@@ -8,8 +8,7 @@ defmodule Bier.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      # Starts a worker by calling: Bier.Worker.start_link(arg)
-      # {Bier.Worker, arg}
+      Bier.Registry
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
