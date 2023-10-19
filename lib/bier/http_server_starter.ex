@@ -11,7 +11,10 @@ defmodule Bier.HttpServerStarter do
   @impl GenServer
   def init(conf) do
     # TODO: DB introspection
-    db_structure = []
+    db_structure = [
+      %{"Name" => "todos", "Schema" => "api", "Type" => "something"}
+    ]
+
     {:module, plug, _binary, _} = Bier.RouterBuilder.build(conf, db_structure)
     {:ok, %{conf: conf, db_structure: db_structure, plug: plug}, {:continue, :start_webserver}}
   end
