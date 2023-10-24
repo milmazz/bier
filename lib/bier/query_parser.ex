@@ -240,6 +240,8 @@ defmodule Bier.QueryParser do
       {:ok, [{"age", "asc", "nulls first"}]}
       iex> parse_order("age.desc.nullslast")
       {:ok, [{"age", "desc", "nulls last"}]}
+      iex> parse_order("age.left,height.asc")
+      {:error, :bad_request}
   """
   def parse_order(""), do: {:ok, []}
 
@@ -290,6 +292,8 @@ defmodule Bier.QueryParser do
       iex> parse_limit("10.1")
       {:error, :bad_request}
       iex> parse_limit("0")
+      {:error, :bad_request}
+      iex> parse_limit(%{})
       {:error, :bad_request}
   """
   def parse_limit(limit) when is_integer(limit) and limit > 0, do: {:ok, limit}
