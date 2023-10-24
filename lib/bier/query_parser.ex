@@ -57,51 +57,29 @@ defmodule Bier.QueryParser do
       string("timestamp")
     ])
 
+  defp normalize(rest, [casting_type], %{} = context, {_line, _line_offset}, _byte_offset) do
+    {rest, casting_type |> String.reverse() |> String.to_charlist(), context}
+  end
+
   column_cast =
     cast_separator
     |> ignore()
     |> concat(casting_types)
-    |> unwrap_and_tag(:cast)
+    |> post_traverse(:normalize)
+    |> tag(:cast)
 
   column =
     column_alias
     |> optional()
-    |> concat(tag(identifier, :column))
+    |> concat(tag(identifier, :name))
     |> optional(column_cast)
+    |> wrap()
 
   detailed_select =
     column
     |> optional(ignore(optional(column_separator, whitespace)))
-    |> post_traverse(:join_and_wrap)
     |> times(min: 1)
     |> eos()
-
-  defp join_and_wrap(_rest, args, context, _line, _offset) do
-    # TODO: Probably is a good idea to pass the column, cast, and column alias
-    # as a data structure instead of a string, that way, a following step could
-    # verify if the given column actually exist in the given table, but first, we need
-    # to introspect this information from the DB.
-    column = Keyword.fetch!(args, :column)
-    cast = Keyword.get(args, :cast)
-    column_alias = Keyword.get(args, :alias)
-
-    result =
-      cond do
-        cast && column_alias ->
-          ~s|#{column}::#{cast} AS "#{column_alias}"|
-
-        cast ->
-          "#{column}::#{cast}"
-
-        column_alias ->
-          ~s|#{column} AS "#{column_alias}"|
-
-        true ->
-          to_string(column)
-      end
-
-    {List.wrap(result), context}
-  end
 
   defparsecp(:select, choice([default_select, detailed_select]))
 
@@ -111,32 +89,22 @@ defmodule Bier.QueryParser do
   ## Examples
 
       iex> parse_select("*")
-      {:ok, "*"}
+      {:ok, [default: '*']}
       iex> parse_select("first_name,age")
-      {:ok, "first_name, age"}
+      {:ok, [[name: 'first_name'], [name: 'age']]}
       iex> parse_select("fullName:full_name,birthDate:birth_date")
-      {:ok, ~S/full_name AS "fullName", birth_date AS "birthDate"/}
+      {:ok, [[alias: 'fullName', name: 'full_name'], [alias: 'birthDate', name: 'birth_date']]}
       iex> parse_select("uno:first::text, dos:second, third, forth::text")
-      {:ok, ~S/first::text AS "uno", second AS "dos", third, forth::text/}
+      {:ok, [[alias: 'uno', name: 'first', cast: 'text'], [alias: 'dos', name: 'second'], [name: 'third'], [name: 'forth', cast: 'text']]}
   """
   @spec parse_select(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def parse_select(select) do
     case select(select) do
       {:ok, result, _rest = "", _context, _line, _byte_offset} ->
-        {:ok, transform_select(result)}
+        {:ok, result}
 
       {:error, reason, _rest, _contact, _line, _byte_offset} ->
         {:error, reason}
-    end
-  end
-
-  defp transform_select(result) when is_list(result) do
-    case Keyword.get(result, :default) do
-      nil ->
-        Enum.join(result, ", ")
-
-      '*' ->
-        "*"
     end
   end
 

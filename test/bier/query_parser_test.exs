@@ -8,10 +8,19 @@ defmodule Bier.QueryParserTest do
     test "success: parses the select query string" do
       query_string = "uno:first::text, dos:second, third, forth::text"
 
-      assert {:ok, ~S/first::text AS "uno", second AS "dos", third, forth::text/} =
-               parse_select(query_string)
+      assert {:ok, result} = parse_select(query_string)
 
-      assert {:ok, "*"} = parse_select("*")
+      expected_result =
+        MapSet.new([
+          [alias: 'uno', name: 'first', cast: 'text'],
+          [alias: 'dos', name: 'second'],
+          [name: 'third'],
+          [name: 'forth', cast: 'text']
+        ])
+
+      assert MapSet.equal?(MapSet.new(result), expected_result)
+
+      assert {:ok, [default: '*']} = parse_select("*")
     end
 
     test "error: should detect bad select input" do
