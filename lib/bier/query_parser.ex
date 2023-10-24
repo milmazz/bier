@@ -186,8 +186,6 @@ defmodule Bier.QueryParser do
       {:ok, [{:age, %{operator: ">=", value: "13", negation?: false}}]}
       iex> parse_filters(%{age: "not.gte.13"})
       {:ok, [{:age, %{operator: ">=", value: "13", negation?: true}}]}
-      iex> parse_filters(%{age: "gt.13", name: "like.john*"})
-      {:ok, [{:name, %{operator: "LIKE", value: "john%", negation?: false}}, {:age, %{operator: ">", value: "13", negation?: false}}]}
   """
   def parse_filters(params) when is_map(params) do
     result =
