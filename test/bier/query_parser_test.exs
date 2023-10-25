@@ -34,10 +34,12 @@ defmodule Bier.QueryParserTest do
       for operator <- ["like", "ilike"] do
         params = %{age: "gt.13", name: "#{operator}.john*", adult: "is.true"}
 
+        operator = operator |> String.upcase() |> to_charlist()
+
         expected_result = [
-          {:adult, %{operator: "IS", value: true, negation?: false}},
-          {:age, %{operator: ">", value: "13", negation?: false}},
-          {:name, %{operator: String.upcase(operator), value: "john%", negation?: false}}
+          {:adult, %{operator: 'IS', value: true, negation?: false}},
+          {:age, %{operator: '>', value: "13", negation?: false}},
+          {:name, %{operator: operator, value: "john%", negation?: false}}
         ]
 
         assert {:ok, result} = parse_filters(params)
@@ -49,8 +51,8 @@ defmodule Bier.QueryParserTest do
       params = %{age: "gt.13", name: "ilike.john*"}
 
       expected_result = [
-        {:age, %{operator: ">", value: "13", negation?: false}},
-        {:name, %{operator: "ILIKE", value: "john%", negation?: false}}
+        {:age, %{operator: '>', value: "13", negation?: false}},
+        {:name, %{operator: 'ILIKE', value: "john%", negation?: false}}
       ]
 
       assert {:ok, result} = parse_filters(params)

@@ -127,6 +127,7 @@ defmodule Bier.QueryParser do
       string("is")
     ]
     |> choice()
+    |> post_traverse(:normalize)
     |> tag(:operator)
 
   horizontal_filter =
@@ -137,7 +138,7 @@ defmodule Bier.QueryParser do
     |> concat(filter_types)
     |> ignore(filter_separator)
 
-  defparsec(:horizontal_filter, horizontal_filter)
+  defparsecp(:horizontal_filter, horizontal_filter)
 
   @doc """
   Parse the given horizontal filters (rows)
@@ -147,20 +148,19 @@ defmodule Bier.QueryParser do
   ## Examples
 
       iex> parse_filters(%{age: "lt.13"})
-      {:ok, [{:age, %{operator: "<", value: "13", negation?: false}}]}
+      {:ok, [{:age, %{operator: '<', value: "13", negation?: false}}]}
       iex> parse_filters(%{age: "gt.13"})
-      {:ok, [{:age, %{operator: ">", value: "13", negation?: false}}]}
+      {:ok, [{:age, %{operator: '>', value: "13", negation?: false}}]}
       iex> parse_filters(%{age: "gte.13"})
-      {:ok, [{:age, %{operator: ">=", value: "13", negation?: false}}]}
+      {:ok, [{:age, %{operator: '>=', value: "13", negation?: false}}]}
       iex> parse_filters(%{age: "not.gte.13"})
-      {:ok, [{:age, %{operator: ">=", value: "13", negation?: true}}]}
+      {:ok, [{:age, %{operator: '>=', value: "13", negation?: true}}]}
   """
   def parse_filters(params) when is_map(params) do
     result =
       Enum.reduce_while(params, [], fn {field, filter}, acc ->
         with {:ok, parsed, rest, %{}, _, _} <- horizontal_filter(filter),
-             operator = parsed |> Keyword.get(:operator) |> hd(),
-             {operator, value} <- operator(operator, rest) do
+             {operator, value} <- parsed |> Keyword.get(:operator) |> operator(rest) do
           parsed_filter = %{
             operator: operator,
             value: value,
@@ -180,13 +180,13 @@ defmodule Bier.QueryParser do
     end
   end
 
-  defp operator("like", value), do: {"LIKE", String.replace(value, "*", "%")}
-  defp operator("ilike", value), do: {"ILIKE", String.replace(value, "*", "%")}
+  defp operator('like', value), do: {'LIKE', String.replace(value, "*", "%")}
+  defp operator('ilike', value), do: {'ILIKE', String.replace(value, "*", "%")}
 
-  defp operator("is", value) when value in ["true", "false"],
-    do: {"IS", String.to_existing_atom(value)}
+  defp operator('is', value) when value in ["true", "false"],
+    do: {'IS', String.to_existing_atom(value)}
 
-  defp operator("is", _value), do: :error
+  defp operator('is', _value), do: :error
 
   defp operator(operator, value), do: {operator, value}
 
