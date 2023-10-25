@@ -113,7 +113,49 @@ defmodule Bier.QueryParser do
   ########################
   filter_separator = ascii_char([?.])
 
-  filter_types =
+  is_value =
+    [
+      string("false") |> replace(false),
+      string("true") |> replace(true)
+    ]
+    |> choice()
+    |> unwrap_and_tag(:value)
+
+  is_operator =
+    string("is")
+    |> post_traverse(:normalize)
+    |> tag(:operator)
+    |> ignore(filter_separator)
+    |> concat(is_value)
+
+  like_value =
+    [
+      ascii_char([?*]) |> replace(?%),
+      ascii_char([])
+    ]
+    |> choice()
+    |> repeat()
+    |> eos()
+    |> tag(:value)
+
+  like_operator =
+    [
+      string("like"),
+      string("ilike")
+    ]
+    |> choice()
+    |> post_traverse(:normalize)
+    |> tag(:operator)
+    |> ignore(filter_separator)
+    |> concat(like_value)
+
+  rest_value =
+    ascii_char([])
+    |> repeat()
+    |> eos()
+    |> tag(:value)
+
+  rest_operator =
     [
       string("eq") |> replace("="),
       string("gte") |> replace(">="),
@@ -121,22 +163,21 @@ defmodule Bier.QueryParser do
       string("lte") |> replace("<="),
       string("lt") |> replace("<"),
       string("neq") |> replace("<>"),
-      string("ilike"),
-      string("like"),
-      string("in"),
-      string("is")
+      string("in")
     ]
     |> choice()
     |> post_traverse(:normalize)
     |> tag(:operator)
+    |> ignore(filter_separator)
+    |> concat(rest_value)
 
   horizontal_filter =
     string("not")
-    |> tag(:negation)
+    |> replace(true)
+    |> unwrap_and_tag(:negation?)
     |> ignore(filter_separator)
     |> optional()
-    |> concat(filter_types)
-    |> ignore(filter_separator)
+    |> choice([is_operator, like_operator, rest_operator])
 
   defparsecp(:horizontal_filter, horizontal_filter)
 
@@ -148,27 +189,22 @@ defmodule Bier.QueryParser do
   ## Examples
 
       iex> parse_filters(%{age: "lt.13"})
-      {:ok, [{:age, %{operator: '<', value: "13", negation?: false}}]}
+      {:ok, [{:age, [negation?: false, operator: '<', value: '13']}]}
       iex> parse_filters(%{age: "gt.13"})
-      {:ok, [{:age, %{operator: '>', value: "13", negation?: false}}]}
+      {:ok, [{:age, [negation?: false, operator: '>', value: '13']}]}
       iex> parse_filters(%{age: "gte.13"})
-      {:ok, [{:age, %{operator: '>=', value: "13", negation?: false}}]}
+      {:ok, [{:age, [negation?: false, operator: '>=', value: '13']}]}
       iex> parse_filters(%{age: "not.gte.13"})
-      {:ok, [{:age, %{operator: '>=', value: "13", negation?: true}}]}
+      {:ok, [{:age, [negation?: true, operator: '>=', value: '13']}]}
   """
   def parse_filters(params) when is_map(params) do
     result =
       Enum.reduce_while(params, [], fn {field, filter}, acc ->
-        with {:ok, parsed, rest, %{}, _, _} <- horizontal_filter(filter),
-             {operator, value} <- parsed |> Keyword.get(:operator) |> operator(rest) do
-          parsed_filter = %{
-            operator: operator,
-            value: value,
-            negation?: Keyword.has_key?(parsed, :negation)
-          }
+        case horizontal_filter(filter) do
+          {:ok, parsed, "", %{}, _, _} ->
+            parsed_filter = Keyword.put_new(parsed, :negation?, false)
+            {:cont, [{field, parsed_filter} | acc]}
 
-          {:cont, [{field, parsed_filter} | acc]}
-        else
           _ ->
             {:halt, :bad_request}
         end
@@ -179,16 +215,6 @@ defmodule Bier.QueryParser do
       result -> {:ok, result}
     end
   end
-
-  defp operator('like', value), do: {'LIKE', String.replace(value, "*", "%")}
-  defp operator('ilike', value), do: {'ILIKE', String.replace(value, "*", "%")}
-
-  defp operator('is', value) when value in ["true", "false"],
-    do: {'IS', String.to_existing_atom(value)}
-
-  defp operator('is', _value), do: :error
-
-  defp operator(operator, value), do: {operator, value}
 
   defguardp order_direction(direction) when direction in ["asc", "desc"]
   defguardp nulls_order(nulls) when nulls in ["nullsfirst", "nullslast"]
