@@ -113,6 +113,11 @@ defmodule Bier.QueryParser do
   ########################
   filter_separator = ascii_char([?.])
 
+  # TODO: Extract the following into a common combinator
+  # |> post_traverse(:normalize)
+  # |> tag(:operator)
+  # |> ignore(filter_separator)
+
   is_value =
     [
       string("false") |> replace(false),
