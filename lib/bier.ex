@@ -87,6 +87,6 @@ defmodule Bier do
 
   """
   def json_library do
-    Application.get_env(:bier, :json_library, Jason)
+    Application.get_env(:bier, :json_library, JSON)
   end
 end
