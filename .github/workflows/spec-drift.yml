@@ -1,0 +1,54 @@
+name: Spec Drift
+
+# Manual-only invocation per docs/AGENT_PLAN.md §3.6:
+#
+#   "Invocation: manual only — the Orchestrator triggers it (e.g. when a
+#    new PostgREST release lands, or before cutting a Bier release). It
+#    is not scheduled. Reaching parity with the pinned PostgREST version
+#    is the priority; chasing upstream drift before parity exists wastes
+#    Researcher and Tester cycles."
+#
+# §10 lists this workflow as "(nightly, runs Auditor)" but §3.6 is the
+# authoritative role definition: no schedule trigger here.
+on:
+  workflow_dispatch:
+    inputs:
+      postgrest_ref:
+        description: "PostgREST git ref to diff against (tag or branch)"
+        required: false
+        default: "v12.2.0"
+      bier_spec_ref:
+        description: "Bier spec/ git ref to diff (defaults to main)"
+        required: false
+        default: "main"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    name: Spec drift audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.bier_spec_ref }}
+      - name: Show inputs
+        run: |
+          echo "PostgREST ref: ${{ github.event.inputs.postgrest_ref }}"
+          echo "Bier spec ref: ${{ github.event.inputs.bier_spec_ref }}"
+      # Phase 0 stub. The Spec-Drift Auditor itself is implemented as the
+      # `auditor` subagent in .claude/agents/auditor.md; once spec/
+      # exists, this job is wired up to:
+      #   1. Clone PostgREST at $postgrest_ref
+      #   2. Run the Researcher's diffing pass
+      #   3. File an issue (template: .github/ISSUE_TEMPLATE/spec-gap.md)
+      #      for every observed behavior change.
+      #
+      # Until then, this job is a placeholder so Orchestrators can wire
+      # `gh workflow run spec-drift.yml` into release tooling early.
+      - name: Placeholder
+        run: |
+          echo "Spec-Drift Auditor is a Phase 0 stub."
+          echo "Implement once spec/ is populated by the Researcher."

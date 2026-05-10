@@ -4,23 +4,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Bier is an early-stage (alpha) Elixir library that aims to serve a RESTful API generated on-the-fly from PostgreSQL DB introspection — heavily inspired by PostgREST. The README is the source of truth for the design intent and includes the two key sequence diagrams (boot flow and request flow). Several pieces called out in the README are intentional placeholders today: DB introspection is stubbed, `Bier.Plugs.ActionController` returns canned responses, and `QueryParser` / `QueryExecutor` (and authentication) do not yet exist.
+Bier is an early-stage (alpha) Elixir library that aims to serve a RESTful API generated on-the-fly from PostgreSQL DB introspection — heavily inspired by PostgREST. The README is the source of truth for the design intent and includes the two key sequence diagrams (boot flow and request flow). Several pieces called out in the README are intentional placeholders today: DB introspection is stubbed, `Bier.Plugs.ActionController` returns canned responses, `QueryExecutor` and authentication do not yet exist. `Bier.Query.Parser` (`lib/bier/query/parser.ex`) is the seed for slices 2–4 of the multi-agent factory plan.
+
+The whole repository is being driven by the multi-agent factory described in `docs/AGENT_PLAN.md`. Read it before making structural changes — it defines roles (Researcher, Tester, Developer, Reviewer, Auditor), file-ownership boundaries, and CI quality gates. Subagent system prompts live in `.claude/agents/`. `docs/STATUS.md` is the Kanban for slice progress.
 
 ## Toolchain
 
-Elixir/OTP versions are pinned in `mise.toml` (Elixir 1.19.5 / OTP 28) and matched in `.github/workflows/elixir.yml`. `mix.exs` declares the lower bound at `elixir: "~> 1.18"`.
+Elixir/OTP versions are pinned in `mise.toml` (Elixir 1.19.5 / OTP 28) and matched in `.github/workflows/ci.yml`. `mix.exs` declares the lower bound at `elixir: "~> 1.18"`.
+
+Postgres is run via `docker-compose.yml` (services `pg14`, `pg15`, `pg16` on host ports 5414/5415/5416). The conformance fixture lives at `priv/repo/conformance_fixtures.sql` and is mounted into each container's init dir.
 
 ## Common commands
 
 ```sh
 mix deps.get          # fetch dependencies
 mix compile
-mix test              # run the full suite
+mix test              # run the full suite (including doctests)
 mix test test/path/to/file_test.exs:LINE   # single test by file:line
 mix format            # uses .formatter.exs
+mix coveralls.html    # local coverage report (opens cover/excoveralls.html)
 ```
 
-CI runs these gates before `mix test`, so run them locally before pushing to avoid red builds:
+CI runs these gates per `.github/workflows/ci.yml` (the §8 gates from `docs/AGENT_PLAN.md`); run them locally before pushing to avoid red builds:
 
 ```sh
 mix deps.unlock --check-unused
@@ -28,9 +33,19 @@ mix format --check-formatted
 mix hex.audit
 mix compile --warnings-as-errors
 mix docs --warnings-as-errors
+mix credo --strict
+mix dialyzer                          # PLTs cached under priv/plts/
+mix coveralls.json                    # produces cover/excoveralls.json for the coverage gate
+mix test --only conformance           # needs Postgres running (docker compose up -d pg16)
+mix test --only property              # property-based tests
+bash .githooks/role-guard.sh main     # file-ownership matrix from §4
+bash .githooks/changelog-check.sh main # PR must add an entry under [Unreleased]
+bash .githooks/spec-lint.sh           # validates spec/conformance/cases/*.yaml
 ```
 
-No credo or dialyzer step is configured.
+The CI matrix for the conformance suite runs on Postgres 14, 15, and 16. `.github/workflows/spec-drift.yml` is a manual-only auditor (per `docs/AGENT_PLAN.md` §3.6); trigger it via `gh workflow run spec-drift.yml`.
+
+Hooks are not active by default — opt in with `git config core.hooksPath .githooks`. Once active, `pre-commit` runs role-guard plus `mix do format, compile` on staged Elixir files.
 
 ## Architecture
 
@@ -67,4 +82,4 @@ When changing routing/dispatch semantics, edit the quoted block inside `RouterBu
 
 ## Test layout
 
-`test/support/` is added to `elixirc_paths` only in `:test` (see `mix.exs`). Put shared fixtures/helpers there. The current suite is essentially empty (`test/bier_test.exs`).
+`test/support/` is added to `elixirc_paths` only in `:test` (see `mix.exs`). Put shared fixtures/helpers there. The current unit suite is `test/bier/query/parser_test.exs`. Conformance and property tests live under `test/conformance/` and `test/property/` (created by the Tester in Phase 2). The conformance runner is generative — adding a YAML to `spec/conformance/cases/` auto-creates an ExUnit test, so do not write per-case Elixir test files by hand.

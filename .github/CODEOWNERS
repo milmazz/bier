@@ -1,0 +1,47 @@
+# CODEOWNERS — file-ownership matrix from docs/AGENT_PLAN.md §4.
+#
+# GitHub requires CODEOWNERS entries to reference accounts with write
+# access. The agent roles ("researcher", "tester", "developer",
+# "reviewer", "auditor") are not GitHub identities — they are subagent
+# roles defined in .claude/agents/*.md. Until those map to dedicated
+# GitHub bot accounts, the orchestrator (@milmazz) is listed as the
+# required reviewer and the role is recorded inline as a comment.
+#
+# When a role acquires its own GitHub identity, replace the @milmazz
+# token on the relevant lines with that identity (and keep the role
+# comment for humans).
+
+# spec/ — Researcher (RW); Tester/Developer/Orchestrator read-only.
+spec/                              @milmazz  # role: researcher
+priv/repo/conformance_fixtures.sql @milmazz  # role: tester (Postgres fixtures)
+
+# test/ — Tester (RW); Developer/Orchestrator read-only.
+test/                              @milmazz  # role: tester
+test/support/                      @milmazz  # role: tester
+
+# lib/ — Developer (RW); Tester/Orchestrator read-only.
+lib/                               @milmazz  # role: developer
+
+# Build configuration — shared between Tester (test-only deps) and
+# Developer (runtime deps); Orchestrator arbitrates.
+mix.exs                            @milmazz  # role: developer + tester (split: test-only vs runtime deps)
+mix.lock                           @milmazz  # role: developer + tester
+
+# Orchestrator-only.
+docs/STATUS.md                     @milmazz  # role: orchestrator
+docs/AGENT_PLAN.md                 @milmazz  # role: orchestrator
+.github/                           @milmazz  # role: orchestrator (CI, CODEOWNERS, templates)
+.githooks/                         @milmazz  # role: orchestrator
+.claude/agents/                    @milmazz  # role: orchestrator (subagent definitions)
+mise.toml                          @milmazz  # role: orchestrator
+.formatter.exs                     @milmazz  # role: orchestrator
+.credo.exs                         @milmazz  # role: orchestrator
+.gitignore                         @milmazz  # role: orchestrator
+docker-compose.yml                 @milmazz  # role: orchestrator
+CLAUDE.md                          @milmazz  # role: orchestrator
+README.md                          @milmazz  # role: orchestrator
+LICENSE                            @milmazz  # role: orchestrator
+
+# CHANGELOG.md is RW for every role — one [Unreleased] entry per PR
+# (enforced by the changelog gate, not by CODEOWNERS).
+CHANGELOG.md                       @milmazz

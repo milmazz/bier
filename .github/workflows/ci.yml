@@ -1,0 +1,282 @@
+name: CI
+
+# Implements the §8 quality gates from docs/AGENT_PLAN.md.
+#
+# Job map (numbers reference the §8 list):
+#   lint             — #1 format, #2 compile-warnings-as-errors, #3 credo, hex.audit, docs
+#   dialyzer         — #4
+#   test             — #5 (mix coveralls.json, excludes :conformance and :property)
+#   conformance      — #6 (matrix: PG 14/15/16; loads priv/repo/conformance_fixtures.sql)
+#   property         — #10 (mix test --only property, longer timeout)
+#   role-guard       — #7 (PR only)
+#   spec-lint        — #8
+#   coverage-gate    — #9 (report-only in Phase 0; ratchets up per slice)
+#   changelog        — #11 (PR only; respects 'changelog:skip' label)
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  ELIXIR_VERSION: "1.19.5"
+  OTP_VERSION: "28"
+  MIX_ENV: test
+
+jobs:
+  lint:
+    name: Lint (format, compile, credo, docs, audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Elixir
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-mix-
+      - name: Install deps
+        run: mix deps.get
+      - name: Check unused deps
+        run: mix deps.unlock --check-unused
+      - name: Format check
+        run: mix format --check-formatted
+      - name: Hex audit
+        run: mix hex.audit
+      - name: Compile (warnings as errors)
+        run: mix compile --warnings-as-errors
+      - name: Build docs (warnings as errors)
+        run: mix docs --warnings-as-errors
+      - name: Credo (strict)
+        run: mix credo --strict
+
+  dialyzer:
+    name: Dialyzer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Elixir
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-mix-
+      - name: Cache PLTs
+        uses: actions/cache@v4
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-plt-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-plt-
+      - name: Install deps
+        run: mix deps.get
+      - name: Compile
+        run: mix compile
+      - name: Build PLTs (if missing)
+        run: mix dialyzer --plt
+      - name: Run dialyzer
+        run: mix dialyzer --format short
+
+  test:
+    name: Unit tests + coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Elixir
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-mix-
+      - name: Install deps
+        run: mix deps.get
+      - name: Compile
+        run: mix compile
+      - name: Run tests with coverage
+        run: mix coveralls.json --exclude conformance --exclude property
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: cover/excoveralls.json
+          if-no-files-found: error
+          retention-days: 7
+
+  conformance:
+    name: Conformance (PG ${{ matrix.postgres }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["14", "15", "16"]
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}-alpine
+        env:
+          POSTGRES_USER: bier
+          POSTGRES_PASSWORD: bier
+          POSTGRES_DB: bier
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bier -d bier"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      BIER_PG_HOST: localhost
+      BIER_PG_PORT: "5432"
+      BIER_PG_USER: bier
+      BIER_PG_PASSWORD: bier
+      BIER_PG_DATABASE: bier
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Elixir
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-mix-
+      - name: Install deps
+        run: mix deps.get
+      - name: Load conformance fixtures
+        env:
+          PGPASSWORD: bier
+        run: psql -h localhost -U bier -d bier -f priv/repo/conformance_fixtures.sql
+      - name: Run conformance suite
+        run: mix test --only conformance
+
+  property:
+    name: Property tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Elixir
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-mix-
+      - name: Install deps
+        run: mix deps.get
+      - name: Run property tests
+        run: mix test --only property
+
+  spec-lint:
+    name: Spec lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python (for PyYAML)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Run spec-lint
+        run: bash .githooks/spec-lint.sh
+
+  role-guard:
+    name: Role guard
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch base ref
+        run: git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+      - name: Run role-guard
+        run: bash .githooks/role-guard.sh "origin/${{ github.base_ref }}"
+
+  changelog:
+    name: Changelog gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch base ref
+        run: git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+      - name: Run changelog-check
+        env:
+          SKIP: ${{ contains(github.event.pull_request.labels.*.name, 'changelog:skip') }}
+        run: bash .githooks/changelog-check.sh "origin/${{ github.base_ref }}"
+
+  coverage-gate:
+    name: Coverage gate (report-only)
+    needs: test
+    runs-on: ubuntu-latest
+    # §8 #9: line coverage ≥ 85% on touched modules. Phase 0 lands the
+    # plumbing but does not enforce the threshold yet — slices arrive
+    # with very different coverage starting points and we ratchet the
+    # gate up per slice (see docs/STATUS.md). Flip MIN_COVERAGE / drop
+    # `continue-on-error` once a slice is meant to enforce.
+    continue-on-error: true
+    env:
+      MIN_COVERAGE: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage
+          path: cover
+      - name: Check coverage threshold
+        run: |
+          if [[ ! -f cover/excoveralls.json ]]; then
+            echo "coverage-gate: no coverage report available" >&2
+            exit 1
+          fi
+          covered=$(jq '[.source_files[].coverage[] | select(. != null)] | length' cover/excoveralls.json)
+          hits=$(jq '[.source_files[].coverage[] | select(. != null and . > 0)] | length' cover/excoveralls.json)
+          if [[ "$covered" -eq 0 ]]; then
+            pct=0
+          else
+            pct=$(( hits * 100 / covered ))
+          fi
+          echo "coverage-gate: ${pct}% (${hits}/${covered} relevant lines)"
+          if [[ "$pct" -lt "${MIN_COVERAGE}" ]]; then
+            echo "coverage-gate: below MIN_COVERAGE=${MIN_COVERAGE}" >&2
+            exit 1
+          fi

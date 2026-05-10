@@ -1,0 +1,20 @@
+-- Bier conformance fixtures
+--
+-- This file is the canonical Postgres schema and seed data used by the
+-- conformance test runner (`spec/conformance/cases/*.yaml`).
+--
+-- Ownership: Researcher (per docs/AGENT_PLAN.md §4) — only the Researcher
+-- adds to this file. Schemas declared here must mirror what PostgREST's
+-- own test suite uses, so behavior diffs are real diffs and not fixture
+-- drift.
+--
+-- Conventions:
+--   * Each schema corresponds to a `schema:` field referenced in a
+--     conformance case YAML (e.g. `schema: tests`).
+--   * Keep statements idempotent (`DROP ... IF EXISTS` first, or
+--     `CREATE TABLE IF NOT EXISTS`) so re-runs against a persistent DB
+--     do not require manual cleanup.
+--   * Anything specific to a single conformance case belongs in that
+--     case's `preconditions:` block, not here.
+--
+-- This placeholder is empty by design; Phase 1 (Researcher) populates it.

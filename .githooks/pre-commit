@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# pre-commit — enforces role-guard and runs `mix do format, compile`
+# locally before every commit. See docs/AGENT_PLAN.md §4.
+#
+# Enable via:
+#   git config core.hooksPath .githooks
+
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+# 1. Role guard against the staged index.
+"$repo_root/.githooks/role-guard.sh" ""
+
+# 2. Format check (only on staged Elixir files for speed).
+staged_ex=$(git diff --cached --name-only --diff-filter=ACM \
+  | grep -E '\.(ex|exs)$' || true)
+
+if [[ -n "$staged_ex" ]]; then
+  if ! mix format --check-formatted $staged_ex; then
+    echo "pre-commit: 'mix format' would change files. Run 'mix format' and re-stage." >&2
+    exit 1
+  fi
+fi
+
+# 3. Compile (warnings-as-errors). Skipped if no .ex/.exs is staged.
+if [[ -n "$staged_ex" ]]; then
+  if ! MIX_ENV=test mix compile --warnings-as-errors >/dev/null; then
+    echo "pre-commit: compile failed (or warnings)." >&2
+    exit 1
+  fi
+fi
+
+echo "pre-commit: ok"
