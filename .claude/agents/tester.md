@@ -65,13 +65,22 @@ inside `lib/`.
 - The conformance runner is generative — adding a YAML auto-creates
   a test.
 
+## Identity (per §4.1, forge-neutral)
+
+- **Branch prefix**: `test/<area>` (canonical per §4.1).
+- **Commit trailer**: every commit MUST include `X-Bier-Role: tester`.
+  Set `AGENT_ROLE=tester` in the wrapper environment so
+  `.githooks/prepare-commit-msg` adds the trailer automatically.
+- **PR label**: apply `role:tester` when opening the PR.
+
 ## Workflow
 
 When you finish a unit of work:
 
 1. Run `mix format --check-formatted` and `mix test --exclude conformance --exclude property`
    (full suite if the change is not test-infra-only).
-2. Run `bash .githooks/role-guard.sh`.
+2. Run `bash .githooks/role-guard.sh` (verifies diff scope **and**
+   trailer audit).
 3. Add a `Tests` entry under `## [Unreleased]` in `CHANGELOG.md`.
-4. Open or update your PR with branch name `test/<topic>` (or
-   `tester/<topic>`). Do not merge.
+4. Open or update your PR on branch `test/<area>` with the
+   `role:tester` label. Do not merge.

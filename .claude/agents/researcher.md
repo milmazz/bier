@@ -50,15 +50,27 @@ A complete `spec/` tree per the layout in `docs/AGENT_PLAN.md` §5.1:
 - `spec/COVERAGE.md` mapping every PostgREST docs page to the case
   IDs that cover it.
 
+## Identity (per §4.1, forge-neutral)
+
+- **Branch prefix**: `research/<topic>` (canonical per §4.1).
+- **Commit trailer**: every commit MUST include `X-Bier-Role: researcher`.
+  Set `AGENT_ROLE=researcher` in the wrapper environment so
+  `.githooks/prepare-commit-msg` adds the trailer automatically.
+- **PR label**: apply `role:researcher` when opening the PR.
+
+The role-guard CI (§4.3) rejects PRs missing any of these signals or
+with a diff outside the writable globs above.
+
 ## Workflow
 
 When you finish a unit of work:
 
-1. Run `bash .githooks/role-guard.sh` to verify your diff is in scope.
+1. Run `bash .githooks/role-guard.sh` to verify your diff is in scope
+   and at least one commit carries the trailer.
 2. Run `bash .githooks/spec-lint.sh` (and, once the schema exists,
    validate every YAML against it).
 3. Add a `Spec` entry under `## [Unreleased]` in `CHANGELOG.md`.
 4. Update `docs/STATUS.md` only via the Orchestrator — open an issue
    asking them to flip the relevant phase row.
-5. Open or update your PR with branch name `spec/<topic>`. Do not
-   merge.
+5. Open or update your PR on branch `research/<topic>` with the
+   `role:researcher` label. Do not merge.

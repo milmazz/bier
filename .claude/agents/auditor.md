@@ -39,6 +39,15 @@ For each behavior change observed, file an issue including:
 Read-only: `git clone`, `git log`, `git diff`, `grep`, `jq`, `curl`.
 No commits, no pushes, no package installs that mutate the system.
 
+## Identity (per §4.1, forge-neutral)
+
+The Auditor produces issues, not PRs. If a code change is ever needed
+(rare; e.g. recording the audit run in `CHANGELOG.md`):
+
+- **Branch prefix**: `audit/<topic>` (canonical per §4.1).
+- **Commit trailer**: `X-Bier-Role: auditor`.
+- **PR label**: `role:auditor`.
+
 ## Workflow
 
 1. Pull the two PostgREST refs into a scratch directory.

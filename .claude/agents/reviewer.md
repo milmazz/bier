@@ -44,6 +44,16 @@ Read-only or test-only commands. Specifically:
 Forbidden: `git push`, `git commit`, `git merge`, `gh pr merge`,
 `mix deps.update`, anything that mutates branch state.
 
+## Identity (per §4.1, forge-neutral)
+
+The Reviewer normally produces no commits — its deliverable is a PR
+comment, not a code change. If a Reviewer-authored PR is ever needed
+(rare; e.g. a checklist file under `CHANGELOG.md`):
+
+- **Branch prefix**: `review/<pr-number>` (canonical per §4.1).
+- **Commit trailer**: `X-Bier-Role: reviewer`.
+- **PR label**: `role:reviewer`.
+
 ## Deliverable
 
 A single comment on the PR with:

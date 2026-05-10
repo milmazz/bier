@@ -1,15 +1,18 @@
-# CODEOWNERS — file-ownership matrix from docs/AGENT_PLAN.md §4.
+# CODEOWNERS — review routing only, NOT the enforcement mechanism.
 #
-# GitHub requires CODEOWNERS entries to reference accounts with write
-# access. The agent roles ("researcher", "tester", "developer",
-# "reviewer", "auditor") are not GitHub identities — they are subagent
-# roles defined in .claude/agents/*.md. Until those map to dedicated
-# GitHub bot accounts, the orchestrator (@milmazz) is listed as the
-# required reviewer and the role is recorded inline as a comment.
+# Per docs/AGENT_PLAN.md §4.1 and §4.3, the file-ownership matrix is
+# enforced by the role-guard CI (`.githooks/role-guard.sh` +
+# `.github/workflows/ci.yml`), which reads three forge-neutral signals:
+# PR label → branch prefix → commit trailer. CODEOWNERS exists only so
+# GitHub routes review notifications to the right human (the
+# Orchestrator) when paths in the matrix change.
 #
-# When a role acquires its own GitHub identity, replace the @milmazz
-# token on the relevant lines with that identity (and keep the role
-# comment for humans).
+# Agent personas are not separate GitHub identities — they are roles
+# encoded in PR labels (`role:<role>`), branch prefixes (`research/`,
+# `test/`, `dev/<slice>/`, `review/`, `audit/`, `chore/`), and
+# `X-Bier-Role:` commit trailers. The single human/machine account
+# (`@milmazz`) drives every persona. The role-guard CI determines
+# which role authored the PR and which globs that role may touch.
 
 # spec/ — Researcher (RW); Tester/Developer/Orchestrator read-only.
 spec/                              @milmazz  # role: researcher

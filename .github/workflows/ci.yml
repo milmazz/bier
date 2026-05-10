@@ -230,6 +230,10 @@ jobs:
       - name: Fetch base ref
         run: git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
       - name: Run role-guard
+        env:
+          # Comma-separated list of label names on the PR. role-guard.sh
+          # parses this for `role:<role>` entries (§4.1 priority 1).
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: bash .githooks/role-guard.sh "origin/${{ github.base_ref }}"
 
   changelog:

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# prepare-commit-msg — auto-add the `X-Bier-Role:` trailer per
+# docs/AGENT_PLAN.md §4.1 / §4.3.
+#
+# Resolves the role from (in order):
+#   1. AGENT_ROLE env var (subagent wrapper sets this).
+#   2. Branch prefix (research/, test/, dev/<slice>/, review/,
+#      audit/, chore/).
+#
+# PR labels are not available locally, so they don't participate in
+# the local resolution. The CI role-guard reads labels for the
+# authoritative check.
+#
+# If a role can't be confidently resolved (e.g. an unknown branch
+# prefix and no AGENT_ROLE), this hook does nothing — the commit
+# proceeds, and CI's role-guard will flag the missing trailer with
+# a clear message.
+
+set -euo pipefail
+
+commit_msg_file=$1
+commit_source=${2-}
+
+# Skip when the user is not authoring a fresh commit message
+# (merge, squash, template, --message replays — the trailer was
+# already authored or doesn't apply cleanly).
+case "$commit_source" in
+  merge|squash|commit) exit 0 ;;
+esac
+
+# Resolve role.
+valid_re='^(researcher|tester|developer|reviewer|orchestrator|auditor)$'
+
+role=""
+if [[ -n "${AGENT_ROLE:-}" && "${AGENT_ROLE}" =~ $valid_re ]]; then
+  role="$AGENT_ROLE"
+else
+  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  case "$branch" in
+    research/*) role="researcher" ;;
+    test/*)     role="tester" ;;
+    dev/*)      role="developer" ;;
+    review/*)   role="reviewer" ;;
+    audit/*)    role="auditor" ;;
+    chore/*|docs/*|phase-*/*) role="orchestrator" ;;
+  esac
+fi
+
+[[ -z "$role" ]] && exit 0
+
+# If a trailer is already present, leave it alone.
+if grep -qE '^X-Bier-Role:[[:space:]]+' "$commit_msg_file"; then
+  exit 0
+fi
+
+# Append via git interpret-trailers so the placement is canonical.
+tmp=$(mktemp)
+git interpret-trailers --trailer "X-Bier-Role: $role" "$commit_msg_file" > "$tmp"
+mv "$tmp" "$commit_msg_file"

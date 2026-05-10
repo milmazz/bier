@@ -32,6 +32,12 @@ unjustified skips.
   `.credo.exs` (strict mode minus `TagTODO`/`TagFIXME`),
   `docs/STATUS.md` Kanban skeleton, and subagent system prompts under
   `.claude/agents/`.
+- `.githooks/prepare-commit-msg`: auto-adds the `X-Bier-Role:` trailer
+  required by §4.3 (role resolved from `AGENT_ROLE` env or canonical
+  branch prefix).
+- `.github/labels.yml`: documents the seven PR labels the role-guard
+  reads (`role:researcher` … `role:auditor`, plus `changelog:skip`)
+  for bulk creation by the Orchestrator.
 
 ### Changed
 
@@ -42,6 +48,23 @@ unjustified skips.
 - Updated `CLAUDE.md` to reflect the new toolchain (credo, dialyzer,
   coveralls), the docker-compose Postgres setup, and the multi-agent
   factory entry points.
+- `.githooks/role-guard.sh`: rewritten to align with the merged Option
+  0 spec (§4.1, §4.3). Role resolution now follows the priority order
+  PR label (`PR_LABELS` env, set by CI from
+  `github.event.pull_request.labels`) → branch prefix → `X-Bier-Role:`
+  commit trailer, with `AGENT_ROLE` retained as a local override when
+  `PR_LABELS` is empty. Branch prefixes match the §4.1 canonical set
+  (`research/`, `test/`, `dev/<slice>/`, `review/`, `audit/`,
+  `chore/`). New trailer audit step requires at least one commit on
+  the branch to carry `X-Bier-Role: <role>`.
+- `.github/workflows/ci.yml`: the `role-guard` job now passes
+  `PR_LABELS` (joined from `github.event.pull_request.labels.*.name`)
+  to the script.
+- `.github/CODEOWNERS`: header rewritten to make the
+  review-routing-only role explicit; enforcement is the role-guard CI.
+- `.claude/agents/{researcher,tester,developer,reviewer,auditor}.md`:
+  each subagent now declares its canonical branch prefix, commit
+  trailer, and `role:<role>` PR label per §11.
 
 ### Spec
 

@@ -55,13 +55,23 @@ Per-slice exit criteria (§5.3):
 - `CHANGELOG.md` updated under `## [Unreleased]` with one entry per
   user-visible change.
 
+## Identity (per §4.1, forge-neutral)
+
+- **Branch prefix**: `dev/<slice-name>/<topic>` (canonical per §4.1).
+- **Commit trailer**: every commit MUST include `X-Bier-Role: developer`.
+  Set `AGENT_ROLE=developer` in the wrapper environment so
+  `.githooks/prepare-commit-msg` adds the trailer automatically.
+- **PR label**: apply `role:developer` when opening the PR.
+
 ## Workflow
 
 When you finish a unit of work:
 
 1. Run `mix do format, compile --warnings-as-errors, credo --strict, dialyzer, test --cover`.
-2. Run `bash .githooks/role-guard.sh`.
+2. Run `bash .githooks/role-guard.sh` (verifies diff scope **and**
+   trailer audit).
 3. Add an entry under `## [Unreleased]` in `CHANGELOG.md` (typically
    `Added` or `Changed`).
-4. Open or update your PR with branch name `feat/<slice-name>`. Do
-   not merge — the Reviewer gates and the Orchestrator merges.
+4. Open or update your PR on branch `dev/<slice-name>/<topic>` with
+   the `role:developer` label. Do not merge — the Reviewer gates and
+   the Orchestrator merges.

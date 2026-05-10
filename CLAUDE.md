@@ -45,7 +45,7 @@ bash .githooks/spec-lint.sh           # validates spec/conformance/cases/*.yaml
 
 The CI matrix for the conformance suite runs on Postgres 14, 15, and 16. `.github/workflows/spec-drift.yml` is a manual-only auditor (per `docs/AGENT_PLAN.md` §3.6); trigger it via `gh workflow run spec-drift.yml`.
 
-Hooks are not active by default — opt in with `git config core.hooksPath .githooks`. Once active, `pre-commit` runs role-guard plus `mix do format, compile` on staged Elixir files.
+Hooks are not active by default — opt in with `git config core.hooksPath .githooks`. Once active: `pre-commit` runs role-guard (glob check + `X-Bier-Role:` trailer audit) plus `mix do format, compile` on staged Elixir files, and `prepare-commit-msg` auto-adds the trailer required by §4.3 (role resolved from `AGENT_ROLE` env or branch prefix).
 
 ## Architecture
 
