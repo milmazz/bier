@@ -25,7 +25,11 @@ permissions:
 env:
   ELIXIR_VERSION: "1.19.5"
   OTP_VERSION: "28"
-  MIX_ENV: test
+  # Do NOT set MIX_ENV here. `mix test` and the `coveralls.*` tasks
+  # auto-elevate to :test (the latter via the cli/0 preferred_envs in
+  # mix.exs). `mix docs` and `mix dialyzer` need :dev because ex_doc and
+  # dialyxir are `only: :dev`. Pinning a workflow-wide MIX_ENV breaks
+  # one of those two sets.
 
 jobs:
   lint:
@@ -175,7 +179,7 @@ jobs:
           PGPASSWORD: bier
         run: psql -h localhost -U bier -d bier -f priv/repo/conformance_fixtures.sql
       - name: Run conformance suite
-        run: mix test --only conformance
+        run: bash .githooks/mix-test-tagged.sh conformance
 
   property:
     name: Property tests
@@ -199,7 +203,7 @@ jobs:
       - name: Install deps
         run: mix deps.get
       - name: Run property tests
-        run: mix test --only property
+        run: bash .githooks/mix-test-tagged.sh property
 
   spec-lint:
     name: Spec lint

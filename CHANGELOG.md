@@ -51,6 +51,17 @@ unjustified skips.
 
 - _none_
 
+### Fixed
+
+- `ci.yml`: removed the workflow-level `MIX_ENV: test` that prevented
+  `mix docs` (lint job) and `mix dialyzer` from finding their tasks
+  (`ex_doc` and `dialyxir` are `only: :dev`). `mix test` and
+  `coveralls.*` continue to auto-elevate to `:test`.
+- `ci.yml`: routed the `conformance` and `property` jobs through
+  `.githooks/mix-test-tagged.sh`, which tolerates the Elixir 1.19
+  "no test was executed" exit code 1 produced by `mix test --only
+  <tag>` when no tests carry that tag yet (Phase 0 / 1 reality).
+
 ### Removed
 
 - `.github/workflows/elixir.yml` — replaced by the multi-job
