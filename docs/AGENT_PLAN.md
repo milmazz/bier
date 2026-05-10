@@ -136,6 +136,61 @@ PostgREST.
 
 ## 4. File ownership matrix (enforce in CODEOWNERS + pre-commit)
 
+### 4.1 Forge-neutral identity (Option 0 — default)
+
+Roles in this document are **abstract**, not GitHub-account-bound. The
+plan deliberately does not require one GitHub account per persona —
+that path leads to either fake accounts (a ToS problem on a personal
+namespace) or to maintaining N machine accounts with N email aliases
+and N PATs (a real cost that buys only a nicer activity feed).
+
+Instead, role is encoded in **three forge-neutral signals**, any one
+of which is sufficient and which are checked in order of priority:
+
+1. **PR label** — `role:researcher`, `role:tester`, `role:developer`,
+   `role:reviewer`, `role:orchestrator`, `role:auditor`. Highest
+   priority: an explicit label always wins.
+2. **Branch prefix** — `research/<topic>`, `test/<area>`,
+   `dev/<slice>/<topic>`, `review/<pr-number>`, `chore/<topic>` (for
+   the Orchestrator), `audit/<topic>` (for the Spec-Drift Auditor).
+   Used when no label is set.
+3. **Commit trailer** — `X-Bier-Role: <role>` on every commit, written
+   by the agent's wrapper. At least one commit on the branch must
+   carry the trailer for audit; if labels and prefix are missing, the
+   trailer is the fallback.
+
+A single human GitHub account (or a single machine account, if you
+prefer) drives every role. The role-guard CI determines which globs
+the diff is allowed to touch by reading those signals — not by
+reading `pr.user.login`.
+
+Why this is the default:
+
+- **Forge-neutral by construction.** Labels, branch prefixes, and
+  commit trailers are universal Git/SCM primitives. The plan ports
+  to Forgejo, Gitea, GitLab CE, or any future forge without edits.
+- **No ToS friction.** Zero fake accounts; the plan is compatible with
+  GitHub's personal-account terms.
+- **Auditable.** Every commit's trailer plus the PR label gives a
+  durable record of which persona authored what — without depending
+  on any forge's UI or any per-role identity.
+- **Cheap.** No PAT rotation, no email alias management, no extra
+  branch-protection rules per identity.
+
+Trade-off: GitHub's per-user activity feeds, contribution graphs, and
+review-author filters all attribute everything to the single driving
+account. That's a dashboard nicety, not a correctness property; the
+role-guard CI and the trailer history reconstruct the same view on
+demand.
+
+If you later want isolated per-persona activity streams (e.g. a public
+demo of the factory), upgrade to GitHub machine accounts (ToS-compliant
+for automated use) or to a self-hosted Forgejo instance with
+first-class bot accounts. The plan does not change — only the wrapper
+that pushes commits picks up new credentials.
+
+### 4.2 Ownership matrix
+
 | Path                         | Researcher | Tester | Developer | Orchestrator |
 | ---------------------------- | :--------: | :----: | :-------: | :----------: |
 | `spec/**`                    |     RW     |   R    |     R     |      R       |
@@ -159,14 +214,28 @@ an entry corresponding to their own PR. Format: [Keep a Changelog
 `CHANGELOG.md` under `## [Unreleased]` — CI rejects PRs that don't
 (see §8).
 
-Enforce with:
+### 4.3 Enforcement
 
-1. `CODEOWNERS` mapping each glob to the corresponding agent identity
-   (or human reviewer placeholder).
-2. A pre-commit hook in `.githooks/pre-commit` that reads
-   `.agent-role` from the env / branch name and rejects writes outside
-   that role's globs.
-3. CI job "guard" that diffs the PR against the role's allowed globs.
+The matrix is enforced by a **role-guard** that fails closed: if the
+role can't be determined, or if the diff escapes the role's globs,
+CI rejects the PR.
+
+1. **Role resolution** (`scripts/role-guard.sh`, runs in CI and as a
+   pre-commit hook): apply the priority order from §4.1 (label →
+   branch prefix → commit trailer). If none match, exit non-zero.
+2. **Glob check**: compute `git diff --name-only origin/main...HEAD`
+   and assert every changed path matches the resolved role's writable
+   globs. `CHANGELOG.md` is permitted for every role (see §4.2).
+3. **Trailer audit**: at least one commit on the branch must carry
+   `X-Bier-Role:` matching the resolved role. The hook adds it
+   automatically on commit if missing.
+4. **Pre-commit hook** at `.githooks/pre-commit` runs the same check
+   locally for fast feedback. Installed via `git config core.hooksPath
+   .githooks`.
+5. **CODEOWNERS** still exists, but only for **human review routing**
+   (e.g. directing notifications to you for `spec/` changes). It is
+   no longer the enforcement mechanism — labels, prefixes, and
+   trailers are.
 
 ---
 
@@ -434,9 +503,18 @@ Concrete checklist for the first session that picks up this plan:
       different ports.
 - [ ] `priv/repo/conformance_fixtures.sql` placeholder.
 - [ ] `.github/workflows/ci.yml` implementing §8 gates.
-- [ ] `.github/workflows/spec-drift.yml` (nightly, runs Auditor).
-- [ ] `.github/CODEOWNERS` per §4.
-- [ ] `.githooks/pre-commit` role-guard script + `mix do format, compile`.
+- [ ] `.github/workflows/spec-drift.yml` (manual `workflow_dispatch`
+      only, runs Auditor when triggered by the Orchestrator — see §3.6).
+- [ ] `scripts/role-guard.sh` implementing §4.3 (role resolution + glob
+      check + trailer audit). Wired into `.github/workflows/ci.yml` and
+      installable as a pre-commit hook via `core.hooksPath`.
+- [ ] PR labels created in the repo: `role:researcher`, `role:tester`,
+      `role:developer`, `role:reviewer`, `role:orchestrator`,
+      `role:auditor`, plus `changelog:skip` (§8 #11).
+- [ ] `.github/CODEOWNERS` per §4 (review routing only, not
+      enforcement).
+- [ ] `.githooks/pre-commit` invoking `scripts/role-guard.sh` plus
+      `mix do format, compile`. Installed in CI bootstrap docs.
 - [ ] `.github/ISSUE_TEMPLATE/spec-gap.md`.
 - [ ] `docs/STATUS.md` Kanban skeleton.
 - [ ] `CHANGELOG.md` initialized in Keep a Changelog format with an
@@ -473,10 +551,18 @@ Writable globs (hard limit): <list>
 Forbidden: editing any path outside your writable globs. If you
 believe you need to, stop and open a coordination issue.
 
+Identity (per §4.1, forge-neutral):
+- Branch prefix: <prefix>/  (e.g. research/, test/, dev/<slice>/)
+- Every commit MUST include the trailer: `X-Bier-Role: <role>`
+- When opening a PR, apply the label `role:<role>`
+- The role-guard CI (§4.3) will reject the PR if any of the above
+  is missing or if the diff escapes your globs.
+
 When you finish a unit of work:
-1. Run the relevant gates (`mix test`, `mix format --check-formatted`).
+1. Run the relevant gates (`mix test`, `mix format --check-formatted`,
+   `scripts/role-guard.sh`).
 2. Update docs/STATUS.md with your slice's row.
-3. Open or update your PR. Do not merge.
+3. Open or update your PR with the `role:<role>` label. Do not merge.
 ```
 
 ---
