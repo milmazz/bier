@@ -118,11 +118,19 @@ modified, (d) no spec files were modified.
   `mix dialyzer`.
 - Posts pass/fail with delta vs. main.
 
-### 3.6 Spec-Drift Auditor (cron / nightly)
+### 3.6 Spec-Drift Auditor (on-demand)
 
 **Goal**: detect when upstream PostgREST changes behavior (new release,
 docs change). Re-runs the Researcher's diffing pass and files an issue
 if new behavior appears.
+
+**Invocation**: manual only — the Orchestrator triggers it (e.g. when a
+new PostgREST release lands, or before cutting a Bier release). It is
+**not** scheduled. Reaching parity with the pinned PostgREST version is
+the priority; chasing upstream drift before parity exists wastes
+Researcher and Tester cycles. Once Phase 4 is green for the pinned
+version, the Auditor becomes the mechanism for re-pinning to a newer
+PostgREST.
 
 ---
 
@@ -136,9 +144,20 @@ if new behavior appears.
 | `lib/**`                     |     —      |   R    |    RW     |      R       |
 | `mix.exs` runtime deps       |     —      |   —    |    RW     |      RW      |
 | `mix.exs` test-only deps     |     —      |   RW   |     —     |      RW      |
+| `CHANGELOG.md`               |     RW     |   RW   |    RW     |      RW      |
 | `docs/STATUS.md`             |     —      |   —    |     —     |      RW      |
 | `docs/AGENT_PLAN.md`         |     —      |   —    |     —     |      RW      |
 | Postgres fixtures (`priv/`)  |     —      |   RW   |     R     |      R       |
+
+`CHANGELOG.md` is the one file every role may write — but only to add
+an entry corresponding to their own PR. Format: [Keep a Changelog
+1.1.0](https://keepachangelog.com/en/1.1.0/), versioned with
+[SemVer](https://semver.org). Sections: `Added`, `Changed`,
+`Deprecated`, `Removed`, `Fixed`, `Security`, plus a Bier-specific
+`Spec` section for changes that originate in `spec/` (Researcher) and
+`Tests` for test-suite-only changes (Tester). Every PR must touch
+`CHANGELOG.md` under `## [Unreleased]` — CI rejects PRs that don't
+(see §8).
 
 Enforce with:
 
@@ -285,6 +304,8 @@ Per-slice exit criteria:
 - `mix format`, `mix credo --strict`, `mix dialyzer` clean.
 - New runtime deps justified in PR description.
 - PR body links to the spec sections implemented.
+- `CHANGELOG.md` updated under `## [Unreleased]` with one entry per
+  user-visible change in the PR (see §4 for format).
 
 ---
 
@@ -372,6 +393,10 @@ Orchestrator re-slices and closes one PR.
 8. **Spec lint**: every `spec/conformance/cases/*.yaml` validates
 9. **Coverage gate**: line coverage ≥ 85% on touched modules
 10. **Property tests**: `mix test --only property` (longer timeout)
+11. **Changelog gate**: PR diff must add at least one line under
+    `## [Unreleased]` in `CHANGELOG.md`. Exempt only via the label
+    `changelog:skip` (chore, internal-doc-only, CI-only). The
+    Reviewer agent rejects unjustified skips.
 
 Postgres in CI: `services.postgres` matrix in GitHub Actions, with
 `spec/conformance/fixtures.sql` loaded on boot.
@@ -388,7 +413,8 @@ Postgres in CI: `services.postgres` matrix in GitHub Actions, with
 | 3     | N sessions      | All slices green; `mix test` 100% green                          |
 | 4     | 1–2 sessions    | Side-by-side conformance: identical fixture DB, run same suite   |
 |       |                 | against PostgREST and Bier; diff must be empty                   |
-| 5     | ongoing         | Spec-Drift Auditor live; v1.0 release                            |
+| 5     | on-demand       | v1.0 release; Spec-Drift Auditor available for re-pinning to     |
+|       |                 | newer PostgREST versions when triggered                          |
 
 Phase 4 is the **real** acceptance gate: the same
 `spec/conformance/cases/*.yaml` runner pointed at PostgREST must produce
@@ -413,6 +439,10 @@ Concrete checklist for the first session that picks up this plan:
 - [ ] `.githooks/pre-commit` role-guard script + `mix do format, compile`.
 - [ ] `.github/ISSUE_TEMPLATE/spec-gap.md`.
 - [ ] `docs/STATUS.md` Kanban skeleton.
+- [ ] `CHANGELOG.md` initialized in Keep a Changelog format with an
+      empty `## [Unreleased]` block and Bier-specific `Spec` / `Tests`
+      sections documented in the file header.
+- [ ] CI changelog gate (§8 #11) implemented.
 - [ ] `.claude/agents/researcher.md`, `tester.md`, `developer.md`,
       `reviewer.md`, `auditor.md` (subagent definitions with the
       role's system prompt and tool allowlist).
@@ -471,6 +501,9 @@ When you finish a unit of work:
 - All `spec/conformance/cases/` pass against Bier on Postgres 14/15/16.
 - Phase 4 differential test against PostgREST (pinned version) is empty.
 - `mix hex.publish --dry-run` succeeds.
+- `CHANGELOG.md` `[Unreleased]` block has been promoted to a versioned
+  release entry (with date), and every merged PR since the previous
+  release has a corresponding entry.
 - README rewritten with usage; `docs/AGENT_PLAN.md` archived under
   `docs/history/` with a postmortem.
 
