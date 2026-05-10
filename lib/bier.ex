@@ -1,7 +1,24 @@
 defmodule Bier do
-  # TODO: Put something more here, maybe reading the README docs? once you have
-  # something there of course
-  @moduledoc false
+  @moduledoc """
+  Public entry point for a Bier instance.
+
+  `Bier` is a `Supervisor` that the host application starts to spin up one
+  named instance — its own validated configuration, its own Bandit web server,
+  and its own router built on the fly from database introspection. Multiple
+  instances can coexist in the same node by passing distinct `:name` values.
+
+  ## Usage
+
+  Add a `Bier` child to your application's supervision tree:
+
+      children = [
+        {Bier, name: MyApp.Bier, router: [port: 4040, scheme: :http]}
+      ]
+
+  See `start_link/1` for the full list of options.
+
+  Per-instance processes are registered through `Bier.Registry`.
+  """
 
   @schema [
     name: [
