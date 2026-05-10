@@ -1,0 +1,61 @@
+# Postgres versions Bier targets for conformance testing.
+#
+# Each service binds a unique host port so all three can run concurrently
+# (in CI these run as separate matrix jobs, not concurrently — but local
+# parallel runs are useful when bisecting version-specific behavior).
+#
+# Conformance fixtures live in priv/repo/conformance_fixtures.sql and
+# are mounted into /docker-entrypoint-initdb.d so each container loads
+# them on first boot.
+#
+# Usage:
+#   docker compose up -d pg14 pg15 pg16
+#   PGPASSWORD=bier psql -h localhost -p 5414 -U bier bier
+services:
+  pg14:
+    image: postgres:14-alpine
+    environment:
+      POSTGRES_USER: bier
+      POSTGRES_PASSWORD: bier
+      POSTGRES_DB: bier
+    ports:
+      - "5414:5432"
+    volumes:
+      - ./priv/repo/conformance_fixtures.sql:/docker-entrypoint-initdb.d/conformance_fixtures.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bier -d bier"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  pg15:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: bier
+      POSTGRES_PASSWORD: bier
+      POSTGRES_DB: bier
+    ports:
+      - "5415:5432"
+    volumes:
+      - ./priv/repo/conformance_fixtures.sql:/docker-entrypoint-initdb.d/conformance_fixtures.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bier -d bier"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  pg16:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bier
+      POSTGRES_PASSWORD: bier
+      POSTGRES_DB: bier
+    ports:
+      - "5416:5432"
+    volumes:
+      - ./priv/repo/conformance_fixtures.sql:/docker-entrypoint-initdb.d/conformance_fixtures.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bier -d bier"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

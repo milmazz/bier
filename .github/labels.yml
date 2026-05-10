@@ -1,0 +1,44 @@
+# PR labels used by the Bier multi-agent factory.
+#
+# These labels participate in the role-guard CI (docs/AGENT_PLAN.md
+# §4.1, §4.3) — the `role:<role>` labels are priority 1 in role
+# resolution, and `changelog:skip` exempts a PR from the changelog
+# gate (§8 #11).
+#
+# Bulk-create with the GitHub CLI:
+#
+#   yq -r '.[] | "\(.name)\t\(.color)\t\(.description)"' .github/labels.yml \
+#     | while IFS=$'\t' read -r name color desc; do
+#         gh label create "$name" --color "$color" --description "$desc" --force
+#       done
+#
+# (Or use one of the many "labels-from-yaml" Actions if you'd rather
+# automate it on push to main.)
+
+- name: role:researcher
+  color: "0E8A16"
+  description: "Authored by the Researcher subagent (writes spec/, CHANGELOG.md). §4.1"
+
+- name: role:tester
+  color: "1D76DB"
+  description: "Authored by the Tester subagent (writes test/, priv/repo/, mix.exs test deps, CHANGELOG.md). §4.1"
+
+- name: role:developer
+  color: "FBCA04"
+  description: "Authored by a Developer subagent (writes lib/ slice, mix.exs runtime deps, CHANGELOG.md). §4.1"
+
+- name: role:reviewer
+  color: "C5DEF5"
+  description: "Authored by the Reviewer subagent (read-only; CHANGELOG.md only if needed). §4.1"
+
+- name: role:orchestrator
+  color: "5319E7"
+  description: "Authored by the Orchestrator (the human session driving the factory). §4.1"
+
+- name: role:auditor
+  color: "B60205"
+  description: "Authored by the Spec-Drift Auditor (issues only; rare PRs). §4.1"
+
+- name: changelog:skip
+  color: "BFD4F2"
+  description: "Exempts this PR from the changelog gate. Use only for chore / docs-only / CI-only PRs. §8 #11"

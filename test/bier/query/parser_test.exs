@@ -1,8 +1,8 @@
-defmodule Bier.QueryParserTest do
+defmodule Bier.Query.ParserTest do
   use ExUnit.Case, async: true
 
-  import Bier.QueryParser
-  doctest Bier.QueryParser
+  import Bier.Query.Parser
+  doctest Bier.Query.Parser
 
   describe "parse_select/1" do
     test "success: parses the select query string" do

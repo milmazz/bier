@@ -1,6 +1,9 @@
-defmodule Bier.QueryParser do
+defmodule Bier.Query.Parser do
   @moduledoc """
-  Parser for SQL queries given via query strings
+  Parser for SQL queries given via query strings.
+
+  Slices 2–4 (`query_parser_select`, `query_parser_filters`,
+  `query_parser_order`) extend this module rather than rewriting it.
   """
   import NimbleParsec
 
