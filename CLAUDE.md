@@ -8,8 +8,7 @@ Bier is an early-stage (alpha) Elixir library that aims to serve a RESTful API g
 
 ## Toolchain
 
-- Elixir/OTP versions are pinned in `mise.toml` (Elixir 1.19.5 / OTP 28). `mix.exs` declares `elixir: "~> 1.18"`.
-- Note: `.github/workflows/elixir.yml` still pins Elixir 1.15.2 / OTP 26.0 — the CI matrix is older than the local toolchain.
+Elixir/OTP versions are pinned in `mise.toml` (Elixir 1.19.5 / OTP 28) and matched in `.github/workflows/elixir.yml`. `mix.exs` declares the lower bound at `elixir: "~> 1.18"`.
 
 ## Common commands
 
@@ -21,7 +20,17 @@ mix test test/path/to/file_test.exs:LINE   # single test by file:line
 mix format            # uses .formatter.exs
 ```
 
-There is no lint/dialyzer/credo step configured.
+CI runs these gates before `mix test`, so run them locally before pushing to avoid red builds:
+
+```sh
+mix deps.unlock --check-unused
+mix format --check-formatted
+mix hex.audit
+mix compile --warnings-as-errors
+mix docs --warnings-as-errors
+```
+
+No credo or dialyzer step is configured.
 
 ## Architecture
 
