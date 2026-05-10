@@ -89,7 +89,7 @@ role_from_labels() {
         return 0
       fi
     fi
-  done < <(printf '%s' "$labels" | tr ',' '\n')
+  done < <(printf '%s\n' "$labels" | tr ',' '\n')
   return 1
 }
 
