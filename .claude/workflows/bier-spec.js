@@ -30,7 +30,7 @@
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
-const PINNED = "v12.2.0"; // the single PostgREST version this run specs
+const PINNED = "v14.12"; // the single PostgREST version this run specs
 const REPO = "https://github.com/PostgREST/postgrest";
 const RAW = `https://raw.githubusercontent.com/PostgREST/postgrest/${PINNED}`;
 const MAX_REVISIONS = 2; // adversarial revise rounds per area before escalating
@@ -115,7 +115,7 @@ Area scope: ${area.scope}
 Ground truth, in priority order:
   1. PostgREST tests:    ${RAW}/test/spec/Feature/...  (+ test/spec/fixtures/*.sql)
   2. PostgREST source:   ${RAW}/src/...
-  3. PostgREST docs:     https://postgrest.org/en/v12/   (behavior tests imply)
+  3. PostgREST docs:     https://postgrest.org/en/v14/   (behavior tests imply)
 Clone shallow if helpful: git clone --depth 1 --branch ${PINNED} ${REPO}
 
 Produce, under spec/:
@@ -176,7 +176,7 @@ files and conformance cases now exist. Produce, under spec/:
   - spec/README.md        overview + the pinned version (${PINNED})
   - spec/case.schema.json  a JSON-Schema the conformance cases validate against
                            (the Tester owns it afterward; draft a faithful one)
-  - spec/COVERAGE.md       a table mapping every PostgREST v12 docs page -> the
+  - spec/COVERAGE.md       a table mapping every PostgREST v14 docs page -> the
                            conformance case IDs that cover it; flag uncovered pages
   - spec/conformance/INDEX.md  cross-reference of cases <-> feature areas
 
