@@ -1,0 +1,17 @@
+id: 1172
+feature: filters/quoting/like
+request:
+  method: GET
+  path: '/grandchild_entities?or=(name.like."*ity,4*",name.ilike."*ITY,5)")&select=id'
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 4 }, { "id": 5 }]
+notes: >
+  like / ilike patterns may be double-quoted to protect reserved chars.
+  Mirrors AndOrParamsSpec "like and ilike can have quotes".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L206

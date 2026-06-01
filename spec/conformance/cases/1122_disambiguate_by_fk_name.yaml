@@ -1,0 +1,18 @@
+id: 1122
+feature: select/embed/hint-by-fk-name
+request:
+  method: GET
+  path: /projects?id=in.(1,3)&select=id,name,client(id,name)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"id":1,"name":"Windows 7","client":{"id":1,"name":"Microsoft"}},{"id":3,"name":"IOS","client":{"id":2,"name":"Apple"}}]
+notes: >
+  can embed by FK name: the projects->clients FK constraint is renamed to
+  "client" in the fixture, so `client(...)` targets that relationship and the
+  embed key is the FK name (EmbedDisambiguationSpec.hs:177).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedDisambiguationSpec.hs#L177

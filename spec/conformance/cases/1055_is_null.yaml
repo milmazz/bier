@@ -1,0 +1,15 @@
+id: 1055
+feature: operators/is/null
+request:
+  method: GET
+  path: /no_pk?a=is.null
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "a": null, "b": null }]
+notes: "is.null -> `a IS NULL`. Mirrors QuerySpec.hs 'matches nulls in varchar and numeric fields alike'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L79

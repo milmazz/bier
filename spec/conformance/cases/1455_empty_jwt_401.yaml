@@ -1,0 +1,17 @@
+id: 1455
+feature: auth/jwt/empty-token
+request:
+  method: GET
+  path: /authors_only
+  headers:
+    Accept: application/json
+    Authorization: "Bearer "
+schema: auth
+preconditions: []
+expect:
+  status: 401
+  headers:
+    WWW-Authenticate: 'Bearer error="invalid_token", error_description="Empty JWT is sent in Authorization header"'
+  body_exact: { "message": "Empty JWT is sent in Authorization header", "code": "PGRST301", "hint": null, "details": null }
+notes: "Empty bearer token -> PGRST301."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L89

@@ -1,0 +1,15 @@
+id: 1436
+feature: rpc/overloaded/two-int-args
+request:
+  method: GET
+  path: /rpc/overloaded?a=1&b=2
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: 3
+notes: "Overloaded function dispatched by supplied args: overloaded(a,b) with a=1&b=2 resolves to the (int,int) variant returning 3."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L791

@@ -1,0 +1,26 @@
+id: 1705
+feature: config/dump-config/defaults
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config: {}
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'db-uri = "postgresql://"'
+    - 'db-schemas = "public"'
+    - 'db-anon-role = ""'
+    - 'db-max-rows = ""'
+    - 'server-port = 3000'
+    - 'server-host = "!4"'
+    - 'log-level = "error"'
+    - 'db-tx-end = "commit"'
+    - 'jwt-secret = ""'
+    - 'jwt-role-claim-key = ".\"role\""'
+    - 'openapi-mode = "follow-privileges"'
+    - 'server-unix-socket-mode = "660"'
+    - 'admin-server-port = ""'
+notes: "Dumping config with no overrides yields the documented default values. Golden file: test/io/configs/expected/defaults.config."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L1

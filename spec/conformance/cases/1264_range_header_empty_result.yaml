@@ -1,0 +1,18 @@
+id: 1264
+feature: pagination/range_header/empty_result
+request:
+  method: GET
+  path: /menagerie
+  headers:
+    Accept: application/json
+    Range-Unit: items
+    Range: 0-1
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "*/*"
+  body_exact: []
+notes: "Range over an empty table returns [] with Content-Range '*/*', status 200. Mirrors RangeSpec.hs:427."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L427

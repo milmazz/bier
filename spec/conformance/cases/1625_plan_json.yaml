@@ -1,0 +1,20 @@
+id: 1625
+feature: content_negotiation/plan/json
+request:
+  method: GET
+  path: /projects?id=in.(1,2,3)
+  headers: { Accept: application/vnd.pgrst.plan+json }
+schema: test
+preconditions:
+  - "Requires db-plan-enabled = true; otherwise the plan media type does not resolve and negotiation returns 406 / PGRST107."
+expect:
+  status: 200
+  headers:
+    Content-Type: 'application/vnd.pgrst.plan+json; for="application/json"; charset=utf-8'
+  body_jsonpath:
+    - { path: "$[0].Plan", exists: true }
+notes: >-
+  Accept application/vnd.pgrst.plan+json returns the JSON EXPLAIN plan; the
+  Content-Type defaults for=application/json and appends charset. Mirrors
+  PlanSpec 'outputs the total cost for a single filter on a table'.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PlanSpec.hs#L34

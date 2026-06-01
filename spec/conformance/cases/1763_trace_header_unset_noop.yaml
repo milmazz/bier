@@ -1,0 +1,22 @@
+id: 1763
+feature: observability/trace-header/unset-noop
+request:
+  method: GET
+  path: /items?id=eq.1
+  headers: { X-Request-Id: "99", Accept: application/json }
+schema: observability
+config:
+  server-trace-header: ""
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  headers_absent: [X-Request-Id]
+  body_exact: [{ "id": 1 }]
+notes: >
+  When server-trace-header is unset (empty string -> Nothing), the trace
+  middleware is a no-op: the incoming X-Request-Id is NOT echoed back. Mirrors
+  App.hs:225-229 (Nothing -> app req respond) and the empty-string optString
+  -> default behaviour. Source line is the middleware's Nothing branch.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/App.hs#L225

@@ -1,0 +1,23 @@
+id: 1131
+feature: select/aggregate/implicit-group-by
+request:
+  method: GET
+  path: /project_invoices?select=invoice_total.sum(),invoice_total.max(),invoice_total.min(),project_id&order=project_id.desc
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+config:
+  db-aggregates-enabled: true
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - {"sum":4100,"max":4000,"min":100,"project_id":4}
+    - {"sum":3200,"max":2000,"min":1200,"project_id":3}
+    - {"sum":1200,"max":700,"min":500,"project_id":2}
+    - {"sum":300,"max":200,"min":100,"project_id":1}
+notes: >
+  Plain fields selected alongside aggregates become an implicit GROUP BY;
+  one row per distinct group (AggregateFunctionsSpec.hs:53).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L53

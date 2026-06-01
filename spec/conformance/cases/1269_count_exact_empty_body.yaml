@@ -1,0 +1,17 @@
+id: 1269
+feature: pagination/count/exact_empty_body
+request:
+  method: GET
+  path: /items?id=eq.0
+  headers:
+    Accept: application/json
+    Prefer: count=exact
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "*/0"
+  body_exact: []
+notes: "count=exact over a filtered-out result returns [] with Content-Range '*/0', status 200 (window equals total of 0). Mirrors RangeSpec.hs:153."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L153

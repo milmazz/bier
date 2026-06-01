@@ -1,0 +1,19 @@
+id: 1011
+feature: url_grammar/profile/content-profile
+request:
+  method: POST
+  path: /children?select=id,parent(*)
+  headers:
+    Content-Type: application/json
+    Content-Profile: v2
+    Prefer: return=representation
+  body: { "id": 0, "name": "child v2-3", "parent_id": 3 }
+schema: multi
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Profile: v2
+  body_exact: [{ "id": 0, "parent": { "id": 3, "name": "parent v2-3" } }]
+notes: "Write methods use Content-Profile (not Accept-Profile) for schema selection; same path /children resolves to the v2 schema, so the embedded parent comes from v2.parents. Mirrors MultipleSchemaSpec 'succeeds inserting on the v2 schema and returning its parent'"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L139

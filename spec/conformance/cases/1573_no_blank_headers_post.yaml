@@ -1,0 +1,19 @@
+id: 1573
+feature: headers/guc/no-blank-headers
+request:
+  method: POST
+  path: /loc_test
+  headers:
+    Content-Type: application/json
+  body: { "id": 1, "c": "c1" }
+schema: headers
+preconditions: []
+expect:
+  status: 201
+  headers_no_blank: true
+  body_exact: null
+notes: >
+  Regression for issue #1427: no blank ` : ` headers may appear in the response.
+  `headers_no_blank: true` is an assertion that the response header set contains
+  no header with an empty name or empty value. Mirrors RpcSpec.hs:1099-1104.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1099

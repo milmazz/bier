@@ -1,0 +1,17 @@
+id: 1671
+feature: openapi/rpc/get-params
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.paths['/rpc/varied_arguments_openapi'].get.parameters[0]", equals: { format: "double precision", in: "query", name: "double", required: true, type: "number" } }
+    - { path: "$.paths['/rpc/varied_arguments_openapi'].get.parameters[6]", equals: { format: "text[]", in: "query", name: "text_arr", required: true, type: "string" } }
+    - { path: "$.paths['/rpc/varied_arguments_openapi'].get.parameters[15]", equals: { format: "int32", in: "query", name: "integer", required: false, type: "integer" } }
+    - { path: "$.paths['/rpc/varied_arguments_openapi'].get.parameters[16]", equals: { format: "json", in: "query", name: "json", required: false, type: "string" } }
+notes: "RPC GET query params: scalar typed, array as type:string, DEFAULT args required:false. Mirrors OpenApiSpec.hs:730-874"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L744

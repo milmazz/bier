@@ -1,0 +1,29 @@
+id: 1331
+feature: representations/put/single-upsert-replace-200
+request:
+  method: PUT
+  path: /items?id=eq.1
+  headers:
+    Prefer: "return=representation"
+    Content-Type: application/json
+  body: [{ "id": 1 }]
+schema: representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: "return=representation"
+  body_exact: [{ "id": 1 }]
+notes: >-
+  PUT single upsert that REPLACES an existing row (PK already present, 0 newly
+  inserted) with return=representation yields 200 + JSON array body. Status
+  semantics (not inserted => 200) per Response.hs#L154-L158. The
+  Preference-Applied: return=representation echo is DERIVED FROM SOURCE, not
+  from the cited test: the upstream PUT-update test (UpsertSpec.hs#L423-L427)
+  asserts only the JSON body (defaulting to status 200) and does NOT assert
+  Preference-Applied. The echo is produced because responsePreferences passes
+  preferRepresentation through for any MutateReadPlan{} (Response.hs#L287-L289)
+  and the SingleUpsert dispatch emits it via prefAppliedHeader
+  (Response.hs#L149,L158).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L158

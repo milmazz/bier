@@ -1,0 +1,20 @@
+id: 1553
+feature: headers/prefer/timezone
+request:
+  method: GET
+  path: /timestamps
+  headers:
+    Prefer: "timezone=America/Los_Angeles"
+schema: headers
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: "timezone=America/Los_Angeles"
+  body_exact:
+    - { "t": "2023-10-18T05:37:59.611-07:00" }
+    - { "t": "2023-10-18T07:37:59.611-07:00" }
+    - { "t": "2023-10-18T09:37:59.611-07:00" }
+notes: "Prefer: timezone shifts timestamptz rendering and is echoed in Preference-Applied. Mirrors the exact it-block at PreferencesSpec.hs:86-94 (\"should change timezone without handling=strict\")."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L86

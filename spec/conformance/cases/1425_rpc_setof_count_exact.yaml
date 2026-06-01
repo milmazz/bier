@@ -1,0 +1,15 @@
+id: 1425
+feature: rpc/count/exact-setof
+request:
+  method: HEAD
+  path: /rpc/getallprojects
+  headers: { Prefer: "count=exact" }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: 0-4/5
+  body_exact: ""
+notes: "Prefer count=exact on a SETOF proc returns an exact total in Content-Range (5 projects in fixture). HEAD returns headers only."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L84

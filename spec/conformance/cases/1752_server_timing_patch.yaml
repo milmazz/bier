@@ -1,0 +1,22 @@
+id: 1752
+feature: observability/server-timing/patch
+request:
+  method: PATCH
+  path: /no_pk?b=eq.0
+  headers: { Content-Type: application/json }
+  body: { "b": "1" }
+schema: observability
+config:
+  server-timing-enabled: true
+preconditions: []
+expect:
+  status: 204
+  headers_present: [Server-Timing]
+  headers_match:
+    Server-Timing: "transaction;dur=[0-9]+\\.[0-9]+"
+  headers_absent: [Content-Type]
+  body_exact: null
+notes: >
+  PATCH with default return (204, no body) still emits the full Server-Timing
+  metric set. Mirrors ServerTimingSpec.hs:38-45.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L38

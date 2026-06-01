@@ -1,0 +1,15 @@
+id: 1657
+feature: openapi/comments/table-summary-description
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.paths['/child_entities'].get.summary", equals: "child_entities comment" }
+    - { path: "$.paths['/child_entities'].get.description", absent: true }
+notes: "Single-line table COMMENT -> get.summary, no description key. Mirrors OpenApiSpec.hs:85-87"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L85

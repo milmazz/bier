@@ -1,0 +1,25 @@
+id: 1634
+feature: content_negotiation/nulls-stripped/array-explicit-select
+request:
+  method: GET
+  path: /organizations?select=id,referee,auditor
+  headers: { Accept: application/vnd.pgrst.array+json;nulls=stripped }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8
+  body_exact:
+    - { id: 1 }
+    - { id: 2 }
+    - { id: 3, referee: 1, auditor: 2 }
+    - { id: 4, referee: 1, auditor: 2 }
+    - { id: 5, referee: 3, auditor: 4 }
+    - { id: 6, referee: 3, auditor: 4 }
+notes: >-
+  nulls=stripped removes null keys even when the column was explicitly named in
+  select=; rows 1 and 2 (referee/auditor null) collapse to just {id}. Mirrors
+  NullsStripSpec 'strip nulls from response even if explicitly selected' ->
+  'strips nulls when Accept: application/vnd.pgrst.array+json;nulls=stripped'.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/NullsStripSpec.hs#L79

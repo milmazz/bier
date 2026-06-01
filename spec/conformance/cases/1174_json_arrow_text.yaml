@@ -1,0 +1,17 @@
+id: 1174
+feature: filters/json/arrow
+request:
+  method: GET
+  path: /json_table?data->>id=eq.1
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "data": { "id": 1, "foo": { "bar": "baz" } } }]
+notes: >
+  ->> extracts a top-level json key as text for comparison. Mirrors
+  JsonOperatorSpec "can filter by properties inside json column using ->>".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L168

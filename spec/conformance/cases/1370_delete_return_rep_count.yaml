@@ -1,0 +1,19 @@
+id: 1370
+feature: mutations/delete/return-representation-count
+request:
+  method: DELETE
+  path: /items?id=eq.2
+  headers:
+    Prefer: return=representation, count=exact
+schema: mutations
+preconditions:
+  - "DELETE FROM test.items;"
+  - "INSERT INTO test.items (id) SELECT generate_series(1, 15);"
+expect:
+  status: 200
+  headers:
+    Content-Range: "*/1"
+    Preference-Applied: return=representation, count=exact
+  body_exact: [{ "id": 2 }]
+notes: "DELETE return=rep + count=exact -> 200, deleted row(s), Content-Range */1."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L29

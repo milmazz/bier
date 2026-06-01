@@ -1,0 +1,13 @@
+id: 1552
+feature: headers/prefer/handling-lenient
+request:
+  method: GET
+  path: /items
+  headers:
+    Prefer: "handling=lenient, anything"
+schema: headers
+preconditions: []
+expect:
+  status: 200
+notes: "handling=lenient ignores invalid preferences and succeeds (200). Mirrors PreferencesSpec.hs:47-49."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L46

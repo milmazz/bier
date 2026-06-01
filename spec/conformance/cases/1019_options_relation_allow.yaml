@@ -1,0 +1,15 @@
+id: 1019
+feature: url_grammar/method/options
+request:
+  method: OPTIONS
+  path: /items
+  headers: {}
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Allow: OPTIONS,GET,HEAD,POST,PUT,PATCH,DELETE
+    Content-Length: "0"
+notes: "OPTIONS on a writeable relation resolves to ActRelationInfo and returns the Allow header of supported methods. Mirrors OptionsSpec writeable table"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OptionsSpec.hs#L17

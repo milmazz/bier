@@ -1,0 +1,17 @@
+id: 1471
+feature: auth/audience/array-contains
+request:
+  method: GET
+  path: /authors_only
+  headers: { Accept: application/json }
+  jwt:
+    sign_with: hs256_test_secret
+    payload: { "exp": 9999999999, "role": "postgrest_test_author", "id": "jdoe", "aud": ["notyouraudience", "youraudience", "anotheraudience"] }
+schema: auth
+config:
+  jwt-aud: youraudience
+preconditions: []
+expect:
+  status: 200
+notes: "Array aud containing the configured value (any position) -> 200."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L70

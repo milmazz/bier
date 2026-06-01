@@ -1,0 +1,17 @@
+id: 1058
+feature: operators/is/case_insensitive
+request:
+  method: GET
+  path: /chores?done=is.NoT_NuLl
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 1, "name": "take out the garbage", "done": true }
+    - { "id": 2, "name": "do the laundry", "done": false }
+notes: "is value keywords are case-insensitive (ciString). Mirrors QuerySpec.hs 'matches with null and not_null values in upper or mixed case'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L109

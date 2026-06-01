@@ -1,0 +1,24 @@
+id: 1624
+feature: content_negotiation/octet-stream/unavailable-406
+request:
+  method: GET
+  path: /rpc/get_lines
+  headers: { Accept: application/octet-stream }
+schema: test
+preconditions: []
+expect:
+  status: 406
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    code: PGRST107
+    details: null
+    hint: null
+    message: "None of these media types are available: application/octet-stream"
+notes: >-
+  Accept application/octet-stream on an RPC whose result type has no
+  octet-stream aggregate handler is not negotiable: 406 / PGRST107. Mirrors
+  CustomMediaSpec 'fails if doesn't have an aggregate defined' (GET
+  /rpc/get_lines with Accept application/octet-stream). The path is an RPC
+  (not a relation) to match the cited it-block exactly.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/CustomMediaSpec.hs#L163

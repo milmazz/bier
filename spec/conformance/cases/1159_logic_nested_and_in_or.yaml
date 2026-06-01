@@ -1,0 +1,15 @@
+id: 1159
+feature: filters/logical/grouping
+request:
+  method: GET
+  path: /entities?or=(and(name.eq.entity 2,id.eq.2),and(name.eq.entity 1,id.eq.1))&select=id
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 1 }, { "id": 2 }]
+notes: 'and(...) groups nested inside or(...). Mirrors AndOrParamsSpec "can be nested inside the same expression".'
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L55

@@ -1,0 +1,17 @@
+id: 1268
+feature: pagination/count/none_empty_body
+request:
+  method: GET
+  path: /menagerie
+  headers:
+    Accept: application/json
+    Prefer: count=none
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "*/*"
+  body_exact: []
+notes: "count=none over an empty result returns [] with Content-Range '*/*'. Mirrors RangeSpec.hs:161."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L161

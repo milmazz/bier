@@ -1,0 +1,14 @@
+id: 1353
+feature: mutations/insert/empty-object-defaults
+request:
+  method: POST
+  path: /items
+  headers: { Content-Type: application/json }
+  body: {}
+schema: mutations
+preconditions: []
+expect:
+  status: 201
+  headers_absent: [Content-Type]
+notes: "Empty object {} inserts a row using all column defaults (serial pk)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L346

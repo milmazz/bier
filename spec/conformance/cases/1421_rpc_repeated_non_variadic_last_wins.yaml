@@ -1,0 +1,15 @@
+id: 1421
+feature: rpc/args/repeated-non-variadic
+request:
+  method: GET
+  path: /rpc/sayhello?name=ignored&name=world
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: "Hello, world"
+notes: "Repeated query params for a non-VARIADIC scalar param take the last value."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L751

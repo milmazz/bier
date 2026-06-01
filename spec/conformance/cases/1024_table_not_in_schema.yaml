@@ -1,0 +1,19 @@
+id: 1024
+feature: url_grammar/path/relation-not-found
+request:
+  method: GET
+  path: /another_table
+  headers:
+    Accept: application/json
+    Accept-Profile: v1
+schema: multi
+preconditions: []
+expect:
+  status: 404
+  body_exact:
+    code: PGRST205
+    details: null
+    hint: null
+    message: Could not find the table 'v1.another_table' in the schema cache
+notes: "A relation path resolves only within the active schema; another_table exists in v2 but not v1, so via Accept-Profile v1 it is not found (PGRST205, 404). Mirrors MultipleSchemaSpec another_table not in v1"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L66

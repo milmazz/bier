@@ -1,0 +1,18 @@
+id: 1054
+feature: operators/not/in
+request:
+  method: GET
+  path: /items?id=not.in.(2,4,6,7,8,9,10,11,12,13,14,15)
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: 0-2/*
+  body_exact:
+    - { "id": 1 }
+    - { "id": 3 }
+    - { "id": 5 }
+notes: "not.in is NOT (= ANY(...)). Mirrors QuerySpec.hs 'matches items NOT IN using not operator'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L64

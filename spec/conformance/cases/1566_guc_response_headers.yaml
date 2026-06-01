@@ -1,0 +1,17 @@
+id: 1566
+feature: headers/guc/response-headers
+request:
+  method: GET
+  path: /rpc/get_int_and_guc_headers?num=1
+  headers: { Accept: application/json }
+schema: headers
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    X-Test: "key1=val1; someValue; key2=val2"
+    X-Test-2: "key1=val1"
+  body_exact: 1
+notes: "response.headers GUC (JSON array of single-key objects) becomes response headers. Mirrors RpcSpec.hs:1035-1040."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1027

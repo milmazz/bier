@@ -1,0 +1,16 @@
+id: 1672
+feature: openapi/rpc/get-params
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi_variadic
+preconditions:
+  - "CREATE FUNCTION test.variadic_param(VARIADIC v text[]) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT array_to_string(v, ','); $$"
+  - "GRANT EXECUTE ON FUNCTION test.variadic_param(text[]) TO postgrest_test_anonymous"
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.paths['/rpc/variadic_param'].get.parameters[0]", equals: { collectionFormat: "multi", in: "query", items: { format: "text", type: "string" }, name: "v", required: false, type: "array" } }
+notes: "VARIADIC argument uses collectionFormat:multi with type:array and typed items. Mirrors OpenApiSpec.hs:1041-1059"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L1041

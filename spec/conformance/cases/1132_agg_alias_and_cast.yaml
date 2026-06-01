@@ -1,0 +1,23 @@
+id: 1132
+feature: select/aggregate/alias-and-cast
+request:
+  method: GET
+  path: /project_invoices?select=total_charged:invoice_total.sum()::text,project_id&order=project_id.desc
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+config:
+  db-aggregates-enabled: true
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - {"total_charged":"4100","project_id":4}
+    - {"total_charged":"3200","project_id":3}
+    - {"total_charged":"1200","project_id":2}
+    - {"total_charged":"300","project_id":1}
+notes: >
+  Aggregate output alias plus result cast: total_charged:invoice_total.sum()::text
+  (AggregateFunctionsSpec.hs:76; alias form documented at L69).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L76

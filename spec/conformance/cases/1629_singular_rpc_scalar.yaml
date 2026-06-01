@@ -1,0 +1,17 @@
+id: 1629
+feature: content_negotiation/singular/rpc-scalar
+request:
+  method: POST
+  path: /rpc/sayhello
+  headers:
+    Accept: application/vnd.pgrst.object+json
+    Content-Type: application/json
+  body: { "name": "world" }
+schema: test
+preconditions: []
+expect:
+  status: 200
+notes: >-
+  A singular request on a scalar RPC result succeeds with 200 (the scalar is
+  wrapped as the single object). Mirrors SingularSpec 'succeeds for scalar result'.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L281

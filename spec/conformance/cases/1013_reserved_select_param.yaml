@@ -1,0 +1,17 @@
+id: 1013
+feature: url_grammar/reserved-params/select
+request:
+  method: GET
+  path: /parents?select=id&id=eq.1
+  headers:
+    Accept: application/json
+    Accept-Profile: v1
+schema: multi
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 1 }]
+notes: "select is a reserved param (shapes response, not a column filter); id=eq.1 is a horizontal filter. Reserved set defined in QueryParams.parse"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L165

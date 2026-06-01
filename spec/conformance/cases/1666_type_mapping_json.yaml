@@ -1,0 +1,15 @@
+id: 1666
+feature: openapi/types/mapping
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.definitions.openapi_types.properties.a_json", equals: { format: "json" } }
+    - { path: "$.definitions.openapi_types.properties.a_jsonb", equals: { format: "jsonb" } }
+notes: "json/jsonb produce only a format, no type. Mirrors OpenApiSpec.hs:515-541 and OpenAPI.hs:70-71"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L515

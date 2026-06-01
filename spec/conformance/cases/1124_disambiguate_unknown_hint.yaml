@@ -1,0 +1,24 @@
+id: 1124
+feature: select/embed/hint-unknown-error
+request:
+  method: GET
+  path: /projects?select=id,clients!nonexistent(id)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    hint: null
+    message: "Could not find a relationship between 'projects' and 'clients' in the schema cache"
+    code: "PGRST200"
+    details: "Searched for a foreign key relationship between 'projects' and 'clients' using the hint 'nonexistent' in the schema 'test', but no matches were found."
+notes: >
+  An embed hint that matches no relationship yields HTTP 400 PGRST200. The
+  message/details template is the one asserted in EmbedDisambiguationSpec.hs:218
+  (the upstream test uses message/person/space; here the same template is
+  instantiated against projects/clients with hint 'nonexistent' so it runs on
+  the minimal select.sql fixture).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedDisambiguationSpec.hs#L218

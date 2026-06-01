@@ -1,0 +1,15 @@
+id: 1119
+feature: select/embed/left-join-explicit
+request:
+  method: GET
+  path: /projects?select=id,clients!left(id)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"id":1,"clients":{"id":1}},{"id":2,"clients":{"id":1}},{"id":3,"clients":{"id":2}},{"id":4,"clients":{"id":2}},{"id":5,"clients":null}]
+notes: "!left keeps the null embedding (project 5) (EmbedInnerJoinSpec.hs:23)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L23

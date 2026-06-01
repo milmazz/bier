@@ -1,0 +1,17 @@
+id: 1674
+feature: openapi/rpc/volatility-methods
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.paths['/rpc/reset_table'].get", absent: true }
+    - { path: "$.paths['/rpc/reset_table'].post", present: true }
+    - { path: "$.paths['/rpc/getallusers'].get", present: true }
+    - { path: "$.paths['/rpc/getallusers'].post", present: true }
+notes: "VOLATILE -> POST only; STABLE -> GET+POST. Mirrors OpenApiSpec.hs:1061-1077 and OpenAPI.hs:366-368"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L1061

@@ -1,0 +1,25 @@
+id: 1757
+feature: observability/server-timing/options-subset
+request:
+  method: OPTIONS
+  path: /organizations
+  headers: {}
+schema: observability
+config:
+  server-timing-enabled: true
+preconditions: []
+expect:
+  status: 200
+  headers_present: [Server-Timing]
+  headers_match:
+    Server-Timing: "jwt;dur=[0-9]+\\.[0-9]+.*parse;dur=[0-9]+\\.[0-9]+.*response;dur=[0-9]+\\.[0-9]+"
+  headers_absent_in_value:
+    Server-Timing: [plan, transaction]
+  body_exact: null
+notes: >
+  OPTIONS responses carry only jwt, parse, response timing metrics; plan and
+  transaction are absent (no query plan / DB transaction runs). Same holds for
+  OPTIONS on /rpc/<fn> and on /. headers_absent_in_value asserts the named
+  substrings do NOT appear in the Server-Timing value. Mirrors
+  ServerTimingSpec.hs:87-111.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L87

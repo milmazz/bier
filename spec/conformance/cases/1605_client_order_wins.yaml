@@ -1,0 +1,14 @@
+id: 1605
+feature: content_negotiation/precedence/client-order
+request:
+  method: GET
+  path: /simple_pk
+  headers: { Accept: "text/csv, application/json" }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: text/csv; charset=utf-8
+notes: "First acceptable media type wins (client order), even when opposite of server preference. Mirrors QuerySpec 'honors client preference even when opposite of server preference'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1209

@@ -1,0 +1,17 @@
+id: 1482
+feature: auth/guc/request-cookies-multiple
+request:
+  method: POST
+  path: /rpc/get_guc_value
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Cookie: acookie=cookievalue;secondcookie=anothervalue
+  body: { "prefix": "request.cookies", "name": "secondcookie" }
+schema: auth
+preconditions: []
+expect:
+  status: 200
+  body_exact: "anothervalue"
+notes: "Multiple cookies parsed into request.cookies."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L903

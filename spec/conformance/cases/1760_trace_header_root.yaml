@@ -1,0 +1,19 @@
+id: 1760
+feature: observability/trace-header/root
+request:
+  method: HEAD
+  path: /
+  headers: { X-Request-Id: "1" }
+schema: observability
+config:
+  server-trace-header: X-Request-Id
+preconditions: []
+expect:
+  status: 200
+  headers:
+    X-Request-Id: "1"
+  body_exact: null
+notes: >
+  With server-trace-header=X-Request-Id, the incoming X-Request-Id is echoed
+  verbatim on the response (root spec). Mirrors ObservabilitySpec.hs:14-20.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/ObservabilitySpec.hs#L14

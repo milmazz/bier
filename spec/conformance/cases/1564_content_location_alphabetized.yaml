@@ -1,0 +1,15 @@
+id: 1564
+feature: headers/content-location/alphabetized
+request:
+  method: GET
+  path: /no_pk?b=eq.1&a=eq.1
+  headers: { Accept: application/json }
+schema: headers
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Location: "/no_pk?a=eq.1&b=eq.1"
+  body_exact: []
+notes: "Content-Location reorders filter params alphabetically (canonical form). Mirrors QuerySpec.hs:1234-1239."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1234

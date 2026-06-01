@@ -1,0 +1,17 @@
+id: 1154
+feature: filters/horizontal/like
+request:
+  method: GET
+  path: /simple_pk?k=like.*yx
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "k": "xyyx", "extra": "u" }]
+notes: >
+  like with `*` wildcard. Only lowercase xyyx matches (xYYx does not, like is
+  case-sensitive). Mirrors QuerySpec "matches with like".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L131

@@ -1,0 +1,12 @@
+id: 1429
+feature: rpc/method/unsupported-patch
+request:
+  method: PATCH
+  path: /rpc/sayhello
+  headers: {}
+schema: rpc
+preconditions: []
+expect:
+  status: 405
+notes: "PATCH on /rpc/<fn> is unsupported -> 405 (InvalidRpcMethod)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L626

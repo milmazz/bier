@@ -1,0 +1,210 @@
+# Representations: Prefer: return=minimal | headers-only | representation
+#
+# Area scope: which status code and response body each `return=` resolution
+# yields for mutating actions (POST insert, POST upsert, PATCH update,
+# PUT single upsert, DELETE), and which response headers each carries
+# (Preference-Applied, Location, Content-Range, Content-Type, Content-Length).
+#
+# Pinned to PostgREST v14.12.
+# Primary ground truth is the source dispatch in PostgREST/Response.hs and the
+# Prefer header parser in PostgREST/ApiRequest/Preferences.hs, cross-checked
+# against the Feature test specs.
+
+version: v14.12
+
+# --- The Prefer: return token and its three values --------------------------
+preference:
+  header: Prefer
+  parameter: return
+  # The applied value is echoed back in the Preference-Applied response header.
+  # Parser maps the token to an internal PreferRepresentation constructor.
+  values:
+    representation:
+      constructor: Full
+      meaning: "Return the mutated rows in the response body."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/Preferences.hs#L216
+    minimal:
+      constructor: None
+      meaning: "Return nothing from the mutated data (empty body)."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/Preferences.hs#L218
+    headers-only:
+      constructor: HeadersOnly
+      meaning: >-
+        Return the Location header (POST/insert only) but no body. Needs SELECT
+        privilege on the primary key.
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/Preferences.hs#L217
+  # toHeaderValue round-trips the constructor back to the canonical token.
+  applied_token_map:
+    Full: "return=representation"
+    None: "return=minimal"
+    HeadersOnly: "return=headers-only"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/Preferences.hs#L221-L224
+  # When return= is absent the dispatch treats it as the Nothing branch, which
+  # is identical to None (empty body, no Preference-Applied: return=...).
+  default_when_absent:
+    behaves_as: minimal
+    emits_preference_applied: false
+    note: >-
+      With no return= token there is no Preference-Applied: return=... header;
+      the body is still empty. Distinct from explicit return=minimal which DOES
+      echo Preference-Applied: return=minimal.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L120
+
+# --- Per-action resolution table --------------------------------------------
+# Each action's dispatch clause in Response.hs decides (status, headers, body)
+# by casing on preferRepresentation iPreferences.
+actions:
+
+  # POST that inserts (MutationCreate). Status is 201 unless an upsert with
+  # resolution=merge-duplicates inserted 0 rows, in which case 200.
+  post_insert:
+    mutation: MutationCreate
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L91-L124
+    status_base:
+      created: 201
+      # rsInserted <= 0 AND resolution=merge-duplicates => 200
+      merge_duplicates_zero_inserted: 200
+      status_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L110-L115
+      # The 0-inserted => 200 edge is tested upstream by POST /articles [] with
+      # resolution=merge-duplicates, return=representation -> 200 + []. Backed
+      # by conformance case 1307.
+      merge_duplicates_zero_inserted_test: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L77
+    always_headers:
+      # Location emitted only when rsLocation is non-empty (table has a PK that
+      # was selectable, or on_conflict was supplied).
+      Location: "/<table>?<pk>=eq.<value> (only when PK/location resolvable)"
+      Content-Range: "*/N when count=exact else */* ; insert range base is 1 0"
+    resolutions:
+      representation:
+        status: 201
+        body: "JSON array of inserted rows (shaped by &select)"
+        content_type: "application/json; charset=utf-8 (or negotiated media)"
+        content_length: present
+        preference_applied: "return=representation"
+        source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L117
+      minimal:
+        status: 201
+        body: empty
+        content_type: absent
+        content_length: "0"
+        preference_applied: "return=minimal"
+        source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L118
+      headers-only:
+        status: 201
+        body: empty
+        content_type: absent
+        content_length: "0"
+        location: present
+        preference_applied: "return=headers-only"
+        source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L119
+
+  # PATCH update (MutationUpdate). Representation => 200, otherwise 204.
+  patch_update:
+    mutation: MutationUpdate
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L126-L145
+    always_headers:
+      Content-Range: "0-(N-1)/* ; or 0-(N-1)/N when count=exact"
+      content_range_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L128-L130
+    resolutions:
+      representation:
+        status: 200
+        body: "JSON array of updated rows (empty array [] when 0 rows matched)"
+        content_type: present
+        content_length: present
+        preference_applied: "return=representation"
+        source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L139
+      minimal:
+        status: 204
+        body: empty
+        content_type: absent
+        content_length: absent
+        preference_applied: "return=minimal"
+        source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L140
+      headers-only:
+        # Update has no Full/None special-case for HeadersOnly; the catch-all
+        # `_` branch maps HeadersOnly to the 204 minimal behavior.
+        status: 204
+        body: empty
+        content_type: absent
+        preference_applied: "return=headers-only"
+        source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L141
+
+  # PUT single upsert (MutationSingleUpsert). 201 if a row was inserted, else 200.
+  put_single_upsert:
+    mutation: MutationSingleUpsert
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L147-L163
+    status_base:
+      inserted: 201
+      replaced_existing: 200
+      status_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L154-L155
+    resolutions:
+      representation:
+        status: "201 if inserted else 200"
+        body: "JSON array with the upserted row"
+        content_type: present
+        content_length: present
+        preference_applied: "return=representation"
+        source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L158
+      minimal:
+        status: 204
+        body: empty
+        preference_applied: "return=minimal"
+        source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L159
+      headers-only:
+        status: 204
+        body: empty
+        preference_applied: "return=headers-only"
+        source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L160
+
+  # DELETE (MutationDelete). Representation => 200, otherwise 204.
+  delete:
+    mutation: MutationDelete
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L165-L179
+    always_headers:
+      Content-Range: "*/* ; or */N when count=exact (range base 1 0)"
+      content_range_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L167
+    resolutions:
+      representation:
+        status: 200
+        body: "JSON array of deleted rows (shaped by &select)"
+        content_type: present
+        content_length: present
+        preference_applied: "return=representation"
+        source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L173
+      minimal:
+        status: 204
+        body: empty
+        content_type: absent
+        content_length: absent
+        preference_applied: "return=minimal"
+        source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L174
+      headers-only:
+        status: 204
+        body: empty
+        preference_applied: "return=headers-only"
+        source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L175
+
+# --- Cross-cutting notes ----------------------------------------------------
+notes:
+  - claim: >-
+      &select is ignored unless return=representation is requested; with no
+      return token or return=minimal the body is empty so column shaping has no
+      effect.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L49
+  - claim: >-
+      Preference-Applied composes multiple applied preferences in a single
+      header value, e.g. "return=representation, count=exact" or
+      "missing=default, return=representation".
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L104
+  - claim: >-
+      For POST insert, when the body is empty (minimal/headers-only/no-token)
+      the Content-Type header is absent and Content-Length is 0.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L32
+  - claim: >-
+      headers-only on POST emits the Location header pointing at the created
+      row by primary key, e.g. Location: /projects?id=eq.11.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L139
+  - claim: >-
+      PATCH with return=representation that matches zero rows returns 200 with
+      an empty JSON array body, not 204.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L79

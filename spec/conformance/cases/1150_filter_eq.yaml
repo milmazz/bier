@@ -1,0 +1,18 @@
+id: 1150
+feature: filters/horizontal/eq
+request:
+  method: GET
+  path: /entities?id=eq.1&select=id
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 1 }]
+notes: >
+  Equality horizontal filter. Mirrors QuerySpec "matches with equality"
+  (uses /items there; reproduced against entities fixture to stay
+  self-contained).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L35

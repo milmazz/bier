@@ -1,0 +1,15 @@
+id: 1655
+feature: openapi/root/external-docs
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.externalDocs.url", equals: "https://postgrest.org/en/v14/references/api.html" }
+    - { path: "$.externalDocs.description", equals: "PostgREST Documentation" }
+notes: "externalDocs points at the pinned docs version (v14). Mirrors OpenApiSpec.hs:41-49 (docsVersion); source OpenAPI.hs:401."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response/OpenAPI.hs#L401

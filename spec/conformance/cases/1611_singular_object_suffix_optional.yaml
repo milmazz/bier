@@ -1,0 +1,15 @@
+id: 1611
+feature: content_negotiation/singular/suffix-optional
+request:
+  method: GET
+  path: /items?id=eq.5
+  headers: { Accept: application/vnd.pgrst.object }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/vnd.pgrst.object+json; charset=utf-8
+  body_exact: { "id": 5 }
+notes: "The +json suffix is optional; application/vnd.pgrst.object behaves identically and still emits the +json Content-Type. Mirrors SingularSpec 'also test without the +json suffix'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L30

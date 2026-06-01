@@ -1,0 +1,18 @@
+id: 1501
+feature: errors/sqlstate/foreign_key_violation
+request:
+  method: POST
+  path: /fk_child
+  headers: { Content-Type: application/json }
+  body: { id: 1, parent_id: 999 }
+schema: test
+preconditions: []
+expect:
+  status: 409
+  body_jsonpath:
+    - { path: "$.code", equals: "23503" }
+notes: >
+  Inserting a child row that references a non-existent parent raises
+  foreign_key_violation (23503), which pgErrorStatus maps to HTTP 409.
+  Status mapping asserted at Error.hs:610. The body code is the raw SQLSTATE.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L610

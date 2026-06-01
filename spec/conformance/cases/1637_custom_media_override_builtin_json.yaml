@@ -1,0 +1,23 @@
+id: 1637
+feature: content_negotiation/custom-media-handler/override-builtin
+request:
+  method: GET
+  path: /ov_json
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    overridden: "true"
+notes: >-
+  A non-vendored builtin media type (application/json) can be overridden for a
+  single table by defining an aggregate over that table whose stype is the
+  builtin's DOMAIN. Here ov_json's aggregate has no finalfunc and the table has
+  zero rows, so the aggregate returns its initcond verbatim. The response keeps
+  the builtin Content-Type application/json; charset=utf-8 but the body is the
+  handler's output. Mirrors CustomMediaSpec 'will override the application/json
+  handler for a single table' (GET /ov_json).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/CustomMediaSpec.hs#L180

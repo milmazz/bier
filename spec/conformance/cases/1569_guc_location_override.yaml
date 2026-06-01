@@ -1,0 +1,18 @@
+id: 1569
+feature: headers/guc/location-override
+request:
+  method: POST
+  path: /stuff
+  headers:
+    Content-Type: application/json
+  body: [{ "id": 2, "name": "stuff 2" }]
+schema: headers
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Location: "/stuff?id=eq.2&overriden=true"
+  headers_absent: [Content-Type]
+  body_exact: null
+notes: "INSTEAD OF trigger overrides Location via response.headers GUC. Mirrors RpcSpec.hs:1086-1094."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1086

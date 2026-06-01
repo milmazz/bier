@@ -1,0 +1,23 @@
+id: 1560
+feature: headers/profile/unknown-schema
+request:
+  method: GET
+  path: /parents
+  headers:
+    Accept-Profile: unknown
+schema: headers
+preconditions: []
+expect:
+  status: 406
+  body_exact:
+    code: "PGRST106"
+    message: "Invalid schema: unknown"
+    details: null
+    hint: 'Only the following schemas are exposed: v1, v2, SPECIAL "@/\#~_-'
+notes: >
+  Profile naming a non-exposed schema -> 406 PGRST106, whose hint lists the
+  exposed schemas in exposure order. The headers.sql fixture exposes
+  v1, v2, and the special-named schema (matching PostgREST's own fixture), so
+  the hint lists all three verbatim. Mirrors the exact it-block at
+  MultipleSchemaSpec.hs:75-80.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L75

@@ -1,0 +1,16 @@
+id: 1600
+feature: content_negotiation/json/default
+request:
+  method: GET
+  path: /items?id=eq.1
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 1 }
+notes: "application/json is the default producer; Content-Type carries charset=utf-8. Mirrors RawOutputTypesSpec json response."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L66

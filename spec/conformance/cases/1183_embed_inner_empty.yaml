@@ -1,0 +1,18 @@
+id: 1183
+feature: filters/embed/inner
+request:
+  method: GET
+  path: /entities?select=id,child_entities!inner(id)&child_entities.id=eq.0
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: []
+notes: >
+  An !inner-embedded filter matching no embedded rows drops all parent rows,
+  yielding an empty top-level array. Mirrors EmbedInnerJoinSpec one-to-many
+  "filters source tables when the embedded table is filtered" (eq.0 branch).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L137

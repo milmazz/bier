@@ -1,0 +1,17 @@
+id: 1176
+feature: filters/json/array_index
+request:
+  method: GET
+  path: /json_arr?select=data&data->>0=eq.1
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "data": [1, 2, 3] }]
+notes: >
+  A well-formed integer in a json path is an array index. Only row 1's data
+  has element 0 == 1. Mirrors JsonOperatorSpec "can filter by array indexes".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L182

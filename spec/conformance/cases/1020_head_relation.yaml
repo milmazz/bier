@@ -1,0 +1,15 @@
+id: 1020
+feature: url_grammar/method/head
+request:
+  method: HEAD
+  path: /items?id=eq.5
+  headers: {}
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: null
+notes: "HEAD on a relation resolves to ActRelationRead (head=True): same routing as GET, empty body. Action mapping in ApiRequest.getAction"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest.hs#L138

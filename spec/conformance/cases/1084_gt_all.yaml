@@ -1,0 +1,15 @@
+id: 1084
+feature: operators/quantifier/gt_all
+request:
+  method: GET
+  path: /projects?id=gt(all).{4,3}
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 5, "name": "Orphan", "client_id": null }]
+notes: "gt(all) -> `id > ALL('{4,3}')`. Mirrors QuerySpec.hs any/all quantifiers 'works with the gt/gte operator'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1503

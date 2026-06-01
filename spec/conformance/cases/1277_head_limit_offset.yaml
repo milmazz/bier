@@ -1,0 +1,18 @@
+id: 1277
+feature: pagination/limit_offset/head_method
+request:
+  method: HEAD
+  path: /items?select=id&order=id.asc&limit=3&offset=2
+  headers: { Accept: application/json }
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: "application/json; charset=utf-8"
+    Content-Range: "2-4/*"
+  body_exact: ""
+notes: >
+  HEAD request with limit/offset returns no body but the same Content-Range
+  ('2-4/*') as the equivalent GET. Mirrors RangeSpec.hs:217.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L217

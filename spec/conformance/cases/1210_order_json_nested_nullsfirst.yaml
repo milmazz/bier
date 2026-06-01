@@ -1,0 +1,20 @@
+id: 1210
+feature: ordering/json_path/nested_nullsfirst
+request:
+  method: GET
+  path: /json_table?order=data->foo->>bar.nullsfirst
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "data": { "id": 3 } }
+    - { "data": { "id": 0 } }
+    - { "data": { "id": 1, "foo": { "bar": "baz" } } }
+notes: >
+  orders by a two-level json path with nulls first; rows lacking foo->bar sort
+  first (their relative order is the input order as PostgreSQL leaves ties).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L235

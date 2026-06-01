@@ -1,0 +1,15 @@
+id: 1166
+feature: filters/quoting/in
+request:
+  method: GET
+  path: /grandchild_entities?or=(id.in.("1","2"),id.in.("3","4"))&select=id
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 1 }, { "id": 2 }, { "id": 3 }, { "id": 4 }]
+notes: 'IN list elements may be double-quoted. Mirrors AndOrParamsSpec "in can have quotes".'
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L209

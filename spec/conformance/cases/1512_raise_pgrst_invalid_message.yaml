@@ -1,0 +1,24 @@
+id: 1512
+feature: errors/raise/pgrst_parse_error_message
+request:
+  method: GET
+  path: /rpc/raise_sqlstate_invalid_json_message
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 500
+  headers:
+    Content-Type: "application/json; charset=utf-8"
+    Content-Length: "263"
+  body_exact:
+    code: "PGRST121"
+    message: "Could not parse JSON in the \"RAISE SQLSTATE 'PGRST'\" error"
+    details: "Invalid JSON value for MESSAGE: 'INVALID'"
+    hint: "MESSAGE must be a JSON object with obligatory keys: 'code', 'message' and optional keys: 'details', 'hint'."
+notes: >
+  When the MESSAGE of a RAISE 'PGRST' is not valid JSON, PostgREST returns
+  PGRST121 with HTTP 500, echoing the raw MESSAGE in details and the required
+  shape in hint. Mirrors RpcSpec.hs "returns error for invalid JSON in the
+  MESSAGE option of the RAISE statement".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1413

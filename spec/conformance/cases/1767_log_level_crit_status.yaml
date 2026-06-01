@@ -1,0 +1,18 @@
+id: 1767
+feature: observability/log-level/crit-logs-nothing
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/openapi+json }
+schema: observability
+config:
+  log-level: crit
+preconditions: []
+expect:
+  status: 200
+notes: >
+  At log-level=crit, shouldLogResponse is const False: no access-log line is
+  emitted for any status (the io test asserts len(output) == 0). The request
+  still succeeds normally (200). Stdout-absence verified at io level. Mirrors
+  Logger.hs:90 (LogCrit -> const False) and test_io.py:test_log_level (crit).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Logger.hs#L90

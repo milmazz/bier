@@ -1,0 +1,14 @@
+id: 1360
+feature: mutations/columns-param/table-not-found-precedence
+request:
+  method: POST
+  path: /garlic?columns=helicopter
+  headers: { Content-Type: application/json }
+  body: [{ "id": 204, "body": "yyy" }]
+schema: mutations
+preconditions: []
+expect:
+  status: 404
+  body_exact: { "code": "PGRST205", "details": null, "hint": null, "message": "Could not find the table 'test.garlic' in the schema cache" }
+notes: "Missing-table error (PGRST205) takes precedence over invalid ?columns."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L480

@@ -1,0 +1,22 @@
+id: 1361
+feature: mutations/missing-default/insert
+request:
+  method: POST
+  path: /complex_items?columns=id,name,field-with_sep,arr_data
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation, missing=default
+  body:
+    - { "id": 4, "name": "Vier" }
+    - { "id": 6, "name": "Sechs", "field-with_sep": 6, "arr_data": "{1,2,3}" }
+schema: mutations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Preference-Applied: missing=default, return=representation
+  body_exact:
+    - { "id": 4, "name": "Vier", "field-with_sep": 1, "settings": null, "arr_data": null }
+    - { "id": 6, "name": "Sechs", "field-with_sep": 6, "settings": null, "arr_data": [1, 2, 3] }
+notes: "missing=default fills column DEFAULT (field-with_sep=1) for objects omitting it; explicit values kept."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L500

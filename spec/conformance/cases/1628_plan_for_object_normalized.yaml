@@ -1,0 +1,19 @@
+id: 1628
+feature: content_negotiation/plan/for-object-normalized
+request:
+  method: GET
+  path: /projects
+  headers: { Accept: 'application/vnd.pgrst.plan+json; for="application/vnd.pgrst.object"; options=verbose' }
+schema: test
+preconditions:
+  - "Requires db-plan-enabled = true."
+expect:
+  status: 200
+  headers:
+    Content-Type: 'application/vnd.pgrst.plan+json; for="application/vnd.pgrst.object+json"; options=verbose; charset=utf-8'
+notes: >-
+  for="application/vnd.pgrst.object" is normalized to
+  for="application/vnd.pgrst.object+json" in the response Content-Type
+  (decodeMediaType resolves the for= type, toMime re-renders it canonically).
+  Mirrors PlanSpec 'outputs the plan for application/vnd.pgrst.object'.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PlanSpec.hs#L115

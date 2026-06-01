@@ -1,0 +1,16 @@
+id: 1467
+feature: auth/jwt/asymmetric-rs256
+request:
+  method: GET
+  path: /authors_only
+  headers:
+    Accept: application/json
+    Authorization: "Bearer eyJhbGciOiJSUzI1NiJ9.eyJyb2xlIjogInBvc3RncmVzdF90ZXN0X2F1dGhvciJ9Cg.CBOYWDvqgAR0YYnZnyDGTQi6AJLc2Pds6_eV3YuBG6I36mj_h05eLhkEKNEDA5ZteMzCiY83P60rC_xtxVd7B6vo3BeF5uoanPS3rrbuHzKPwzsrgrD_CqvEuJ4n7Q9epkQiLsNkcexneENZDRqFjbwZx3DrXiCWwlK3Ytr5NAIGxmy0od-0xNpb2U1nXQyO_Q3mumWFViRt4tmFn_3goDHNKG3Ha_AzImfUNvHnWL78kAc4rbn15vLtWXD8PwtSnZaB4lY4V6RfsaW937srQsmRetvytM1i_bHBnjkjQLAqGbXPyItjtlXPs0uGNBadE8-wgkLtfmSCC4v2DjUthw"
+schema: auth
+preconditions: []
+config:
+  jwt-secret: asymmetric_jwk_public_key
+notes: "Server started with an asymmetric (RS256) public JWK as jwt-secret verifies a token signed with the matching private key. Requires the upstream test public key as jwt-secret."
+expect:
+  status: 200
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AsymmetricJwtSpec.hs#L16

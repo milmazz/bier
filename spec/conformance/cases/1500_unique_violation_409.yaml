@@ -1,0 +1,22 @@
+id: 1500
+feature: errors/sqlstate/unique_violation
+request:
+  method: POST
+  path: /simple_pk
+  headers: { Content-Type: application/json }
+  body: { k: "xyyx", extra: "e1" }
+schema: test
+preconditions: []
+expect:
+  status: 409
+  body_exact:
+    code: "23505"
+    message: "duplicate key value violates unique constraint \"simple_pk_pkey\""
+    details: "Key (k)=(xyyx) already exists."
+    hint: null
+notes: >
+  Re-inserting the seeded primary key 'xyyx' raises unique_violation (23505),
+  which pgErrorStatus maps to HTTP 409. The body is the raw PG ServerError:
+  code is the SQLSTATE, message/details from PG. Mirrors InsertSpec.hs
+  "attempting to insert a row with the same primary key fails returning a 409".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L320

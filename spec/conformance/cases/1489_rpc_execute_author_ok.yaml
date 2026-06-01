@@ -1,0 +1,19 @@
+id: 1489
+feature: auth/rpc/execute-granted
+request:
+  method: POST
+  path: /rpc/privileged_hello
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicG9zdGdyZXN0X3Rlc3RfYXV0aG9yIn0.Xod-F15qsGL0WhdOCr2j3DdKuTw9QJERVgoFD3vGaWA"
+  body: { "name": "jdoe" }
+schema: auth
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: "Privileged hello to jdoe"
+notes: "postgrest_test_author has EXECUTE on privileged_hello (revoked from PUBLIC)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L45

@@ -1,0 +1,20 @@
+id: 1623
+feature: content_negotiation/octet-stream/no-charset
+request:
+  method: POST
+  path: /rpc/unnamed_bytea_param
+  headers:
+    Content-Type: application/octet-stream
+    Accept: application/octet-stream
+  body: "x"
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/octet-stream
+notes: >-
+  toContentType appends '; charset=utf-8' to every media type EXCEPT
+  MTOctetStream and MTOther; octet-stream responses carry a bare
+  application/octet-stream Content-Type with no charset.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L59

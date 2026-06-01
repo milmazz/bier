@@ -1,0 +1,26 @@
+id: 1574
+feature: headers/profile/special-chars
+request:
+  method: GET
+  path: /names?select=id,name
+  headers:
+    Accept-Profile: 'SPECIAL "@/\#~_-'
+    Accept: application/json
+schema: headers
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Profile: 'SPECIAL "@/\#~_-'
+  body_exact:
+    - { "id": 1, "name": "John" }
+    - { "id": 2, "name": "Mary" }
+    - { "id": 3, "name": "José" }
+notes: >
+  A schema whose name contains uppercase and special characters
+  (SPECIAL "@/\#~_-) is a valid Accept-Profile value; the resolved schema is
+  echoed verbatim in Content-Profile. The Accept-Profile / Content-Profile
+  values are the raw schema name (double-quote, slash, backslash, hash, tilde
+  included). Mirrors the exact it-block at MultipleSchemaSpec.hs:82-92.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L82

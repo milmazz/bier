@@ -1,0 +1,22 @@
+id: 1613
+feature: content_negotiation/singular/multiple-rows-error
+request:
+  method: PATCH
+  path: /addresses
+  headers:
+    Accept: application/vnd.pgrst.object+json
+    Content-Type: application/json
+  body_json: { "address": "zzz" }
+schema: test
+preconditions: []
+expect:
+  status: 406
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    details: The result contains 4 rows
+    message: Cannot coerce the result to a single JSON object
+    code: PGRST116
+    hint: null
+notes: "A singular mutation matching multiple rows fails 406/PGRST116; the error body is plain JSON, not vnd.pgrst.object+json. Mirrors SingularSpec 'raises an error for multiple rows'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L68

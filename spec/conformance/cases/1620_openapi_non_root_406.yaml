@@ -1,0 +1,12 @@
+id: 1620
+feature: content_negotiation/openapi/non-root-406
+request:
+  method: GET
+  path: /items
+  headers: { Accept: application/openapi+json }
+schema: test
+preconditions: []
+expect:
+  status: 406
+notes: "application/openapi+json on a non-root path returns 406; the openapi producer is only available at the root. Mirrors OpenApiSpec 'should respond to openapi request on none root path with 406'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L31

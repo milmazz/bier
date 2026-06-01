@@ -1,0 +1,25 @@
+id: 1724
+feature: config/sources/db-role-settings-override
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_DB_CONFIG: "true"
+    PGUSER: db_config_authenticator
+  preconditions_sql:
+    - "CREATE ROLE db_config_authenticator LOGIN NOINHERIT"
+    - "ALTER ROLE db_config_authenticator SET pgrst.db_max_rows = '500'"
+    - "ALTER ROLE db_config_authenticator SET pgrst.db_schemas = 'test, tenant1, tenant2'"
+  file:
+    db-max-rows: 1000
+    db-schemas: "public"
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'db-max-rows = 500'
+    - 'db-schemas = "test,tenant1,tenant2"'
+notes: "With db-config=true, reloadable keys from ALTER ROLE ... SET pgrst.* override the config file. Mirrors test_cli.py:test_expected_config_from_db_settings and db_config.sql."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L168

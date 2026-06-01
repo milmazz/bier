@@ -1,0 +1,25 @@
+id: 1275
+feature: pagination/count/estimated_falls_back_to_exact
+request:
+  method: HEAD
+  path: /getallprojects_view?id=lt.3
+  headers:
+    Accept: application/json
+    Prefer: count=estimated
+schema: pagination
+preconditions:
+  - "ANALYZE test.projects;"
+expect:
+  status: 200
+  headers:
+    Content-Type: "application/json; charset=utf-8"
+    Content-Range: "0-1/2"
+notes: >
+  count=estimated returns the exact count when the planner estimate is <=
+  max-rows. Filtered to ids < 3 the view has 2 rows, so Content-Range '0-1/2',
+  status 200. Mirrors QueryLimitedSpec.hs:60. CAVEAT: count=estimated semantics
+  depend on the server max-rows configuration (a deployment config, not a
+  request param); this case assumes the same max-rows the PostgREST suite uses
+  for QueryLimitedSpec (max-rows=2). When the exact count is small it is
+  deterministic regardless of max-rows.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QueryLimitedSpec.hs#L60

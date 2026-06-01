@@ -1,0 +1,15 @@
+id: 1157
+feature: filters/logical/or
+request:
+  method: GET
+  path: /entities?or=(id.eq.1,id.eq.2)&select=id
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 1 }, { "id": 2 }]
+notes: 'or= simple logic. Mirrors AndOrParamsSpec "can do simple logic".'
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L18

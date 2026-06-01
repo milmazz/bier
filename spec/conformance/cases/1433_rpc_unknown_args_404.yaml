@@ -1,0 +1,19 @@
+id: 1433
+feature: rpc/error/unknown-args
+request:
+  method: GET
+  path: /rpc/add_them?a=1&b=2&smthelse=blabla
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 404
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    hint: "Perhaps you meant to call the function test.add_them(a, b)"
+    message: "Could not find the function test.add_them(a, b, smthelse) in the schema cache"
+    code: "PGRST202"
+    details: "Searched for the function test.add_them with parameters a, b, smthelse, but no matches were found in the schema cache."
+notes: "Unknown extra arg is not ignored; 404 PGRST202 with a hint pointing at the real signature."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L236

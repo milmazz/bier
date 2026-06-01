@@ -1,0 +1,30 @@
+id: 1375
+feature: mutations/upsert/post/merge-duplicates-all-updated
+request:
+  method: POST
+  path: /tiobe_pls
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation, resolution=merge-duplicates
+  body:
+    - { "name": "Python", "rank": 6 }
+    - { "name": "Java", "rank": 2 }
+    - { "name": "C", "rank": 1 }
+schema: mutations
+# All three names (Python, Java, C) MUST already exist so every row is an
+# UPDATE and nothing is inserted -> 200. Reset to the seed to guarantee this.
+preconditions:
+  - "DELETE FROM test.tiobe_pls;"
+  - "INSERT INTO test.tiobe_pls (name, rank) VALUES ('Java', 1), ('C', 2), ('Python', 4);"
+expect:
+  status: 200
+  headers:
+    Preference-Applied: resolution=merge-duplicates, return=representation
+  body_exact:
+    - { "name": "Python", "rank": 6 }
+    - { "name": "Java", "rank": 2 }
+    - { "name": "C", "rank": 1 }
+notes: >-
+  When every row already exists (all updates, nothing inserted) merge-duplicates
+  returns 200. Mirrors UpsertSpec.hs#L36-L46.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L36

@@ -1,0 +1,20 @@
+id: 1680
+feature: openapi/security/active
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+config:
+  openapi-security-active: true
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.security[0].JWT", equals: [] }
+    - { path: "$.securityDefinitions.JWT.type", equals: "apiKey" }
+    - { path: "$.securityDefinitions.JWT.in", equals: "header" }
+    - { path: "$.securityDefinitions.JWT.name", equals: "Authorization" }
+    - { path: "$.securityDefinitions.JWT.description", equals: "Add the token prepending \"Bearer \" (without quotes) to it" }
+notes: "openapi-security-active=true adds security + JWT apiKey securityDefinition. Mirrors SecurityOpenApiSpec.hs:19-44"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/SecurityOpenApiSpec.hs#L19

@@ -1,0 +1,20 @@
+id: 1126
+feature: select/spread/many-to-one
+request:
+  method: GET
+  path: /projects?select=id,...clients(client_name:name)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - {"id":1,"client_name":"Microsoft"}
+    - {"id":2,"client_name":"Microsoft"}
+    - {"id":3,"client_name":"Apple"}
+    - {"id":4,"client_name":"Apple"}
+    - {"id":5,"client_name":null}
+notes: "spread embed ...clients(...) flattens the parent's columns into the row (SpreadQueriesSpec.hs:15)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SpreadQueriesSpec.hs#L15

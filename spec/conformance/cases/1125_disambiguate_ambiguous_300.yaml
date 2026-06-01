@@ -1,0 +1,31 @@
+id: 1125
+feature: select/embed/ambiguous-multiple-choices
+request:
+  method: GET
+  path: /sites?select=*,big_projects(*)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 300
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    code: "PGRST201"
+    message: "Could not embed because more than one relationship was found for 'sites' and 'big_projects'"
+    hint: "Try changing 'big_projects' to one of the following: 'big_projects!main_project', 'big_projects!jobs', 'big_projects!main_jobs'. Find the desired relationship in the 'details' key."
+    details:
+      - cardinality: "many-to-one"
+        relationship: "main_project using sites(main_project_id) and big_projects(big_project_id)"
+        embedding: "sites with big_projects"
+      - cardinality: "many-to-many"
+        relationship: "jobs using jobs_site_id_fkey(site_id) and jobs_big_project_id_fkey(big_project_id)"
+        embedding: "sites with big_projects"
+      - cardinality: "many-to-many"
+        relationship: "main_jobs using jobs_site_id_fkey(site_id) and jobs_big_project_id_fkey(big_project_id)"
+        embedding: "sites with big_projects"
+notes: >
+  Ambiguous embed (3 candidate relationships between sites and big_projects)
+  returns HTTP 300 Multiple Choices with PGRST201, the details array, and a
+  disambiguation hint (EmbedDisambiguationSpec.hs:16).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedDisambiguationSpec.hs#L16

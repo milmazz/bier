@@ -1,0 +1,23 @@
+id: 1097
+feature: operators/quantifier/match_any
+request:
+  method: GET
+  path: /articles?body=match(any).{stop,thing}&select=id
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 1 }]
+notes: >
+  match(any) emits `body ~ ANY('{stop,thing}')`: a case-sensitive POSIX regex
+  match against either pattern. Only article 1 matches because its body
+  ("No… It's a thing; ...") contains the substring "thing". Article 2
+  ("Stop talking, brain thinking. Hush.") matches neither pattern: "Stop" is
+  capitalized so the case-sensitive "stop" regex fails, and "thinking" does
+  not contain the substring "thing". Article 3 contains neither pattern.
+  Mirrors QuerySpec.hs "works with the match/imatch operator" (first
+  assertion).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1528

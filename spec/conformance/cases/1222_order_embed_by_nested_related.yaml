@@ -1,0 +1,26 @@
+id: 1222
+feature: ordering/embed/by_nested_related
+request:
+  method: GET
+  path: /users?select=name,tasks(id,name,projects(id,name))&tasks.order=projects(id).desc,name&limit=1
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - name: "Angela Martin"
+      tasks:
+        - { "id": 4, "name": "Code w10", "projects": { "id": 2, "name": "Windows 10" } }
+        - { "id": 3, "name": "Design w10", "projects": { "id": 2, "name": "Windows 10" } }
+        - { "id": 2, "name": "Code w7", "projects": { "id": 1, "name": "Windows 7" } }
+        - { "id": 1, "name": "Design w7", "projects": { "id": 1, "name": "Windows 7" } }
+notes: >
+  orders an embedded resource (tasks) by a column of its own nested to-one
+  relation (projects), with a multi-term embedded order:
+  tasks.order=projects(id).desc,name. limit=1 restricts the top resource to the
+  single user Angela, matching the upstream assertion. The single-term variant
+  tasks.order=projects(id).desc is asserted at RelatedQueriesSpec.hs#L69.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L82

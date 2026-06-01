@@ -1,0 +1,19 @@
+id: 1302
+feature: representations/post/return-minimal
+request:
+  method: POST
+  path: /projects?select=name,client_id
+  headers:
+    Prefer: "return=minimal"
+    Content-Type: application/json
+  body: { "id": 16, "name": "New Project", "client_id": 2 }
+schema: representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Preference-Applied: "return=minimal"
+  headers_absent: [Content-Type]
+  body_exact: ""
+notes: "return=minimal yields 201, empty body, no Content-Type, and &select is ignored. Mirrors InsertSpec.hs:62."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L62

@@ -1,0 +1,15 @@
+id: 1451
+feature: auth/role/authenticated-no-privilege
+request:
+  method: GET
+  path: /private_table
+  headers:
+    Accept: application/json
+    Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicG9zdGdyZXN0X3Rlc3RfYXV0aG9yIn0.Xod-F15qsGL0WhdOCr2j3DdKuTw9QJERVgoFD3vGaWA"
+schema: auth
+preconditions: []
+expect:
+  status: 403
+  body_exact: { "hint": null, "details": null, "code": "42501", "message": "permission denied for table private_table" }
+notes: "Authenticated role (postgrest_test_author) lacking privilege gets 403, not 401, and no WWW-Authenticate header."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L29

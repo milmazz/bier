@@ -1,0 +1,16 @@
+id: 1395
+feature: mutations/update/columns-param/unknown-column-error
+request:
+  method: PATCH
+  path: /articles?id=eq.1&columns=helicopter
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation
+  body: { "body": "yyy" }
+schema: mutations
+preconditions: []
+expect:
+  status: 400
+  body_exact: { "code": "PGRST204", "details": null, "hint": null, "message": "Could not find the 'helicopter' column of 'articles' in the schema cache" }
+notes: "PATCH ?columns referencing a missing column -> 400 PGRST204."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L349

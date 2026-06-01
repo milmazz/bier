@@ -1,0 +1,16 @@
+id: 1721
+feature: config/coercion/wrong-type-fallback
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  file:
+    db-max-rows: true        # integer key given a bool -> falls back to default (unset)
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'db-max-rows = ""'
+notes: "A value of the wrong type for an optInt key coerces to Nothing and falls back to the default, rather than aborting. Mirrors configs/types.config (db-max-rows = true)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/types.config#L10

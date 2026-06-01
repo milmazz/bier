@@ -1,0 +1,19 @@
+id: 1312
+feature: representations/patch/return-representation-zero-rows
+request:
+  method: PATCH
+  path: /items?id=eq.999999
+  headers:
+    Prefer: "return=representation"
+    Content-Type: application/json
+  body: { "id": 999999 }
+schema: representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Preference-Applied: "return=representation"
+    Content-Length: "2"
+  body_exact: []
+notes: "PATCH return=representation matching zero rows yields 200 with empty JSON array [] (Content-Length 2), NOT 204. Mirrors UpdateSpec.hs:79."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L79

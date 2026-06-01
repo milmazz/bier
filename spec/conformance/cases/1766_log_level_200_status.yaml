@@ -1,0 +1,18 @@
+id: 1766
+feature: observability/log-level/200-logged-at-info
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/openapi+json }
+schema: observability
+config:
+  log-level: info
+preconditions: []
+expect:
+  status: 200
+notes: >
+  Drives the log-level filter: at info (and debug) every response is logged,
+  including a 200 root request (which would NOT be logged at warn/error).
+  Asserts the 200 status the filter keys on; stdout emission verified at io
+  level. Mirrors test_io.py:test_log_level (info branch).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_io.py#L742

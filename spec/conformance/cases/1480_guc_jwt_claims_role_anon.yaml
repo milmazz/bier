@@ -1,0 +1,18 @@
+id: 1480
+feature: auth/guc/jwt-claims-role-anon
+request:
+  method: POST
+  path: /rpc/get_guc_value
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+  body: { "prefix": "request.jwt.claims", "name": "role" }
+schema: auth
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: "postgrest_test_anonymous"
+notes: "With no JWT, request.jwt.claims.role is the anon role."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L887

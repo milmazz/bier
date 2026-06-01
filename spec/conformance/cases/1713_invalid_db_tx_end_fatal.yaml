@@ -1,0 +1,15 @@
+id: 1713
+feature: config/validation/invalid-db-tx-end
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_DB_TX_END: "random"
+preconditions: []
+expect:
+  exit_code: nonzero
+  stderr_contains: "Invalid transaction termination. Check your configuration."
+notes: "db-tx-end must be commit|commit-allow-override|rollback|rollback-allow-override. Mirrors cli fixture 'invalid db-tx-end'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L54

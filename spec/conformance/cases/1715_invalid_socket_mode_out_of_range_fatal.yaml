@@ -1,0 +1,15 @@
+id: 1715
+feature: config/validation/socket-mode-out-of-range
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_SERVER_UNIX_SOCKET_MODE: "599"
+preconditions: []
+expect:
+  exit_code: nonzero
+  stderr_contains: "Invalid server-unix-socket-mode: needs to be between 600 and 777"
+notes: "server-unix-socket-mode below 600 (octal) -> fatal. Mirrors cli fixture 'invalid server-unix-socket-mode < 600'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L34

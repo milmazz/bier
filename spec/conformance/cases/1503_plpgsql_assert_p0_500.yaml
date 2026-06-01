@@ -1,0 +1,18 @@
+id: 1503
+feature: errors/sqlstate/plpgsql_assert
+request:
+  method: POST
+  path: /rpc/assert
+  headers: { Content-Type: application/json }
+  body: {}
+schema: test
+preconditions: []
+expect:
+  status: 500
+  headers:
+    Content-Type: "application/json; charset=utf-8"
+notes: >
+  A plpgsql `ASSERT false` raises SQLSTATE P0004 (assert_failure), which falls
+  under the P0* class (after the P0001 special case) and maps to HTTP 500.
+  Mirrors RpcSpec.hs "treats plpgsql assert as internal server error".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L610

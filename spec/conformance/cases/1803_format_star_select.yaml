@@ -1,0 +1,44 @@
+id: 1803
+feature: domain_representations/read/format_star_select
+request:
+  method: GET
+  path: /datarep_todos?select=*&id=lt.4
+  headers: { Accept: application/json }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    [
+      {
+        "id": 1,
+        "name": "Report",
+        "label_color": "#000000",
+        "due_at": "2018-01-02T00:00:00Z",
+        "icon_image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQAAAAA3bvkkAAAAABBJREFUeJxiYAEAAAAA//8DAAAABgAFBXv6vUAAAAAASUVORK5CYII=",
+        "created_at": 1513213350,
+        "budget": "12.50",
+      },
+      {
+        "id": 2,
+        "name": "Essay",
+        "label_color": "#000100",
+        "due_at": "2018-01-03T00:00:00Z",
+        "icon_image": null,
+        "created_at": 1513213350,
+        "budget": "100000000000000.13",
+      },
+      {
+        "id": 3,
+        "name": "Algebra",
+        "label_color": "#01E240",
+        "due_at": "2018-01-01T14:12:34.123456Z",
+        "icon_image": null,
+        "created_at": 1513213350,
+        "budget": "0.00",
+      },
+    ]
+notes: "select=* formats every domain column: bytea_b64 -> base64, unixtz -> epoch integer, monetary -> JSON string keeping scale. Mirrors QuerySpec.hs 'formats star select'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1575

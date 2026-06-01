@@ -1,0 +1,27 @@
+id: 1377
+feature: mutations/upsert/post/on-conflict-single-unique
+request:
+  method: POST
+  path: /single_unique?on_conflict=unique_key
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation, resolution=merge-duplicates
+  body:
+    - { "unique_key": 1, "value": "B" }
+    - { "unique_key": 2, "value": "C" }
+schema: mutations
+# key 1 MUST exist (updated to B) and key 2 MUST be absent (inserted) so the
+# status is 201. Reset to the seed for order-independence.
+preconditions:
+  - "DELETE FROM test.single_unique;"
+  - "INSERT INTO test.single_unique (unique_key, value) VALUES (1, 'A');"
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: resolution=merge-duplicates, return=representation
+  body_exact:
+    - { "unique_key": 1, "value": "B" }
+    - { "unique_key": 2, "value": "C" }
+notes: "?on_conflict=unique_key targets the UNIQUE column (not pk) as the upsert conflict target; key 1 updated, key 2 inserted -> 201."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L83

@@ -1,0 +1,17 @@
+id: 1457
+feature: auth/jwt/wrong-parts
+request:
+  method: GET
+  path: /authors_only
+  headers:
+    Accept: application/json
+    Authorization: "Bearer ey9zdGdyZXN0X3Rlc3RfYXV0aG9yIiwiaWQiOiJqZG9lIn0.y4vZuu1dDdwAl0-S00MCRWRYMlJ5YAMSir6Es6WtWx0"
+schema: auth
+preconditions: []
+expect:
+  status: 401
+  headers:
+    WWW-Authenticate: 'Bearer error="invalid_token", error_description="Expected 3 parts in JWT; got 2"'
+  body_exact: { "message": "Expected 3 parts in JWT; got 2", "code": "PGRST301", "hint": null, "details": null }
+notes: "Token with only 2 dot-separated parts -> PGRST301."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L112

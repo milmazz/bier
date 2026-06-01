@@ -1,0 +1,22 @@
+id: 1667
+feature: openapi/types/mapping
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.definitions.openapi_types.properties.a_text_arr", equals: { format: "text[]", type: "array", items: { type: "string" } } }
+    - { path: "$.definitions.openapi_types.properties.a_int_arr", equals: { format: "integer[]", type: "array", items: { type: "integer" } } }
+    - { path: "$.definitions.openapi_types.properties.a_bool_arr", equals: { format: "boolean[]", type: "array", items: { type: "boolean" } } }
+    - { path: "$.definitions.openapi_types.properties.a_char_arr", equals: { format: "character[]", type: "array", items: { type: "string" } } }
+    - { path: "$.definitions.openapi_types.properties.a_varchar_arr", equals: { format: "character varying[]", type: "array", items: { type: "string" } } }
+    - { path: "$.definitions.openapi_types.properties.a_bigint_arr", equals: { format: "bigint[]", type: "array", items: { type: "integer" } } }
+    - { path: "$.definitions.openapi_types.properties.a_numeric_arr", equals: { format: "numeric[]", type: "array", items: { type: "number" } } }
+    - { path: "$.definitions.openapi_types.properties.a_json_arr", equals: { format: "json[]", type: "array", items: {} } }
+    - { path: "$.definitions.openapi_types.properties.a_jsonb_arr", equals: { format: "jsonb[]", type: "array", items: {} } }
+notes: "Array types map to type:array with element-typed items; json[]/jsonb[] items are {}. Mirrors OpenApiSpec.hs:543-651"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L543

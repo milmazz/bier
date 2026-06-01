@@ -1,0 +1,16 @@
+id: 1021
+feature: url_grammar/method/delete-relation
+request:
+  method: DELETE
+  path: /%D9%85%D9%88%D8%A7%D8%B1%D8%AF
+  headers:
+    Prefer: tx=commit
+schema: unicode
+preconditions:
+  - 'INSERT INTO "تست"."موارد" ("هویت") VALUES (1);'
+expect:
+  status: 204
+  headers_absent:
+    - Content-Type
+notes: "DELETE on a relation resolves to ActRelationMut MutationDelete; valid (unlike DELETE on /rpc). The exposed schema تست is verified at SpecHelper.hs#L181 (configDbSchemas=[تست]) and schema.sql#L10. Mirrors UnicodeSpec delete, percent-encoded unicode path; the cited test asserts matchHeaderAbsent hContentType."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UnicodeSpec.hs#L31

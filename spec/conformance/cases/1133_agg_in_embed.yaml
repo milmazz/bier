@@ -1,0 +1,24 @@
+id: 1133
+feature: select/aggregate/within-embed
+request:
+  method: GET
+  path: /projects?select=name,project_invoices(invoice_total.sum())
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+config:
+  db-aggregates-enabled: true
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - {"name":"Windows 7","project_invoices":[{"sum":300}]}
+    - {"name":"Windows 10","project_invoices":[{"sum":1200}]}
+    - {"name":"IOS","project_invoices":[{"sum":3200}]}
+    - {"name":"OSX","project_invoices":[{"sum":4100}]}
+    - {"name":"Orphan","project_invoices":[{"sum":null}]}
+notes: >
+  Aggregates apply inside an embedded resource; the embed remains a JSON array
+  with one aggregated object (AggregateFunctionsSpec.hs:100).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L100

@@ -1,0 +1,16 @@
+id: 1606
+feature: content_negotiation/csv/read
+request:
+  method: GET
+  path: /simple_pk
+  headers: { Accept: "text/csv; version=1" }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: text/csv; charset=utf-8
+    Content-Length: "21"
+  body_contains: "k,extra\nxyyx,u\nxYYx,v"
+notes: "text/csv (even with a version param) yields a CSV header row plus data rows. Mirrors QuerySpec 'should respond with CSV to text/csv request'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1222

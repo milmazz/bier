@@ -1,0 +1,24 @@
+id: 1507
+feature: errors/raise/pt_non_numeric
+request:
+  method: GET
+  path: /rpc/raise_bad_pt
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 500
+  headers:
+    Content-Type: "application/json; charset=utf-8"
+    Content-Length: "61"
+  body_exact:
+    code: "PT40A"
+    message: "Wrong"
+    details: null
+    hint: null
+notes: >
+  `RAISE SQLSTATE 'PT40A'` has a non-numeric suffix, so the status cannot be
+  parsed and defaults to HTTP 500. The envelope still carries the literal
+  SQLSTATE as code, and details/hint are null. Mirrors RpcSpec.hs "defaults to
+  status 500 if RAISE code is PT not followed by a number".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L776

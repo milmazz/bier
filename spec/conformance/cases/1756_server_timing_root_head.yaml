@@ -1,0 +1,20 @@
+id: 1756
+feature: observability/server-timing/root-head
+request:
+  method: HEAD
+  path: /
+  headers: {}
+schema: observability
+config:
+  server-timing-enabled: true
+preconditions: []
+expect:
+  status: 200
+  headers_present: [Server-Timing]
+  headers_match:
+    Server-Timing: "jwt;dur=[0-9]+\\.[0-9]+.*parse;dur=[0-9]+\\.[0-9]+.*plan;dur=[0-9]+\\.[0-9]+.*transaction;dur=[0-9]+\\.[0-9]+.*response;dur=[0-9]+\\.[0-9]+"
+  body_exact: null
+notes: >
+  HEAD on the root spec emits the full Server-Timing metric set. Mirrors
+  ServerTimingSpec.hs:77-85.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L77

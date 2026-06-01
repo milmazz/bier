@@ -1,0 +1,29 @@
+id: 1550
+feature: headers/prefer/preference-applied
+request:
+  method: POST
+  path: /projects?select=name,client_id
+  headers:
+    Prefer: "return=representation"
+    Content-Type: application/json
+  body: { "id": 10, "name": "New Project", "client_id": 2 }
+schema: headers
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Range: "*/*"
+    Preference-Applied: "return=representation"
+  headers_absent: [Location]
+  body_exact: [{ "name": "New Project", "client_id": 2 }]
+notes: >
+  A single applied "Prefer: return=representation" is echoed verbatim in
+  Preference-Applied with NO count token: count defaults to none unless a
+  separate "Prefer: count=exact" is also supplied. Contrast the L98 test,
+  which adds a second Prefer header and therefore echoes
+  "return=representation, count=exact"; this case deliberately exercises the
+  single-preference path, so Content-Range is "*/*". Mirrors the exact
+  it-block at InsertSpec.hs:119-128 ("should not throw and return location
+  header when selecting without PK").
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L120

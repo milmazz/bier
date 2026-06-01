@@ -1,0 +1,18 @@
+id: 1184
+feature: filters/embed/inner
+request:
+  method: GET
+  path: /entities?select=id,child_entities!inner(id)&child_entities.id=eq.3
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 2, "child_entities": [{ "id": 3 }] }]
+notes: >
+  child_entity 3 belongs to entity 2, so the !inner filter keeps only entity 2.
+  Mirrors EmbedInnerJoinSpec one-to-many "filters source tables when the
+  embedded table is filtered" (eq.3 branch).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L134

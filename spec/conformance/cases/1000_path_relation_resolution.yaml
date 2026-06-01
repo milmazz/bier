@@ -1,0 +1,16 @@
+id: 1000
+feature: url_grammar/path/relation
+request:
+  method: GET
+  path: /items?id=eq.5
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Range: 0-0/*
+  body_exact: [{ "id": 5 }]
+notes: "Single path segment resolves to a relation; a single row is addressed by a horizontal filter, not a path id. Mirrors QuerySpec 'matches with equality' (it at L35, get \"/items?id=eq.5\" at L36, body [{\"id\":5}] at L37). NOTE: a prior review claimed this test lives at L60, but L60 is the unrelated 'matches items IN' test (get \"/items?id=in.(1,3,5)\"); the eq.5 case is at L35-L41 in v14.12. Anchor kept at the it-line L35."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L35

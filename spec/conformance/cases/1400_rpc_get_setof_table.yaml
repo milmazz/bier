@@ -1,0 +1,17 @@
+id: 1400
+feature: rpc/setof/table-get
+request:
+  method: GET
+  path: /rpc/getitemrange?min=2&max=4
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 3 }
+    - { "id": 4 }
+notes: "GET invokes a STABLE SETOF-table proc as a read; args from query string; returns JSON array of row objects."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L123

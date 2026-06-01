@@ -1,0 +1,15 @@
+id: 1403
+feature: rpc/return/scalar-count
+request:
+  method: GET
+  path: /rpc/add_them?a=3&b=4
+  headers: { Accept: application/json, Prefer: "count=exact" }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: 0-0/1
+  body_exact: 7
+notes: "A function returning a single scalar reports exact count 1 (Content-Range 0-0/1) under Prefer count=exact."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L99

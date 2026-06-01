@@ -1,0 +1,15 @@
+id: 1113
+feature: select/embed/missing-parent-null
+request:
+  method: GET
+  path: /projects?id=in.(1,5)&select=id,clients(id)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"id":1,"clients":{"id":1}},{"id":5,"clients":null}]
+notes: "rows with missing parents are included with null embed (QuerySpec.hs:660)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L660

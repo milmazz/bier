@@ -1,0 +1,16 @@
+id: 1004
+feature: url_grammar/percent-encoding/unicode-path
+request:
+  method: POST
+  path: /%D9%85%D9%88%D8%A7%D8%B1%D8%AF
+  headers:
+    Content-Type: application/json
+    Prefer: tx=commit, return=representation
+  body: { "هویت": 1 }
+schema: unicode
+preconditions: []
+expect:
+  status: 201
+  body_exact: [{ "هویت": 1 }]
+notes: "Insert into percent-encoded unicode relation, returns representation with unicode column name. The exposed schema is تست (testUnicodeCfg sets configDbSchemas=[تست], SpecHelper.hs#L181; schema created at schema.sql#L10). The cited UnicodeSpec test sends both Prefer: tx=commit and Prefer: return=representation."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UnicodeSpec.hs#L20

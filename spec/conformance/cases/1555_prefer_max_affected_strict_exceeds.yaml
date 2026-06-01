@@ -1,0 +1,18 @@
+id: 1555
+feature: headers/prefer/max-affected-strict-exceeds
+request:
+  method: DELETE
+  path: /items?id=lt.15
+  headers:
+    Prefer: "handling=strict, max-affected=10"
+schema: headers
+preconditions: []
+expect:
+  status: 400
+  body_exact:
+    code: "PGRST124"
+    message: "Query result exceeds max-affected preference constraint"
+    details: "The query affects 14 rows"
+    hint: null
+notes: "handling=strict, max-affected=10 on a DELETE affecting 14 rows -> 400 PGRST124. Mirrors PreferencesSpec.hs:124-130."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L123

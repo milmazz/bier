@@ -1,0 +1,22 @@
+id: 1212
+feature: ordering/embed/alias
+request:
+  method: GET
+  path: /projects?id=eq.1&select=id,name,the_tasks:tasks(id,name)&tasks.order=name.asc
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - id: 1
+      name: "Windows 7"
+      the_tasks:
+        - { id: 2, name: "Code w7" }
+        - { id: 1, name: "Design w7" }
+notes: >
+  ordering embedded entities with alias: the order key uses the real relation
+  name 'tasks' even though the embed is aliased 'the_tasks'.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1154

@@ -1,0 +1,16 @@
+id: 1394
+feature: mutations/insert/empty-array-no-op
+request:
+  method: POST
+  path: /no_pk
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation
+  body: []
+schema: mutations
+preconditions: []
+expect:
+  status: 201
+  body_exact: []
+notes: "Empty array body inserts nothing; with return=rep -> 201 and []."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L242

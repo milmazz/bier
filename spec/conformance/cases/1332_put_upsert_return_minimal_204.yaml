@@ -1,0 +1,27 @@
+id: 1332
+feature: representations/put/single-upsert-return-minimal
+request:
+  method: PUT
+  path: /items?id=eq.2
+  headers:
+    Prefer: "return=minimal"
+    Content-Type: application/json
+  body: [{ "id": 2 }]
+schema: representations
+preconditions: []
+expect:
+  status: 204
+  headers:
+    Preference-Applied: "return=minimal"
+  body_exact: ""
+notes: >-
+  PUT single upsert with return=minimal yields 204 with empty body regardless of
+  insert vs replace. Status/body (None => 204, empty) per Response.hs#L159. The
+  Preference-Applied: return=minimal echo is DERIVED FROM SOURCE, not from the
+  cited test: the upstream PUT return=minimal test (UpsertSpec.hs#L545-L552)
+  asserts matchStatus=204 and matchHeaderAbsent hContentType but does NOT assert
+  Preference-Applied. The echo is produced because responsePreferences passes
+  preferRepresentation through for any MutateReadPlan{} (Response.hs#L287-L289)
+  and the SingleUpsert dispatch emits it via prefAppliedHeader
+  (Response.hs#L149,L159).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L159

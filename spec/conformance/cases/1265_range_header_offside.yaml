@@ -1,0 +1,20 @@
+id: 1265
+feature: pagination/range_header/offside_invalid
+request:
+  method: GET
+  path: /items
+  headers:
+    Accept: application/json
+    Range-Unit: items
+    Range: 1-0
+schema: pagination
+preconditions: []
+expect:
+  status: 416
+  body_exact:
+    message: "Requested range not satisfiable"
+    code: "PGRST103"
+    details: "The lower boundary must be lower than or equal to the upper boundary in the Range header."
+    hint: null
+notes: "Offside Range (1-0, to < from) is 416 PGRST103 (LowerGTUpper). Mirrors RangeSpec.hs:452; details from Error.hs:224."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L452

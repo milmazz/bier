@@ -1,0 +1,18 @@
+id: 1209
+feature: ordering/json_path/arrow_text
+request:
+  method: GET
+  path: /json_table?order=data->>id.asc
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "data": { "id": 0 } }
+    - { "data": { "id": 1, "foo": { "bar": "baz" } } }
+    - { "data": { "id": 3 } }
+notes: "orders by a json column property asc using the ->> text arrow."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L230

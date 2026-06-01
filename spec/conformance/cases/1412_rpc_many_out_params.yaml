@@ -1,0 +1,15 @@
+id: 1412
+feature: rpc/return/many-out-params
+request:
+  method: GET
+  path: /rpc/many_out_params
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: { "my_json": { "a": 1, "b": "two" }, "num": 3, "str": "four" }
+notes: "Many OUT params yield a single JSON object with one key per OUT param."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L685

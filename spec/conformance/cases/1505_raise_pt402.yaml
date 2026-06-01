@@ -1,0 +1,24 @@
+id: 1505
+feature: errors/raise/pt_custom_status
+request:
+  method: GET
+  path: /rpc/raise_pt402
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 402
+  headers:
+    Content-Type: "application/json; charset=utf-8"
+    Content-Length: "99"
+  body_exact:
+    code: "PT402"
+    message: "Payment Required"
+    details: "Quota exceeded"
+    hint: "Upgrade your plan"
+notes: >
+  `RAISE SQLSTATE 'PT402'` maps the digits after PT to HTTP status 402. The
+  envelope code is the literal SQLSTATE PT402; message/details/hint come from
+  the RAISE USING fields. Mirrors RpcSpec.hs "can map a RAISE error code and
+  message to a http status".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L768

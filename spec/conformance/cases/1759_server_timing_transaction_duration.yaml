@@ -1,0 +1,23 @@
+id: 1759
+feature: observability/server-timing/transaction-duration
+request:
+  method: GET
+  path: /rpc/sleep?seconds=2
+  headers: {}
+schema: observability
+config:
+  server-timing-enabled: true
+preconditions: []
+expect:
+  status: 204
+  headers_present: [Server-Timing]
+  headers_match:
+    Server-Timing: "transaction;dur=2[0-9][0-9][0-9]\\.[0-9]+"
+  body_exact: null
+notes: >
+  The transaction metric reflects DB wall-clock time: an RPC sleeping 2s
+  reports a transaction duration in [2000ms, 3000ms). The regex matches a
+  4-digit ms value beginning with 2 (>=2000, <3000). Timing-sensitive: see
+  gaps in observability.yaml; best validated at the io level. Mirrors
+  test_io.py:test_server_timing_transaction_duration.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_io.py#L1789

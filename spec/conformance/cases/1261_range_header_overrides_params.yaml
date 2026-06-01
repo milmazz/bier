@@ -1,0 +1,18 @@
+id: 1261
+feature: pagination/range_header/overrides_query_params
+request:
+  method: GET
+  path: /items?select=id&order=id.asc&limit=3
+  headers:
+    Accept: application/json
+    Range-Unit: items
+    Range: 0-1
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "0-1/*"
+  body_exact: [{"id":1},{"id":2}]
+notes: "Range header overrides limit=3 query param; only 2 rows returned. Mirrors RangeSpec.hs:195."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L195

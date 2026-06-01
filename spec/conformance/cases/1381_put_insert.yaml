@@ -1,0 +1,22 @@
+id: 1381
+feature: mutations/upsert/put/insert
+request:
+  method: PUT
+  path: /tiobe_pls?name=eq.Go
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation
+  body: [{ "name": "Go", "rank": 19 }]
+schema: mutations
+# 'Go' MUST NOT exist for PUT to be an INSERT (-> 201). Earlier cases (1374)
+# never insert 'Go', but reset the table anyway so this case holds regardless
+# of run order. Upstream asserts the row is absent first (GET .. -> []).
+preconditions:
+  - "DELETE FROM test.tiobe_pls WHERE name = 'Go';"
+expect:
+  status: 201
+  body_exact: [{ "name": "Go", "rank": 19 }]
+notes: >-
+  PUT to a non-existent pk inserts the row -> 201. Upstream first asserts
+  GET /tiobe_pls?name=eq.Go returns [] then PUTs. Mirrors UpsertSpec.hs#L364-L375.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L375

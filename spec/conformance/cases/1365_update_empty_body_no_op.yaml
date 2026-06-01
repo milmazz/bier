@@ -1,0 +1,16 @@
+id: 1365
+feature: mutations/update/empty-body-no-op
+request:
+  method: PATCH
+  path: /items
+  headers: { Content-Type: application/json }
+  body: {}
+schema: mutations
+preconditions: []
+expect:
+  status: 204
+  headers:
+    Content-Range: "*/*"
+  headers_absent: [Content-Type, Content-Length]
+notes: "Empty object body makes no updates -> 204 with Content-Range */*."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L234

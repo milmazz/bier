@@ -1,0 +1,20 @@
+id: 1211
+feature: ordering/embed
+request:
+  method: GET
+  path: /projects?id=eq.1&select=id,name,tasks(id,name)&tasks.order=name.asc
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - id: 1
+      name: "Windows 7"
+      tasks:
+        - { id: 2, name: "Code w7" }
+        - { id: 1, name: "Design w7" }
+notes: "ordering embedded entities via <embed>.order=name.asc."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1149

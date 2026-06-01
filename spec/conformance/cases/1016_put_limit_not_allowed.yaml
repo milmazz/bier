@@ -1,0 +1,19 @@
+id: 1016
+feature: url_grammar/reserved-params/put-limit-forbidden
+request:
+  method: PUT
+  path: /parents?limit=1
+  headers:
+    Content-Type: application/json
+    Accept: application/json
+    Content-Profile: v1
+  body: [{ "id": 1, "name": "parent v1-1" }]
+schema: multi
+preconditions: []
+expect:
+  status: 400
+  body_jsonpath:
+    - { path: "$.code", equals: PGRST114 }
+    - { path: "$.message", equals: "limit/offset querystring parameters are not allowed for PUT" }
+notes: "PUT with a limit/offset query param is rejected (PutLimitNotAllowedError, PGRST114, 400). Traced to ApiRequest.getRanges; no dedicated Feature spec line located (see url_grammar.md gaps)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest.hs#L177

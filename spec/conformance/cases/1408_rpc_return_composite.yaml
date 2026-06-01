@@ -1,0 +1,16 @@
+id: 1408
+feature: rpc/return/composite
+request:
+  method: POST
+  path: /rpc/ret_point_2d
+  headers: { Content-Type: application/json, Accept: application/json }
+  body: {}
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: { "x": 10, "y": 5 }
+notes: "A function returning a composite type in the exposed schema returns a single JSON object (single-row)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L447

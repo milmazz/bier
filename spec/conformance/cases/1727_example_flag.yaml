@@ -1,0 +1,18 @@
+id: 1727
+feature: config/cli/example-flag
+request:
+  kind: cli
+  flag: "--example"
+schema: config
+config: {}
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'db-uri = "postgresql://"'
+    - 'db-schemas = "public"'
+    - 'db-channel = "pgrst"'
+    - 'server-port = 3000'
+    - 'log-level = "error"'
+notes: "The --example flag prints the documented example config template. Source Config.hs exampleConfigFile (#L624-L737)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L624

@@ -1,0 +1,19 @@
+id: 1478
+feature: auth/guc/request-headers-custom
+request:
+  method: POST
+  path: /rpc/get_guc_value
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Custom-Header: test
+  body: { "prefix": "request.headers", "name": "custom-header" }
+schema: auth
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: "test"
+notes: "request.headers GUC exposes request headers (lowercased keys) as JSON."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L869

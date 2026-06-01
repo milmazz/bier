@@ -1,0 +1,25 @@
+id: 1508
+feature: errors/raise/pgrst_full_control
+request:
+  method: GET
+  path: /rpc/raise_sqlstate_test1
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 332
+  status_text: "My Custom Status"
+  headers:
+    X-Header: "str"
+  body_exact:
+    code: "123"
+    message: "ABC"
+    details: "DEF"
+    hint: "XYZ"
+notes: >
+  `RAISE SQLSTATE 'PGRST'` with a JSON MESSAGE (code/message/details/hint) and
+  JSON DETAIL ({status, status_text, headers}) gives full response control:
+  status 332, custom reason phrase "My Custom Status", extra header X-Header,
+  and the body taken verbatim from MESSAGE. Mirrors RpcSpec.hs "gets message
+  and details from raise sqlstate PGRST".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1368

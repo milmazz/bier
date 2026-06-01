@@ -1,0 +1,19 @@
+id: 1111
+feature: select/json-path/bad-syntax-error
+request:
+  method: GET
+  path: /json_arr?select=data->>--34
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    details: "unexpected \"-\" expecting digit"
+    message: "\"failed to parse select parameter (data->>--34)\" (line 1, column 9)"
+    code: "PGRST100"
+    hint: null
+notes: "gives a meaningful error on bad syntax -> PGRST100 (JsonOperatorSpec.hs:296)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L296

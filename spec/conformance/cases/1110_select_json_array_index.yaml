@@ -1,0 +1,15 @@
+id: 1110
+feature: select/json-path/array-index
+request:
+  method: GET
+  path: /json_arr?select=data->>0::int&id=in.(1,2)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"data":1},{"data":4}]
+notes: "can get array of ints and cast it (JsonOperatorSpec.hs:84)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L84

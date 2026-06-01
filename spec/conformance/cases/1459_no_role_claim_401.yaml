@@ -1,0 +1,14 @@
+id: 1459
+feature: auth/claims/no-role
+request:
+  method: GET
+  path: /authors_only
+  headers:
+    Accept: application/json
+    Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6Impkb2UifQ.RVlZDaSyKbFPvxUf3V_NQXybfRB4dlBIkAUQXVXLUAI"
+schema: auth
+preconditions: []
+expect:
+  status: 401
+notes: "Token with claims but no role member -> 401."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L128

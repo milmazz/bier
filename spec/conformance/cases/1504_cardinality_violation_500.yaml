@@ -1,0 +1,17 @@
+id: 1504
+feature: errors/sqlstate/cardinality_violation
+request:
+  method: GET
+  path: /bad_subquery
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 500
+notes: >
+  Selecting from the bad_subquery view executes a scalar subquery that returns
+  more than one row, raising cardinality_violation (21000). Because the message
+  does not end with "requires a WHERE clause", pgErrorStatus maps it to HTTP 500
+  (generic server error). Mirrors ErrorSpec.hs "should return 500 for
+  cardinality_violation".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ErrorSpec.hs#L16

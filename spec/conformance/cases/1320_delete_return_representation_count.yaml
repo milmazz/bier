@@ -1,0 +1,18 @@
+id: 1320
+feature: representations/delete/return-representation
+request:
+  method: DELETE
+  path: /items?id=eq.2
+  headers:
+    Prefer: "return=representation, count=exact"
+schema: representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "*/1"
+    Content-Length: "10"
+    Preference-Applied: "return=representation, count=exact"
+  body_exact: [{ "id": 2 }]
+notes: "DELETE with return=representation yields 200 + JSON array of deleted rows; count=exact populates Content-Range total. Mirrors DeleteSpec.hs:29."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L29

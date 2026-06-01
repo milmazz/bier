@@ -1,0 +1,376 @@
+# PostgREST v14.12 — Horizontal-filter operators behavior model
+#
+# Scope: the operators usable in `?<column>=<op>.<value>` horizontal filters
+# (and inside and=()/or=() logic trees), plus the `not` prefix and the
+# any()/all() quantifiers.
+#
+# Ground truth (priority order):
+#   1. PostgREST test specs (test/spec/Feature/Query/*.hs + fixtures/*.sql)
+#   2. PostgREST source (src/PostgREST/...)
+#   3. PostgREST docs (postgrest.org/en/v14)
+#
+# Operator -> SQL mapping is taken verbatim from
+#   src/PostgREST/Query/SqlFragment.hs  (simpleOperator / quantOperator / ftsOperator)
+# Operator token parsing is taken from
+#   src/PostgREST/ApiRequest/QueryParams.hs (simpleOperator / quantOperator / pOpExpr)
+# Operator enums are in
+#   src/PostgREST/ApiRequest/Types.hs (QuantOperator / SimpleOperator / FtsOperator)
+
+version: PostgREST v14.12
+area: operators
+
+# ---------------------------------------------------------------------------
+# Grammar notes shared by all operators
+# ---------------------------------------------------------------------------
+grammar:
+  filter_syntax: "<column>=<op>.<value>"  # e.g. id=eq.5
+  not_prefix:
+    # `not` is a boolean prefix on the whole operation, parsed by pOpExpr.
+    # Emits a leading `NOT` before the field reference in SQL.
+    syntax: "<column>=not.<op>.<value>"
+    sql: "NOT <field> <op> <value>"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    source_line: 421
+  quantifiers:
+    # any()/all() modifiers are only valid on QuantOperator operators
+    # (eq, gte, gt, lte, lt, like, ilike, match, imatch).
+    syntax: "<column>=<op>(any|all).<value>"   # value is a pg array literal {…}
+    sql_any: "<field> <op> ANY(<arr>)"
+    sql_all: "<field> <op> ALL(<arr>)"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    source_line: 423
+  value_lists:
+    # in.() parenthesised lists: pListVal parses (e1,e2,...). Each element is
+    # pListElement, which accepts a pQuotedValue ("…", with \-escapes) at
+    # QueryParams.hs L688-691, so quoted elements are supported.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    source_line: 682
+
+# ---------------------------------------------------------------------------
+# Quantifiable operators (QuantOperator) — accept any()/all()
+# ---------------------------------------------------------------------------
+operators:
+  - name: eq
+    pg_op: "="
+    quantifiable: true
+    type_constraints: "any equality-comparable type; also ranges, arrays"
+    examples:
+      - "id=eq.1"
+      - "id=eq(any).{3,4,5}"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 199
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 126
+
+  - name: gt
+    pg_op: ">"
+    quantifiable: true
+    type_constraints: "ordered types; ranges, arrays"
+    examples:
+      - "id=gt.2"
+      - "id=gt(all).{4,3}"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 201
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 128
+
+  - name: gte
+    pg_op: ">="
+    quantifiable: true
+    type_constraints: "ordered types; ranges, arrays"
+    examples:
+      - "id=gte.2"
+      - "id=gte(all).{4,3}"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 200
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 127
+
+  - name: lt
+    pg_op: "<"
+    quantifiable: true
+    type_constraints: "ordered types; ranges, arrays"
+    examples:
+      - "id=lt.14"
+      - "id=lt(all).{4,3}"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 203
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 130
+
+  - name: lte
+    pg_op: "<="
+    quantifiable: true
+    type_constraints: "ordered types; ranges, arrays"
+    examples:
+      - "id=lte.3"
+      - "id=lte(all).{4,3}"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 202
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 129
+
+  - name: neq
+    pg_op: "<>"
+    quantifiable: false    # SimpleOperator: not quantifiable
+    type_constraints: "any equality-comparable type; ranges, arrays"
+    examples:
+      - "id=neq.5"
+      - "range=neq.[1,3]"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 186
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 114
+
+  # -------------------------------------------------------------------------
+  # Pattern matching
+  # -------------------------------------------------------------------------
+  - name: like
+    pg_op: "like"
+    quantifiable: true
+    type_constraints: "text/varchar; `*` in the value is rewritten to SQL `%`"
+    star_rewrite: true
+    examples:
+      - "k=like.*yx"     # -> like '%yx'
+      - "k=like.xy*"     # -> like 'xy%'
+      - "body=like(any).{%plan%,%brain%}"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 204
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 131
+    star_rewrite_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    star_rewrite_source_line: 394   # OpLike -> T.map star val
+
+  - name: ilike
+    pg_op: "ilike"
+    quantifiable: true
+    type_constraints: "text/varchar; case-insensitive; `*` rewritten to `%`"
+    star_rewrite: true
+    examples:
+      - "k=ilike.xy*"
+      - "body=ilike(all).{%plan%,%greatness%}"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 205
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 132
+    star_rewrite_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    star_rewrite_source_line: 395   # OpILike -> T.map star val
+
+  - name: match
+    pg_op: "~"
+    quantifiable: true
+    type_constraints: "text; POSIX regular expression (case-sensitive)"
+    examples:
+      - "k=match.^xy"
+      - "body=match(any).{stop,thing}"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 206
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 133
+
+  - name: imatch
+    pg_op: "~*"
+    quantifiable: true
+    type_constraints: "text; POSIX regular expression (case-insensitive)"
+    examples:
+      - "k=imatch.^xy"
+      - "body=imatch(any).{stop,thing}"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 207
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 134
+
+  # -------------------------------------------------------------------------
+  # in / is / isdistinct  (special parse forms, not quantifiable)
+  # -------------------------------------------------------------------------
+  - name: in
+    pg_op: "= ANY(...)"      # PostgREST never emits SQL IN; uses = ANY('{...}')
+    quantifiable: false
+    type_constraints: "value is a parenthesised list: in.(v1,v2,...). Empty value => = ANY('{}')"
+    examples:
+      - "id=in.(1,3,5)"
+      - "id=not.in.(2,4,6)"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 643   # pIn = In <$> (string "in" *> pDelimiter *> pListVal)
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 415    # In vals -> "= ANY (...)" ; [""] -> "= ANY('{}')"
+
+  - name: is
+    pg_op: "IS"
+    quantifiable: false
+    type_constraints: >
+      value MUST be one of: null, not_null, true, false, unknown
+      (case-insensitive). Any other value is a 400 error. Whitelisted at
+      parse time because IS cannot be parameterised.
+    examples:
+      - "a=is.null"
+      - "a=is.not_null"
+      - "done=is.true"
+      - "done=is.unknown"
+      - "done=is.NoT_NuLl"   # case-insensitive
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 657   # pIsVal whitelist (null/not_null/true/false/unknown)
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 402    # Is isVal -> " IS " <> NULL/NOT NULL/TRUE/FALSE/UNKNOWN
+
+  - name: isdistinct
+    pg_op: "IS DISTINCT FROM"
+    quantifiable: false
+    type_constraints: "any type; null-safe inequality"
+    examples:
+      - "a=isdistinct.2"
+      - "a=not.isdistinct.2"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 646   # pIsDist = IsDistinctFrom <$> (string "isdistinct" *> pDelimiter *> pSVal)
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 410    # IsDistinctFrom val -> " IS DISTINCT FROM " <> ...
+
+  # -------------------------------------------------------------------------
+  # Full text search operators (FtsOperator) — optional (language) modifier
+  # -------------------------------------------------------------------------
+  - name: fts
+    pg_op: "@@ to_tsquery"
+    quantifiable: false
+    type_constraints: "tsvector / text; optional (config) language: fts(french).x"
+    lang_modifier: true
+    examples:
+      - "text_search_vector=fts.impossible"
+      - "text_search_vector=fts(french).amusant"
+      - "text_search_vector=not.fts.impossible|fat|fun"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 664   # pFts; "fts" -> FilterFts
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 138    # FilterFts -> "@@ to_tsquery"
+
+  - name: plfts
+    pg_op: "@@ plainto_tsquery"
+    quantifiable: false
+    type_constraints: "tsvector / text; optional language modifier"
+    lang_modifier: true
+    examples:
+      - "text_search_vector=plfts.The Fat Rats"
+      - "text_search_vector=plfts(french).amusant impossible"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 666   # "plfts" -> FilterFtsPlain
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 139    # FilterFtsPlain -> "@@ plainto_tsquery"
+
+  - name: phfts
+    pg_op: "@@ phraseto_tsquery"
+    quantifiable: false
+    type_constraints: "tsvector / text; optional language modifier"
+    lang_modifier: true
+    examples:
+      - "text_search_vector=phfts.The Fat Cats"
+      - "text_search_vector=phfts(german).Art Spass"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 667   # "phfts" -> FilterFtsPhrase
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 140    # FilterFtsPhrase -> "@@ phraseto_tsquery"
+
+  - name: wfts
+    pg_op: "@@ websearch_to_tsquery"
+    quantifiable: false
+    type_constraints: "tsvector / text; optional language modifier"
+    lang_modifier: true
+    examples:
+      - "text_search_vector=wfts.The Fat Rats"
+      - "text_search_vector=wfts(french).amusant impossible"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 668   # "wfts" -> FilterFtsWebsearch
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 141    # FilterFtsWebsearch -> "@@ websearch_to_tsquery"
+
+  # -------------------------------------------------------------------------
+  # Array / range operators (SimpleOperator) — not quantifiable
+  # -------------------------------------------------------------------------
+  - name: cs
+    pg_op: "@>"
+    quantifiable: false
+    type_constraints: "array / range / jsonb 'contains'"
+    examples:
+      - "arr_data=cs.{2}"
+      - "range=cs.[1,2]"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 187
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 115
+
+  - name: cd
+    pg_op: "<@"
+    quantifiable: false
+    type_constraints: "array / range / jsonb 'contained in'"
+    examples:
+      - "arr_data=cd.{1,2,4}"
+      - "range=cd.[1,6]"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 188
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 116
+
+  - name: ov
+    pg_op: "&&"
+    quantifiable: false
+    type_constraints: "array / range overlap"
+    examples:
+      - "arr=ov.{2,3}"
+      - "range=ov.[0,4]"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 189
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 117
+
+  - name: sl
+    pg_op: "<<"
+    quantifiable: false
+    type_constraints: "range strictly left of"
+    examples:
+      - "range=sl.[9,10]"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 190
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 118
+
+  - name: sr
+    pg_op: ">>"
+    quantifiable: false
+    type_constraints: "range strictly right of"
+    examples:
+      - "range=sr.[3,4]"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 191
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 119
+
+  - name: nxr
+    pg_op: "&<"
+    quantifiable: false
+    type_constraints: "range does not extend to the right of"
+    examples:
+      - "range=nxr.[4,7]"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 192
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 120
+
+  - name: nxl
+    pg_op: "&>"
+    quantifiable: false
+    type_constraints: "range does not extend to the left of"
+    examples:
+      - "range=nxl.[4,7]"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 193
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 121
+
+  - name: adj
+    pg_op: "-|-"
+    quantifiable: false
+    type_constraints: "range adjacent to"
+    examples:
+      - "range=adj.(3,10]"
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs
+    parse_source_line: 194
+    sql_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs
+    sql_source_line: 122

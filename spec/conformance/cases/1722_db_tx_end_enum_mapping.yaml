@@ -1,0 +1,16 @@
+id: 1722
+feature: config/db-tx-end/enum-mapping
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_DB_TX_END: "commit-allow-override"
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'db-tx-end = "commit-allow-override"'
+notes: "db-tx-end accepts commit-allow-override and round-trips it on dump. Mirrors cli fixture 'db-tx-end=commit-allow-override'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L106

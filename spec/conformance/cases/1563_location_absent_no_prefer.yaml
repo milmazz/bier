@@ -1,0 +1,18 @@
+id: 1563
+feature: headers/location/absent
+request:
+  method: POST
+  path: /projects?select=name,client_id
+  headers:
+    Content-Type: application/json
+  body: { "id": 12, "name": "New Project", "client_id": 2 }
+schema: headers
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Length: "0"
+  headers_absent: [Content-Type, Location]
+  body_exact: null
+notes: "POST with no return preference -> 201, no Location, no body. Mirrors InsertSpec.hs:159-170."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L159

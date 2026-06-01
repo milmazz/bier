@@ -1,0 +1,17 @@
+id: 1483
+feature: auth/guc/request-headers-authorization
+request:
+  method: POST
+  path: /rpc/get_guc_value
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicG9zdGdyZXN0X3Rlc3RfYXV0aG9yIn0.Xod-F15qsGL0WhdOCr2j3DdKuTw9QJERVgoFD3vGaWA"
+  body: { "prefix": "request.headers", "name": "authorization" }
+schema: auth
+preconditions: []
+expect:
+  status: 200
+  body_exact: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicG9zdGdyZXN0X3Rlc3RfYXV0aG9yIn0.Xod-F15qsGL0WhdOCr2j3DdKuTw9QJERVgoFD3vGaWA"
+notes: "The raw Authorization header value is available in request.headers."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L919

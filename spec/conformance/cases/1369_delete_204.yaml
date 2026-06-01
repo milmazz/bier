@@ -1,0 +1,17 @@
+id: 1369
+feature: mutations/delete/204
+request:
+  method: DELETE
+  path: /items?id=eq.1
+  headers: {}
+schema: mutations
+preconditions:
+  - "DELETE FROM test.items;"
+  - "INSERT INTO test.items (id) SELECT generate_series(1, 15);"
+expect:
+  status: 204
+  headers:
+    Content-Range: "*/*"
+  headers_absent: [Content-Type, Content-Length]
+notes: "DELETE existing row with no return= -> 204, Content-Range */*."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L17

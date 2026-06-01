@@ -1,0 +1,22 @@
+id: 1622
+feature: content_negotiation/octet-stream/bytea-roundtrip
+request:
+  method: POST
+  path: /rpc/unnamed_bytea_param
+  headers:
+    Content-Type: application/octet-stream
+    Accept: application/octet-stream
+  body: "hello-bytes"
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/octet-stream
+  body_contains: "hello-bytes"
+notes: >-
+  POST to an RPC with a single unnamed bytea parameter echoes the raw request
+  bytes; Content-Type is application/octet-stream WITHOUT a charset. Mirrors
+  RpcSpec 'can insert bytea directly' (body uses raw bytes; here a simple ASCII
+  payload stands in for the image.png fixture).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1181

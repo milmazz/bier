@@ -1,0 +1,29 @@
+id: 1213
+feature: ordering/embed/two_levels
+request:
+  method: GET
+  path: /projects?id=eq.1&select=id,name,tasks(id,name,users(id,name))&tasks.order=name.asc&tasks.users.order=name.desc
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - id: 1
+      name: "Windows 7"
+      tasks:
+        - id: 2
+          name: "Code w7"
+          users:
+            - { id: 1, name: "Angela Martin" }
+        - id: 1
+          name: "Design w7"
+          users:
+            - { id: 3, name: "Dwight Schrute" }
+            - { id: 1, name: "Angela Martin" }
+notes: >
+  ordering embedded entities two levels deep: tasks ordered by name asc, and
+  each task's users ordered by name desc.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1159

@@ -1,0 +1,20 @@
+id: 1438
+feature: rpc/single-unnamed-param/json-post
+request:
+  method: POST
+  path: /rpc/unnamed_json_param
+  headers: { Content-Type: application/json, Accept: application/json }
+  body: { "A": 1, "B": 2, "C": 3 }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: { "A": 1, "B": 2, "C": 3 }
+notes: >
+  A function with a single UNNAMED json/jsonb parameter receives the ENTIRE POST
+  body as that argument (the body is not destructured into named params); the
+  echoing unnamed_json_param returns the body verbatim. This is distinct from the
+  deprecated Prefer: params=single-object header.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1149

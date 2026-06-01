@@ -1,0 +1,15 @@
+id: 1202
+feature: ordering/direction/default
+request:
+  method: GET
+  path: /items?id=lte.2&order=id
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "0-1/*"
+  body_exact: [{ "id": 1 }, { "id": 2 }]
+notes: "Order with no direction or nulls specified; PostgreSQL default (ascending) applies."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1139

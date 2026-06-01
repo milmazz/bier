@@ -1,0 +1,23 @@
+id: 1185
+feature: filters/embed/nonexistent
+request:
+  method: GET
+  path: /entities?select=*&non_existent_children.id=eq.1
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    code: PGRST108
+    message: "'non_existent_children' is not an embedded resource in this request"
+    details: null
+    hint: "Verify that 'non_existent_children' is included in the 'select' query parameter."
+notes: >
+  Filtering an embed path absent from the select parameter is a 400 PGRST108.
+  Mirrors QuerySpec "errs when the embedded resource doesn't exist and an
+  embedded filter is applied to it" (reproduced against the entities fixture;
+  resource name changed to non_existent_children, message/hint pattern verbatim).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L523

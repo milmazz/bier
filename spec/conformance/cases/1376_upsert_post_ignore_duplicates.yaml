@@ -1,0 +1,28 @@
+id: 1376
+feature: mutations/upsert/post/ignore-duplicates
+request:
+  method: POST
+  path: /tiobe_pls
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation, resolution=ignore-duplicates
+  body:
+    - { "name": "PHP", "rank": 9 }
+    - { "name": "Python", "rank": 10 }
+schema: mutations
+# 'PHP' MUST be absent (inserted) and 'Python' MUST exist (skipped). Reset to
+# the seed so the returned set is deterministically just [PHP].
+preconditions:
+  - "DELETE FROM test.tiobe_pls;"
+  - "INSERT INTO test.tiobe_pls (name, rank) VALUES ('Java', 1), ('C', 2), ('Python', 4);"
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: resolution=ignore-duplicates, return=representation
+  body_exact:
+    - { "name": "PHP", "rank": 9 }
+notes: >-
+  ignore-duplicates skips conflicting rows (Python exists, ON CONFLICT DO
+  NOTHING); only the newly inserted PHP is returned. Mirrors UpsertSpec.hs#L167-L177.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L167

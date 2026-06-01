@@ -1,0 +1,15 @@
+id: 1121
+feature: select/embed/inner-filter-propagates
+request:
+  method: GET
+  path: /projects?select=id,clients!inner(id)&clients.id=eq.1
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"id":1,"clients":{"id":1}},{"id":2,"clients":{"id":1}}]
+notes: "filter on the !inner embedded table also filters the source table (EmbedInnerJoinSpec.hs:36)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L36

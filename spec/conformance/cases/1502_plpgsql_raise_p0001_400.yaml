@@ -1,0 +1,21 @@
+id: 1502
+feature: errors/sqlstate/plpgsql_raise_default
+request:
+  method: POST
+  path: /rpc/problem
+  headers: { Content-Type: application/json }
+  body: {}
+schema: test
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: "application/json; charset=utf-8"
+  body_jsonpath:
+    - { path: "$.code", equals: "P0001" }
+notes: >
+  A bare plpgsql `RAISE 'bad thing'` uses the default SQLSTATE P0001, which
+  pgErrorStatus maps to HTTP 400 (treated as client input error). The body is
+  the standard error envelope. Mirrors RpcSpec.hs "treats simple plpgsql raise
+  as invalid input".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L605

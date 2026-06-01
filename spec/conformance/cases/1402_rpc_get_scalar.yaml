@@ -1,0 +1,15 @@
+id: 1402
+feature: rpc/return/scalar-get
+request:
+  method: GET
+  path: /rpc/add_them?a=3&b=4
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: 7
+notes: "Scalar-returning function responds with the bare JSON scalar (not array-wrapped); named args from query string."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L99

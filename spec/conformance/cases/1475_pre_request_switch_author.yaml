@@ -1,0 +1,19 @@
+id: 1475
+feature: auth/pre-request/switch-role-author
+request:
+  method: POST
+  path: /rpc/get_current_user
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MX0.gKw7qI50i9hMrSJW8BlTpdMEVmMXJYxlAqueGqpa_mE"
+  body: {}
+schema: auth
+config:
+  db-pre-request: test.switch_role
+preconditions: []
+expect:
+  status: 200
+  body_exact: "postgrest_test_author"
+notes: "Pre-request proc reads request.jwt.claims->id (=1) and SET ROLE postgrest_test_author."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L202

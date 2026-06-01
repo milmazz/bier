@@ -1,0 +1,39 @@
+id: 1812
+feature: domain_representations/write/post_parse_format_all_columns
+request:
+  method: POST
+  path: /datarep_todos
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Prefer: return=representation
+  body_json:
+    {
+      "id": 5,
+      "name": "party",
+      "label_color": "#001100",
+      "due_at": "2018-01-03T11:00:00+00",
+      "icon_image": "3q2+7w",
+      "created_at": -15,
+      "budget": "-100000000000000.13",
+    }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    [
+      {
+        "id": 5,
+        "name": "party",
+        "label_color": "#001100",
+        "due_at": "2018-01-03T11:00:00Z",
+        "icon_image": "3q2+7w==",
+        "created_at": -15,
+        "budget": "-100000000000000.13",
+      },
+    ]
+notes: "Every domain column is parsed from the JSON body via json AS <domain> and re-formatted via <domain> AS json: isodate gains trailing Z, bytea_b64 padded on read-back, unixtz round-trips as epoch integer, monetary keeps its numeric string. Mirrors InsertSpec.hs 'parses values in POST body and formats values in return=representation'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L834

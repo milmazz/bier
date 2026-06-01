@@ -1,0 +1,17 @@
+id: 1392
+feature: mutations/max-affected/lenient-ignores
+request:
+  method: DELETE
+  path: /items?id=lt.15
+  headers:
+    Prefer: handling=lenient, max-affected=10
+schema: mutations
+preconditions:
+  - "DELETE FROM test.items;"
+  - "INSERT INTO test.items (id) SELECT generate_series(1, 15);"
+expect:
+  status: 204
+  headers:
+    Preference-Applied: handling=lenient
+notes: "handling=lenient ignores the max-affected cap even with 14 rows -> 204; only handling=lenient echoed."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L158

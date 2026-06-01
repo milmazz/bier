@@ -1,0 +1,16 @@
+id: 1730
+feature: config/aliases/db-schema-singular
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  file:
+    db-schema: "aliased_schema"
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'db-schemas = "aliased_schema"'
+notes: "Singular db-schema is a deprecated alias for db-schemas. Source Config.hs optWithAlias db-schemas/db-schema (#L273-L274)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L273

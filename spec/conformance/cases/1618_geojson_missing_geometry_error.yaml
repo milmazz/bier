@@ -1,0 +1,20 @@
+id: 1618
+feature: content_negotiation/geojson/missing-geometry
+request:
+  method: GET
+  path: /projects
+  headers: { Accept: application/geo+json }
+schema: test
+preconditions:
+  - "Requires the postgis extension to be installed so the geo+json handler is registered."
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    hint: null
+    details: null
+    code: "22023"
+    message: geometry column is missing
+notes: "GeoJSON on a relation without a geometry column fails 400 / SQLSTATE 22023. Mirrors PostGISSpec 'fails for a table that doesn't have a geometry column'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PostGISSpec.hs#L28

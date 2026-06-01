@@ -1,0 +1,16 @@
+id: 1420
+feature: rpc/args/noparams-post-empty
+request:
+  method: POST
+  path: /rpc/noparamsproc
+  headers: { Content-Type: application/json, Accept: application/json }
+  body_raw: ""
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: "Return value of no parameters procedure."
+notes: "On POST an empty body string is interpreted as an empty JSON object. body_raw sends the literal empty body."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L655

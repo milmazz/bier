@@ -1,0 +1,17 @@
+id: 1627
+feature: content_negotiation/plan/options-echoed
+request:
+  method: GET
+  path: /projects
+  headers: { Accept: "application/vnd.pgrst.plan+json; options=buffers" }
+schema: test
+preconditions:
+  - "Requires db-plan-enabled = true."
+expect:
+  status: 200
+  headers:
+    Content-Type: 'application/vnd.pgrst.plan+json; for="application/json"; options=buffers; charset=utf-8'
+notes: >-
+  options= plan parameters (e.g. buffers) are echoed verbatim in the response
+  Content-Type. Mirrors PlanSpec 'outputs blocks info when using the buffers option'.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PlanSpec.hs#L59

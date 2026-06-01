@@ -1,0 +1,14 @@
+id: 1458
+feature: auth/claims/empty-claims
+request:
+  method: GET
+  path: /authors_only
+  headers:
+    Accept: application/json
+    Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.CUIP5V9thWsGGFsFyGijSZf1fJMfarLHI9CEJL-TGNk"
+schema: auth
+preconditions: []
+expect:
+  status: 401
+notes: "Token with empty claims {} -> no role to switch to -> 401."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L123

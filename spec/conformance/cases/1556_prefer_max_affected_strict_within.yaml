@@ -1,0 +1,16 @@
+id: 1556
+feature: headers/prefer/max-affected-strict-within
+request:
+  method: DELETE
+  path: /items?id=lt.10
+  headers:
+    Prefer: "handling=strict, max-affected=10"
+schema: headers
+preconditions: []
+expect:
+  status: 204
+  headers:
+    Preference-Applied: "handling=strict, max-affected=10"
+  body_exact: null
+notes: "Within the max-affected limit -> 204 and the preference echoed in Preference-Applied. Mirrors PreferencesSpec.hs:132-139."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L132

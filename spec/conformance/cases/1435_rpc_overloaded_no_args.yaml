@@ -1,0 +1,15 @@
+id: 1435
+feature: rpc/overloaded/no-args
+request:
+  method: GET
+  path: /rpc/overloaded
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [1, 2, 3]
+notes: "Overloaded function dispatched by supplied args: overloaded() (no args) resolves to the SETOF int variant returning [1,2,3]."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L786

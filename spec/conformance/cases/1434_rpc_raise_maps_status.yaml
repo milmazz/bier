@@ -1,0 +1,19 @@
+id: 1434
+feature: rpc/error/raise-maps-status
+request:
+  method: GET
+  path: /rpc/raise_pt402
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 402
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    hint: "Upgrade your plan"
+    details: "Quota exceeded"
+    code: "PT402"
+    message: "Payment Required"
+notes: "A RAISE with SQLSTATE prefix PTxyz maps to HTTP status xyz; the body carries message/details/hint/code."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L769

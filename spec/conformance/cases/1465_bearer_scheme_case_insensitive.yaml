@@ -1,0 +1,14 @@
+id: 1465
+feature: auth/jwt/bearer-scheme-case-insensitive
+request:
+  method: GET
+  path: /authors_only
+  headers:
+    Accept: application/json
+    Authorization: "bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicG9zdGdyZXN0X3Rlc3RfYXV0aG9yIiwiaWQiOiJqZG9lIn0.B-lReuGNDwAlU1GOC476MlO0vAt9JNoHIlxg2vwMaO0"
+schema: auth
+preconditions: []
+expect:
+  status: 200
+notes: "Lowercase 'bearer' scheme is accepted (so is 'Bearer')."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L229

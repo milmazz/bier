@@ -1,0 +1,194 @@
+# Behavior model for the "domain_representations" feature area of PostgREST
+# v14.12 (upstream name: "Data representations").
+#
+# Scope: PostgreSQL DOMAIN types over a base type, plus the casts that register
+# how PostgREST (de)serializes a column of that domain:
+#   * CREATE CAST (<domain> AS json) -- read out:  domain value -> JSON value
+#   * CREATE CAST (json AS <domain>) -- write in:  JSON request body -> domain
+#   * CREATE CAST (text AS <domain>) -- parse:     query-string filter values
+# Covered: a domain rendered via a registered `<domain> AS json` cast, the
+# inverse `json AS <domain>` cast on insert, the `text AS <domain>` cast used
+# for filter values, formatting through embeds/views/computed columns, manual
+# ::cast layered on top, NULL handling, and the DEFAULT behaviour when no
+# `<domain> AS json` cast exists (the base type's plain JSON rendering).
+#
+# Every entry carries a `source` URL with a line anchor into PostgREST v14.12.
+# Behaviors that could not be traced to a real source line are recorded under
+# `gaps` (see end of file) and NOT modeled as claims.
+#
+# Convention for `source_url`: raw.githubusercontent.com line anchors, pinned to
+# the v14.12 tag, matching the form mandated by spec/case.schema.json. Each #Lnn
+# lands on the `it`/definition line of the upstream HSpec test or SQL fixture
+# that demonstrates the behavior; line numbers were re-derived directly from the
+# raw v14.12 files. To view in a browser, replace
+# `raw.githubusercontent.com/PostgREST/postgrest/v14.12/` with
+# `github.com/PostgREST/postgrest/blob/v14.12/`.
+
+area: domain_representations
+version: v14.12
+fixture: spec/conformance/fixtures/domain_representations.sql
+schema: test
+
+entries:
+  # --- read: domain AS json cast -------------------------------------------
+  - entry_id: domain_representations.format_single_column
+    claim: >
+      A column whose type is a DOMAIN with a registered `CREATE CAST (<domain>
+      AS json)` is serialized in GET responses by that cast. The `color` domain
+      (integer) reads out as the formatted string "#RRGGBB".
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1536
+    source_line: 1536
+    cases: [1800]
+
+  - entry_id: domain_representations.format_multiple_distinct
+    claim: >
+      Distinct domain columns in the same row each apply their own
+      representation cast independently (color -> "#RRGGBB", isodate ->
+      timestamptz with trailing "Z").
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1540
+    source_line: 1540
+    cases: [1801]
+
+  - entry_id: domain_representations.format_nulls
+    claim: >
+      NULL handling is delegated to the cast function. A NULL `isodate`
+      serializes as JSON null; a NULL `color` serializes as the empty string ""
+      because its json cast maps NULL to to_json('').
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1570
+    source_line: 1570
+    cases: [1802]
+
+  - entry_id: domain_representations.format_star_select
+    claim: >
+      `select=*` (and implicit star) formats every domain column via its
+      representation cast: bytea_b64 -> unpadded base64 string, unixtz ->
+      integer epoch seconds, monetary -> JSON string preserving scale.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1575
+    source_line: 1575
+    cases: [1803]
+
+  - entry_id: domain_representations.format_rename
+    claim: >
+      A renamed domain column (`select=clr:label_color`) still applies its
+      representation cast; only the JSON key changes.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1562
+    source_line: 1562
+    cases: [1804]
+
+  - entry_id: domain_representations.manual_cast_on_top
+    claim: >
+      An explicit `::text` cast appended to a domain column
+      (`select=clr:label_color::text`) is applied on top of the representation:
+      the formatted JSON string is itself re-serialized, yielding a quoted
+      string like "\"#000000\"".
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1566
+    source_line: 1566
+    cases: [1805]
+
+  - entry_id: domain_representations.format_in_view_and_computed
+    claim: >
+      Domain representations apply to view columns, including a computed view
+      column whose expression is cast back to the domain
+      (e.g. (label_color/2)::color renders as "#RRGGBB").
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1553
+    source_line: 1553
+    cases: [1806]
+
+  - entry_id: domain_representations.format_through_embed
+    claim: >
+      Domain representations are applied to embedded (joined) resources, so a
+      domain column read through a to-one embed is still formatted.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1599
+    source_line: 1599
+    cases: [1807]
+
+  # --- filter: text AS domain cast -----------------------------------------
+  - entry_id: domain_representations.filter_text_parser
+    claim: >
+      When a `CREATE CAST (text AS <domain>)` is registered, query-string filter
+      values are parsed with it before comparison. `label_color=eq.000100`
+      matches the row whose color is the parsed value.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1610
+    source_line: 1610
+    cases: [1808]
+
+  - entry_id: domain_representations.filter_no_text_parser_no_json_fallback
+    claim: >
+      In the absence of a `text AS <domain>` cast (isodate has none), PostgREST
+      does NOT fall back on the JSON parser for query-string filter values; the
+      raw value reaches the base type and may error there.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1614
+    source_line: 1614
+    cases: [1809]
+
+  - entry_id: domain_representations.filter_text_parser_in_predicate
+    claim: >
+      The `text AS <domain>` parser is also applied to each value of an `in.(...)`
+      predicate.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1624
+    source_line: 1624
+    cases: [1810]
+
+  # --- write: json AS domain cast ------------------------------------------
+  - entry_id: domain_representations.parse_post_body_select_shaped
+    claim: >
+      On POST with return=representation, JSON body values for domain columns
+      are parsed via `CREATE CAST (json AS <domain>)`, and the returned columns
+      are re-formatted via the `<domain> AS json` cast (round trip).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L824
+    source_line: 824
+    cases: [1811]
+
+  - entry_id: domain_representations.parse_post_body_all_columns
+    claim: >
+      A full-row POST with return=representation parses every domain column from
+      the JSON body and formats them back: color "#001100", isodate parsed and
+      rendered with trailing Z, bytea_b64 padded on read-back, unixtz as epoch
+      integer, monetary preserving its numeric string.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L834
+    source_line: 834
+    cases: [1812]
+
+  - entry_id: domain_representations.columns_param_uses_defaults
+    claim: >
+      With ?columns=, JSON keys not listed are ignored and the omitted domain
+      columns fall back to their table DEFAULT (parsed/formatted accordingly),
+      e.g. due_at defaults to the isodate '2018-01-01' rendered as
+      "2018-01-01T00:00:00Z".
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L845
+    source_line: 845
+    cases: [1813]
+
+  # --- default behaviour: no domain AS json cast ---------------------------
+  - entry_id: domain_representations.no_cast_uses_base_type
+    claim: >
+      A DOMAIN with no registered `<domain> AS json` cast (devil_int, int DEFAULT
+      666) serializes using the base int type's plain JSON rendering (a bare
+      number). On a POST that omits the domain column with Prefer: missing=default,
+      the column takes the domain DEFAULT (666) and the return=representation body
+      is [{"id": 666, "name": "Lu"}] with status 201.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L572
+    source_line: 572
+    cases: [1814]
+
+# ---------------------------------------------------------------------------
+# gaps: behaviors observed in the area but NOT modeled as conformance cases
+# because they could not be pinned to a stable, unambiguous source line, or are
+# explicitly out of the data-representations contract.
+# ---------------------------------------------------------------------------
+gaps:
+  - id: domain_representations.ilike_unsupported
+    note: >
+      Pattern operators (ilike/like) are intentionally NOT supported on
+      data-representation columns; the upstream test only asserts PostgREST does
+      not panic and surfaces the raw Postgres "operator does not exist" error.
+      The exact 404 status + error body are an implementation detail of how the
+      unsupported operator is surfaced rather than a representation contract, so
+      it is left unmodeled.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1643
+  - id: domain_representations.arrays_and_composites
+    note: >
+      The area brief asked about domains nested in arrays/composites. PostgREST
+      v14.12 ships no test fixture exercising a representation cast on an array
+      element type or a composite field, so no behavior could be cited; omitted
+      rather than guessed.

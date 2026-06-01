@@ -1,0 +1,18 @@
+id: 1372
+feature: mutations/delete/zero-rows-return-rep
+request:
+  method: DELETE
+  path: /items?id=eq.10101
+  headers:
+    Prefer: return=representation
+schema: mutations
+preconditions:
+  - "DELETE FROM test.items;"
+  - "INSERT INTO test.items (id) SELECT generate_series(1, 15);"
+expect:
+  status: 200
+  headers:
+    Content-Range: "*/*"
+  body_exact: []
+notes: "DELETE matching no rows + return=rep -> 200 with [] and Content-Range */*."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L106

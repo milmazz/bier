@@ -1,0 +1,330 @@
+# Behavior model for the "filters" feature area of PostgREST v14.12.
+#
+# Scope: horizontal filters, logical and/or/not, grouping & precedence,
+# value quoting, JSON arrow filters, filtering on embedded resources.
+#
+# Every entry carries a `source` URL with a line anchor. Behaviors that could
+# not be traced to a real source line are recorded under `gaps` (and NOT
+# asserted here). Filters that depend on full-text-search, range, or array
+# operator *semantics* are out of scope (owned by the operators area); only
+# their syntactic interaction with and/or/not is referenced where the filters
+# parser is the load-bearing piece.
+
+area: filters
+version: PostgREST v14.12
+fixtures: spec/conformance/fixtures/filters.sql
+
+entries:
+  # ---------------------------------------------------------------------------
+  # Horizontal filters: <column>=<operator>.<value>
+  # ---------------------------------------------------------------------------
+  - id: filters.horizontal.shape
+    claim: >
+      A horizontal filter is a query param of the form
+      `<field>=<op>.<value>`. The key parses into an embed path plus a field
+      (`pTreePath`), the value parses into an OpExpr via `pOpExpr pSingleVal`.
+      A value without a recognized leading operator is a 400 PGRST100 parse
+      error ("failed to parse filter (...)", "expecting 'not' or operator
+      (eq, gt, ...)") for table reads.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L229
+    cases: [1150]
+
+  - id: filters.horizontal.eq
+    claim: >
+      `col=eq.<v>` matches rows where col equals v.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L35
+    cases: [1150]
+
+  - id: filters.horizontal.in
+    claim: >
+      `col=in.(a,b,c)` matches rows where col is in the parenthesized,
+      comma-separated list. List elements may be bare or double-quoted
+      (pListVal / pListElement).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L59
+    cases: [1151, 1166]
+
+  - id: filters.horizontal.is
+    claim: >
+      `col=is.<v>` accepts only null, not_null, true, false, unknown
+      (case-insensitive). Any other value is a 400. `is.null` matches NULLs;
+      `is.true/false/unknown` match trilean boolean values.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L657
+    cases: [1152, 1153, 1163]
+
+  - id: filters.horizontal.like_ilike
+    claim: >
+      `col=like.<pat>` / `col=ilike.<pat>` do pattern matching where `*` is
+      the wildcard (translated to SQL `%`). ilike is case-insensitive.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L131
+    cases: [1154]
+
+  - id: filters.horizontal.cs_cd
+    claim: >
+      Array containment operators `cs` (contains) and `cd` (contained in)
+      take a `{...}` value, e.g. `arr_data=cs.{2}`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L555
+    cases: [1164]
+
+  - id: filters.horizontal.isdistinct
+    claim: >
+      `col=isdistinct.<v>` implements SQL `IS DISTINCT FROM` (NULL-aware
+      inequality); negatable with `not.`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L646
+    cases: [1165]
+
+  # ---------------------------------------------------------------------------
+  # not. negation of a single operator
+  # ---------------------------------------------------------------------------
+  - id: filters.not.prefix
+    claim: >
+      A filter value may be prefixed with `not.` to negate the operator:
+      `col=not.<op>.<v>`. `pOpExpr` consumes a leading `not` + delimiter into
+      a boolean negation flag before parsing the operator.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L637
+    cases: [1155, 1156]
+
+  - id: filters.not.is_not_null_equivalence
+    claim: >
+      `not.is.not_null` is equivalent to `is.null` (double negation of the
+      null test).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L84
+    cases: [1156]
+
+  # ---------------------------------------------------------------------------
+  # Logical and/or/not as top-level params
+  # ---------------------------------------------------------------------------
+  - id: filters.logic.or
+    claim: >
+      `or=(cond,cond,...)` ORs its comma-separated conditions. Each condition
+      is itself a filter `field.op.value` or a nested `and(...)/or(...)` group.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L19
+    cases: [1157]
+
+  - id: filters.logic.and
+    claim: >
+      `and=(cond,cond,...)` ANDs its comma-separated conditions. `and`/`or`
+      keys are parsed by `pLogicTree`; the parser internally rewrites
+      `or=(..)` to `or(..)` so the top-level key and nested groups share one
+      grammar.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L815
+    cases: [1162]
+
+  - id: filters.logic.not_prefix_on_group
+    claim: >
+      A logical group may be negated with `not.` on the key
+      (`not.or=(...)`) or inside a nested group (`not.and(...)`,
+      `not.or(...)`). `pLogicPath` lifts a `not` token out of the key path,
+      and `pNot` consumes `not.` before a nested group.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L840
+    cases: [1158, 1161]
+
+  - id: filters.logic.nesting
+    claim: >
+      and/or groups nest arbitrarily: `or=(and(...),and(...))`, and multiple
+      top-level logic params combine (implicitly ANDed with each other and
+      with traditional filters).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L55
+    cases: [1159, 1160, 1162]
+
+  - id: filters.logic.combined_with_traditional
+    claim: >
+      A logic param and a traditional horizontal filter on the same request
+      are ANDed together, e.g. `or=(id.eq.1,id.eq.2)&name=eq.entity 1`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L24
+    cases: [1160]
+
+  - id: filters.logic.arity
+    claim: >
+      A logic group must have at least one condition (sepBy1). Zero
+      conditions `or=()` is a 400 PGRST100 ("failed to parse logic tree (())").
+      A single condition is allowed; three or more are allowed.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L218
+    cases: [1167, 1168]
+
+  - id: filters.logic.whitespace
+    claim: >
+      Whitespace is permitted around grouping parens, commas, and the and/or
+      keywords inside a logic tree (lexeme / ws in pLogicTree).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L213
+    cases: [1169]
+
+  - id: filters.logic.reserved_word_columns
+    claim: >
+      Columns whose names begin with the reserved words `and`/`or`
+      (e.g. and_starting_col, or_starting_col) can still be filtered inside a
+      logic group; the and/or keyword match does not greedily consume column
+      names.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L289
+    cases: [1170]
+
+  # ---------------------------------------------------------------------------
+  # Value quoting
+  # ---------------------------------------------------------------------------
+  - id: filters.quoting.double_quotes
+    claim: >
+      Values inside a logic group (and `in.(...)` list elements) may be
+      double-quoted to protect reserved characters such as `(`, `)`, and `,`:
+      e.g. `or=(name.eq."(grandchild,entity,4)",...)`. Backslash escapes the
+      next char inside quotes (pQuotedValue / pCharsOrSlashed). like/ilike
+      patterns may also be quoted.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L688
+    cases: [1171, 1172, 1166]
+
+  # ---------------------------------------------------------------------------
+  # JSON arrow filters
+  # ---------------------------------------------------------------------------
+  - id: filters.json.arrow_keys
+    claim: >
+      A filter target may traverse a json/jsonb column with `->` (returns
+      json) and `->>` (returns text) arrows ending in a key, e.g.
+      `data->foo->>bar=eq.baz`. The json path is parsed by `pJsonPath` after
+      the field name in `pTreePath`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L155
+    cases: [1173, 1174]
+
+  - id: filters.json.arrow_not
+    claim: >
+      JSON arrow filters can be negated with `not.`, e.g.
+      `data->foo->>bar=not.eq.baz`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L163
+    cases: [1175]
+
+  - id: filters.json.array_index
+    claim: >
+      Well-formed integers in a json path are treated as array indexes, e.g.
+      `data->>0=eq.1`, `data->1->>2=eq.13`. `pJsonPath` distinguishes JIdx
+      (numeric) from JKey. This entry covers ONLY positive indexes (the
+      "can filter by array indexes" it-block, L182).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L182
+    cases: [1176]
+
+  - id: filters.json.negative_index
+    claim: >
+      Negative integers in a json path are valid array indexes counting from
+      the end, e.g. `data->>-3=eq.1` (the -3rd == element 0 of a 3-element
+      array). This is a distinct "can filter with negative indexes" it-block
+      from the positive-index one, hence a separate anchor.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L282
+    cases: [1177]
+
+  - id: filters.json.in_logic_tree
+    claim: >
+      JSON arrow paths work inside and/or logic groups, e.g.
+      `or=(jsonb_col->a->>b.eq.foo,jsonb_col->>b.eq.bar)`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L173
+    cases: [1178]
+
+  - id: filters.json.jsonb_value
+    claim: >
+      A jsonb sub-document obtained via `->` can be compared with `eq` to a
+      JSON literal, e.g. `data->a=eq.{"b":2}` and `data->c=eq.[1,2,3]`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L196
+    cases: [1179]
+
+  - id: filters.json.bad_syntax
+    claim: >
+      Malformed json paths produce a 400 PGRST100 parse error, e.g.
+      `select=data->>--34` -> "unexpected '-' expecting digit".
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L296
+    cases: [1180]
+
+  # ---------------------------------------------------------------------------
+  # Filtering on embedded resources
+  # ---------------------------------------------------------------------------
+  - id: filters.embed.dotted_path
+    claim: >
+      A filter key may be prefixed with an embedded-resource path using `.`
+      separators, e.g. `child_entities.id=eq.1` or
+      `child_entities.or=(...)`. `pTreePath` / `pLogicPath` split the path on
+      `.`; the init of the path is the embed path, the last segment is the
+      field (or and/or keyword).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L277
+    cases: [1181, 1182]
+
+  - id: filters.embed.left_join_default
+    claim: >
+      With the default (left join) embedding, filtering an embedded resource
+      filters the embedded rows but keeps parent rows (with an empty array /
+      null embedding) that no longer match.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L29
+    cases: [1182]
+
+  - id: filters.embed.inner_join_filters_parent
+    claim: >
+      With `!inner`, filtering the embedded resource also filters the source
+      (parent) table: parents whose embedding becomes empty are dropped. A
+      filter that matches no embedded rows yields an empty top-level array.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L130
+    cases: [1183, 1184]
+
+  - id: filters.embed.nonexistent_resource_error
+    claim: >
+      Applying a filter to an embed path that is not present in the `select`
+      query parameter is a 400 PGRST108 ("'<name>' is not an embedded
+      resource in this request") with a hint to add it to select.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L523
+    cases: [1185]
+
+  - id: filters.embed.null_filtering
+    claim: >
+      An embedded resource can be filtered directly on its null-ness to keep
+      or drop PARENT rows based on whether a related row exists:
+      `embed=not.is.null` behaves like `!inner` (keep parents that HAVE a
+      related row), and `embed=is.null` performs an anti-join (keep parents
+      that have NO related row). The embed is typically projected empty
+      (`embed()`) so the related array is omitted from the body. Both forms
+      can also appear inside an `or=(...)` group across multiple embeds.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L153
+    cases: [1186, 1187]
+
+gaps:
+  - >
+      AndOrParamsSpec "embedded levels" third-level logic
+      (child_entities.grandchild_entities.or=...) and EmbedInnerJoinSpec
+      one-to-many cases at L147+ expect grandchild_entities rows distributed
+      across child_entities 1,2,4,5 and 3,6, but the committed fixture
+      data.sql L371-375 only defines 5 grandchild rows under parent_ids 1,1,
+      2,2,2. The expected vs. seeded data could not be reconciled from the
+      pinned sources, so no conformance case asserts third-level embedded
+      filtering. Needs the actual fixture data PostgREST loads for these
+      tests (possible per-spec data override not found in fixtures/data.sql).
+  - >
+      Full-text search filter operators inside and/or
+      (fts/plfts/phfts/wfts, AndOrParamsSpec L84-117) and range/array operator
+      *semantics* (L123-200) are referenced syntactically but their value
+      semantics belong to the operators feature area; not modeled here beyond
+      the and/or/not parser interaction.
+  - >
+      `is` case-insensitivity of NULL/NoT_NuLl and trilean upper/mixed case
+      (QuerySpec L104-125) is covered by case 1163 only for the lowercase
+      trilean path; the uppercase variants are asserted in QuerySpec but not
+      given dedicated conformance cases to keep the band within 1150..1199.
+  - >
+      `match` (~) and `imatch` (~*) regex filter operators (QuerySpec
+      L154-175) parse via quantOperator but no dedicated conformance case was
+      written (operators-area semantics); only like/ilike are exercised here.
+  - >
+      The (any)/(all) operator quantifier modifier
+      (e.g. id=eq(any).{3,4,5}, id=gt(all).{4,3}, body=like(any).{%plan%,...})
+      is a documented major filter MODIFIER with dedicated tests at
+      QuerySpec.hs L1495-1531. The filters parser is the load-bearing piece:
+      pOperation tries pQuantOp (QueryParams.hs L641, definition L652-655),
+      where the optional (any)/(all) is parsed between parens after the base
+      operator. filters.horizontal.shape's claim references pOpExpr (which
+      reaches pQuantOp transitively), but this area deliberately writes NO
+      conformance case for the quantifier syntax: the per-operator value
+      semantics (which ops accept a quantifier, the {..} array value shape)
+      are operators-area scope. Recorded here because the syntactic parse of
+      the (any)/(all) token lives in the filters/operator grammar.
+  - >
+      No machine-enforced case shape until recently: spec/case.schema.json
+      now exists and the Tester's lint validates every case against it
+      (it REQUIRES source URLs on raw.githubusercontent.com matching
+      `^https://raw\.githubusercontent\.com/PostgREST/postgrest/.+#L[0-9]+$`,
+      so all filters cases were migrated from github.com/.../blob/ to raw
+      URLs in this pass). Residual gap: the schema is intentionally permissive
+      about the body-assertion key (body_exact / body_jsonpath / body_contains
+      are all optional and unconstrained beyond JSON type), so it does NOT
+      enforce "exactly one body assertion style per case" nor the
+      filename-id == internal-id invariant; those remain hand-verified
+      conventions, not machine-enforced contracts.

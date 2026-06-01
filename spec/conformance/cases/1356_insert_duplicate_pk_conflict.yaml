@@ -1,0 +1,15 @@
+id: 1356
+feature: mutations/insert/error/duplicate-pk
+request:
+  method: POST
+  path: /simple_pk
+  headers: { Content-Type: application/json }
+  body: { "k": "xyyx", "extra": "e1" }
+schema: mutations
+preconditions: []
+expect:
+  status: 409
+  body_jsonpath:
+    - { path: "$.code", equals: "23505" }
+notes: "Insert with existing pk surfaces Postgres 23505 as 409 Conflict."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L317

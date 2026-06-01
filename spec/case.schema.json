@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/elixir-lang/bier/spec/case.schema.json",
+  "title": "Bier conformance case",
+  "description": "Black-box conformance case shape per docs/AGENT_PLAN.md §5.1. One YAML per scenario (request -> response). Authored by the Spec Researcher, consumed by the Tester's conformance runner. This schema is intentionally permissive about the body-assertion key (body_exact / body_jsonpath / body_contains) so areas that assert in different styles all validate; exactly one body assertion style SHOULD be present per case. Two request shapes are supported: an HTTP request (method + path, the common case) and a CLI invocation (kind: cli + flag) used by the config/observability areas that exercise --dump-config and startup validation rather than the HTTP surface.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "feature", "request", "schema", "expect", "source"],
+  "properties": {
+    "config": {
+      "description": "Optional PostgREST config the case requires. The conformance runner applies these before running the request and restores defaults after. Top-level keys mirror PostgREST config names; their values are strings, booleans, numbers, or null (null clears a setting, e.g. db-anon-role: null). The reserved keys `env`, `file`, and `preconditions_sql` carry, respectively, a PGRST_*/PGUSER environment map, a config-file key/value map, and a list of SQL statements to run before the invocation (used by the config area's --dump-config cases).",
+      "type": "object",
+      "properties": {
+        "env": {
+          "description": "Environment variables (PGRST_*, PGUSER, ...) set for the invocation.",
+          "type": "object",
+          "additionalProperties": { "type": ["string", "boolean", "number"] }
+        },
+        "file": {
+          "description": "Config-file key/value pairs (canonical or deprecated-alias keys).",
+          "type": "object",
+          "additionalProperties": { "type": ["string", "boolean", "number"] }
+        },
+        "preconditions_sql": {
+          "description": "SQL statements run before the invocation (e.g. ALTER ROLE ... SET pgrst.* for db-config cases).",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": { "type": ["string", "boolean", "number", "null"] }
+    },
+    "id": {
+      "description": "Globally-unique numeric case id. Each feature area owns a non-overlapping band (e.g. ordering owns 1200..1249).",
+      "type": "integer",
+      "minimum": 0
+    },
+    "feature": {
+      "description": "Slash-delimited feature path, e.g. ordering/related/to_one.",
+      "type": "string",
+      "minLength": 1
+    },
+    "request": {
+      "description": "Either an HTTP request (method + path) or a CLI invocation (kind: cli + flag). HTTP is the default shape; CLI is used by the config/observability --dump-config and startup-validation cases.",
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["method", "path"] },
+        { "required": ["kind", "flag"] }
+      ],
+      "properties": {
+        "kind": {
+          "description": "Request shape selector. Absent (or `http`) means an HTTP request; `cli` means a command-line invocation of the PostgREST binary.",
+          "type": "string",
+          "enum": ["http", "cli"]
+        },
+        "flag": {
+          "description": "CLI flag/argument for a `kind: cli` invocation, e.g. \"--dump-config\".",
+          "type": "string",
+          "minLength": 1
+        },
+        "method": {
+          "type": "string",
+          "enum": ["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"]
+        },
+        "path": {
+          "description": "Request path including query string, exactly as sent on the wire.",
+          "type": "string",
+          "minLength": 1
+        },
+        "headers": {
+          "description": "Request headers as a string->string map.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "jwt": {
+          "description": "Instructs the runner to mint a signed JWT and send it as the Bearer token. `sign_with` names a key/secret fixture; `payload` is the claim set to sign. Used by the auth area to exercise specific claim shapes.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["payload"],
+          "properties": {
+            "sign_with": { "type": "string", "minLength": 1 },
+            "payload": { "type": "object" }
+          }
+        },
+        "body": {
+          "description": "Optional request body (object, array, or raw string).",
+          "type": ["object", "array", "string", "null"]
+        },
+        "body_json": {
+          "description": "Optional request body asserted to be sent as JSON (object or array). Alternative to `body` when the case wants to make the JSON intent explicit.",
+          "type": ["object", "array"]
+        },
+        "body_raw": {
+          "description": "Optional raw (non-JSON) request body sent verbatim, e.g. a CSV payload or an empty string for a no-body POST.",
+          "type": "string"
+        }
+      }
+    },
+    "schema": {
+      "description": "Which spec/conformance/fixtures/<name>.sql to load before running this case.",
+      "type": "string",
+      "minLength": 1
+    },
+    "preconditions": {
+      "description": "Optional SQL statements to run before the request.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "expect": {
+      "description": "Assertions on the outcome. HTTP cases assert `status` (+ headers/body); CLI cases assert `exit_code` (+ dump_contains / stderr_contains). At least one of `status` or `exit_code` MUST be present.",
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["status"] },
+        { "required": ["exit_code"] }
+      ],
+      "properties": {
+        "status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "exit_code": {
+          "description": "Expected process exit code for a CLI invocation: 0, a specific non-zero integer, or the literal string \"nonzero\" when only failure (not a specific code) is asserted.",
+          "type": ["integer", "string"]
+        },
+        "stderr_contains": {
+          "description": "Substring(s) the process stderr must contain (CLI startup-validation cases).",
+          "type": ["string", "array"]
+        },
+        "dump_contains": {
+          "description": "Lines/substrings the --dump-config output must contain.",
+          "type": ["string", "array"]
+        },
+        "dump_reparse_stable": {
+          "description": "When true, the dumped config re-fed and re-dumped must be byte-identical (idempotence check).",
+          "type": "boolean"
+        },
+        "status_text": {
+          "description": "Expected HTTP reason phrase. Used when a case asserts a custom status text, e.g. the RAISE SQLSTATE 'PGRST' DETAIL status_text override (errors area).",
+          "type": "string",
+          "minLength": 1
+        },
+        "headers": {
+          "description": "Expected response headers as a string->string map.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "body_exact": {
+          "description": "Literal JSON document the body must equal (object, array, scalar, or null when no body assertion).",
+          "type": ["object", "array", "string", "number", "boolean", "null"]
+        },
+        "body_jsonpath": {
+          "description": "List of JSONPath assertions; each entry is matched against the response body.",
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "body_contains": {
+          "description": "Substring(s) the raw response body must contain (for non-JSON bodies, e.g. CSV).",
+          "type": ["string", "array"]
+        },
+        "body_raw": {
+          "description": "Literal raw (non-JSON) response body the response must equal verbatim, e.g. a CSV document.",
+          "type": "string"
+        },
+        "body_json": {
+          "description": "Literal JSON document the body must equal (object or array). Synonym of body_exact used when the case wants to make the JSON intent explicit.",
+          "type": ["object", "array"]
+        },
+        "headers_absent": {
+          "description": "List of response header names that MUST be absent (e.g. Content-Type on an empty-body 201/204). Mirrors PostgREST's matchHeaderAbsent assertions.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "headers_present": {
+          "description": "List of response header names that MUST be present (value unconstrained). Mirrors PostgREST's matchHeaderExists.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "headers_match": {
+          "description": "Map of header name -> regular expression the header value must match (e.g. the Server-Timing dur=<ms> pattern). Mirrors PostgREST's matchHeader regex assertions.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "headers_absent_in_value": {
+          "description": "Map of header name -> list of substrings that MUST NOT appear within that header's value (e.g. plan/transaction absent from an OPTIONS Server-Timing value).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "headers_no_blank": {
+          "description": "When true, asserts the response carries no header with an empty name or empty value (regression for blank ` : ` headers).",
+          "type": "boolean"
+        }
+      }
+    },
+    "notes": {
+      "description": "Free-text rationale; SHOULD reference the upstream PostgREST it-block.",
+      "type": "string"
+    },
+    "source": {
+      "description": "Source URL with a line anchor, pinned to the PostgREST version under test. MUST use raw.githubusercontent.com for machine-fetchability.",
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://raw\\.githubusercontent\\.com/PostgREST/postgrest/.+#L[0-9]+$"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+id: 1374
+feature: mutations/upsert/post/merge-duplicates-insert-and-update
+request:
+  method: POST
+  path: /tiobe_pls
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation, resolution=merge-duplicates
+  body:
+    - { "name": "Javascript", "rank": 6 }
+    - { "name": "Java", "rank": 2 }
+    - { "name": "C", "rank": 1 }
+schema: mutations
+# Reset tiobe_pls to the seeded state so this case is order-independent:
+# 'Javascript' MUST be absent (so it is inserted -> 201) and Java/C MUST exist
+# (so they are updated). Mirrors data.sql:403 (Java,C,Python only).
+preconditions:
+  - "DELETE FROM test.tiobe_pls;"
+  - "INSERT INTO test.tiobe_pls (name, rank) VALUES ('Java', 1), ('C', 2), ('Python', 4);"
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: resolution=merge-duplicates, return=representation
+  body_exact:
+    - { "name": "Javascript", "rank": 6 }
+    - { "name": "Java", "rank": 2 }
+    - { "name": "C", "rank": 1 }
+notes: >-
+  resolution=merge-duplicates upserts on pk; status is 201 because at least one
+  row (Javascript, not seeded) was inserted. Mirrors UpsertSpec.hs#L21-L34.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L21

@@ -1,0 +1,15 @@
+id: 1067
+feature: operators/fts
+request:
+  method: GET
+  path: /tsearch?text_search_vector=fts.impossible
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "text_search_vector": "'fun':5 'imposs':9 'kind':3" }]
+notes: "fts -> `@@ to_tsquery(...)`. Mirrors QuerySpec.hs 'finds matches with to_tsquery'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L179

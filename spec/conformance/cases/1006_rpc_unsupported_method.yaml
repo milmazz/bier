@@ -1,0 +1,19 @@
+id: 1006
+feature: url_grammar/method/rpc-invalid
+request:
+  method: DELETE
+  path: /rpc/get_parents_below
+  headers: { Accept: application/json }
+schema: multi
+preconditions: []
+expect:
+  status: 405
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    code: PGRST101
+    details: null
+    hint: null
+    message: Cannot use the DELETE method on RPC
+notes: "DELETE on /rpc/<fn> is InvalidRpcMethod (PGRST101, 405). Mirrors RpcSpec 'DELETE fails'. Uses get_parents_below in place of sayhello (same code path)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L617

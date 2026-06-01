@@ -1,0 +1,15 @@
+id: 1114
+feature: select/embed/one-to-many-empty-array
+request:
+  method: GET
+  path: /projects?id=in.(5)&select=id,tasks(id)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"id":5,"tasks":[]}]
+notes: "rows with no children return [] instead of null (QuerySpec.hs:665)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L665

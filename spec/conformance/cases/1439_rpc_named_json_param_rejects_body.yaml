@@ -1,0 +1,25 @@
+id: 1439
+feature: rpc/single-unnamed-param/named-rejects-body
+request:
+  method: POST
+  path: /rpc/named_json_param
+  headers: { Content-Type: application/json, Accept: application/json }
+  body: { "A": 1, "B": 2, "C": 3 }
+schema: rpc
+preconditions: []
+expect:
+  status: 404
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    code: PGRST202
+    message: "Could not find the function test.named_json_param(A, B, C) in the schema cache"
+    details: "Searched for the function test.named_json_param with parameters A, B, C or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache."
+    hint: null
+notes: >
+  Contrast with the single-unnamed-param mechanism: a function whose single json
+  parameter is NAMED does NOT receive the whole body as one argument. The body's
+  top-level keys are treated as named params (A, B, C), which do not match, so the
+  whole-body fallback (single unnamed json/jsonb parameter) is also searched and
+  no match is found -> 404 PGRST202.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1155

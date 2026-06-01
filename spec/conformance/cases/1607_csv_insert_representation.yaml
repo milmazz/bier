@@ -1,0 +1,19 @@
+id: 1607
+feature: content_negotiation/csv/insert-representation
+request:
+  method: POST
+  path: /no_pk
+  headers:
+    Content-Type: text/csv
+    Accept: text/csv
+    Prefer: return=representation
+  body: "a,b\nbar,baz"
+schema: test
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: text/csv; charset=utf-8
+  body_contains: "a,b\nbar,baz"
+notes: "POST with text/csv body + Accept text/csv + return=representation returns inserted rows as CSV (201). Mirrors InsertSpec 'returns full details of inserted record'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L652

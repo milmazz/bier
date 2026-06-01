@@ -1,0 +1,17 @@
+id: 1681
+feature: openapi/root/media-type
+request:
+  method: HEAD
+  path: /
+  headers: { Accept: application/openapi+json }
+schema: openapi
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/openapi+json; charset=utf-8
+  body_exact: ""
+  headers_absent:
+    - Content-Length
+notes: "HEAD / with application/openapi+json -> 200, empty body, Content-Type application/openapi+json; charset=utf-8, and NO Content-Length header. Mirrors OpenApiSpec.hs:22-29 (methodHead, matchStatus 200, matchHeaderAbsent hContentLength)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L22

@@ -1,0 +1,15 @@
+id: 1610
+feature: content_negotiation/singular/one-row
+request:
+  method: GET
+  path: /items?id=eq.5
+  headers: { Accept: application/vnd.pgrst.object+json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/vnd.pgrst.object+json; charset=utf-8
+  body_exact: { "id": 5 }
+notes: "Accept vnd.pgrst.object+json returns a single object (not an array) for exactly one row. Mirrors SingularSpec 'will select an existing object'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L24

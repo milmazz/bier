@@ -1,0 +1,18 @@
+id: 1303
+feature: representations/post/no-return-token
+request:
+  method: POST
+  path: /projects?select=name,client_id
+  headers:
+    Content-Type: application/json
+  body: { "id": 12, "name": "New Project", "client_id": 2 }
+schema: representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Length: "0"
+  headers_absent: [Content-Type, Location]
+  body_exact: ""
+notes: "No return token behaves like minimal (empty body) but emits NO Preference-Applied: return=... and no Location when selecting without PK. Mirrors InsertSpec.hs:159."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L159

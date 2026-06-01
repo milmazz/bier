@@ -1,0 +1,17 @@
+id: 1017
+feature: url_grammar/percent-encoding/query-value-space
+request:
+  method: GET
+  path: /parents?name=eq.parent%20v1-1
+  headers:
+    Accept: application/json
+    Accept-Profile: v1
+schema: multi
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 1, "name": "parent v1-1" }]
+notes: "%20 in a filter value decodes to a space (parseQueryReplacePlus). Matches the row whose name contains a space. Percent-decoding contract in QueryParams.parse; %20-space behavior mirrored by QuerySpec tsearch %20 cases"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L149

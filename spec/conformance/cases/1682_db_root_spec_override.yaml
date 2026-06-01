@@ -1,0 +1,24 @@
+id: 1682
+feature: openapi/root/db-root-spec
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/openapi+json }
+schema: openapi
+config:
+  db-root-spec: root
+preconditions: []
+expect:
+  status: 200
+  body_exact:
+    swagger: "2.0"
+    info:
+      title: "Overridden"
+      description: "This is a my own API"
+notes: >
+  With db-root-spec='root', GET / invokes test.root() and returns its JSON
+  body verbatim instead of the generated Swagger document. The fixture root()
+  mirrors the documented example (docs/references/api/openapi.rst#L60-100) and
+  load.sql root(). Dispatch: ApiRequest.getResource maps [] to ResourceRoutine
+  when configDbRootSpec is Just qi (ApiRequest.hs#L120-122).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest.hs#L120

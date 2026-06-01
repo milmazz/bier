@@ -1,0 +1,15 @@
+id: 1679
+feature: openapi/security/default-absent
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.security", absent: true }
+    - { path: "$.securityDefinitions", absent: true }
+notes: "By default neither security nor securityDefinitions is present. Mirrors OpenApiSpec.hs:1095-1106"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L1095

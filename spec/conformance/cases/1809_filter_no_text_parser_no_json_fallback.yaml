@@ -1,0 +1,21 @@
+id: 1809
+feature: domain_representations/filter/no_text_parser_no_json_fallback
+request:
+  method: GET
+  path: /datarep_todos?select=id,due_at&due_at=eq.Z
+  headers: { Accept: application/json }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    {
+      "code": "22007",
+      "details": null,
+      "hint": null,
+      "message": 'invalid input syntax for type timestamp with time zone: "Z"',
+    }
+notes: "isodate has no `text AS isodate` cast; PostgREST does not fall back on the JSON parser (which would rewrite Z to +00:00). The raw Z reaches the base type and errors. Mirrors QuerySpec.hs 'in the absense of text parser, does not try to use the JSON parser for query parameters'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1614

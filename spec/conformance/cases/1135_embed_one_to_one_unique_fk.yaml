@@ -1,0 +1,18 @@
+id: 1135
+feature: select/embed/one-to-one/unique-fk
+request:
+  method: GET
+  path: /country?select=name,capital(name)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"name":"Afghanistan","capital":{"name":"Kabul"}},{"name":"Algeria","capital":{"name":"Algiers"}}]
+notes: >
+  One-to-one embed where capital.country_id is a UNIQUE-constraint FK to country,
+  so each country embeds at most one capital as a single JSON object
+  (QuerySpec.hs:724, "works when having a fk with a unique constraint").
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L724

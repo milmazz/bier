@@ -1,0 +1,17 @@
+id: 1078
+feature: operators/nxl/range
+request:
+  method: GET
+  path: /ranges?range=nxl.[4,7]&select=id
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 3 }
+    - { "id": 4 }
+notes: "nxl -> `&>` does not extend to the left of, on numrange. Mirrors AndOrParamsSpec.hs 'can handle range operators'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L148

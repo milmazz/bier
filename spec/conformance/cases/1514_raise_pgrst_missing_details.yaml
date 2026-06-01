@@ -1,0 +1,20 @@
+id: 1514
+feature: errors/raise/pgrst_parse_error_missing_detail
+request:
+  method: GET
+  path: /rpc/raise_sqlstate_missing_details
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 500
+  body_exact:
+    code: "PGRST121"
+    message: "Could not parse JSON in the \"RAISE SQLSTATE 'PGRST'\" error"
+    details: "DETAIL is missing in the RAISE statement"
+    hint: "DETAIL must be a JSON object with obligatory keys: 'status', 'headers' and optional key: 'status_text'."
+notes: >
+  When the RAISE 'PGRST' has no DETAIL at all, PostgREST returns PGRST121 with
+  HTTP 500 and details "DETAIL is missing in the RAISE statement". Mirrors
+  RpcSpec.hs "returns error for missing DETAIL option in the RAISE statement".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1434

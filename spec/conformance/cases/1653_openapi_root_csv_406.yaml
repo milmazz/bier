@@ -1,0 +1,12 @@
+id: 1653
+feature: openapi/root/non-root-406
+request:
+  method: GET
+  path: /
+  headers: { Accept: text/csv }
+schema: openapi
+preconditions: []
+expect:
+  status: 406
+notes: "Unsupported media type (text/csv) at root is 406. Mirrors OpenApiSpec.hs:36-39"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L36

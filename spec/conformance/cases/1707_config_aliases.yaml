@@ -1,0 +1,28 @@
+id: 1707
+feature: config/aliases
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  file:
+    db-schema: "provided_through_alias"
+    db-pool-timeout: 5
+    max-rows: 1000
+    pre-request: "check_alias"
+    role-claim-key: ".aliased"
+    root-spec: "open_alias"
+    secret-is-base64: true
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'db-schemas = "provided_through_alias"'
+    - 'db-pool-max-idletime = 5'
+    - 'db-max-rows = 1000'
+    - 'db-pre-request = "check_alias"'
+    - 'jwt-role-claim-key = ".\"aliased\""'
+    - 'db-root-spec = "open_alias"'
+    - 'jwt-secret-is-base64 = true'
+notes: "Deprecated alias keys resolve to their canonical key. Mirrors configs/aliases.config dumped output."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/aliases.config#L1

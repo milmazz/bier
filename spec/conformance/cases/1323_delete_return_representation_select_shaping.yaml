@@ -1,0 +1,17 @@
+id: 1323
+feature: representations/delete/return-representation-select-shaping
+request:
+  method: DELETE
+  path: /complex_items?id=eq.2&select=id,name
+  headers:
+    Prefer: "return=representation"
+schema: representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "*/*"
+    Content-Length: "23"
+  body_exact: [{ "id": 2, "name": "Two" }]
+notes: "DELETE return=representation shapes the deleted-row body via &select. Mirrors DeleteSpec.hs:61."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L61

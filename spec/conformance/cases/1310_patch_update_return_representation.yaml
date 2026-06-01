@@ -1,0 +1,19 @@
+id: 1310
+feature: representations/patch/return-representation
+request:
+  method: PATCH
+  path: /items?id=eq.2
+  headers:
+    Prefer: "return=representation"
+    Content-Type: application/json
+  body: { "id": 2 }
+schema: representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "0-0/*"
+    Preference-Applied: "return=representation"
+  body_exact: [{ "id": 2 }]
+notes: "PATCH with return=representation yields 200 + JSON array of updated rows + Content-Range 0-0/*. Mirrors UpdateSpec.hs:94."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L94

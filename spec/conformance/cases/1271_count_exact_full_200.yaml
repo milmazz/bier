@@ -1,0 +1,21 @@
+id: 1271
+feature: pagination/count/exact_full_200
+request:
+  method: GET
+  path: /rpc/getallprojects?select=id&order=id
+  headers:
+    Accept: application/json
+    Prefer: count=exact
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "0-4/5"
+  body_exact: [{"id":1},{"id":2},{"id":3},{"id":4},{"id":5}]
+notes: >
+  count=exact where the returned window equals the total returns 200 (not 206).
+  getallprojects() returns all 5 projects; Content-Range '0-4/5'. Mirrors
+  RpcSpec.hs:84 (HEAD form asserts Content-Range '0-4/5', status 200); body
+  shape derived from the projects fixture rows.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L84

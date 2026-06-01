@@ -1,0 +1,17 @@
+id: 1262
+feature: pagination/range_header/truncation_beyond_length
+request:
+  method: GET
+  path: /items?order=id
+  headers:
+    Accept: application/json
+    Range-Unit: items
+    Range: 10-100
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "10-14/*"
+notes: "Range beyond collection length is truncated to the available rows; status 200, Content-Range '10-14/*'. Mirrors RangeSpec.hs:443 (asserts Content-Range and ok200)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L443

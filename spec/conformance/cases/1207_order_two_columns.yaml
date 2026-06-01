@@ -1,0 +1,20 @@
+id: 1207
+feature: ordering/multi_column
+request:
+  method: GET
+  path: /projects?select=client_id,id,name&order=client_id.desc.nullslast,id.desc
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "0-4/*"
+  body_exact:
+    - { "client_id": 2, "id": 4, "name": "OSX" }
+    - { "client_id": 2, "id": 3, "name": "IOS" }
+    - { "client_id": 1, "id": 2, "name": "Windows 10" }
+    - { "client_id": 1, "id": 1, "name": "Windows 7" }
+    - { "client_id": null, "id": 5, "name": "Orphan" }
+notes: "by two columns with nulls and direction specified."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1126

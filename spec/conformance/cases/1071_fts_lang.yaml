@@ -1,0 +1,15 @@
+id: 1071
+feature: operators/fts/language
+request:
+  method: GET
+  path: /tsearch?text_search_vector=fts(french).amusant
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "text_search_vector": "'amus':5 'fair':7 'impossibl':9 'peu':4" }]
+notes: "fts(french) passes the dictionary as `to_tsquery('french', ...)`. Mirrors QuerySpec.hs 'finds matches with different dictionaries'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L224

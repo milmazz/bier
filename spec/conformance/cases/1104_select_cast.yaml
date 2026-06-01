@@ -1,0 +1,15 @@
+id: 1104
+feature: select/cast
+request:
+  method: GET
+  path: /complex_items?select=id::text
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"id":"1"},{"id":"2"},{"id":"3"}]
+notes: "one simple column with casting (text) (QuerySpec.hs:594)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L594

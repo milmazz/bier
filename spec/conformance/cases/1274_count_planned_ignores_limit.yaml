@@ -1,0 +1,22 @@
+id: 1274
+feature: pagination/count/planned_ignores_limit_offset
+request:
+  method: HEAD
+  path: /child_entities?limit=2
+  headers:
+    Accept: application/json
+    Prefer: count=planned
+schema: pagination
+preconditions:
+  - "ANALYZE test.child_entities;"
+expect:
+  status: 206
+  headers:
+    Content-Type: "application/json; charset=utf-8"
+    Content-Range: "0-1/6"
+notes: >
+  count=planned computes the total over the unlimited query: limit=2 returns a
+  2-row window (0-1) but the planned total stays 6, so 206. Mirrors
+  RangeSpec.hs:381. CAVEAT: planned total is planner dependent; ANALYZE in
+  preconditions aligns it with the 6 actual rows.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L381

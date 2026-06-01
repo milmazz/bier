@@ -1,0 +1,15 @@
+id: 1410
+feature: rpc/return/single-out-param
+request:
+  method: GET
+  path: /rpc/single_out_param?num=5
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: { "num_plus_one": 6 }
+notes: "A single OUT parameter yields a single JSON object keyed by the OUT name (single-row, not array-wrapped)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L671

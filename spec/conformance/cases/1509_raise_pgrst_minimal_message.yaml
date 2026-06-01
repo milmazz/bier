@@ -1,0 +1,22 @@
+id: 1509
+feature: errors/raise/pgrst_minimal_message
+request:
+  method: GET
+  path: /rpc/raise_sqlstate_test2
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 332
+  headers:
+    X-Header: "str"
+  body_exact:
+    code: "123"
+    message: "ABC"
+    details: null
+    hint: null
+notes: >
+  RAISE 'PGRST' MESSAGE with only the obligatory keys (code, message) -> the
+  optional details and hint serialize as null in the envelope. DETAIL has
+  status 332 but no status_text. Mirrors RpcSpec.hs raise_sqlstate_test2.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1381

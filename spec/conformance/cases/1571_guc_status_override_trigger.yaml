@@ -1,0 +1,15 @@
+id: 1571
+feature: headers/guc/status-override-trigger
+request:
+  method: PATCH
+  path: /stuff?id=eq.1
+  headers:
+    Content-Type: application/json
+  body: [{ "name": "updated stuff 1" }]
+schema: headers
+preconditions: []
+expect:
+  status: 205
+  body_exact: null
+notes: "INSTEAD OF UPDATE trigger sets response.status=205. Mirrors RpcSpec.hs:1133-1137."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1133

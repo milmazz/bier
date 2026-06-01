@@ -1,0 +1,17 @@
+id: 1075
+feature: operators/sl/range
+request:
+  method: GET
+  path: /ranges?range=sl.[9,10]&select=id
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 1 }
+    - { "id": 2 }
+notes: "sl -> `<<` strictly left of, on numrange. Mirrors AndOrParamsSpec.hs 'can handle range operators'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L142

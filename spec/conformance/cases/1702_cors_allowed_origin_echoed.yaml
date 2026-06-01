@@ -1,0 +1,23 @@
+id: 1702
+feature: config/server-cors-allowed-origins/match
+request:
+  method: OPTIONS
+  path: /items
+  headers:
+    Accept: "*/*"
+    Origin: http://example.com
+    Access-Control-Request-Method: POST
+    Access-Control-Request-Headers: Content-Type
+schema: config
+config:
+  db-schemas: test
+  db-anon-role: postgrest_test_anonymous
+  server-cors-allowed-origins: "http://example.com, http://example2.com"
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Access-Control-Allow-Origin: http://example.com
+    Access-Control-Allow-Credentials: "true"
+notes: "Preflight from an allowed origin echoes that origin and sets credentials true. Mirrors test_io.py:test_preflight_request_with_cors_allowed_origin_config."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_io.py#L1299

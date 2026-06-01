@@ -1,0 +1,21 @@
+id: 1216
+feature: ordering/related/not_to_one_error
+request:
+  method: GET
+  path: /clients?select=*,projects(*)&order=projects(id)
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    code: "PGRST118"
+    details: "'clients' and 'projects' do not form a many-to-one or one-to-one relationship"
+    hint: null
+    message: "A related order on 'projects' is not possible"
+notes: >
+  related order fails when the relation is not to-one (clients has many
+  projects); 400 PGRST118.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L109

@@ -1,0 +1,17 @@
+id: 1088
+feature: operators/cs/array
+request:
+  method: GET
+  path: /entities?arr=cs.{1,2}&select=id
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 2 }
+    - { "id": 3 }
+notes: "cs -> `@>` contains, on integer[] (entities.arr). Mirrors AndOrParamsSpec.hs 'can handle array operators'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L174

@@ -1,0 +1,23 @@
+id: 1357
+feature: mutations/columns-param/ignore-unlisted
+request:
+  method: POST
+  path: /articles?columns=id,body
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation
+  body: { "id": 200, "body": "xxx", "smth": "here", "other": "stuff", "fake_id": 13 }
+schema: mutations
+# id 200 MUST be absent so the insert succeeds (and so this never collides with
+# the array case 1351 which uses ids 201-203). Reset just this row.
+preconditions:
+  - "DELETE FROM test.articles WHERE id = 200;"
+expect:
+  status: 201
+  body_exact: [{ "id": 200, "body": "xxx", "owner": "postgrest_test_anonymous" }]
+notes: >-
+  Single-object insert with ?columns=id,body: JSON keys not listed in ?columns
+  (smth, other, fake_id) are ignored, not rejected. No ?select, so the full
+  inserted row (including the defaulted owner) is returned. Mirrors
+  InsertSpec.hs#L440-L442.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L440
