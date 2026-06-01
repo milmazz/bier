@@ -47,7 +47,7 @@ is Phase 2 (the Tester) and is out of scope here.
 ```
 A. Partition      one research unit per feature area (table below) — in-script, no agent
 B. Research       fan-out: 1 agent / area -> writes spec/<area>.yaml + cases + fixture fragment
-C. Cross-check    fan-out: 1 agent / area, reviewing a DIFFERENT area's output (adversarial)
+C. Cross-check    fan-out: 1 fresh agent / area, adversarially re-auditing that SAME area's output (never its author)
    └─ revise loop  on "revise" verdict, re-dispatch research with the issues (<= 2 rounds)
 D. Consolidate    1 agent: merge fixture fragments -> spec/conformance/fixtures.sql (loads on PG 14/15/16)
 E. Synthesize     1 agent: spec/README.md, spec/COVERAGE.md, spec/case.schema.json, conformance/INDEX.md
@@ -95,8 +95,11 @@ Derived from `AGENT_PLAN.md` §5.1. One agent owns one row and writes that row's
 - **Returns** (structured): `[{ entry_id, claim, source_url, source_line, case_ids }]`.
 - **Hard rule**: no entry without a `source` URL + line. Untraceable → omit + log a gap.
 
-### C · Review agent (one per area, never its own)
-Reviews a **different** area's output (agent *i* reviews area *(i+1) mod n*).
+### C · Review agent (one per area, never its author)
+A **fresh, stateless** agent re-audits the **same** area it reviews — it did not
+write that area's spec. Because every subagent is independent, a same-area review
+by a different agent already gives the adversarial property; reviewing an
+unrelated area would not let the reviewer verify *these* citations.
 - **Verifies** each citation actually supports the claim (re-fetches the source),
   flags contradictions, checks the area's docs ToC for **missing** major features,
   and lints every case against `spec/case.schema.json`.
@@ -153,23 +156,31 @@ web / headless session can't launch the workflow runtime.
 2. **Pre-allow the tools the agents need** so the run doesn't pause on prompts —
    add to your allowlist: `WebFetch`, `WebSearch`, and the Bash commands the
    research agents use, e.g. `Bash(git clone:*)`, `Bash(psql:*)`.
-3. **Launch** — either run the saved command:
-   ```
-   /bier-spec
-   ```
-   …or, to (re)generate the script from this brief, paste a prompt containing the
-   keyword **workflow**:
-   ```
-   Run a workflow that executes docs/workflows/bier-spec.md: spec-research
-   fan-out for PostgREST v14.12, one subagent per feature area writing spec/,
-   a second adversarial wave cross-checking each area's cited sources, then
-   consolidate fixtures and synthesize COVERAGE.md. Write only under spec/.
-   ```
-4. **Approve** the plan when prompted (*Yes, run it*). Watch with `/workflows`.
-5. **Read the report**, triage its gap list, then hand `spec/` to Phase 2.
+3. **Launch.** `bier-spec.js` lives in `.claude/workflows/`, which is *not* a
+   slash-command directory — there is no `/bier-spec` command (that only exists
+   if you separately save one). Launch it one of these ways, easiest first:
+   - **Ask Claude, with the keyword _workflow_ in your message** — e.g.
+     "run the bier-spec workflow." Claude drives the runtime for you. If the
+     workflow resolves by name it runs as `Workflow({name: "bier-spec"})`;
+     otherwise Claude runs it by path:
+     `Workflow({scriptPath: ".claude/workflows/bier-spec.js"})`. To override the
+     pinned version, pass args: `Workflow({scriptPath: "…", args: {pinned: "v15.0"}})`.
+   - **(Re)generate from this brief** instead of using the committed script —
+     paste a prompt containing the keyword **workflow**:
+     ```
+     Run a workflow that executes docs/workflows/bier-spec.md: spec-research
+     fan-out for PostgREST v14.12, one subagent per feature area writing spec/,
+     a fresh adversarial reviewer re-auditing each area's cited sources, then
+     consolidate fixtures and synthesize COVERAGE.md. Write only under spec/.
+     ```
+4. **Approve** the plan when prompted (*Yes, run it*). It runs in the background;
+   watch with `/workflows`.
+5. **Read the report**, triage its `gaps_for_human_review` list, then hand
+   `spec/` to Phase 2.
 
-To re-save an improved run as the project command: `/workflows` → select the run
-→ `s` → `.claude/workflows/`.
+To save an improved run as a reusable `/bier-spec` slash command, copy/move the
+script into `.claude/commands/`; `/workflows` → select the run → `s` lets you
+re-save the script back into `.claude/workflows/`.
 
 ## 9. Caveats
 
