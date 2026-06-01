@@ -1,0 +1,18 @@
+id: 1362
+feature: mutations/update/single-204
+request:
+  method: PATCH
+  path: /items?id=eq.2
+  headers: { Content-Type: application/json }
+  body: { "id": 42 }
+schema: mutations
+preconditions:
+  - "DELETE FROM test.items;"
+  - "INSERT INTO test.items (id) SELECT generate_series(1, 15);"
+expect:
+  status: 204
+  headers:
+    Content-Range: 0-0/*
+  headers_absent: [Content-Type, Content-Length]
+notes: "Single-row PATCH with no return= -> 204, Content-Range 0-0/*."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L68

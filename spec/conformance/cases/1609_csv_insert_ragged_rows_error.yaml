@@ -1,0 +1,21 @@
+id: 1609
+feature: content_negotiation/csv/insert-ragged-error
+request:
+  method: POST
+  path: /no_pk
+  headers:
+    Content-Type: text/csv
+  body_raw: "a,b\nfoo,bar\nbaz"
+schema: test
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    message: All lines must have same number of fields
+    code: PGRST102
+    details: null
+    hint: null
+notes: "A CSV body whose lines have inconsistent field counts fails with PGRST102 / 400. Mirrors InsertSpec 'fails for too few'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L681

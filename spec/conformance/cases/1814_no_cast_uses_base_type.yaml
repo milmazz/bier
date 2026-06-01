@@ -1,0 +1,27 @@
+id: 1814
+feature: domain_representations/default/no_cast_uses_base_type
+request:
+  method: POST
+  path: /evil_friends?columns=id,name
+  headers:
+    Prefer: "return=representation, missing=default"
+    Accept: application/json
+  body_json: { "name": "Lu" }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Preference-Applied: "missing=default, return=representation"
+  body_exact:
+    [
+      { "id": 666, "name": "Lu" },
+    ]
+notes: >
+  Upstream InsertSpec "inserts a default on a DOMAIN with default": evil_friends.id
+  is the domain devil_int (int DEFAULT 666) which has NO registered `<domain> AS json`
+  cast. The id column is omitted from the POST body, so with Prefer: missing=default it
+  takes the domain DEFAULT (666); because there is no representation cast, devil_int
+  serializes with the base int type's plain JSON rendering (a bare number, 666). The
+  returned representation is [{"id": 666, "name": "Lu"}] with status 201.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L572

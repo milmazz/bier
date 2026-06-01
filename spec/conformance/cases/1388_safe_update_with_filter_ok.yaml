@@ -1,0 +1,14 @@
+id: 1388
+feature: mutations/safe-update/filter-satisfies
+request:
+  method: PATCH
+  path: /safe_update_items?id=gt.0
+  headers: { Content-Type: application/json }
+  body: { "name": "updated-item" }
+schema: mutations
+preconditions:
+  - "-- requires pg-safeupdate (safeupdate) loaded for this table/session"
+expect:
+  status: 204
+notes: "A filter satisfies pg-safeupdate's WHERE requirement -> 204."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L29

@@ -1,0 +1,26 @@
+id: 1631
+feature: content_negotiation/nulls-stripped/array-suffix-optional
+request:
+  method: GET
+  path: /organizations?select=*
+  headers: { Accept: application/vnd.pgrst.array;nulls=stripped }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8
+  body_exact:
+    - { id: 1, name: "Referee Org", manager_id: 1 }
+    - { id: 2, name: "Auditor Org", manager_id: 2 }
+    - { id: 3, name: "Acme", referee: 1, auditor: 2, manager_id: 3 }
+    - { id: 4, name: "Umbrella", referee: 1, auditor: 2, manager_id: 4 }
+    - { id: 5, name: "Cyberdyne", referee: 3, auditor: 4, manager_id: 5 }
+    - { id: 6, name: "Oscorp", referee: 3, auditor: 4, manager_id: 6 }
+notes: >-
+  The +json suffix is optional on the stripped array media type:
+  application/vnd.pgrst.array;nulls=stripped behaves identically to
+  application/vnd.pgrst.array+json;nulls=stripped and the response Content-Type
+  is still normalized to the +json form. Mirrors NullsStripSpec 'strips nulls
+  when Accept: application/vnd.pgrst.array;nulls=stripped'.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/NullsStripSpec.hs#L48

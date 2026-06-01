@@ -1,0 +1,15 @@
+id: 1059
+feature: operators/is/invalid_value
+request:
+  method: GET
+  path: /chores?done=is.nil
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 400
+notes: >
+  `is` only accepts null/not_null/true/false/unknown; any other value is a
+  400 because the value is whitelisted at parse time. Mirrors QuerySpec.hs
+  "fails if 'is' used and there's no null or trilean value".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L127

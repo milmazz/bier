@@ -1,0 +1,20 @@
+id: 1270
+feature: pagination/count/exact_partial_206
+request:
+  method: GET
+  path: /rpc/getitemrange?min=2&max=4&limit=1&offset=1
+  headers:
+    Accept: application/json
+    Prefer: count=exact
+schema: pagination
+preconditions: []
+expect:
+  status: 206
+  headers:
+    Content-Range: "1-1/2"
+  body_exact: [{"id":4}]
+notes: >
+  count=exact on a partial window returns 206 Partial Content with the full
+  count after '/'. getitemrange(2,4) yields ids {3,4} (total 2); limit=1
+  offset=1 returns id 4 as window 1-1. Mirrors RpcSpec.hs:69.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L69

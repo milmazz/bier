@@ -1,0 +1,23 @@
+id: 1515
+feature: errors/pgrst_code/table_not_found
+request:
+  method: GET
+  path: /non_existent_table
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 404
+  headers:
+    Proxy-Status: "PostgREST; error=PGRST205"
+  body_exact:
+    code: "PGRST205"
+    message: "Could not find the table 'test.non_existent_table' in the schema cache"
+    details: null
+    hint: null
+notes: >
+  A request for a relation absent from the schema cache returns PGRST205 with
+  HTTP 404, the Proxy-Status header carrying the code, and the standard
+  envelope. No hint when there is no >=75% similar table name. Mirrors
+  ErrorSpec.hs "works with SchemaCache error".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ErrorSpec.hs#L42

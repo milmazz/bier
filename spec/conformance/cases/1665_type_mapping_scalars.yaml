@@ -1,0 +1,23 @@
+id: 1665
+feature: openapi/types/mapping
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.definitions.openapi_types.properties.a_character_varying", equals: { format: "character varying", type: "string" } }
+    - { path: "$.definitions.openapi_types.properties.a_character", equals: { maxLength: 1, format: "character", type: "string" } }
+    - { path: "$.definitions.openapi_types.properties.a_text", equals: { format: "text", type: "string" } }
+    - { path: "$.definitions.openapi_types.properties.a_boolean", equals: { format: "boolean", type: "boolean" } }
+    - { path: "$.definitions.openapi_types.properties.a_smallint", equals: { format: "int32", type: "integer" } }
+    - { path: "$.definitions.openapi_types.properties.a_integer", equals: { format: "int32", type: "integer" } }
+    - { path: "$.definitions.openapi_types.properties.a_bigint", equals: { format: "int64", type: "integer" } }
+    - { path: "$.definitions.openapi_types.properties.a_numeric", equals: { format: "numeric", type: "number" } }
+    - { path: "$.definitions.openapi_types.properties.a_real", equals: { format: "real", type: "number" } }
+    - { path: "$.definitions.openapi_types.properties.a_double_precision", equals: { format: "double precision", type: "number" } }
+notes: "Scalar PG->Swagger type/format mapping. Mirrors OpenApiSpec.hs:365-513"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L365

@@ -1,0 +1,15 @@
+id: 1411
+feature: rpc/return/single-inout-param
+request:
+  method: GET
+  path: /rpc/single_inout_param?num=2
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: { "num": 3 }
+notes: "A single INOUT parameter yields a single JSON object keyed by that name."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L680

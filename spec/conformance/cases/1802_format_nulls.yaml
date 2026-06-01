@@ -1,0 +1,23 @@
+id: 1802
+feature: domain_representations/read/format_nulls
+request:
+  method: GET
+  path: /datarep_todos?select=id,label_color,due_at&id=gt.2&id=lt.5
+  headers: { Accept: application/json }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    [
+      {
+        "id": 3,
+        "label_color": "#01E240",
+        "due_at": "2018-01-01T14:12:34.123456Z",
+      },
+      { "id": 4, "label_color": "", "due_at": null },
+    ]
+notes: "NULL handling is delegated to the cast: NULL isodate -> JSON null, NULL color -> empty string per its json cast. Mirrors QuerySpec.hs 'formats nulls'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1570

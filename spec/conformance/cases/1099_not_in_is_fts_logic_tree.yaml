@@ -1,0 +1,17 @@
+id: 1099
+feature: operators/not/logic_tree
+request:
+  method: GET
+  path: /entities?and=(id.not.in.(1,3),and(name.not.is.null,text_search_vector.not.fts.foo))&select=id
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 2 }]
+notes: >
+  `not` negates in/is/fts inside a logic tree. Mirrors AndOrParamsSpec.hs
+  'operators with not' / 'in, is, fts can be negated'.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L190

@@ -1,0 +1,201 @@
+# PostgREST v14.12 — Errors behavior model
+#
+# Scope: how PostgREST turns a failed request into an HTTP error response.
+# Three sub-areas:
+#   1. The PostgreSQL SQLSTATE -> HTTP status map (pgErrorStatus).
+#   2. The JSON error envelope shape ({code, message, details, hint}).
+#   3. RAISE-based custom errors: `RAISE SQLSTATE 'PTnnn'` and the full
+#      response-control `RAISE SQLSTATE 'PGRST'` protocol.
+#
+# Ground truth (priority order):
+#   1. PostgREST test specs (test/spec/Feature/Query/ErrorSpec.hs, RpcSpec.hs,
+#      InsertSpec.hs + fixtures/schema.sql)
+#   2. PostgREST source (src/PostgREST/Error.hs)
+#   3. PostgREST docs (postgrest.org/en/v14)
+#
+# The SQLSTATE->HTTP map is taken verbatim from
+#   src/PostgREST/Error.hs  (pgErrorStatus)
+# The envelope shape is taken from
+#   src/PostgREST/Error.hs  (toJsonPgrstError)
+# The RAISE 'PGRST' protocol is taken from
+#   src/PostgREST/Error.hs  (PgRaiseErrMessage / PgRaiseErrDetails / parseRaisePGRST)
+
+version: PostgREST v14.12
+area: errors
+
+# ---------------------------------------------------------------------------
+# Error envelope (JSON body)
+# ---------------------------------------------------------------------------
+envelope:
+  # Every PostgREST error body is a JSON object with EXACTLY these four keys,
+  # always present, emitted in this key order. `details` and `hint` are JSON
+  # null when absent (they are not omitted).
+  # toJsonPgrstError, Error.hs:324
+  keys: [code, message, details, hint]
+  content_type: "application/json; charset=utf-8"
+  # A Content-Length header is always set (response is fully buffered).
+  # errorResponseFor, Error.hs:63
+  always_sets_content_length: true
+  field_semantics:
+    code:    "string. PostgREST PGRSTxxx code, or the raw 5-char PG SQLSTATE for DB errors, or the custom code from a RAISE 'PGRST' message."
+    message: "string. Human-readable summary."
+    details: "JSON value or null."
+    hint:    "JSON value or null."
+  source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L324
+
+# ---------------------------------------------------------------------------
+# Proxy-Status header
+# ---------------------------------------------------------------------------
+proxy_status_header:
+  # Every PostgREST-originated error response carries a Proxy-Status header with
+  # the error code. Value format: "PostgREST; error=<code>".
+  # The value is built by proxyStatusHeader (Error.hs:522-523,
+  # "PostgREST; error=" <> code). It is NOT added by the inner per-error
+  # `headers` methods (e.g. PgError has no headers clause adding it); instead it
+  # is prepended at the outer `instance PgrstError Error` headers method, one
+  # clause per error class: ApiRequestError (Error.hs:700), SchemaCacheErr
+  # (701), JwtErr (702), PgErr (703), NoSchemaCacheError (704). So the header is
+  # attached at the Error-instance level, not the per-error headers method.
+  name: "Proxy-Status"
+  value_format: "PostgREST; error=<code>"
+  examples:
+    - { code: "PGRST125", value: "PostgREST; error=PGRST125" }
+    - { code: "PT402",    value: "PostgREST; error=PT402" }
+    - { code: "123",      value: "PostgREST; error=123" }   # custom RAISE 'PGRST' code
+  source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L522
+  attached_at_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L700
+
+# ---------------------------------------------------------------------------
+# SQLSTATE -> HTTP status map (pgErrorStatus)
+# ---------------------------------------------------------------------------
+# For database (Hasql) errors, PostgREST inspects the 5-char SQLSTATE on the
+# PG ServerError. `authed` is whether the request reached an authenticated
+# role (affects only 42501). Matching is prefix-based for whole classes and
+# exact for specific codes; the first matching rule wins (order matters).
+# pgErrorStatus, Error.hs:598
+sqlstate_to_http:
+  source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L598
+  # Non-ServerError usage errors (connection/timeout) handled first:
+  connection_usage_error: { http: 503 }          # Error.hs:599
+  acquisition_timeout:    { http: 504 }           # Error.hs:600
+  client_error:           { http: 503 }           # Error.hs:601
+  # ServerError SQLSTATE rules, in source order:
+  rules:
+    - { match: "08*",  http: 503, note: "connection exception" }            # Error.hs:606
+    - { match: "09*",  http: 500, note: "triggered action exception" }      # Error.hs:607
+    - { match: "0L*",  http: 403, note: "invalid grantor" }                 # Error.hs:608
+    - { match: "0P*",  http: 403, note: "invalid role specification" }      # Error.hs:609
+    - { match: "23503", http: 409, note: "foreign_key_violation" }          # Error.hs:610
+    - { match: "23505", http: 409, note: "unique_violation" }               # Error.hs:611
+    - { match: "25006", http: 405, note: "read_only_sql_transaction" }      # Error.hs:612
+    - { match: "21000", http: 400, when: "message ends with 'requires a WHERE clause'", note: "pg-safeupdate, treated as client error" }  # Error.hs:613-615
+    - { match: "21000", http: 500, when: "otherwise", note: "cardinality_violation, e.g. subquery returned >1 row" }  # Error.hs:616
+    - { match: "22023", http: 401, when: "message starts 'role' and ends 'does not exist'", note: "nonexistent JWT role" }  # Error.hs:617-619
+    - { match: "22023", http: 400, when: "otherwise", note: "invalid_parameter_value" }  # Error.hs:620
+    - { match: "25*",  http: 500, note: "invalid tx state" }                # Error.hs:621
+    - { match: "28*",  http: 403, note: "invalid auth specification" }      # Error.hs:622
+    - { match: "2D*",  http: 500, note: "invalid tx termination" }          # Error.hs:623
+    - { match: "38*",  http: 500, note: "external routine exception" }      # Error.hs:624
+    - { match: "39*",  http: 500, note: "external routine invocation" }     # Error.hs:625
+    - { match: "3B*",  http: 500, note: "savepoint exception" }             # Error.hs:626
+    - { match: "40*",  http: 500, note: "tx rollback" }                     # Error.hs:627
+    - { match: "53400", http: 500, note: "config limit exceeded" }          # Error.hs:628
+    - { match: "53*",  http: 503, note: "insufficient resources" }          # Error.hs:629
+    - { match: "54*",  http: 500, note: "program limit exceeded / too complex (e.g. 54001 stack depth)" }  # Error.hs:630
+    - { match: "55*",  http: 500, note: "object not in prerequisite state" }  # Error.hs:631
+    - { match: "57P01", http: 503, note: "admin shutdown" }                 # Error.hs:632
+    - { match: "57*",  http: 500, note: "operator intervention" }           # Error.hs:633
+    - { match: "58*",  http: 500, note: "system error" }                    # Error.hs:634
+    - { match: "F0*",  http: 500, note: "config file error" }               # Error.hs:635
+    - { match: "HV*",  http: 500, note: "foreign data wrapper error" }      # Error.hs:636
+    - { match: "P0001", http: 400, note: "default code for plpgsql RAISE" } # Error.hs:637
+    - { match: "P0*",  http: 500, note: "PL/pgSQL error (e.g. P0004 assert_failure)" }  # Error.hs:638
+    - { match: "XX*",  http: 500, note: "internal error" }                  # Error.hs:639
+    - { match: "42883", http: 406, when: "message starts 'function xmlagg('", note: "undefined function special-case" }  # Error.hs:640-641
+    - { match: "42883", http: 404, when: "otherwise", note: "undefined function" }  # Error.hs:642
+    - { match: "42P01", http: 404, note: "undefined_table" }                # Error.hs:643
+    - { match: "42P17", http: 500, note: "infinite recursion (invalid object definition)" }  # Error.hs:644
+    - { match: "42501", http: 403, when: "authed == true", note: "insufficient_privilege (authenticated)" }  # Error.hs:645
+    - { match: "42501", http: 401, when: "authed == false", note: "insufficient_privilege (anonymous)" }      # Error.hs:645
+    - { match: "PT<n>", http: "<n>", note: "RAISE SQLSTATE 'PTnnn' -> HTTP nnn; non-numeric suffix -> 500" }  # Error.hs:646
+    - { match: "PGRST", http: "from RAISE 'PGRST' detail.status", note: "full response control" }  # Error.hs:647-650
+    - { match: "*",    http: 400, note: "any other SQLSTATE -> client error 400" }  # Error.hs:651
+  # The `code` field in the body for a raw DB error is the 5-char SQLSTATE
+  # itself (e.g. "23505"), and `message`/`details`/`hint` are taken from the
+  # PG ServerError's message/detail/hint fields verbatim.
+  # CommandError ErrorBody instance, Error.hs:566 (code), 576 (message),
+  # 584 (details), 593 (hint)
+  db_error_body:
+    code:    "the 5-char SQLSTATE (decoded UTF-8)"
+    message: "PG ServerError message"
+    details: "PG ServerError detail (string) or null"
+    hint:    "PG ServerError hint (string) or null"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L566
+
+# ---------------------------------------------------------------------------
+# PTxxx custom errors
+# ---------------------------------------------------------------------------
+pt_custom_error:
+  # `RAISE SQLSTATE 'PTnnn'` lets a function set an arbitrary HTTP status: the
+  # three chars after "PT" are parsed as the numeric status code. If they do
+  # not parse as a number, the status defaults to 500. The body is the
+  # standard envelope built from the PG message/detail/hint.
+  # Error.hs:646  (PT branch of pgErrorStatus)
+  status_from_code: "PT<nnn> -> HTTP nnn"
+  non_numeric_suffix: "PT40A and similar -> HTTP 500"
+  body: "standard {code,message,details,hint}; code is the literal SQLSTATE (e.g. 'PT402')"
+  source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L646
+
+# ---------------------------------------------------------------------------
+# RAISE SQLSTATE 'PGRST' — full response control
+# ---------------------------------------------------------------------------
+pgrst_custom_error:
+  # A function may `RAISE SQLSTATE 'PGRST'` to fully control the response.
+  # MESSAGE must be a JSON object; DETAIL must be a JSON object.
+  # Error.hs:647-650 (status), 562-595 (body), 510-515 (headers),
+  # 793-823 (the two parse types), 825 (parseRaisePGRST)
+  source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L825
+  message_json:
+    required: [code, message]
+    optional: [details, hint]
+    note: "Becomes the response body envelope verbatim; missing details/hint serialize as null."
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L806
+  detail_json:
+    required: [status, headers]
+    optional: [status_text]
+    behavior:
+      status:      "HTTP status code of the response."
+      status_text: "If present, becomes the HTTP reason phrase; if absent, the standard reason phrase for `status` is used."
+      headers:     "Map of extra response headers added verbatim (e.g. X-Header: str)."
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L816
+  parse_failures:
+    # If MESSAGE/DETAIL cannot be parsed as the required JSON objects,
+    # PostgREST returns a PGRST121 error (HTTP 500) describing the problem.
+    code: "PGRST121"
+    http: 500
+    cases:
+      - { when: "MESSAGE is not valid JSON object",
+          details: "Invalid JSON value for MESSAGE: '<raw>'",
+          hint: "MESSAGE must be a JSON object with obligatory keys: 'code', 'message' and optional keys: 'details', 'hint'." }
+      - { when: "DETAIL is not valid JSON object",
+          details: "Invalid JSON value for DETAIL: '<raw>'",
+          hint: "DETAIL must be a JSON object with obligatory keys: 'status', 'headers' and optional key: 'status_text'." }
+      - { when: "DETAIL is missing",
+          details: "DETAIL is missing in the RAISE statement",
+          hint: "DETAIL must be a JSON object with obligatory keys: 'status', 'headers' and optional key: 'status_text'." }
+    message: 'Could not parse JSON in the "RAISE SQLSTATE ''PGRST''" error'
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L491
+
+# ---------------------------------------------------------------------------
+# PGRSTxxx code namespace (selected, errors-area relevant)
+# ---------------------------------------------------------------------------
+# PGRST0xx connection, 1xx ApiRequest, 2xx SchemaCache, 3xx JWT, Xxx internal.
+# Error.hs:155-159
+pgrst_codes:
+  source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L155
+  notable:
+    - { code: "PGRST121", meaning: "Could not parse JSON in RAISE 'PGRST' error", http: 500 }  # Error.hs (PGRSTParseError)
+    - { code: "PGRST125", meaning: "Invalid path specified in request URL (InvalidResourcePath)", http: 404 }  # Error.hs:188,142
+    - { code: "PGRST205", meaning: "Could not find the table in the schema cache (TableNotFound)", http: 404 }  # Error.hs:262
+    - { code: "PGRST301", meaning: "JWT decode error", http: 401 }  # Error.hs:752
+    - { code: "PGRSTX00", meaning: "internal/unknown ResultError", http: 500 }  # Error.hs:568

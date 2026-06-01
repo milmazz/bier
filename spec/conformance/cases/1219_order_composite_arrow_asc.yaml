@@ -1,0 +1,19 @@
+id: 1219
+feature: ordering/composite/arrow_asc
+request:
+  method: GET
+  path: /fav_numbers?order=num->i.asc
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "num": { "r": 0.5, "i": 0.5 }, "person": "A" }
+    - { "num": { "r": 0.6, "i": 0.6 }, "person": "B" }
+notes: >
+  orders by a field of a composite-type column using the `->` arrow:
+  order=num->i.asc. Distinct grammar path from jsonb (arrow on a composite type).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L240

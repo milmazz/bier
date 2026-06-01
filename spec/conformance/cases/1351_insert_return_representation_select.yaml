@@ -1,0 +1,31 @@
+id: 1351
+feature: mutations/insert/columns-param-with-select-array
+request:
+  method: POST
+  path: /articles?columns=id,body&select=id,body
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation
+  body:
+    - { "id": 201, "body": "yyy", "smth": "here", "other": "stuff", "fake_id": 13 }
+    - { "id": 202, "body": "zzz", "garbage": "%%$&", "kkk": "jjj" }
+    - { "id": 203, "body": "aaa", "hey": "ho" }
+schema: mutations
+preconditions:
+  - "DELETE FROM test.articles WHERE id IN (201, 202, 203);"
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: return=representation
+  body_exact:
+    - { "id": 201, "body": "yyy" }
+    - { "id": 202, "body": "zzz" }
+    - { "id": 203, "body": "aaa" }
+notes: >-
+  Bulk array insert with ?columns=id,body: JSON keys NOT listed in ?columns
+  (smth, other, fake_id, garbage, kkk, hey) are ignored rather than rejected,
+  and ?select=id,body shapes the returned representation. The extra-keys-ignored
+  behavior REQUIRES ?columns (without it, unknown keys are treated as columns and
+  error). Mirrors InsertSpec.hs#L445-L455.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L445

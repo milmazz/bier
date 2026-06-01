@@ -1,0 +1,20 @@
+id: 1179
+feature: filters/json/jsonb_value
+request:
+  method: GET
+  path: '/jsonb_test?data->a=eq.{"b":2}'
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 1, "data": { "a": { "b": 2 } } }]
+notes: >
+  A jsonb sub-document obtained via -> can be compared with eq to a JSON
+  literal. Mirrors JsonOperatorSpec "can filter jsonb" (it-block starts at
+  L196); the data->a=eq.{"b":2} sub-assertion's get/shouldRespondWith spans
+  L200-L202. The L199 row of the same it-block is the unrelated
+  data=eq.{"e":1} assertion.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L202

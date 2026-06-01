@@ -1,0 +1,15 @@
+id: 1358
+feature: mutations/columns-param/blank-error
+request:
+  method: POST
+  path: /articles?columns=
+  headers: { Content-Type: application/json }
+  body: [{ "id": 204, "body": "yyy" }]
+schema: mutations
+preconditions: []
+expect:
+  status: 400
+  body_jsonpath:
+    - { path: "$.code", equals: "PGRST100" }
+notes: "Blank ?columns= -> 400 PGRST100 parse error."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L458

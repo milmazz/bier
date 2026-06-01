@@ -1,0 +1,16 @@
+id: 1386
+feature: mutations/upsert/put/error/no-pk-table
+request:
+  method: PUT
+  path: /no_pk?a=eq.one&b=eq.two
+  headers: { Content-Type: application/json }
+  body: [{ "a": "one", "b": "two" }]
+schema: mutations
+preconditions: []
+expect:
+  status: 405
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: { "message": "Filters must include all and only primary key columns with 'eq' operators", "code": "PGRST105", "details": null, "hint": null }
+notes: "PUT against a table with no pk -> 405 PGRST105."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L357

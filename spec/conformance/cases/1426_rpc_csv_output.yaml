@@ -1,0 +1,15 @@
+id: 1426
+feature: rpc/content-negotiation/csv
+request:
+  method: GET
+  path: /rpc/getitemrange?min=2&max=4
+  headers: { Accept: text/csv }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: text/csv; charset=utf-8
+  body_raw: "id\n3\n4"
+notes: "A SETOF proc renders as CSV under Accept: text/csv."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L135

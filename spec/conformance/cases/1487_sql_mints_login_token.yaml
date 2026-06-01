@@ -1,0 +1,16 @@
+id: 1487
+feature: auth/jwt/sql-mints-token
+request:
+  method: POST
+  path: /rpc/login
+  headers:
+    Accept: application/vnd.pgrst.object+json
+    Content-Type: application/json
+  body: { "id": "jdoe", "pass": "1234" }
+schema: auth
+preconditions: []
+expect:
+  status: 200
+  body_exact: { "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xuYW1lIjoicG9zdGdyZXN0X3Rlc3RfYXV0aG9yIiwiaWQiOiJqZG9lIn0.KO-0PGp_rU-utcDBP6qwdd-Th2Fk-ICVt01I7QtTDWs" }
+notes: "A SQL function can mint a JWT (jwt.sign) using the configured HS256 secret 'reallyreallyreallyreallyverysafe'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L53

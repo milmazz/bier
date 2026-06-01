@@ -1,0 +1,18 @@
+id: 1204
+feature: ordering/nulls/asc_nullslast
+request:
+  method: GET
+  path: /no_pk?order=a.asc.nullslast
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "0-2/*"
+  body_exact:
+    - { "a": "1", "b": "0" }
+    - { "a": "2", "b": "0" }
+    - { "a": null, "b": null }
+notes: "by a column asc with nulls last."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1099

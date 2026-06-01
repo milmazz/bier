@@ -1,0 +1,19 @@
+id: 1136
+feature: select/computed-relationship/many-to-one
+request:
+  method: GET
+  path: /videogames?select=name,designer:computed_designers(name)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"name":"Civilization I","designer":{"name":"Sid Meier"}},{"name":"Civilization II","designer":{"name":"Sid Meier"}},{"name":"Final Fantasy I","designer":{"name":"Hironobu Sakaguchi"}},{"name":"Final Fantasy II","designer":{"name":"Hironobu Sakaguchi"}}]
+notes: >
+  A computed relationship defined by a SETOF-returning function with ROWS 1
+  (computed_designers(test.videogames)) is embeddable as a many-to-one single
+  object, aliased here as "designer"
+  (ComputedRelsSpec.hs:15, "can define a many-to-one relationship with SETOF and ROWS 1 and embed").
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ComputedRelsSpec.hs#L15

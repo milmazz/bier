@@ -1,0 +1,24 @@
+id: 1516
+feature: errors/pgrst_code/invalid_resource_path
+request:
+  method: GET
+  path: /invalid/nested/paths
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 404
+  headers:
+    Proxy-Status: "PostgREST; error=PGRST125"
+    Content-Length: "96"
+  body_exact:
+    code: "PGRST125"
+    message: "Invalid path specified in request URL"
+    details: null
+    hint: null
+notes: >
+  A request URL with an invalid nested path returns PGRST125 (InvalidResourcePath)
+  with HTTP 404 and the Proxy-Status header. Demonstrates the standard envelope
+  for an ApiRequest-class error. Mirrors ErrorSpec.hs "works with ApiRequest
+  error".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ErrorSpec.hs#L33

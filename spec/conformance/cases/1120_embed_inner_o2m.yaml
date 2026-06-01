@@ -1,0 +1,15 @@
+id: 1120
+feature: select/embed/inner-join-o2m
+request:
+  method: GET
+  path: /entities?select=id,child_entities!inner(id)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"id":1,"child_entities":[{"id":1},{"id":2},{"id":4},{"id":5}]},{"id":2,"child_entities":[{"id":3},{"id":6}]}]
+notes: "!inner ignores empty array embeddings; entities 3 and 4 (no children) are dropped (EmbedInnerJoinSpec.hs:110)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L110

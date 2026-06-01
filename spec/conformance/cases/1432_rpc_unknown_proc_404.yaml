@@ -1,0 +1,18 @@
+id: 1432
+feature: rpc/error/unknown-proc
+request:
+  method: GET
+  path: /rpc/fake
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 404
+notes: >
+  Unknown proc name returns 404. The probe name is `fake`, taken verbatim from
+  the upstream "should fail with 404 on unknown proc name" test, which asserts a
+  bare 404 (`get "/rpc/fake" shouldRespondWith 404`) with NO body — so this case
+  asserts status only. The closest-proc hint behavior (a non-null PGRST202 body)
+  is a distinct feature exercised by the neighboring `sayhell` test (L208) and is
+  tracked separately as a missing-feature gap; it is not asserted for `fake`.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L206

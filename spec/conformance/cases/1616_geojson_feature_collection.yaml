@@ -1,0 +1,21 @@
+id: 1616
+feature: content_negotiation/geojson/feature-collection
+request:
+  method: GET
+  path: /shops
+  headers: { Accept: application/geo+json }
+schema: test
+preconditions:
+  - "Requires the postgis extension and the shops table (see content_negotiation.sql PostGIS block, kept commented because postgis may be unavailable)."
+expect:
+  status: 200
+  headers:
+    Content-Type: application/geo+json; charset=utf-8
+  body_exact:
+    type: FeatureCollection
+    features:
+      - { type: Feature, geometry: { type: Point, coordinates: [-71.10044, 42.373695] }, properties: { id: 1, address: "1369 Cambridge St" } }
+      - { type: Feature, geometry: { type: Point, coordinates: [-71.10543, 42.366432] }, properties: { id: 2, address: "757 Massachusetts Ave" } }
+      - { type: Feature, geometry: { type: Point, coordinates: [-71.081924, 42.36437] }, properties: { id: 3, address: "605 W Kendall St" } }
+notes: "Accept application/geo+json on a table with a geometry column returns a FeatureCollection. Mirrors PostGISSpec 'works for a table that has a geometry column'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PostGISSpec.hs#L16

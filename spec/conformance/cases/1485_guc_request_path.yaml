@@ -1,0 +1,16 @@
+id: 1485
+feature: auth/guc/request-path
+request:
+  method: POST
+  path: /rpc/get_guc_value
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+  body: { "name": "request.path" }
+schema: auth
+preconditions: []
+expect:
+  status: 200
+  body_exact: "/rpc/get_guc_value"
+notes: "request.path GUC carries the request path as a plain setting."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L935

@@ -1,0 +1,12 @@
+id: 1719
+feature: config/sources/nonexistent-file
+request:
+  kind: cli
+  flag: "does_not_exist.conf"
+schema: config
+config: {}
+preconditions: []
+expect:
+  exit_code: nonzero
+notes: "Pointing PostgREST at a nonexistent config file aborts startup. Mirrors cli fixture 'non-existant config file' (expect: error)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L22

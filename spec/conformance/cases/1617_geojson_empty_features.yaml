@@ -1,0 +1,18 @@
+id: 1617
+feature: content_negotiation/geojson/empty
+request:
+  method: GET
+  path: /shops?id=gt.3
+  headers: { Accept: application/geo+json }
+schema: test
+preconditions:
+  - "Requires the postgis extension and the shops table (see content_negotiation.sql PostGIS block)."
+expect:
+  status: 200
+  headers:
+    Content-Type: application/geo+json; charset=utf-8
+  body_exact:
+    type: FeatureCollection
+    features: []
+notes: "GeoJSON on no matching rows returns an empty features array but still a FeatureCollection. Mirrors PostGISSpec 'gives an empty features array on no rows'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PostGISSpec.hs#L36

@@ -1,0 +1,20 @@
+id: 1217
+feature: ordering/related/not_embedded_error
+request:
+  method: GET
+  path: /projects?select=id,clients(name)&order=clientsx(name).nullsfirst
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    code: "PGRST108"
+    details: null
+    hint: "Verify that 'clientsx' is included in the 'select' query parameter."
+    message: "'clientsx' is not an embedded resource in this request"
+notes: >
+  related order fails when the relation is not embedded in select; 400 PGRST108.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L141

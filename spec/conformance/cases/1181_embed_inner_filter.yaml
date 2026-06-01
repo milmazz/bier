@@ -1,0 +1,18 @@
+id: 1181
+feature: filters/embed/inner
+request:
+  method: GET
+  path: /entities?select=id,child_entities!inner(id)&child_entities.id=eq.1
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 1, "child_entities": [{ "id": 1 }] }]
+notes: >
+  Filtering an !inner-embedded resource filters the parent table too: only
+  entity 1 (which owns child_entity 1) survives. Mirrors EmbedInnerJoinSpec
+  one-to-many "filters source tables when the embedded table is filtered".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L130

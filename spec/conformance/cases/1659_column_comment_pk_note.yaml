@@ -1,0 +1,16 @@
+id: 1659
+feature: openapi/comments/column-description
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.definitions.child_entities.properties.id.description", equals: "child_entities id comment\n\nNote:\nThis is a Primary Key.<pk/>" }
+    - { path: "$.definitions.child_entities.properties.name.description", equals: "child_entities name comment. Can be longer than sixty-three characters long" }
+    - { path: "$.definitions.child_entities.required[0]", equals: "id" }
+notes: "PK column appends Note/<pk/> after the column COMMENT; required lists NOT NULL cols. Mirrors OpenApiSpec.hs:145-178"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L145

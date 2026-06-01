@@ -1,0 +1,15 @@
+id: 1116
+feature: select/embed/alias
+request:
+  method: GET
+  path: "/projects?id=eq.1&select=myId:id, name, project_client:clients(*), project_tasks:tasks(id, name)"
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"myId":1,"name":"Windows 7","project_client":{"id":1,"name":"Microsoft"},"project_tasks":[{"id":1,"name":"Design w7"},{"id":2,"name":"Code w7"}]}]
+notes: "requesting parents and children while renaming them (QuerySpec.hs:651)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L651

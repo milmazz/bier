@@ -1,0 +1,472 @@
+# Behavior model: config (every PostgREST config key + semantics)
+# PostgREST version pinned: v14.12
+#
+# Every entry carries a `source` URL with a line anchor into PostgREST's own
+# source or test suite. Behaviors that could not be traced to a real source
+# line are recorded under `gaps` at the bottom, NOT invented.
+#
+# Ground-truth priority: PostgREST tests > PostgREST source > docs.
+#
+# Config is sourced (later sources override earlier) from, in increasing
+# precedence: config file -> environment variables (PGRST_*) -> database
+# role settings (ALTER ROLE ... SET pgrst.*). See `precedence` below.
+#   - Env var name for a key is "PGRST_" <> uppercased key with '-' -> '_'.
+#     source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L432
+#   - DB setting name for a key is the key with '-' -> '_' under the `pgrst.`
+#     namespace (e.g. pgrst.db_max_rows).
+#     source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L430-L433
+
+area: config
+version: v14.12
+
+# ===========================================================================
+# Sources & precedence
+# ===========================================================================
+precedence:
+  # overrideFromDbOrEnvironment: dbConf <|> env var is checked first; only if
+  # neither is present does the value come from the config file.
+  order: ["config-file", "environment", "db-role-settings"]
+  db_or_env_over_file: true
+  source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L425-L433
+  # Config can be read entirely from the environment with no config file.
+  env_only_supported: true
+  env_only_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L151
+  # DB role settings (ALTER ROLE ... SET pgrst.*) override the config file when
+  # db-config is enabled; non-reloadable keys are ignored from DB settings.
+  db_settings_override_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L168
+  db_settings_fixture: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/db_config.sql#L5
+
+# ===========================================================================
+# Config keys: defaults, aliases, types, coercions
+# Defaults come from the parser combinator (Config.hs parser) and are verified
+# by the dumped-defaults golden file.
+#   defaults golden: test/io/configs/expected/defaults.config
+# ===========================================================================
+keys:
+  db-uri:
+    default: "postgresql://"
+    type: string
+    # A leading "@" means read the URI from that file path.
+    at_prefix_reads_file: true
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L279
+    file_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L516-L526
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L21
+
+  db-schemas:
+    default: ["public"]
+    type: comma-separated-nonempty
+    alias: db-schema
+    # Split on commas, each element stripped of surrounding whitespace.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L273
+    alias_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L274
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L17
+
+  db-anon-role:
+    default: null   # no anonymous role -> anonymous access disabled
+    type: string
+    # Dumped as "" when unset.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L254
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L2
+
+  db-extra-search-path:
+    default: ["public"]
+    type: comma-separated-emptyable
+    # Emptyable: empty string -> [] (not ["public"]).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L257
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L5
+
+  db-max-rows:
+    default: null   # no limit; dumped as ""
+    type: integer
+    alias: max-rows
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L259-L260
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L7
+    # HTTP-observable: caps the rows returned; Content-Range total is "*".
+    http_behavior_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QueryLimitedSpec.hs#L16
+
+  db-pre-request:
+    default: null
+    type: string  # qualified identifier (toQi)
+    alias: pre-request
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L268-L269
+
+  db-root-spec:
+    default: null
+    type: string  # qualified identifier
+    alias: root-spec
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L271-L272
+
+  db-pre-config:
+    default: null
+    type: string  # qualified identifier
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L276
+
+  db-config:
+    default: true
+    type: bool
+    # Default proven by the parser itself (fromMaybe True). No default_source is
+    # cited from defaults.config: that golden dumps db-config explicitly disabled
+    # (db-config = false), which is the test harness's setting, not the default.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L275
+
+  db-aggregates-enabled:
+    default: false
+    type: bool
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L253
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L1
+
+  db-plan-enabled:
+    default: false
+    type: bool
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L261
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L8
+
+  db-prepared-statements:
+    default: true
+    type: bool
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L270
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L15
+
+  db-channel:
+    default: "pgrst"
+    type: string
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L255
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L3
+
+  db-channel-enabled:
+    default: true
+    type: bool
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L256
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L4
+
+  db-hoisted-tx-settings:
+    default: ["statement_timeout", "plan_filter.statement_cost_limit", "default_transaction_isolation"]
+    type: comma-separated
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L258
+    default_list_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L461
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L6
+
+  db-pool:
+    default: 10
+    type: int
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L262
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L9
+
+  db-pool-acquisition-timeout:
+    default: 10
+    type: int
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L263
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L10
+
+  db-pool-max-lifetime:
+    default: 1800
+    type: int
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L264
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L11
+
+  db-pool-max-idletime:
+    default: 30
+    type: int
+    alias: db-pool-timeout
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L265-L266
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L12
+
+  db-pool-automatic-recovery:
+    default: true
+    type: bool
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L267
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L13
+
+  db-tx-end:
+    default: "commit"
+    type: enum
+    values: ["commit", "commit-allow-override", "rollback", "rollback-allow-override"]
+    # Maps to two booleans (rollbackAll, allowOverride). Invalid -> fatal.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L368-L377
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L20
+    invalid_is_fatal_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L54
+
+  jwt-secret:
+    default: null
+    type: string  # text secret, JWK, or JWKS; "@file" reads from file
+    # Text secret must be >= 32 chars; otherwise fatal.
+    min_length: 32
+    at_prefix_reads_file: true
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L284
+    min_length_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L511-L512
+    min_length_test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L280
+    file_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L469-L477
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L24
+
+  jwt-secret-is-base64:
+    default: false
+    type: bool
+    alias: secret-is-base64
+    # When true, the secret is base64-decoded (url-safe chars accepted) before
+    # use; invalid base64 is fatal.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L285-L287
+    decode_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L479-L488
+    invalid_base64_fatal_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L64
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L25
+
+  jwt-aud:
+    default: null
+    type: string-or-uri
+    # If the value contains ':', it must be a valid RFC 3986 URI, else fatal.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L282
+    validation_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L402-L414
+    invalid_uri_test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L269
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L22
+
+  jwt-role-claim-key:
+    default: '.role'   # dumped as .".role" -> .\"role\"
+    type: jspath
+    alias: role-claim-key
+    # Parsed as a JSPath; invalid expression is fatal.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L283
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L379-L383
+    invalid_test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L220
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L23
+
+  jwt-cache-max-entries:
+    default: 1000
+    type: int
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L288
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L26
+
+  log-level:
+    default: "error"
+    type: enum
+    values: ["crit", "error", "warn", "info", "debug"]
+    # Empty/missing -> error. Invalid -> fatal.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L357-L366
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L27
+    invalid_is_fatal_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L49
+
+  log-query:
+    default: false
+    type: bool
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L290
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L28
+
+  openapi-mode:
+    default: "follow-privileges"
+    type: enum
+    values: ["follow-privileges", "ignore-privileges", "disabled"]
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L341-L348
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L29
+    invalid_test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L232
+
+  openapi-security-active:
+    default: false
+    type: bool
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L292
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L30
+
+  openapi-server-proxy-uri:
+    default: null   # dumped as ""
+    type: uri
+    # Malformed proxy uri is fatal.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L293
+    validation_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L350-L355
+    invalid_test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L59
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L31
+
+  server-cors-allowed-origins:
+    default: null   # null -> allow all origins ("*"); dumped as ""
+    type: comma-separated
+    # Comma-split, each origin stripped. Empty string config -> allow all.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L294
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L385-L388
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L32
+    # HTTP-observable: matching Origin echoed; empty config -> "*".
+    http_match_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_io.py#L1299
+    http_empty_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_io.py#L1322
+    http_nomatch_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_io.py#L1361
+
+  server-host:
+    default: "!4"   # special value: all IPv4
+    type: string
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L295
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L33
+
+  server-port:
+    default: 3000
+    type: int
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L296
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L317-L318
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L34
+
+  server-trace-header:
+    default: null   # dumped as ""
+    type: string  # case-insensitive header name
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L297
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L35
+
+  server-timing-enabled:
+    default: false
+    type: bool
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L298
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L36
+
+  server-unix-socket:
+    default: null   # dumped as ""
+    type: string  # filepath; takes precedence over server-port
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L299
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L37
+
+  server-unix-socket-mode:
+    default: "660"   # octal 0o660 = 432 decimal
+    type: octal-string
+    # Must be valid octal in range 600..777, else fatal.
+    range: ["600", "777"]
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L300
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L328-L339
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L38
+    invalid_not_octal_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L29
+    invalid_below_range_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L34
+    invalid_above_range_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L39
+
+  admin-server-host:
+    default: "!4"   # falls back to server-host
+    type: string
+    alias: server-host
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L301-L302
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L39
+
+  admin-server-port:
+    default: null   # admin server disabled unless set; dumped as ""
+    type: int
+    # Must NOT equal server-port, else fatal.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L303
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L320-L326
+    default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/expected/defaults.config#L40
+    same_as_server_port_fatal_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L119
+
+  app.settings.*:
+    default: {}
+    type: subassoc-string
+    # Arbitrary app.settings.<name> become GUCs; can also be set via
+    # PGRST_APP_SETTINGS_<NAME> env vars.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L252
+    env_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L310-L315
+
+# ===========================================================================
+# Aliases (deprecated names accepted with lower precedence than canonical)
+# Verified by configs/aliases.config.
+# ===========================================================================
+aliases:
+  db-schema: db-schemas
+  max-rows: db-max-rows
+  pre-request: db-pre-request
+  root-spec: db-root-spec
+  db-pool-timeout: db-pool-max-idletime
+  role-claim-key: jwt-role-claim-key
+  secret-is-base64: jwt-secret-is-base64
+  server-host: admin-server-host   # admin-server-host falls back to server-host
+  # Canonical key wins if both present (optWithAlias tries canonical first).
+  precedence_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L390-L394
+  test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/aliases.config#L1
+
+# ===========================================================================
+# Type coercion rules
+# ===========================================================================
+coercion:
+  # Booleans accept True/true/TRUE/"true" and numeric (>0 is true).
+  bool_accepts_text_and_numeric: true
+  bool_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L444-L452
+  # Integers accept JSON numbers or numeric strings.
+  int_accepts_number_and_string: true
+  int_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L439-L442
+  # A value of wrong type falls back to the default (does not abort).
+  wrong_type_falls_back_to_default: true
+  wrong_type_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/types.config#L1
+  # Empty string for an optString key is treated as absent (mfilter (/= "")).
+  empty_string_is_absent: true
+  empty_string_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L396-L397
+
+# ===========================================================================
+# Fatal validations (process exits non-zero; --dump-config errors)
+# ===========================================================================
+fatal_validations:
+  jwt_secret_too_short:
+    message: "The JWT secret must be at least 32 characters long."
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L280
+    message_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L512
+  jwt_aud_invalid_uri:
+    message: "jwt-aud should be a string or a valid URI"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L269
+    message_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L414
+  invalid_openapi_mode:
+    message: "Invalid openapi-mode. Check your configuration."
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L232
+    message_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L348
+  invalid_role_claim_key:
+    message: "failed to parse role-claim-key value (<value>)"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L220
+    message_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L383
+  invalid_log_level:
+    message: "Invalid logging level. Check your configuration."
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L366
+    test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L49
+  invalid_tx_end:
+    message: "Invalid transaction termination. Check your configuration."
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L377
+    test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L54
+  invalid_socket_mode_not_octal:
+    message: "Invalid server-unix-socket-mode: not an octal"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L335
+    test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L29
+  invalid_socket_mode_out_of_range:
+    message: "Invalid server-unix-socket-mode: needs to be between 600 and 777"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L338
+    test_below_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L34
+    test_above_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L39
+  malformed_openapi_proxy_uri:
+    message: "Malformed proxy uri, a correct example: https://example.com:8443/basePath"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L354
+    test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L59
+  invalid_jwt_secret_base64:
+    # jwt-secret-is-base64=true with a non-base64 secret aborts.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L64
+    decode_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L482-L483
+  admin_port_equals_server_port:
+    message: "admin-server-port cannot be the same as server-port"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L119
+    message_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L325
+
+# ===========================================================================
+# Special host values (server-host / admin-server-host)
+# ===========================================================================
+special_host_values:
+  values: ["*4", "!4", "*6", "!6", "*"]
+  source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L235
+
+# ===========================================================================
+# CLI flags affecting config
+# ===========================================================================
+cli:
+  dump_config:
+    flag: "--dump-config"
+    # Prints the fully-resolved config (defaults + overrides) and exits 0.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L136
+  dump_config_stable:
+    # Re-reading a dumped config and re-dumping is idempotent.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L189
+  example_flag:
+    flag: "--example"
+    # Prints the example config file template.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L624-L625
+  nonexistent_config_file_fatal:
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L22
+
+# ===========================================================================
+# Gaps: behaviors not traceable to a single source line in v14.12, or out of
+# scope for black-box conformance.
+# ===========================================================================
+gaps:
+  - "Connection-string augmentation (addFallbackAppName / addTargetSessionAttrs) is documented only via doctests in Config.hs#L549-L607; effect is on the wire to Postgres, not observable via HTTP, so no conformance case."
+  - "db-pre-config / db-pre-config hook semantics are exercised only by the db-settings golden file (no-defaults-with-db-other-authenticator.config); a runtime HTTP assertion was not located in v14.12 test/spec."
+  - "internal-schema-cache-* keys (Config.hs#L306-L308) are internal test hooks; not part of the public docs ToC, no dedicated conformance case."
+  - "log-query HTTP-observable effect (Config.hs#L290) is logged to stderr only; covered by test_io.py log tests, not assertable as an HTTP response in this harness."
+  - "server-unix-socket / server-unix-socket-mode runtime socket binding is not exercisable through the HTTP conformance runner (requires a unix socket transport)."

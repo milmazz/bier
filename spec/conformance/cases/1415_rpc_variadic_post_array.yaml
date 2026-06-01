@@ -1,0 +1,16 @@
+id: 1415
+feature: rpc/args/variadic-post
+request:
+  method: POST
+  path: /rpc/variadic_param
+  headers: { Content-Type: application/json, Accept: application/json }
+  body: { "v": ["hi", "hello", "there"] }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: ["hi", "hello", "there"]
+notes: "A VARIADIC parameter is supplied via POST as a JSON array under the param name."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L707

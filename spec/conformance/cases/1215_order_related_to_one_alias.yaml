@@ -1,0 +1,23 @@
+id: 1215
+feature: ordering/related/to_one_alias
+request:
+  method: GET
+  path: /projects?select=id,client:clients(name)&order=client(name).asc
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 3, "client": { "name": "Apple" } }
+    - { "id": 4, "client": { "name": "Apple" } }
+    - { "id": 1, "client": { "name": "Microsoft" } }
+    - { "id": 2, "client": { "name": "Microsoft" } }
+    - { "id": 5, "client": null }
+notes: >
+  related order references the embed's alias: order=client(name).asc where the
+  embed is aliased client:clients(name); nulls follow PostgreSQL default for asc
+  (last).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L27

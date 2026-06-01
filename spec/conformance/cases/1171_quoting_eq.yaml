@@ -1,0 +1,17 @@
+id: 1171
+feature: filters/quoting/eq
+request:
+  method: GET
+  path: '/grandchild_entities?or=(name.eq."(grandchild,entity,4)",name.eq."(grandchild,entity,5)")&select=id'
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 4 }, { "id": 5 }]
+notes: >
+  Double quotes protect the reserved characters ( ) , inside an eq value in a
+  logic group. Mirrors AndOrParamsSpec "eq can have quotes".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L203

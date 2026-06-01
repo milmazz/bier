@@ -1,0 +1,17 @@
+id: 1391
+feature: mutations/max-affected/strict-within
+request:
+  method: DELETE
+  path: /items?id=lt.10
+  headers:
+    Prefer: handling=strict, max-affected=10
+schema: mutations
+preconditions:
+  - "DELETE FROM test.items;"
+  - "INSERT INTO test.items (id) SELECT generate_series(1, 15);"
+expect:
+  status: 204
+  headers:
+    Preference-Applied: handling=strict, max-affected=10
+notes: "9 matching rows under the cap of 10 -> 204; Preference-Applied echoes both."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L132

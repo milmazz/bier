@@ -1,0 +1,26 @@
+id: 1186
+feature: filters/embed/null_filtering
+request:
+  method: GET
+  path: /entities?select=name,child_entities()&child_entities=is.null
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "name": "entity 3" }
+    - { "name": null }
+notes: >
+  Null filtering on an embedded resource: filtering the embed directly with
+  is.null performs an anti-join, keeping only PARENT rows that have NO related
+  embedded row. child_entities has parent_ids {1,1,2,1,1,2}, so only entities
+  with id in {1,2} have children; entity 3 and the unnamed entity 4 have none.
+  The empty embed projection child_entities() drops the related array from the
+  body. Documented at resource_embedding.rst "Null filtering on Embedded
+  Resources" (anti-join example, L1028-1036). Mirrors RelatedQueriesSpec
+  "related conditions through null operator on embed" > "works on a
+  one-to-many relationship" (is.null branch, L185-192).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L185

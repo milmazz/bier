@@ -1,0 +1,19 @@
+id: 1129
+feature: select/aggregate/count-no-field
+request:
+  method: GET
+  path: /entities?select=count()
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+config:
+  db-aggregates-enabled: true
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"count":4}]
+notes: >
+  count() returns the count of all rows under key "count" when no other field
+  is selected. Requires db-aggregates-enabled=true (AggregateFunctionsSpec.hs:16).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L16

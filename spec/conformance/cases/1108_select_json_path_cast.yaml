@@ -1,0 +1,15 @@
+id: 1108
+feature: select/json-path/cast
+request:
+  method: GET
+  path: /complex_items?id=eq.1&select=settings->foo->>int::integer
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"int":1}]
+notes: "obtains a json subfield two levels with casting (int) (JsonOperatorSpec.hs:42)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L42

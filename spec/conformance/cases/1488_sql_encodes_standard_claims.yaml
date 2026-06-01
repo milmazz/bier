@@ -1,0 +1,16 @@
+id: 1488
+feature: auth/jwt/sql-encodes-claims
+request:
+  method: POST
+  path: /rpc/jwt_test
+  headers:
+    Accept: application/vnd.pgrst.object+json
+    Content-Type: application/json
+  body: {}
+schema: auth
+preconditions: []
+expect:
+  status: 200
+  body_exact: { "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJqb2UiLCJzdWIiOiJmdW4iLCJhdWQiOiJldmVyeW9uZSIsImV4cCI6MTMwMDgxOTM4MCwibmJmIjoxMzAwODE5MzgwLCJpYXQiOjEzMDA4MTkzODAsImp0aSI6ImZvbyIsInJvbGUiOiJwb3N0Z3Jlc3RfdGVzdCIsImh0dHA6Ly9wb3N0Z3Jlc3QuY29tL2ZvbyI6dHJ1ZX0.G2REtPnOQMUrVRDA9OnkPJTd8R0tf4wdYOlauh1E2Ek" }
+notes: "SQL function encodes custom and standard claims into a token (jwt_test)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L61

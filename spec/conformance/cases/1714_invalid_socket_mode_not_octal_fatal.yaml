@@ -1,0 +1,15 @@
+id: 1714
+feature: config/validation/socket-mode-not-octal
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_SERVER_UNIX_SOCKET_MODE: "800"
+preconditions: []
+expect:
+  exit_code: nonzero
+  stderr_contains: "Invalid server-unix-socket-mode: not an octal"
+notes: "server-unix-socket-mode '800' is not a valid octal -> fatal. Mirrors cli fixture 'invalid server-unix-socket-mode not octal'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L29

@@ -1,0 +1,18 @@
+id: 1260
+feature: pagination/range_header/open_ended
+request:
+  method: GET
+  path: /items?order=id
+  headers:
+    Accept: application/json
+    Range-Unit: items
+    Range: 0-
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "0-14/*"
+  body_exact: [{"id":1},{"id":2},{"id":3},{"id":4},{"id":5},{"id":6},{"id":7},{"id":8},{"id":9},{"id":10},{"id":11},{"id":12},{"id":13},{"id":14},{"id":15}]
+notes: "Open-ended Range '0-' means offset 0 with no upper bound; returns all rows, status 200. Mirrors RangeSpec.hs:422 (which asserts 200); Content-Range derived from RangeQuery.hs:111 (offset 0, full window, no count)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L422

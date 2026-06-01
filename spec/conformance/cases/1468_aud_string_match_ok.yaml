@@ -1,0 +1,17 @@
+id: 1468
+feature: auth/audience/string-match
+request:
+  method: GET
+  path: /authors_only
+  headers: { Accept: application/json }
+  jwt:
+    sign_with: hs256_test_secret
+    payload: { "exp": 9999999999, "role": "postgrest_test_author", "id": "jdoe", "aud": "youraudience" }
+schema: auth
+config:
+  jwt-aud: youraudience
+preconditions: []
+expect:
+  status: 200
+notes: "With jwt-aud=youraudience, a string aud that matches -> 200."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L17

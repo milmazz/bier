@@ -1,0 +1,15 @@
+id: 1068
+feature: operators/plfts
+request:
+  method: GET
+  path: /tsearch?text_search_vector=plfts.The%20Fat%20Rats
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "text_search_vector": "'ate':3 'cat':2 'fat':1 'rat':4" }]
+notes: "plfts -> `@@ plainto_tsquery(...)`. Mirrors QuerySpec.hs 'finds matches with plainto_tsquery'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L197

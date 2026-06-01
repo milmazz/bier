@@ -1,0 +1,20 @@
+id: 1023
+feature: url_grammar/path/rpc-profile
+request:
+  method: GET
+  path: /rpc/get_parents_below?id=6&select=id,name,children(id,name)
+  headers:
+    Accept: application/json
+    Accept-Profile: v2
+schema: multi
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Profile: v2
+  body_exact:
+    - { "id": 3, "name": "parent v2-3", "children": [{ "id": 1, "name": "child v2-3" }] }
+    - { "id": 4, "name": "parent v2-4", "children": [] }
+notes: "Same /rpc/<fn> path resolves to the routine in the Accept-Profile-selected schema (v2), and embedding resolves within that schema. Mirrors MultipleSchemaSpec 'succeeds in calling the v2 schema proc and embedding'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L194

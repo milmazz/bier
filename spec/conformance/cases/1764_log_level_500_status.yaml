@@ -1,0 +1,20 @@
+id: 1764
+feature: observability/log-level/500-is-logged-at-error
+request:
+  method: GET
+  path: /
+  headers: { Authorization: "Bearer any.invalid.token" }
+schema: observability
+config:
+  log-level: error
+preconditions: []
+expect:
+  status: 500
+notes: >
+  Drives the log-level access-log filter: at log-level=error only responses
+  with status >= 500 are logged. A request presenting a token when the server
+  lacks a JWT secret yields 500, which is the single line logged at error
+  level. The conformance case asserts the status that the filter keys on; the
+  actual stdout line emission is verified at the io level (see gaps in
+  observability.yaml). Mirrors test_io.py:test_log_level (error branch).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_io.py#L727

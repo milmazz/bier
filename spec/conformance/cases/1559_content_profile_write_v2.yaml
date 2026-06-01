@@ -1,0 +1,19 @@
+id: 1559
+feature: headers/profile/content-profile-write
+request:
+  method: POST
+  path: /children?select=id,parent(*)
+  headers:
+    Content-Profile: v2
+    Prefer: "return=representation"
+    Content-Type: application/json
+  body: { "id": 0, "name": "child v2-3", "parent_id": 3 }
+schema: headers
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Profile: v2
+  body_exact: [{ "id": 0, "parent": { "id": 3, "name": "parent v2-3" } }]
+notes: "Content-Profile: v2 targets schema v2 on a write; echoed in Content-Profile. Mirrors the exact it-block at MultipleSchemaSpec.hs:139-148 (\"succeeds inserting on the v2 schema and returning its parent\")."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L139

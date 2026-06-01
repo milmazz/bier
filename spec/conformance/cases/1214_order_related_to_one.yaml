@@ -1,0 +1,22 @@
+id: 1214
+feature: ordering/related/to_one
+request:
+  method: GET
+  path: /projects?select=id,clients(name)&order=clients(name).nullsfirst
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 5, "clients": null }
+    - { "id": 3, "clients": { "name": "Apple" } }
+    - { "id": 4, "clients": { "name": "Apple" } }
+    - { "id": 1, "clients": { "name": "Microsoft" } }
+    - { "id": 2, "clients": { "name": "Microsoft" } }
+notes: >
+  related order on a many-to-one relationship: order=clients(name).nullsfirst
+  orders projects by the embedded client's name, nulls first.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L16

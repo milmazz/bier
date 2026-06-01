@@ -1,0 +1,14 @@
+id: 1106
+feature: select/cast/unknown-type-error
+request:
+  method: GET
+  path: /complex_items?select=id::fakecolumntype
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 400
+  headers: {}
+  body_exact: {"hint":null,"details":null,"code":"42704","message":"type \"fakecolumntype\" does not exist"}
+notes: "fails on bad casting (wrong cast type) -> PG SQLSTATE 42704 (QuerySpec.hs:609)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L609

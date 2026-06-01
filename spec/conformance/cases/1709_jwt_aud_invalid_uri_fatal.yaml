@@ -1,0 +1,15 @@
+id: 1709
+feature: config/validation/jwt-aud-invalid-uri
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_JWT_AUD: "foo://%%$$^^.com"
+preconditions: []
+expect:
+  exit_code: nonzero
+  stderr_contains: "jwt-aud should be a string or a valid URI"
+notes: "jwt-aud containing ':' must be a valid RFC 3986 URI; otherwise startup aborts. Mirrors test_cli.py:test_jwt_aud_config_set_to_invalid_uri."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L269

@@ -1,0 +1,21 @@
+id: 1137
+feature: select/computed-relationship/inner-filter
+request:
+  method: GET
+  path: /videogames?select=name,designer:computed_designers!inner(name)&designer.name=like.*Hironobu*
+  headers:
+    Accept: application/json
+    Prefer: count=exact
+expect:
+  status: 200
+  headers:
+    Content-Range: 0-1/2
+  body_exact: [{"name":"Final Fantasy I","designer":{"name":"Hironobu Sakaguchi"}},{"name":"Final Fantasy II","designer":{"name":"Hironobu Sakaguchi"}}]
+schema: test
+preconditions: []
+notes: >
+  A computed relationship works with !inner and a filter on the embedded
+  resource: only videogames whose computed designer matches name like
+  *Hironobu* are returned, and count=exact yields Content-Range 0-1/2
+  (ComputedRelsSpec.hs:51, within "works with !inner and count=exact").
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ComputedRelsSpec.hs#L51

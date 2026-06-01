@@ -1,0 +1,18 @@
+id: 1010
+feature: url_grammar/profile/unacceptable
+request:
+  method: GET
+  path: /parents
+  headers:
+    Accept: application/json
+    Accept-Profile: unknown
+schema: multi
+preconditions: []
+expect:
+  status: 406
+  body_jsonpath:
+    - { path: "$.code", equals: PGRST106 }
+    - { path: "$.message", equals: "Invalid schema: unknown" }
+    - { path: "$.details", equals: null }
+notes: "Accept-Profile not in db-schemas -> UnacceptableSchema (PGRST106, 406) with hint listing exposed schemas. Mirrors MultipleSchemaSpec unknown schema. hint text depends on exact db-schemas list so only code/message asserted here"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L76

@@ -1,0 +1,21 @@
+id: 1257
+feature: pagination/limit_offset/offset_out_of_bounds
+request:
+  method: GET
+  path: /items?offset=100
+  headers:
+    Accept: application/json
+    Prefer: count=exact
+schema: pagination
+preconditions: []
+expect:
+  status: 416
+  headers:
+    Content-Range: "*/15"
+  body_exact:
+    message: "Requested range not satisfiable"
+    code: "PGRST103"
+    details: "An offset of 100 was requested, but there are only 15 rows."
+    hint: null
+notes: "With count=exact, an offset past the last row is 416 PGRST103 OutOfBounds; Content-Range '*/<total>'. Mirrors RangeSpec.hs:296; details from Error.hs:225."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L296

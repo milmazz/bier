@@ -1,0 +1,12 @@
+id: 1621
+feature: content_negotiation/openapi/root-unsupported-406
+request:
+  method: GET
+  path: /
+  headers: { Accept: text/csv }
+schema: test
+preconditions: []
+expect:
+  status: 406
+notes: "An unsupported Accept (text/csv) on the root path returns 406; the root only produces openapi+json / json / */*. Mirrors OpenApiSpec 'should respond to openapi request with unsupported media type with 406'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L36

@@ -1,0 +1,18 @@
+id: 1371
+feature: mutations/delete/select-rename-cast
+request:
+  method: DELETE
+  path: /complex_items?id=eq.3&select=ciId:id::text,ciName:name
+  headers:
+    Prefer: return=representation
+schema: mutations
+# Ensure complex_items id=3 ('Three') exists so the DELETE returns exactly one
+# row, regardless of run order. Reset just this row.
+preconditions:
+  - "DELETE FROM test.complex_items WHERE id = 3;"
+  - "INSERT INTO test.complex_items (id, name, settings, arr_data) VALUES (3, 'Three', '{\"foo\":{\"int\":1,\"bar\":\"baz\"}}', '{1,2,3}');"
+expect:
+  status: 200
+  body_exact: [{ "ciId": "3", "ciName": "Three" }]
+notes: "DELETE return=rep with ?select supports column rename + cast."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L70

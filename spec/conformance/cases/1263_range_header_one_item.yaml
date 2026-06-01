@@ -1,0 +1,17 @@
+id: 1263
+feature: pagination/range_header/single_item
+request:
+  method: GET
+  path: /items?order=id
+  headers:
+    Accept: application/json
+    Range-Unit: items
+    Range: 0-0
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "0-0/*"
+notes: "One-item Range request (0-0) returns a single row, Content-Range '0-0/*'. Mirrors RangeSpec.hs:435."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L435

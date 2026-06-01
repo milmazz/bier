@@ -1,0 +1,24 @@
+id: 1266
+feature: pagination/range_header/nonzero_start_empty_with_count
+request:
+  method: GET
+  path: /menagerie
+  headers:
+    Accept: application/json
+    Range-Unit: items
+    Range: 1-2
+    Prefer: count=exact
+schema: pagination
+preconditions: []
+expect:
+  status: 416
+  headers:
+    Content-Range: "*/0"
+    Content-Length: "144"
+  body_exact:
+    message: "Requested range not satisfiable"
+    code: "PGRST103"
+    details: "An offset of 1 was requested, but there are only 0 rows."
+    hint: null
+notes: "Range with nonzero start over empty table + count=exact (rangeHdrsWithCount) -> 416, Content-Range '*/0'. Mirrors RangeSpec.hs:464."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L464

@@ -1,0 +1,17 @@
+id: 1173
+feature: filters/json/arrow
+request:
+  method: GET
+  path: /json_table?data->foo->>bar=eq.baz
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "data": { "id": 1, "foo": { "bar": "baz" } } }]
+notes: >
+  Filter on a nested json key with ->/->>. Mirrors JsonOperatorSpec
+  "can filter by properties inside json column".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L155

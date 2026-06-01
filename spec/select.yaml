@@ -1,0 +1,400 @@
+# Behavior model for the "select" feature area of PostgREST v14.12.
+#
+# Scope: columns, alias, ::cast, JSON paths ->/->>, embeds (one-to-many,
+# many-to-one, one-to-one, many-to-many via junction), !inner/!left,
+# disambiguation hints, spread ...embed, computed columns, computed
+# relationships (SETOF functions), aggregate functions.
+#
+# Every entry carries a `source` URL with a line anchor into PostgREST v14.12.
+# Behaviors that could not be traced to a real source line are recorded under
+# spec/select.yaml `gaps` (see end of file) and NOT modeled as claims.
+#
+# Convention for `source_url`: raw.githubusercontent.com line anchors, pinned to
+# the v14.12 tag, matching the form mandated by spec/case.schema.json (the lint
+# gate for conformance cases). Each #Lnn lands on the `it`/`spec` line of the
+# upstream HSpec test that demonstrates the behavior; line numbers were
+# re-derived directly from the raw v14.12 files (not GitHub blob HTML). To view
+# in a browser, replace `raw.githubusercontent.com/PostgREST/postgrest/v14.12/`
+# with `github.com/PostgREST/postgrest/blob/v14.12/`; the same #Lnn highlights
+# the cited test.
+
+area: select
+version: v14.12
+fixture: spec/conformance/fixtures/select.sql
+schema: test
+
+entries:
+  # --- plain columns -------------------------------------------------------
+  - entry_id: select.absent
+    claim: >
+      When the `select` query parameter is absent, all columns of the resource
+      are returned (SELECT *).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L576
+    source_line: 576
+    cases: [1100]
+
+  - entry_id: select.single_column
+    claim: >
+      `select=<col>` returns only that column for every row.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L584
+    source_line: 584
+    cases: [1101]
+
+  - entry_id: select.dash_in_name
+    claim: >
+      A dash `-` is accepted inside a column name in the select list
+      (e.g. `field-with_sep`).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L580
+    source_line: 580
+    cases: [1102]
+
+  # --- alias ---------------------------------------------------------------
+  - entry_id: select.alias
+    claim: >
+      `select=<alias>:<col>` renames a column in the response. The alias
+      becomes the JSON key.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L589
+    source_line: 589
+    cases: [1103]
+
+  # --- cast ----------------------------------------------------------------
+  - entry_id: select.cast
+    claim: >
+      `select=<col>::<type>` casts the column to a Postgres type before
+      serialization (e.g. `id::text` returns the integer as a JSON string).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L594
+    source_line: 594
+    cases: [1104]
+
+  - entry_id: select.alias_and_cast
+    claim: >
+      Alias and cast combine: `select=<alias>:<col>::<type>`.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L599
+    source_line: 599
+    cases: [1105]
+
+  - entry_id: select.cast_underscore_numbers
+    claim: >
+      Cast target types may contain underscores and digits (e.g. `::int`,
+      `::_int4` for an array type).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L616
+    source_line: 616
+    cases: []
+
+  - entry_id: select.cast_unknown_type
+    claim: >
+      Casting to a nonexistent type yields HTTP 400 with PG SQLSTATE 42704
+      ("type ... does not exist") surfaced in the error body.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L609
+    source_line: 609
+    cases: [1106]
+
+  # --- JSON paths ----------------------------------------------------------
+  - entry_id: select.json_arrow_text_key
+    claim: >
+      `->` navigates into a json/jsonb subfield keeping json type; `->>`
+      extracts the field as text. The last segment's key becomes the JSON key
+      unless aliased. Two-level path `settings->foo->>bar`.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L32
+    source_line: 32
+    cases: [1107]
+
+  - entry_id: select.json_path_with_cast
+    claim: >
+      A JSON path may be followed by a cast: `settings->foo->>int::integer`
+      returns the extracted text coerced to the target type.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L42
+    source_line: 42
+    cases: [1108]
+
+  - entry_id: select.json_path_alias
+    claim: >
+      A JSON path can be aliased: `select=<alias>:settings->foo->>bar`.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L37
+    source_line: 37
+    cases: [1109]
+
+  - entry_id: select.json_array_index
+    claim: >
+      A non-negative integer segment in a JSON path is treated as an array
+      index: `data->>0::int` extracts element 0 as text then casts.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L84
+    source_line: 84
+    cases: [1110]
+
+  - entry_id: select.json_bad_syntax
+    claim: >
+      Malformed JSON path syntax in select yields HTTP 400 with code PGRST100
+      and a "failed to parse select parameter" message.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L296
+    source_line: 296
+    cases: [1111]
+
+  # --- embeds: many-to-one -------------------------------------------------
+  - entry_id: select.embed_many_to_one
+    claim: >
+      Embedding a parent (many-to-one) returns the related row as a JSON
+      object (or null when the FK is null). `projects?select=id,name,clients(*)`.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L623
+    source_line: 623
+    cases: [1112]
+
+  - entry_id: select.embed_missing_parent_null
+    claim: >
+      Rows whose FK has no matching parent still appear, with the embed set to
+      null (default left join).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L660
+    source_line: 660
+    cases: [1113]
+
+  # --- embeds: one-to-many -------------------------------------------------
+  - entry_id: select.embed_one_to_many
+    claim: >
+      Embedding children (one-to-many) returns a JSON array. Rows with no
+      children get an empty array `[]`, not null.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L665
+    source_line: 665
+    cases: [1114]
+
+  - entry_id: select.embed_nested_two_levels
+    claim: >
+      Embeds nest arbitrarily: `clients?select=id,projects(id,tasks(id))`
+      returns children-of-children.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L669
+    source_line: 669
+    cases: [1115]
+
+  - entry_id: select.embed_alias
+    claim: >
+      An embedded resource can be aliased with `<alias>:<relation>(...)`.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L651
+    source_line: 651
+    cases: [1116]
+
+  # --- embeds: one-to-one --------------------------------------------------
+  - entry_id: select.embed_one_to_one_pk_as_fk
+    claim: >
+      A one-to-one relationship established by sharing the primary key as the
+      foreign key (students_info's (id, code) PK is also its FK to students) is
+      embedded as a single JSON object, not an array, in either direction.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L716
+    source_line: 716
+    cases: [1134]
+
+  - entry_id: select.embed_one_to_one_unique_fk
+    claim: >
+      A one-to-one relationship established by a UNIQUE-constraint FK
+      (capital.country_id is UNIQUE and references country) is embedded as a
+      single JSON object, not an array, in either direction.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L724
+    source_line: 724
+    cases: [1135]
+
+  # --- embeds: many-to-many ------------------------------------------------
+  - entry_id: select.embed_many_to_many
+    claim: >
+      A many-to-many relationship through a junction table is embedded as a
+      JSON array of the far-side rows: `tasks?select=id,users(id)`.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L674
+    source_line: 674
+    cases: [1117]
+
+  # --- !inner / !left ------------------------------------------------------
+  - entry_id: select.embed_inner_m2o
+    claim: >
+      `<relation>!inner(...)` turns the embed into an inner join: source rows
+      with a null many-to-one embedding are dropped (vs default left join).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L17
+    source_line: 17
+    cases: [1118]
+
+  - entry_id: select.embed_left_explicit
+    claim: >
+      `<relation>!left(...)` is the explicit form of the default left join;
+      null/empty embeddings are retained. No dedicated `it` block exists for
+      `!left`; it is asserted by the `clients!left(id)` request at L23 inside
+      the shared "ignores null embeddings while the default left join doesn't"
+      it-block (its `it` line is L17). L23 is cited because it is the exact line
+      demonstrating `!left`.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L23
+    source_line: 23
+    cases: [1119]
+
+  - entry_id: select.embed_inner_o2m
+    claim: >
+      For one-to-many, `!inner` drops source rows whose child array would be
+      empty (vs default left join which keeps them with []).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L110
+    source_line: 110
+    cases: [1120]
+
+  - entry_id: select.embed_inner_filter_propagates
+    claim: >
+      A filter on an `!inner` embedded table filters the source table rows as
+      well (e.g. `projects?select=id,clients!inner(id)&clients.id=eq.1`).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L36
+    source_line: 36
+    cases: [1121]
+
+  # --- disambiguation hints ------------------------------------------------
+  - entry_id: select.hint_by_fk_name
+    claim: >
+      An embed can be disambiguated by FK constraint name with
+      `<relation>!<fk>(...)`; the renamed FK constraint name also works as a
+      target directly (e.g. `client(...)`).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedDisambiguationSpec.hs#L177
+    source_line: 177
+    cases: [1122]
+
+  - entry_id: select.hint_by_column
+    claim: >
+      An embed can be disambiguated by the FK column name:
+      `projects?select=id,name,client_id(id,name)` embeds the parent and the
+      embed key is the column name.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedDisambiguationSpec.hs#L257
+    source_line: 257
+    cases: [1123]
+
+  - entry_id: select.hint_unknown_fk
+    claim: >
+      An embed hint that does not match any relationship yields HTTP 400 with
+      code PGRST200 ("Could not find a relationship ... using the hint ...").
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedDisambiguationSpec.hs#L218
+    source_line: 218
+    cases: [1124]
+
+  - entry_id: select.ambiguous_300
+    claim: >
+      When more than one relationship matches an embed, PostgREST returns HTTP
+      300 Multiple Choices with code PGRST201, a `details` array enumerating
+      candidate relationships, and a `hint` listing disambiguated targets.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedDisambiguationSpec.hs#L16
+    source_line: 16
+    cases: [1125]
+
+  # --- spread embeds -------------------------------------------------------
+  - entry_id: select.spread_many_to_one
+    claim: >
+      `...<relation>(...)` spreads a to-one embed's columns into the parent
+      object instead of nesting them under a key.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SpreadQueriesSpec.hs#L15
+    source_line: 15
+    cases: [1126]
+
+  - entry_id: select.spread_one_to_many_arrays
+    claim: >
+      Spreading a one-to-many relationship flattens each selected child column
+      into a JSON array on the parent (e.g. names of all child processes).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SpreadQueriesSpec.hs#L95
+    source_line: 95
+    cases: []
+
+  - entry_id: select.spread_drop_junction
+    claim: >
+      In a many-to-many embed, spreading the far table inside the junction
+      embed (`users_tasks(...tasks(*))`) drops the junction columns from the
+      output rows.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SpreadQueriesSpec.hs#L80
+    source_line: 80
+    cases: [1127]
+
+  # --- computed columns ----------------------------------------------------
+  - entry_id: select.computed_column
+    claim: >
+      A computed column (SQL function taking the table row type) can be
+      selected like a normal column: `items?select=id,always_true`.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L761
+    source_line: 761
+    cases: [1128]
+
+  # --- computed relationships ----------------------------------------------
+  - entry_id: select.computed_rel_many_to_one
+    claim: >
+      A computed relationship defined by a SETOF-returning function (with ROWS 1)
+      on a table's row type, e.g. computed_designers(test.videogames), is
+      embeddable like a real relationship and returns a single JSON object for
+      the many-to-one case. Supports aliasing (`designer:computed_designers`).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ComputedRelsSpec.hs#L15
+    source_line: 15
+    cases: [1136]
+
+  - entry_id: select.computed_rel_inner_filter
+    claim: >
+      A computed relationship supports `!inner` and filtering on the embedded
+      resource; the embedded filter propagates to the source table and
+      count=exact reports the filtered total.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ComputedRelsSpec.hs#L51
+    source_line: 51
+    cases: [1137]
+
+  # --- aggregate functions (require db-aggregates-enabled = true) ----------
+  - entry_id: select.agg_count_no_field
+    claim: >
+      `select=count()` returns the count of all rows under key "count" when no
+      other field is selected. Alias and cast apply (`cnt:count()`,
+      `count()::text`).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L16
+    source_line: 16
+    cases: [1129]
+
+  - entry_id: select.agg_function_on_field
+    claim: >
+      `select=<col>.sum()` (also avg/min/max/count) aggregates a field; the
+      JSON key is the aggregate name unless aliased.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L38
+    source_line: 38
+    cases: [1130]
+
+  - entry_id: select.agg_group_by_plain_fields
+    claim: >
+      Plain (non-aggregated) fields selected alongside an aggregate become an
+      implicit GROUP BY; one result row per distinct group.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L53
+    source_line: 53
+    cases: [1131]
+
+  - entry_id: select.agg_alias_and_cast
+    claim: >
+      Aggregates support an output alias and a result cast:
+      `total_charged:invoice_total.sum()::text` ("allows you to cast the result
+      of the aggregate"); the alias-only form is at L69.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L76
+    source_line: 76
+    cases: [1132]
+
+  - entry_id: select.agg_in_embed
+    claim: >
+      Aggregates apply within an embedded resource:
+      `projects?select=name,project_invoices(invoice_total.sum())`.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L100
+    source_line: 100
+    cases: [1133]
+
+  - entry_id: select.agg_disallowed
+    claim: >
+      When db-aggregates-enabled is false (PostgREST default), use of an
+      aggregate function returns HTTP 400 with code PGRST123 ("Use of aggregate
+      functions is not allowed").
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L312
+    source_line: 312
+    cases: []
+
+# Behaviors observed in PostgREST v14.12 within this area but NOT modeled as
+# black-box conformance cases (recorded per the HARD RULE rather than guessed).
+gaps:
+  - >
+    spread one-to-many producing JSON arrays (entry select.spread_one_to_many_arrays)
+    is modeled but lacks a case: it needs the factories/processes fixture.
+    Source: test/spec/Feature/Query/SpreadQueriesSpec.hs#L95.
+  - >
+    db-aggregates-enabled=false PGRST123 (entry select.agg_disallowed) is
+    modeled but not cased: the conformance runner must drive PostgREST/Bier
+    with aggregates disabled, a config concern outside select.sql.
+  - >
+    JSON path negative array indexes (data->>-1::int) are traced at
+    JsonOperatorSpec.hs#L271 but not given a separate case; covered indirectly
+    by the array-index entry.
+  - >
+    "obtains a json subfield one level with casting" using ->>foo::json
+    (JsonOperatorSpec.hs#L17) returns the still-text value parsed as json; this
+    nuance is traced but not cased to avoid coupling to PG json formatting.

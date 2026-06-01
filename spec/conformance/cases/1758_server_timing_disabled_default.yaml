@@ -1,0 +1,22 @@
+id: 1758
+feature: observability/server-timing/disabled-default
+request:
+  method: GET
+  path: /organizations?id=eq.6
+  headers: { Accept: application/json }
+schema: observability
+config:
+  server-timing-enabled: false
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  headers_absent: [Server-Timing]
+  body_exact: [{ "id": 6, "name": "Oscorp", "referee": 3, "auditor": 4, "manager_id": 6 }]
+notes: >
+  server-timing-enabled defaults to false; when disabled the Server-Timing
+  header is omitted entirely (App.hs only appends it when
+  configServerTimingEnabled). Mirrors App.hs:210 and the default in
+  Config.hs:728.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/App.hs#L210

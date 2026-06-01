@@ -1,0 +1,15 @@
+id: 1450
+feature: auth/anonymous/permission-denied
+request:
+  method: GET
+  path: /authors_only
+  headers: { Accept: application/json }
+schema: auth
+preconditions: []
+expect:
+  status: 401
+  headers:
+    WWW-Authenticate: Bearer
+  body_exact: { "hint": null, "details": null, "code": "42501", "message": "permission denied for table authors_only" }
+notes: "Anonymous role lacks SELECT on authors_only -> 42501 surfaced as 401 with WWW-Authenticate: Bearer."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L17

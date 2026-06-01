@@ -1,0 +1,15 @@
+id: 1712
+feature: config/validation/invalid-log-level
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_LOG_LEVEL: "never"
+preconditions: []
+expect:
+  exit_code: nonzero
+  stderr_contains: "Invalid logging level. Check your configuration."
+notes: "log-level must be one of crit|error|warn|info|debug. Mirrors cli fixture 'invalid log-level'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L49

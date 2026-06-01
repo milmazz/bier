@@ -1,0 +1,30 @@
+id: 1305
+feature: representations/post/return-headers-only-auto-pk
+request:
+  method: POST
+  path: /auto_incrementing_pk
+  headers:
+    Prefer: "return=headers-only"
+    Content-Type: application/json
+  body: { "non_nullable_string": "not null" }
+schema: representations
+preconditions:
+  - "ALTER SEQUENCE test.auto_incrementing_pk_id_seq RESTART WITH 2;"
+expect:
+  status: 201
+  headers:
+    Content-Length: "0"
+    Location: "/auto_incrementing_pk?id=eq.2"
+    Preference-Applied: "return=headers-only"
+  headers_absent: [Content-Type]
+  body_exact: ""
+notes: >-
+  headers-only Location reflects the auto-generated serial PK value (id=2).
+  Mirrors InsertSpec.hs#L199-L209. PARAPHRASE: the upstream test makes the
+  inserted id deterministic by calling POST /rpc/reset_sequence with
+  {"name":"auto_incrementing_pk_id_seq","value":2} (InsertSpec.hs#L189-L196).
+  That RPC's body is `ALTER SEQUENCE <name> RESTART WITH <value>`
+  (reset_sequence in schema.sql#L454-L462), so this precondition runs the
+  equivalent ALTER SEQUENCE ... RESTART WITH 2 directly instead of through the
+  RPC; the next nextval() therefore yields 2, matching the cited Location.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L199

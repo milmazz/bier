@@ -1,0 +1,17 @@
+id: 1062
+feature: operators/ilike
+request:
+  method: GET
+  path: /simple_pk?k=ilike.xy*&order=extra.asc
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "k": "xyyx", "extra": "u" }
+    - { "k": "xYYx", "extra": "v" }
+notes: "ilike is case-insensitive; `*` rewritten to `%`. Mirrors QuerySpec.hs 'matches with ilike'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L143

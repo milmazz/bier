@@ -1,0 +1,18 @@
+id: 1322
+feature: representations/delete/return-minimal
+request:
+  method: DELETE
+  path: /items?id=eq.3&select=id
+  headers:
+    Prefer: "return=minimal"
+schema: representations
+preconditions: []
+expect:
+  status: 204
+  headers:
+    Content-Range: "*/*"
+    Preference-Applied: "return=minimal"
+  headers_absent: [Content-Type, Content-Length]
+  body_exact: ""
+notes: "DELETE return=minimal yields 204, empty body, &select ignored, and echoes Preference-Applied: return=minimal. Mirrors DeleteSpec.hs:49."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L49

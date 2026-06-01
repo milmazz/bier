@@ -1,0 +1,25 @@
+id: 1811
+feature: domain_representations/write/post_parse_format_selected
+request:
+  method: POST
+  path: /datarep_todos?select=id,label_color
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Prefer: return=representation
+  body_json:
+    {
+      "id": 5,
+      "name": "party",
+      "label_color": "#001100",
+      "due_at": "2018-01-03T11:00:00+00",
+    }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 5, "label_color": "#001100" }]
+notes: "POST body color value parsed via CREATE CAST (json AS color); the selected column is re-formatted via color AS json on return=representation (round trip). Mirrors InsertSpec.hs 'parses values in POST body and formats individually selected values in return=representation'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L824

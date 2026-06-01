@@ -1,0 +1,19 @@
+id: 1220
+feature: ordering/composite/arrow_text_desc
+request:
+  method: GET
+  path: /fav_numbers?order=num->>i.desc
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "num": { "r": 0.6, "i": 0.6 }, "person": "B" }
+    - { "num": { "r": 0.5, "i": 0.5 }, "person": "A" }
+notes: >
+  orders by a composite-type field's text form using the `->>` arrow:
+  order=num->>i.desc.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L244

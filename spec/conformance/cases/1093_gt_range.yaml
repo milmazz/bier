@@ -1,0 +1,15 @@
+id: 1093
+feature: operators/gt/range
+request:
+  method: GET
+  path: /ranges?range=gt.[8,11]&select=id
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 4 }]
+notes: "gt -> `>` on numrange. Mirrors AndOrParamsSpec.hs 'can handle range operators'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L130

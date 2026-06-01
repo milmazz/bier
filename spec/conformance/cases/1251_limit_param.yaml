@@ -1,0 +1,15 @@
+id: 1251
+feature: pagination/limit_offset/limit
+request:
+  method: GET
+  path: /items?select=id&order=id.asc&limit=3
+  headers: { Accept: application/json }
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "0-2/*"
+  body_exact: [{"id":1},{"id":2},{"id":3}]
+notes: "Top level limit with query parameter. Mirrors RangeSpec.hs:189."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L189

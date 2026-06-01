@@ -1,0 +1,22 @@
+id: 1561
+feature: headers/location/headers-only
+request:
+  method: POST
+  path: /projects?select=name,client_id
+  headers:
+    Prefer: "return=headers-only"
+    Content-Type: application/json
+  body: { "id": 11, "name": "New Project", "client_id": 2 }
+schema: headers
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Location: "/projects?id=eq.11"
+    Content-Range: "*/*"
+    Content-Length: "0"
+    Preference-Applied: "return=headers-only"
+  headers_absent: [Content-Type]
+  body_exact: null
+notes: "return=headers-only -> 201 with Location keyed by PK, no body. Mirrors InsertSpec.hs:130-143."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L130

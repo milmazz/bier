@@ -1,0 +1,19 @@
+id: 1025
+feature: url_grammar/reserved-characters/quoted-in-values
+request:
+  method: GET
+  path: /w_or_wo_comma_names?name=in.(%22Hebdon,%20John%22,%22Williams,%20Mary%22,%22Smith,%20Joseph%22)
+  headers:
+    Accept: application/json
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "name": "Hebdon, John" }
+    - { "name": "Williams, Mary" }
+    - { "name": "Smith, Joseph" }
+notes: 'Reserved characters (here the comma) inside an in.() filter value must be wrapped in double quotes, percent-encoded as %22, so the comma is read as part of the value rather than as the list separator. Mirrors QuerySpec "values with quotes in IN and NOT IN" / "succeeds when only quoted values are present" (the %22 is the URL form of the literal double quote shown in the upstream get string).'
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1293

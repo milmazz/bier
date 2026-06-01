@@ -1,0 +1,23 @@
+id: 1510
+feature: errors/raise/pgrst_standard_status_text
+request:
+  method: GET
+  path: /rpc/raise_sqlstate_test3
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 404
+  status_text: "Not Found"
+  headers:
+    X-Header: "str"
+  body_exact:
+    code: "123"
+    message: "ABC"
+    details: null
+    hint: null
+notes: >
+  RAISE 'PGRST' DETAIL with status 404 and NO status_text -> the standard HTTP
+  reason phrase "Not Found" is used. Mirrors RpcSpec.hs "get message and
+  details from PGRST raise and checks standard status message".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1386

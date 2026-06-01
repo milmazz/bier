@@ -1,0 +1,15 @@
+id: 1808
+feature: domain_representations/filter/text_parser
+request:
+  method: GET
+  path: /datarep_todos?select=id,due_at&label_color=eq.000100
+  headers: { Accept: application/json }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 2, "due_at": "2018-01-03T00:00:00Z" }]
+notes: "CREATE CAST (text AS color) parses the query-string filter value 000100 before comparison. Mirrors QuerySpec.hs 'uses text parser on value for filter given through query parameters'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1610

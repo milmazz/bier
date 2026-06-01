@@ -1,0 +1,18 @@
+id: 1091
+feature: operators/gte/range
+request:
+  method: GET
+  path: /ranges?range=gte.[2,3]&select=id
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 2 }
+    - { "id": 3 }
+    - { "id": 4 }
+notes: "gte -> `>=` on numrange. Mirrors AndOrParamsSpec.hs 'can handle range operators'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L134

@@ -1,0 +1,19 @@
+id: 1608
+feature: content_negotiation/csv/insert-null
+request:
+  method: POST
+  path: /no_pk
+  headers:
+    Content-Type: text/csv
+    Accept: text/csv
+    Prefer: return=representation
+  body: "a,b\nNULL,foo"
+schema: test
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: text/csv; charset=utf-8
+  body_raw: "a,b\n,foo"
+notes: "The CSV NULL token becomes an empty cell on representation output. Mirrors InsertSpec 'can post nulls'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L661

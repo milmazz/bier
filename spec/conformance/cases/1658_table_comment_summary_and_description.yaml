@@ -1,0 +1,15 @@
+id: 1658
+feature: openapi/comments/table-summary-description
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.paths['/grandchild_entities'].get.summary", equals: "grandchild_entities summary" }
+    - { path: "$.paths['/grandchild_entities'].get.description", equals: "grandchild_entities description\nthat spans\nmultiple lines" }
+notes: "Multi-line table COMMENT -> summary (1st line) + description (rest). Mirrors OpenApiSpec.hs:89-91"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L89

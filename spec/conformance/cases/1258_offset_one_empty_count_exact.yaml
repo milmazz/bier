@@ -1,0 +1,22 @@
+id: 1258
+feature: pagination/limit_offset/offset_out_of_bounds_empty_table
+request:
+  method: GET
+  path: /menagerie?offset=1
+  headers:
+    Accept: application/json
+    Prefer: count=exact
+schema: pagination
+preconditions: []
+expect:
+  status: 416
+  headers:
+    Content-Range: "*/0"
+    Content-Length: "144"
+  body_exact:
+    message: "Requested range not satisfiable"
+    code: "PGRST103"
+    details: "An offset of 1 was requested, but there are only 0 rows."
+    hint: null
+notes: "Nonzero start with no items + count=exact -> 416, Content-Range '*/0', Content-Length 144. Mirrors RangeSpec.hs:281."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L281

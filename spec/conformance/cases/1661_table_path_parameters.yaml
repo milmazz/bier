@@ -1,0 +1,26 @@
+id: 1661
+feature: openapi/table/path-parameters
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.paths['/child_entities'].get.parameters[0]['$ref']", equals: "#/parameters/rowFilter.child_entities.id" }
+    - { path: "$.paths['/child_entities'].get.parameters[1]['$ref']", equals: "#/parameters/rowFilter.child_entities.name" }
+    - { path: "$.paths['/child_entities'].get.parameters[2]['$ref']", equals: "#/parameters/rowFilter.child_entities.parent_id" }
+    - { path: "$.paths['/child_entities'].get.parameters[3]['$ref']", equals: "#/parameters/select" }
+    - { path: "$.paths['/child_entities'].get.parameters[4]['$ref']", equals: "#/parameters/order" }
+    - { path: "$.paths['/child_entities'].get.parameters[5]['$ref']", equals: "#/parameters/range" }
+    - { path: "$.paths['/child_entities'].get.parameters[6]['$ref']", equals: "#/parameters/rangeUnit" }
+    - { path: "$.paths['/child_entities'].get.parameters[7]['$ref']", equals: "#/parameters/offset" }
+    - { path: "$.paths['/child_entities'].get.parameters[8]['$ref']", equals: "#/parameters/limit" }
+    - { path: "$.paths['/child_entities'].get.parameters[9]['$ref']", equals: "#/parameters/preferCount" }
+    - { path: "$.paths['/child_entities'].post.parameters[0]['$ref']", equals: "#/parameters/body.child_entities" }
+    - { path: "$.paths['/child_entities'].post.parameters[1]['$ref']", equals: "#/parameters/select" }
+    - { path: "$.paths['/child_entities'].post.parameters[2]['$ref']", equals: "#/parameters/preferPost" }
+notes: "GET/POST parameter $ref ordering for a table. Mirrors OpenApiSpec.hs:93-116"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L93

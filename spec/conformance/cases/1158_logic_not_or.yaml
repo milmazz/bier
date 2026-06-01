@@ -1,0 +1,15 @@
+id: 1158
+feature: filters/logical/not
+request:
+  method: GET
+  path: /entities?not.or=(id.eq.1,id.eq.2)&select=id
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 3 }, { "id": 4 }]
+notes: 'not.or= negates the whole group. Mirrors AndOrParamsSpec "can negate simple logic".'
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L21

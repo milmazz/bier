@@ -1,0 +1,21 @@
+id: 1720
+feature: config/precedence/env-overrides-file
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  file:
+    db-max-rows: 100
+    log-level: "warn"
+  env:
+    PGRST_DB_MAX_ROWS: "999"
+    PGRST_LOG_LEVEL: "debug"
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'db-max-rows = 999'
+    - 'log-level = "debug"'
+notes: "overrideFromDbOrEnvironment checks env (and db settings) before the config file value, so the env wins. Source Config.hs#L425-L433."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L425

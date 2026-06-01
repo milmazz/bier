@@ -1,0 +1,15 @@
+id: 1253
+feature: pagination/limit_offset/limit_zero
+request:
+  method: GET
+  path: /items?select=id&limit=0
+  headers: { Accept: application/json }
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "*/*"
+  body_exact: []
+notes: "limit=0 succeeds and returns an empty array with Content-Range '*/*'. Mirrors RangeSpec.hs:260."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L260

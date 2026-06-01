@@ -1,0 +1,18 @@
+id: 1380
+feature: mutations/upsert/post/empty-payload
+request:
+  method: POST
+  path: /articles
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation, resolution=merge-duplicates
+  body: []
+schema: mutations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: []
+notes: "Empty array payload inserts nothing -> 200 (not 201) with []."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L77

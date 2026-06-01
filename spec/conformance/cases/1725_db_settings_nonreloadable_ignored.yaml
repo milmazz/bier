@@ -1,0 +1,21 @@
+id: 1725
+feature: config/sources/db-role-settings-nonreloadable-ignored
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_DB_CONFIG: "true"
+    PGUSER: db_config_authenticator
+    PGRST_SERVER_PORT: "3000"
+  preconditions_sql:
+    - "CREATE ROLE db_config_authenticator LOGIN NOINHERIT"
+    - "ALTER ROLE db_config_authenticator SET pgrst.server_port = 'ignored'"
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'server-port = 3000'
+notes: "Non-reloadable keys (e.g. server-port) set via ALTER ROLE pgrst.* are ignored; the value comes from env/file. Mirrors db_config.sql non-reloadable block (#L52)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/db_config.sql#L52

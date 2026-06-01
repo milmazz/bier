@@ -1,0 +1,22 @@
+id: 1180
+feature: filters/json/bad_syntax
+request:
+  method: GET
+  path: /json_arr?select=data->>--34
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    code: PGRST100
+    message: '"failed to parse select parameter (data->>--34)" (line 1, column 9)'
+    details: unexpected "-" expecting digit
+    hint: null
+notes: >
+  Malformed json path is a 400 PGRST100. Exercises the shared json-path
+  parser (pJsonPath) used by both select and filters. Mirrors JsonOperatorSpec
+  "gives a meaningful error on bad syntax".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L296

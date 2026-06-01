@@ -1,0 +1,16 @@
+id: 1460
+feature: auth/claims/exp-not-number
+request:
+  method: GET
+  path: /authors_only
+  headers: { Accept: application/json }
+  jwt:
+    sign_with: hs256_test_secret
+    payload: { "exp": "invalid", "role": "postgrest_test_author" }
+schema: auth
+preconditions: []
+expect:
+  status: 401
+  body_exact: { "code": "PGRST303", "details": null, "hint": null, "message": "The JWT 'exp' claim must be a number" }
+notes: "Non-numeric exp -> PGRST303. Token must be signed with the HS256 test secret 'reallyreallyreallyreallyverysafe' (generateJWT)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L140

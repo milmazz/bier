@@ -1,0 +1,27 @@
+id: 1378
+feature: mutations/upsert/post/on-conflict-compound-unique
+request:
+  method: POST
+  path: /compound_unique?on_conflict=key1,key2
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation, resolution=merge-duplicates
+  body:
+    - { "key1": 1, "key2": 1, "value": "B" }
+    - { "key1": 1, "key2": 2, "value": "C" }
+schema: mutations
+# (1,1) MUST exist (updated to B) and (1,2) MUST be absent (inserted) so the
+# status is 201. Reset to the seed for order-independence.
+preconditions:
+  - "DELETE FROM test.compound_unique;"
+  - "INSERT INTO test.compound_unique (key1, key2, value) VALUES (1, 1, 'A');"
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: resolution=merge-duplicates, return=representation
+  body_exact:
+    - { "key1": 1, "key2": 1, "value": "B" }
+    - { "key1": 1, "key2": 2, "value": "C" }
+notes: "?on_conflict=key1,key2 targets a compound UNIQUE; (1,1) updated, (1,2) inserted -> 201."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L96

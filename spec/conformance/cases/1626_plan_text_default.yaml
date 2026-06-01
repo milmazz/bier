@@ -1,0 +1,17 @@
+id: 1626
+feature: content_negotiation/plan/text-default
+request:
+  method: GET
+  path: /projects?id=in.(1,2,3)
+  headers: { Accept: application/vnd.pgrst.plan }
+schema: test
+preconditions:
+  - "Requires db-plan-enabled = true."
+expect:
+  status: 200
+  headers:
+    Content-Type: 'application/vnd.pgrst.plan+text; for="application/json"; charset=utf-8'
+notes: >-
+  A bare application/vnd.pgrst.plan (no +suffix) defaults to the +text format
+  and for=application/json. Mirrors PlanSpec 'outputs in text format by default'.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PlanSpec.hs#L285

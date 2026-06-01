@@ -1,0 +1,19 @@
+id: 1810
+feature: domain_representations/filter/text_parser_in_predicate
+request:
+  method: GET
+  path: /datarep_todos?select=id,due_at&label_color=in.(000100,01E240)
+  headers: { Accept: application/json }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    [
+      { "id": 2, "due_at": "2018-01-03T00:00:00Z" },
+      { "id": 3, "due_at": "2018-01-01T14:12:34.123456Z" },
+    ]
+notes: "The text AS color parser is applied to each value of an in.(...) predicate. Mirrors QuerySpec.hs 'uses text parser for filter with IN predicates'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1624

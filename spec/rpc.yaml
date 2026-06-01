@@ -1,0 +1,360 @@
+# RPC (/rpc/<fn>) behavior model — PostgREST v14.12
+#
+# Scope: GET vs POST invocation, scalar vs SETOF returns, single-row,
+# variadic, named & default args, void returns, table-valued functions,
+# OUT/INOUT params, and the Prefer: params=single-object gap.
+#
+# Ground-truth priority: PostgREST tests > source > docs.
+# Every entry carries a `source` URL with a line anchor.
+#
+# Fixture: spec/conformance/fixtures/rpc.sql (schema `test`).
+
+version: v14.12
+area: rpc
+
+entries:
+  - id: rpc.path
+    claim: >
+      The path /rpc/<fn> resolves to a database routine (function). getResource
+      maps ["rpc", pName] to ResourceRoutine pName.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest.hs#L126
+    source_line: 126
+
+  - id: rpc.method.get_is_read
+    claim: >
+      A GET request to /rpc/<fn> invokes the routine as a read (InvRead False),
+      running in a read-only (SQL.Read) transaction regardless of declared
+      volatility.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest.hs#L133
+    source_line: 133
+
+  - id: rpc.method.post_is_invoke
+    claim: >
+      A POST request to /rpc/<fn> invokes the routine (Inv). The transaction mode
+      depends on volatility: Stable/Immutable -> Read, Volatile -> Write
+      (txMode case at Plan.hs L203-207).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Plan.hs#L203
+    source_line: 203
+
+  - id: rpc.method.head_is_read
+    claim: >
+      A HEAD request to /rpc/<fn> invokes the routine as read (InvRead True) and
+      returns headers with no body.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest.hs#L132
+    source_line: 132
+
+  - id: rpc.method.unsupported
+    claim: >
+      Any method other than GET/HEAD/POST/OPTIONS on /rpc/<fn> yields 405 with
+      body {"code":"PGRST101","message":"Cannot use the <METHOD> method on RPC",
+      "details":null,"hint":null}. The (ResourceRoutine _, _) -> InvalidRpcMethod
+      catch-all dispatch is at ApiRequest.hs L136.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest.hs#L136
+    source_line: 136
+
+  - id: rpc.method.unsupported.message
+    claim: >
+      The DELETE-on-RPC error message is exactly "Cannot use the DELETE method on
+      RPC" (Error.hs message clause L195); the status is status405 (L125) and the
+      code is PGRST101 (L164).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L195
+    source_line: 195
+
+  - id: rpc.get.volatile_rejected
+    claim: >
+      A GET request to a VOLATILE proc runs in a read-only transaction; Postgres
+      raises SQLSTATE 25006 (read_only_sql_transaction) which PostgREST maps to
+      HTTP 405 in pgErrorStatus ("25006" -> HTTP.status405).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L612
+    source_line: 612
+
+  - id: rpc.args.get_query_string
+    claim: >
+      With GET (InvRead), function arguments come from the query string
+      (DirectArgs $ toRpcParams proc qsParams'). The args resolution case is the
+      'let args = case (invMethod, iContentMediaType)' block at Plan.hs L199-202.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Plan.hs#L199
+    source_line: 199
+
+  - id: rpc.args.post_json_body
+    claim: >
+      With POST (Inv) and a non-form media type, arguments come from the JSON
+      request body (JsonArgs $ payRaw <$> iPayload); top-level object keys map to
+      named parameters. Args resolution case at Plan.hs L202.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Plan.hs#L202
+    source_line: 202
+
+  - id: rpc.args.post_first_object_only
+    claim: >
+      When a POST body is an array of objects, only the first object is used to
+      bind the function arguments (add_them with array body returns "3").
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L859
+    source_line: 859
+
+  - id: rpc.args.named
+    claim: >
+      Named arguments are bound by name; e.g. add_them(a,b) takes a and b from
+      the query string or body (add_them?a=3&b=4 -> 7).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L98
+    source_line: 98
+
+  - id: rpc.args.defaults
+    claim: >
+      Arguments with a DEFAULT value may be omitted; the database default is used.
+      three_defaults(a,b,c) called with only b=4 returns 1+4+3=8.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L764
+    source_line: 764
+
+  - id: rpc.args.noparams
+    claim: >
+      A proc with no parameters can be called with GET (no query string) or POST
+      (empty body treated as empty JSON object).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L653
+    source_line: 653
+
+  - id: rpc.args.variadic.post_array
+    claim: >
+      A VARIADIC parameter is supplied via POST as a JSON array under the param
+      name; variadic_param({"v":["hi","hello","there"]}) returns that array.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L706
+    source_line: 706
+
+  - id: rpc.args.variadic.get_repeated
+    claim: >
+      With GET, a VARIADIC parameter is supplied via repeated query params
+      (?v=hi&v=there). Zero occurrences uses the DEFAULT (empty array).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L712
+    source_line: 712
+
+  - id: rpc.args.repeated_non_variadic
+    claim: >
+      For a non-VARIADIC scalar parameter, repeated query params take the last
+      value; sayhello?name=ignored&name=world returns "Hello, world".
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L750
+    source_line: 750
+
+  - id: rpc.return.scalar
+    claim: >
+      A function returning a single scalar (int/text/etc.) responds with the bare
+      JSON scalar (not wrapped in an array). add_them?a=3&b=4 returns 7.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L98
+    source_line: 98
+
+  - id: rpc.return.scalar.count
+    claim: >
+      Functions returning a single scalar/domain/composite report exact count 1
+      (Content-Range 0-0/1) when Prefer count=exact is requested.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L98
+    source_line: 98
+
+  - id: rpc.return.text
+    claim: >
+      A function returning text responds with a JSON string; sayhello returns
+      "Hello, world".
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L405
+    source_line: 405
+
+  - id: rpc.return.array
+    claim: >
+      A function returning a scalar array (e.g. integer[]) responds with a JSON
+      array; ret_array returns [1,2,3].
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L415
+    source_line: 415
+
+  - id: rpc.return.setof_scalar
+    claim: >
+      A function returning SETOF scalar responds with a JSON array of scalars;
+      ret_setof_integers returns [1,2,3].
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L420
+    source_line: 420
+
+  - id: rpc.return.setof_table
+    claim: >
+      A function returning SETOF <table> responds with a JSON array of row
+      objects; getitemrange(min=2,max=4) returns [{"id":3},{"id":4}].
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L119
+    source_line: 119
+
+  - id: rpc.return.empty_rowset
+    claim: >
+      A SETOF function yielding no rows responds with an empty JSON array [].
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L394
+    source_line: 394
+
+  - id: rpc.return.composite
+    claim: >
+      A function returning a composite type in the exposed schema responds with a
+      single JSON object; ret_point_2d returns {"x":10,"y":5}.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L446
+    source_line: 446
+
+  - id: rpc.return.void
+    claim: >
+      A function returning void responds 204 with no Content-Type and no
+      Content-Length / body.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L467
+    source_line: 467
+
+  - id: rpc.return.out_single
+    claim: >
+      A function with a single OUT parameter returns a single JSON object keyed by
+      the OUT name; single_out_param?num=5 returns {"num_plus_one":6}.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L670
+    source_line: 670
+
+  - id: rpc.return.inout_single
+    claim: >
+      A function with a single INOUT parameter returns a single JSON object keyed
+      by that name; single_inout_param?num=2 returns {"num":3}.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L679
+    source_line: 679
+
+  - id: rpc.return.out_many
+    claim: >
+      A function with many OUT parameters returns a single JSON object with one
+      key per OUT param; many_out_params returns
+      {"my_json":{"a":1,"b":"two"},"num":3,"str":"four"}.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L684
+    source_line: 684
+
+  - id: rpc.return.table_single_col
+    claim: >
+      A function with a single-column TABLE return responds with a JSON array of
+      objects keyed by the column; single_column_table_return returns [{"a":"A"}].
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L695
+    source_line: 695
+
+  - id: rpc.return.table_multi_col
+    claim: >
+      A function with a multi-column TABLE return responds with a JSON array of
+      multi-key objects; multi_column_table_return returns [{"a":"A","b":"B"}].
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L700
+    source_line: 700
+
+  - id: rpc.shape.select
+    claim: >
+      The select query parameter shapes the response of a table-valued/SETOF proc
+      the same way as on a table; getproject?id=1&select=id,name limits columns
+      ("select works on the first level" it-block at L314, GET request at L317).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L317
+    source_line: 317
+
+  - id: rpc.shape.filter
+    claim: >
+      Horizontal filters apply to the rows returned by a SETOF/table-valued proc;
+      getallprojects?id=gt.1&id=lt.5&select=id returns [{"id":2},{"id":3},{"id":4}]
+      ("can filter proc results" it-block at L296, GET request at L300).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L300
+    source_line: 300
+
+  - id: rpc.shape.limit
+    claim: >
+      limit/offset apply to a SETOF proc result and set Content-Range; the result
+      reflects the window ("can limit proc results" it-block at L304, GET at L309).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L309
+    source_line: 309
+
+  - id: rpc.count.exact_setof
+    claim: >
+      Prefer count=exact on a SETOF proc returns an exact total in Content-Range
+      (0-4/5 for getallprojects). "includes exact count if requested" it-block at
+      L84, HEAD request at L85.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L85
+    source_line: 85
+
+  - id: rpc.csv
+    claim: >
+      A SETOF proc can be rendered as CSV via Accept: text/csv; the response
+      Content-Type is text/csv; charset=utf-8 ("returns CSV" it-block at L127,
+      GET request at L135).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L135
+    source_line: 135
+
+  - id: rpc.notfound.unknown_proc
+    claim: >
+      An unknown proc name returns 404 with code PGRST202 and a message of the
+      form "Could not find the function <schema>.<name> without parameters in the
+      schema cache" (sayhell -> hint "Perhaps you meant to call the function
+      test.sayhello").
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L208
+    source_line: 208
+
+  - id: rpc.notfound.unknown_args
+    claim: >
+      Unknown argument names cause a 404 PGRST202; args are not silently ignored.
+      add_them?a=1&b=2&smthelse=blabla returns 404.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L235
+    source_line: 235
+
+  - id: rpc.overloaded.no_args
+    claim: >
+      Overloaded procs (same name, different argument signatures) are dispatched
+      by the supplied arguments. With no args, overloaded() resolves to the
+      SETOF int variant and returns [1,2,3].
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L786
+    source_line: 786
+
+  - id: rpc.overloaded.two_int_args
+    claim: >
+      overloaded?a=1&b=2 dispatches to the overloaded(a int, b int) variant by
+      argument arity/names and returns the scalar 3.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L791
+    source_line: 791
+
+  - id: rpc.overloaded.three_text_args
+    claim: >
+      overloaded?a=1&b=2&c=3 dispatches to the overloaded(a text, b text, c text)
+      variant and returns the concatenated text "123".
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L794
+    source_line: 794
+
+  - id: rpc.single_unnamed_param.json_post
+    claim: >
+      A function with a single UNNAMED json/jsonb parameter receives the ENTIRE
+      POST body as that argument; the body is passed whole rather than being
+      destructured into named parameters. unnamed_json_param posted {"A":1,"B":2,
+      "C":3} echoes that object back. This mechanism (unnamed-param detection) is
+      distinct from the deprecated Prefer: params=single-object header.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1149
+    source_line: 1149
+
+  - id: rpc.single_unnamed_param.named_rejects_body
+    claim: >
+      The whole-body-as-single-arg behavior applies only when the single json
+      parameter is UNNAMED. A function whose single json parameter is NAMED
+      (named_json_param(data json)) does not receive the body whole; posting
+      {"A":1,"B":2,"C":3} is read as named params A,B,C, which do not match, and
+      the single-unnamed-json/jsonb fallback also finds no match, yielding 404
+      PGRST202 ("Could not find the function test.named_json_param(A, B, C) ...").
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1155
+    source_line: 1155
+
+  - id: rpc.error.raise_maps_status
+    claim: >
+      A PostgreSQL RAISE with SQLSTATE prefix PTxyz maps to HTTP status xyz; the
+      error body carries message/details/hint/code from the RAISE (raise_pt402 ->
+      402).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L768
+    source_line: 768
+
+gaps:
+  - >
+    Prefer: params=single-object — NOT covered. v14.12 has no test referencing
+    "params=single-object" or "single-object" in test/spec/ (grep -rln over
+    test/spec/ returns zero matches). The single-object preference was deprecated;
+    the equivalent behavior is exercised only via "single unnamed json/jsonb
+    parameter" functions, a different mechanism (unnamed-param detection, not the
+    Prefer header). That different mechanism IS now modeled here
+    (rpc.single_unnamed_param.json_post / .named_rejects_body) from the "single
+    unnamed param" context at
+    https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1148
+    No traceable source line for a `Prefer: params=single-object` header behavior
+    in this pinned version, so the header form itself is omitted rather than guessed.
+  - >
+    Single-row enforcement via Accept: application/vnd.pgrst.object+json
+    (PGRST116 "Cannot coerce the result to a single JSON object") for RPC is
+    tested under SingularSpec, not RpcSpec; left to the singular/content-
+    negotiation area to avoid duplicate ownership. See
+    https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L73
+    The plain single-row behavior of OUT-param and composite-returning procs IS
+    covered here (rpc.return.out_single, rpc.return.composite).

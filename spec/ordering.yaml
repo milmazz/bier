@@ -1,0 +1,216 @@
+# Ordering behavior model for Bier (PostgREST v14.12 compatibility).
+#
+# Scope: the `order` query parameter and its embedded variant `<embed>.order`.
+# Covers direction (asc/desc), null placement (nullsfirst/nullslast), JSON-path
+# ordering, ordering on computed columns, ordering on related (to-one) columns,
+# and the error envelopes for bad order syntax / invalid related order.
+#
+# Every entry cites a source line. Behavior not traceable to a source line is
+# listed under `gaps` at the bottom, not asserted here.
+
+area: ordering
+version: PostgREST v14.12
+
+# Case schema: the conformance cases in this area validate against
+# spec/case.schema.json (added in this pass). The reviewer flagged that no such
+# schema existed; it is now present. The Tester (per AGENT_PLAN.md §5.2) owns the
+# canonical published schema and the CI lint job; this file is a forge-neutral
+# stand-in the Researcher provides so cases can be linted before the Tester phase.
+# All ordering cases use raw.githubusercontent.com source URLs with a #L line
+# anchor, matching sibling areas (e.g. pagination, cases 1250+).
+
+grammar:
+  # The order value parser. Top-level order terms and per-relation order terms
+  # are comma-separated; `try pOrderRelationTerm <|> pOrderTerm`.
+  # source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L761
+  order_value: "<term>[,<term>]*"
+  term: "<field>[.<direction>][.<nulls>]   |   <relation>(<field>)[.<direction>][.<nulls>]"
+  field: "<column>[<json-arrow><key-or-index>]*   (-> or ->> arrows)"
+  # asc/desc are parsed by pOrdDir.
+  # source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L782
+  directions: [asc, desc]
+  # nullsfirst/nullslast are parsed by pNulls.
+  # source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L778
+  nulls: [nullsfirst, nullslast]
+  separator: "."   # the pDelimiter between field, direction and nulls
+
+defaults:
+  # When direction is omitted, no ASC/DESC is emitted to SQL; PostgreSQL's
+  # default (ASC) applies. When nulls is omitted, nothing is emitted; PostgreSQL
+  # default applies (NULLS LAST for ASC, NULLS FIRST for DESC).
+  # The SQL fragment only emits a direction/null clause when present in the term.
+  # source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs#L355
+  direction_when_omitted: asc        # PostgreSQL default
+  nulls_when_omitted_asc: nullslast  # PostgreSQL default for ASC
+  nulls_when_omitted_desc: nullsfirst # PostgreSQL default for DESC
+
+sql_mapping:
+  # OrderAsc -> "ASC", OrderDesc -> "DESC"
+  # source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs#L366
+  asc: "ASC"
+  desc: "DESC"
+  # OrderNullsFirst -> "NULLS FIRST", OrderNullsLast -> "NULLS LAST"
+  # source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Query/SqlFragment.hs#L369
+  nullsfirst: "NULLS FIRST"
+  nullslast: "NULLS LAST"
+
+entries:
+  - id: order.asc
+    claim: >
+      `order=<col>.asc` sorts the result ascending by that column.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1074
+    cases: [1200]
+
+  - id: order.desc
+    claim: >
+      `order=<col>.desc` sorts the result descending by that column.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1082
+    cases: [1201]
+
+  - id: order.no_direction
+    claim: >
+      `order=<col>` with no direction or nulls clause sorts ascending
+      (PostgreSQL default applies, no clause emitted).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1139
+    cases: [1202]
+
+  - id: order.nullsfirst
+    claim: >
+      `order=<col>.nullsfirst` (no direction) places NULL rows first; the
+      remaining rows follow PostgreSQL's default (ascending) order.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1089
+    cases: [1203]
+
+  - id: order.asc.nullslast
+    claim: >
+      `order=<col>.asc.nullslast` sorts ascending with NULL rows last.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1099
+    cases: [1204]
+
+  - id: order.desc.nullsfirst
+    claim: >
+      `order=<col>.desc.nullsfirst` sorts descending with NULL rows first.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1108
+    cases: [1205]
+
+  - id: order.desc.nullslast
+    claim: >
+      `order=<col>.desc.nullslast` sorts descending with NULL rows last.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1117
+    cases: [1206]
+
+  - id: order.multi_column
+    claim: >
+      Multiple comma-separated terms order by each in turn; each term carries
+      its own direction and nulls clause, e.g.
+      `order=client_id.desc.nullslast,id.desc`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1126
+    cases: [1207]
+
+  - id: order.computed_column
+    claim: >
+      Ordering by a computed (function) column works, e.g. `order=anti_id.desc`
+      where anti_id(items) = id * -1, so desc on anti_id yields ascending id.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L510
+    cases: [1208]
+
+  - id: order.json_arrow_text
+    claim: >
+      Ordering by a JSON column with the `->>` (text) arrow works,
+      e.g. `order=data->>id.asc`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L230
+    cases: [1209]
+
+  - id: order.json_arrow_nested_nulls
+    claim: >
+      Ordering by a two-level JSON path with nulls placement works,
+      e.g. `order=data->foo->>bar.nullsfirst`; rows lacking the path sort first.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L235
+    cases: [1210]
+
+  - id: order.composite_arrow
+    claim: >
+      Ordering on a field of a composite-type column via a JSON arrow works:
+      `->` selects the field for sorting (`order=num->i.asc`) and `->>` sorts on
+      its text form (`order=num->>i.desc`). This is a distinct grammar path from
+      jsonb ordering (the arrow operates on a composite type, not jsonb).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L240
+    cases: [1219, 1220]
+
+  - id: order.embed
+    claim: >
+      `<embed>.order=<col>.<dir>` orders the rows of an embedded resource
+      independently of the top-level resource, e.g. `tasks.order=name.asc`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1149
+    cases: [1211]
+
+  - id: order.embed.alias
+    claim: >
+      Embedded ordering keys off the real relation name even when the embed is
+      aliased, e.g. `select=the_tasks:tasks(...)&tasks.order=name.asc`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1154
+    cases: [1212]
+
+  - id: order.embed.two_levels
+    claim: >
+      Embedded ordering can be applied at each nesting level via dotted embed
+      paths, e.g. `tasks.order=name.asc&tasks.users.order=name.desc`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1159
+    cases: [1213]
+
+  - id: order.related_to_one
+    claim: >
+      `order=<relation>(<col>).<dir>` orders the top resource by a column of a
+      to-one (many-to-one / one-to-one) embedded relation, e.g.
+      `order=clients(name).nullsfirst`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L17
+    cases: [1214]
+
+  - id: order.related_to_one.alias
+    claim: >
+      A related order references an aliased to-one relation by its alias, e.g.
+      `select=id,client:clients(name)&order=client(name).asc`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L27
+    cases: [1215]
+
+  - id: order.related_to_one.one_to_one_jsonb
+    claim: >
+      A related order works on a one-to-one relationship combined with a JSON
+      arrow on the related column, e.g.
+      `select=id,trash_details(id,jsonb_col)&order=trash_details(jsonb_col->key).asc`
+      (and `.desc`); trash_details.id references trash.id, forming a one-to-one
+      relationship.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L49
+    cases: [1221]
+
+  - id: order.embed.by_nested_related
+    claim: >
+      An embedded resource can be ordered by a column of its own nested to-one
+      relation via `<embed>.order=<relation>(<col>).<dir>`, e.g.
+      `select=name,tasks(id,name,projects(id,name))&tasks.order=projects(id).desc`,
+      and the embedded order may carry multiple terms, e.g.
+      `tasks.order=projects(id).desc,name`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L69
+    cases: [1222]
+
+  - id: order.related_not_to_one_error
+    claim: >
+      A related order on a relation that is not many-to-one or one-to-one fails
+      with 400 PGRST118 ("A related order on '<rel>' is not possible").
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L109
+    cases: [1216]
+
+  - id: order.related_not_embedded_error
+    claim: >
+      A related order referencing a relation that is not in the `select`
+      (not embedded) fails with 400 PGRST108
+      ("'<rel>' is not an embedded resource in this request").
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L141
+    cases: [1217]
+
+  - id: order.bad_syntax_error
+    claim: >
+      An unparseable order value fails with 400 PGRST100 and a parse-error body
+      ("failed to parse order (...)"), e.g. `order=id.asc.nullslasttt`.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1168
+    cases: [1218]

@@ -1,0 +1,18 @@
+id: 1259
+feature: pagination/range_header/closed_range
+request:
+  method: GET
+  path: /items?order=id
+  headers:
+    Accept: application/json
+    Range-Unit: items
+    Range: 0-1
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "0-1/*"
+  body_exact: [{"id":1},{"id":2}]
+notes: "Acceptable closed Range 0-1 returns 2 rows, Content-Range '0-1/*', status 200 (no count). Mirrors RangeSpec.hs:414."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L414

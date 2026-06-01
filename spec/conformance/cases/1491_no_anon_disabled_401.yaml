@@ -1,0 +1,17 @@
+id: 1491
+feature: auth/anonymous/disabled
+request:
+  method: GET
+  path: /items
+  headers: { Accept: application/json }
+schema: auth
+config:
+  db-anon-role: null
+preconditions: []
+expect:
+  status: 401
+  headers:
+    WWW-Authenticate: Bearer
+  body_exact: { "hint": null, "details": null, "code": "PGRST302", "message": "Anonymous access is disabled" }
+notes: "Server started without db-anon-role: an unauthenticated request -> PGRST302."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/NoAnonSpec.hs#L24

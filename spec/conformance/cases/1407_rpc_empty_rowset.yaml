@@ -1,0 +1,15 @@
+id: 1407
+feature: rpc/return/empty-rowset
+request:
+  method: GET
+  path: /rpc/test_empty_rowset
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: []
+notes: "A SETOF proc yielding zero rows responds with an empty JSON array."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L399

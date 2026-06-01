@@ -1,0 +1,26 @@
+id: 1751
+feature: observability/server-timing/post
+request:
+  method: POST
+  path: /organizations?select=*
+  headers:
+    Prefer: "return=representation"
+    Content-Type: application/json
+  body: { "id": 7, "name": "John", "referee": null, "auditor": null, "manager_id": 6 }
+schema: observability
+config:
+  server-timing-enabled: true
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+  headers_present: [Server-Timing]
+  headers_match:
+    Server-Timing: "plan;dur=[0-9]+\\.[0-9]+"
+  body_exact: [{ "id": 7, "name": "John", "referee": null, "auditor": null, "manager_id": 6 }]
+notes: >
+  POST returning representation (201) still emits the full Server-Timing metric
+  set (jwt, parse, plan, transaction, response). Mirrors
+  ServerTimingSpec.hs:28-36.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L28

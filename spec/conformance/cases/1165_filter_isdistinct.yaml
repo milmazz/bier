@@ -1,0 +1,17 @@
+id: 1165
+feature: filters/horizontal/isdistinct
+request:
+  method: GET
+  path: /no_pk?select=a&a=isdistinct.2
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "a": null }, { "a": "1" }]
+notes: >
+  isdistinct = SQL IS DISTINCT FROM (NULL-aware). a IS DISTINCT FROM '2'
+  is true for NULL and '1'. Mirrors QuerySpec "matches with IS DISTINCT FROM".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L565

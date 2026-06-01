@@ -1,0 +1,15 @@
+id: 1716
+feature: config/validation/malformed-openapi-proxy-uri
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_OPENAPI_SERVER_PROXY_URI: "htp:/@@localhorst.invalid"
+preconditions: []
+expect:
+  exit_code: nonzero
+  stderr_contains: "Malformed proxy uri, a correct example: https://example.com:8443/basePath"
+notes: "A malformed openapi-server-proxy-uri aborts startup. Mirrors cli fixture 'invalid openapi-server-proxy-uri'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L59

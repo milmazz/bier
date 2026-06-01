@@ -1,0 +1,22 @@
+id: 1273
+feature: pagination/count/planned_filtered
+request:
+  method: GET
+  path: /child_entities?select=id&id=gt.3&order=id
+  headers:
+    Accept: application/json
+    Prefer: count=planned
+schema: pagination
+preconditions:
+  - "ANALYZE test.child_entities;"
+expect:
+  status: 206
+  body_exact: [{"id":4},{"id":5},{"id":6}]
+notes: >
+  count=planned on a filtered query returns 206 with the planner's estimated
+  total. Upstream asserts Content-Range '0-2/4' (RangeSpec.hs:321). The body
+  rows (ids 4,5,6) and the partial 206 status are deterministic from the
+  fixture; the '/4' total is a query-planner estimate and is therefore NOT
+  asserted as an exact header here (planner/PG-version dependent). The status is
+  206 because the planner estimate (>3) exceeds the 3 returned rows.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L321

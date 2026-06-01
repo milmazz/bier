@@ -1,0 +1,16 @@
+id: 1717
+feature: config/validation/admin-port-equals-server-port
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_SERVER_PORT: "3000"
+    PGRST_ADMIN_SERVER_PORT: "3000"
+preconditions: []
+expect:
+  exit_code: nonzero
+  stderr_contains: "admin-server-port cannot be the same as server-port"
+notes: "admin-server-port must differ from server-port. Mirrors test_cli.py:test_server_port_and_admin_port_same_value."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L119

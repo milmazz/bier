@@ -1,0 +1,16 @@
+id: 1354
+feature: mutations/insert/error/non-uniform-array
+request:
+  method: POST
+  path: /articles
+  headers: { Content-Type: application/json }
+  body: [{ "id": 100, "body": "x" }, { "id": 111, "body": "y", "owner": "me" }]
+schema: mutations
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: { "message": "All object keys must match", "code": "PGRST102", "hint": null, "details": null }
+notes: "Array of objects with differing keys -> 400 PGRST102."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L86

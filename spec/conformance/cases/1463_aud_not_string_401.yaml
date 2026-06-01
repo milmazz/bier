@@ -1,0 +1,16 @@
+id: 1463
+feature: auth/claims/aud-not-string
+request:
+  method: GET
+  path: /authors_only
+  headers: { Accept: application/json }
+  jwt:
+    sign_with: hs256_test_secret
+    payload: { "aud": { "invalid": "value" }, "role": "postgrest_test_author" }
+schema: auth
+preconditions: []
+expect:
+  status: 401
+  body_exact: { "code": "PGRST303", "details": null, "hint": null, "message": "The JWT 'aud' claim must be a string or an array of strings" }
+notes: "Single non-string aud -> PGRST303."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L176

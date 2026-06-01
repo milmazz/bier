@@ -1,0 +1,21 @@
+id: 1379
+feature: mutations/upsert/post/no-pk-ignores-resolution
+request:
+  method: POST
+  path: /no_pk
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation, resolution=merge-duplicates
+  body:
+    - { "a": "1", "b": "0" }
+schema: mutations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: return=representation
+  body_exact:
+    - { "a": "1", "b": "0" }
+notes: "Table with no pk: resolution preference is silently ignored; no resolution=... in Preference-Applied."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L157

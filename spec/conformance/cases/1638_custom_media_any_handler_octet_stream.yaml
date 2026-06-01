@@ -1,0 +1,22 @@
+id: 1638
+feature: content_negotiation/custom-media-handler/any-handler
+request:
+  method: GET
+  path: /rpc/ret_any_mt
+  headers: { Accept: "*/*" }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/octet-stream
+  body_contains: "any"
+notes: >-
+  The Any ("*/*") handler: a function returning the "*/*" DOMAIN matches any
+  Accept (including */*). When the handler does not set response.headers,
+  PostgREST defaults the response Content-Type to application/octet-stream.
+  Mirrors CustomMediaSpec functions context 'returns application/json for */* if
+  not explicitly set' (GET /rpc/ret_any_mt, Accept */* -> 200, Content-Type
+  application/octet-stream). The same handler also accepts arbitrary media types
+  (app/bingo, text/bango, image/boingo) and still emits octet-stream.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/CustomMediaSpec.hs#L322

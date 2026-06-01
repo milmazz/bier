@@ -1,0 +1,14 @@
+id: 1494
+feature: auth/audience/no-jwt-succeeds
+request:
+  method: GET
+  path: /has_count_column
+  headers: { Accept: application/json }
+schema: auth
+config:
+  jwt-aud: youraudience
+preconditions: []
+expect:
+  status: 200
+notes: "Even with jwt-aud set, a request with no JWT runs as anon and succeeds on a granted table."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L147

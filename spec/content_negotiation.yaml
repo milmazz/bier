@@ -1,0 +1,253 @@
+# Content negotiation: which media type PostgREST produces for a request, the
+# Content-Type it emits, and the error envelope when nothing is acceptable.
+#
+# Area scope: application/json, text/csv, application/vnd.pgrst.object+json
+# (single object), GeoJSON (application/geo+json), OpenAPI
+# (application/openapi+json), application/octet-stream (bytea), and
+# application/vnd.pgrst.plan (EXPLAIN, +json/+text with for=/options=).
+#
+# Pinned to PostgREST v14.12.
+# Primary ground truth is the MediaType enum + toMime/toContentType/decodeMediaType
+# in src/PostgREST/MediaType.hs and the negotiateContent dispatch in
+# src/PostgREST/Plan.hs, cross-checked against the Feature test specs.
+
+version: v14.12
+
+# --- Canonical media type -> mime + Content-Type ----------------------------
+# toMime maps the internal MediaType to a wire mime string; toContentType
+# appends "; charset=utf-8" for every type EXCEPT MTOctetStream and MTOther,
+# which get no charset.
+media_types:
+  application_json:
+    accept: application/json
+    content_type: "application/json; charset=utf-8"
+    internal: MTApplicationJSON
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L66
+  text_csv:
+    accept: text/csv
+    content_type: "text/csv; charset=utf-8"
+    internal: MTTextCSV
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L69
+  geojson:
+    accept: application/geo+json
+    content_type: "application/geo+json; charset=utf-8"
+    internal: MTGeoJSON
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L68
+  openapi:
+    accept: application/openapi+json
+    content_type: "application/openapi+json; charset=utf-8"
+    internal: MTOpenAPI
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L72
+  octet_stream:
+    accept: application/octet-stream
+    # NOTE: no charset appended for octet-stream.
+    content_type: "application/octet-stream"
+    internal: MTOctetStream
+    charset_appended: false
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L59-L62
+  singular_object:
+    accept:
+      - application/vnd.pgrst.object+json
+      - application/vnd.pgrst.object        # +json suffix optional
+    content_type: "application/vnd.pgrst.object+json; charset=utf-8"
+    internal: MTVndSingularJSON False
+    # With ;nulls=stripped the parser yields MTVndSingularJSON True and the mime
+    # becomes application/vnd.pgrst.object+json;nulls=stripped.
+    stripped_mime: "application/vnd.pgrst.object+json;nulls=stripped"
+    decode_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L148-L149
+    mime_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L73-L74
+  array_stripped:
+    accept: application/vnd.pgrst.array+json;nulls=stripped
+    content_type: "application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8"
+    internal: MTVndArrayJSONStrip
+    note: >-
+      application/vnd.pgrst.array+json WITHOUT nulls=stripped decodes back to
+      MTApplicationJSON (plain JSON array). Only the stripped variant is a
+      distinct media type.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L150-L151
+  plan:
+    accept_examples:
+      - application/vnd.pgrst.plan                       # defaults to +text, for=application/json
+      - application/vnd.pgrst.plan+json
+      - application/vnd.pgrst.plan+text
+      - 'application/vnd.pgrst.plan+json; for="application/json"; options=verbose'
+    internal: "MTVndPlan <for-mediatype> <PlanJSON|PlanText> [options]"
+    # toMime composes: application/vnd.pgrst.plan+<fmt>; for="<for-mime>"[; options=a|b]
+    # toContentType then appends "; charset=utf-8".
+    content_type_template: 'application/vnd.pgrst.plan+<fmt>; for="<for-mime>"[; options=<o1>|<o2>]; charset=utf-8'
+    default_format: PlanText
+    default_for: application/json
+    mime_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L79-L82
+    decode_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L145-L147
+
+# --- Plan media type parameters --------------------------------------------
+plan_parameters:
+  formats:
+    "+text": PlanText
+    "+json": PlanJSON
+    bare: PlanText   # "application/vnd.pgrst.plan" with no +suffix == +text
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L145-L147
+  for_param:
+    meaning: >-
+      The for="..." parameter names the downstream media type the plan is being
+      generated for; it is echoed in the Content-Type. for="application/vnd.pgrst.object"
+      is normalized to for="application/vnd.pgrst.object+json" on output.
+    default: application/json
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L160-L169
+  options:
+    tokens: [analyze, verbose, settings, buffers, wal]
+    separator: "|"
+    echoed_in_content_type: true
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L160-L169
+  toMimePlanOption_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L84-L89
+  gated_by_config:
+    key: db-plan-enabled
+    note: >-
+      Plan media types only resolve when db-plan-enabled is true; otherwise the
+      plan branch returns Nothing and negotiation fails with PGRST107 / 406.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Plan.hs#L1150
+
+# --- Negotiation algorithm --------------------------------------------------
+negotiation:
+  description: >-
+    The Accept header is parsed into an ordered list of MediaType values.
+    negotiateContent walks that list and picks the FIRST media type for which a
+    handler exists (firstAcceptedPick). If none match, it errors with
+    MediaTypeError -> PGRST107 / HTTP 406.
+  source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Plan.hs#L1128-L1139
+  rules:
+    - claim: >-
+        Vendored media types (vnd.pgrst.object, vnd.pgrst.array stripped, and
+        vnd.pgrst.plan) have special handling and cannot be overridden by custom
+        media handlers; the others (json, csv, geojson, ...) can be overridden.
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Plan.hs#L1140-L1149
+    - claim: >-
+        When multiple acceptable types are listed, PostgREST honors the client's
+        order (first acceptable wins), even when it is the opposite of the
+        server's preference.
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1209
+    - claim: >-
+        */* matches and rescues an otherwise-unknown leading type, resolving to
+        the default JSON handler (200).
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1196
+    - claim: >-
+        A specific available preference listed alongside */* overrides */*, e.g.
+        Accept "text/csv, */*" produces text/csv.
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1201
+    - claim: >-
+        An Accept of a single unsupported type (e.g. text/unknowntype) yields
+        406 with PGRST107 and a JSON error body listing the unavailable types.
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1178-L1189
+  openapi_root_negotiation:
+    description: >-
+      The root path "/" only produces [OpenAPI, JSON, Any]. application/openapi+json
+      on a non-root path is 406. An unsupported type (text/csv) on the root is 406.
+    produced_set: [MTOpenAPI, MTApplicationJSON, MTAny]
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Plan.hs#L226-L230
+
+# --- Error envelope ---------------------------------------------------------
+errors:
+  unacceptable_media_type:
+    http_status: 406
+    code: PGRST107
+    message_template: "None of these media types are available: <comma-joined accepts>"
+    body_shape: { code: string, message: string, details: "null", hint: "null" }
+    status_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L121
+    code_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L170
+    message_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L200
+  singular_coercion_failure:
+    description: >-
+      When a singular-object request (or singular mutation) resolves to a number
+      of rows other than exactly 1, the result cannot be coerced to a single JSON
+      object: HTTP 406, PGRST116, message "Cannot coerce the result to a single
+      JSON object", details "The result contains N rows". The error body is plain
+      JSON (Content-Type application/json), NOT vnd.pgrst.object+json.
+    http_status: 406
+    code: PGRST116
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L98-L105
+  geojson_missing_geometry:
+    description: >-
+      Requesting application/geo+json on a relation lacking a geometry column
+      fails with HTTP 400, SQLSTATE 22023, message "geometry column is missing".
+    http_status: 400
+    code: "22023"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PostGISSpec.hs#L28-L34
+
+# --- Per-media-type behavior summaries --------------------------------------
+behaviors:
+
+  singular_object:
+    - claim: "GET with Accept vnd.pgrst.object+json returns the single object (not an array) for exactly one row."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L24-L34
+    - claim: "The +json suffix is optional: application/vnd.pgrst.object behaves identically."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L30-L34
+    - claim: "Zero rows for a GET singular request returns 406 (PGRST116)."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L20-L22
+    - claim: "Singular shaping works through embedded resources (plurality singular)."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L42-L46
+    - claim: "POST insert of one row with return=representation + singular returns 201 and the single object."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L117-L125
+    - claim: "Singular on a scalar RPC result (sayhello) succeeds with 200."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L281-L284
+    - claim: "Singular RPC returning a json proc row returns the single object."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L286-L291
+
+  text_csv:
+    - claim: "Accept text/csv (with or without a version param) returns CSV with a header row then data rows; Content-Type text/csv; charset=utf-8."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1222-L1231
+    - claim: "POST insert with Content-Type text/csv + Accept text/csv + return=representation returns the inserted rows as CSV (201)."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L651-L659
+    - claim: "CSV insert NULL token produces an empty CSV cell on representation output."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L661-L668
+    - claim: "CSV insert with inconsistent column counts across lines fails with PGRST102 / 400."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L680-L687
+
+  geojson:
+    - claim: "GET with Accept application/geo+json on a table with a geometry column returns a FeatureCollection; Content-Type application/geo+json; charset=utf-8."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PostGISSpec.hs#L16-L26
+    - claim: "GeoJSON on no matching rows returns an empty features array (still a FeatureCollection)."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PostGISSpec.hs#L36-L42
+    - claim: "GeoJSON on a relation without a geometry column fails 400 / SQLSTATE 22023 'geometry column is missing'."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PostGISSpec.hs#L28-L34
+
+  openapi:
+    - claim: "GET / with Accept application/openapi+json returns the OpenAPI doc; Content-Type application/openapi+json; charset=utf-8."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L20-L29
+    - claim: "application/openapi+json on a non-root path returns 406."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L31-L34
+    - claim: "An unsupported Accept (text/csv) on the root path returns 406."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L36-L39
+
+  octet_stream:
+    - claim: "POST to an RPC with a single unnamed bytea parameter, Content-Type + Accept application/octet-stream, echoes the raw bytes back; Content-Type application/octet-stream (no charset)."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1181-L1188
+    - claim: "Accept application/octet-stream against a relation that has no octet-stream handler returns 406 / PGRST107."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/CustomMediaSpec.hs#L163-L168
+
+  nulls_stripped:
+    # 'Stripped Nulls' is a dedicated user-facing feature (own docs ToC
+    # subsection + own test/spec/Feature/Query/NullsStripSpec.hs). The
+    # ;nulls=stripped parameter on the vendored array/object media types omits
+    # every null-valued key from each output object.
+    - claim: "Accept application/vnd.pgrst.array+json;nulls=stripped returns a JSON array with all null-valued keys omitted; Content-Type application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/NullsStripSpec.hs#L20
+    - claim: "The +json suffix is optional: application/vnd.pgrst.array;nulls=stripped behaves identically and the Content-Type is normalized to the +json form."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/NullsStripSpec.hs#L48
+    - claim: "Accept application/vnd.pgrst.object+json;nulls=stripped returns a single object (not an array) with null keys omitted; Content-Type application/vnd.pgrst.object+json;nulls=stripped; charset=utf-8."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/NullsStripSpec.hs#L58
+    - claim: "The stripped singular media type still enforces singular plurality: a non-singular result fails 406 / PGRST116 with a plain application/json error body."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/NullsStripSpec.hs#L68
+    - claim: "nulls=stripped removes null keys even when the column was explicitly named in select=."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/NullsStripSpec.hs#L79
+    - claim: "Plain application/vnd.pgrst.array+json (no nulls=stripped) keeps null keys and responds with Content-Type application/json; charset=utf-8 (decodes back to MTApplicationJSON)."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/NullsStripSpec.hs#L118
+
+  plan:
+    - claim: "GET with Accept application/vnd.pgrst.plan+json returns the JSON plan; Content-Type application/vnd.pgrst.plan+json; for=\"application/json\"; charset=utf-8."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PlanSpec.hs#L25-L37
+    - claim: "Bare application/vnd.pgrst.plan defaults to +text format; Content-Type application/vnd.pgrst.plan+text; for=\"application/json\"; charset=utf-8."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PlanSpec.hs#L276-L288
+    - claim: "options= parameters (e.g. verbose, buffers) are echoed verbatim in the response Content-Type."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PlanSpec.hs#L52-L59
+    - claim: "for=\"application/vnd.pgrst.object\" is normalized to for=\"application/vnd.pgrst.object+json\" in the response Content-Type."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PlanSpec.hs#L108-L117

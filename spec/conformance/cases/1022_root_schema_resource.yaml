@@ -1,0 +1,14 @@
+id: 1022
+feature: url_grammar/path/root
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/openapi+json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/openapi+json; charset=utf-8
+notes: "Empty path ([]) resolves to ResourceSchema (the OpenAPI root) when OpenAPI is enabled, so the root serves the OpenAPI document with Content-Type application/openapi+json; charset=utf-8. Grammar-level resolution is at ApiRequest.getResource (src/PostgREST/ApiRequest.hs#L119, the [] branch); observable behavior is OpenApiSpec 'root path returns a valid openapi spec' (L20-29). Body is the full OpenAPI doc (not asserted here)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L20

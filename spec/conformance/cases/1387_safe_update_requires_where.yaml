@@ -1,0 +1,17 @@
+id: 1387
+feature: mutations/safe-update/requires-where
+request:
+  method: PATCH
+  path: /safe_update_items
+  headers:
+    Content-Type: application/json
+    Prefer: count=exact
+  body: { "name": "New name" }
+schema: mutations
+preconditions:
+  - "-- requires pg-safeupdate (safeupdate) loaded for this table/session"
+expect:
+  status: 400
+  body_exact: { "code": "21000", "details": null, "hint": null, "message": "UPDATE requires a WHERE clause" }
+notes: "With pg-safeupdate, a full-table PATCH (no filter) -> 400, Postgres 21000."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L16

@@ -1,0 +1,18 @@
+id: 1662
+feature: openapi/table/response-status
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.paths['/child_entities'].get.responses['200'].description", equals: "OK" }
+    - { path: "$.paths['/child_entities'].get.responses['206'].description", equals: "Partial Content" }
+    - { path: "$.paths['/child_entities'].post.responses['201'].description", equals: "Created" }
+    - { path: "$.paths['/child_entities'].patch.responses['204'].description", equals: "No Content" }
+    - { path: "$.paths['/child_entities'].delete.responses['204'].description", equals: "No Content" }
+notes: "Per-method response status descriptions for a writable table. Mirrors OpenApiSpec.hs:75-122 and OpenAPI.hs:324-340"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L118

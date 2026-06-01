@@ -1,0 +1,15 @@
+id: 1419
+feature: rpc/args/noparams-get
+request:
+  method: GET
+  path: /rpc/noparamsproc
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: "Return value of no parameters procedure."
+notes: "A no-parameter proc is callable with GET and no query string."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L659

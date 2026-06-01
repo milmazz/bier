@@ -1,0 +1,21 @@
+id: 1806
+feature: domain_representations/read/view_and_computed_column
+request:
+  method: GET
+  path: /datarep_todos_computed?select=id,label_color,dark_color
+  headers: { Accept: application/json }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    [
+      { "id": 1, "label_color": "#000000", "dark_color": "#000000" },
+      { "id": 2, "label_color": "#000100", "dark_color": "#000080" },
+      { "id": 3, "label_color": "#01E240", "dark_color": "#00F120" },
+      { "id": 4, "label_color": "", "dark_color": "" },
+    ]
+notes: "Representations apply to view columns including a computed column cast back to the domain ((label_color/2)::color). Mirrors QuerySpec.hs 'formats columns in views including computed columns'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1553

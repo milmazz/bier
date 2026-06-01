@@ -1,0 +1,21 @@
+id: 1363
+feature: mutations/update/return-representation
+request:
+  method: PATCH
+  path: /items?id=eq.2
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation
+  body: { "id": 2 }
+schema: mutations
+preconditions:
+  - "DELETE FROM test.items;"
+  - "INSERT INTO test.items (id) SELECT generate_series(1, 15);"
+expect:
+  status: 200
+  headers:
+    Content-Range: 0-0/*
+    Preference-Applied: return=representation
+  body_exact: [{ "id": 2 }]
+notes: "PATCH with return=representation -> 200, body is array of updated rows."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L94

@@ -1,0 +1,14 @@
+id: 1427
+feature: rpc/method/get-volatile-rejected
+request:
+  method: GET
+  path: /rpc/callcounter
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 405
+notes: >
+  GET on a VOLATILE proc runs in a read-only transaction; nextval() raises
+  SQLSTATE 25006 (read_only_sql_transaction) which PostgREST maps to 405.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L946

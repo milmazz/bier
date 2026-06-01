@@ -1,0 +1,20 @@
+id: 1364
+feature: mutations/update/zero-rows-return-rep
+request:
+  method: PATCH
+  path: /items?id=eq.999999
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation
+  body: { "id": 999999 }
+schema: mutations
+preconditions:
+  - "DELETE FROM test.items;"
+  - "INSERT INTO test.items (id) SELECT generate_series(1, 15);"
+expect:
+  status: 200
+  headers:
+    Preference-Applied: return=representation
+  body_exact: []
+notes: "PATCH matching zero rows + return=rep -> 200 with empty array."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L79

@@ -1,0 +1,19 @@
+id: 1130
+feature: select/aggregate/sum-on-field
+request:
+  method: GET
+  path: /project_invoices?select=invoice_total.sum()
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+config:
+  db-aggregates-enabled: true
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"sum":8800}]
+notes: >
+  <col>.sum() aggregates a field; the JSON key defaults to the aggregate name.
+  Requires db-aggregates-enabled=true (AggregateFunctionsSpec.hs:38).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L38

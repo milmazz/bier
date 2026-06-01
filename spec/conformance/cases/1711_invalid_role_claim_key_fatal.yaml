@@ -1,0 +1,15 @@
+id: 1711
+feature: config/validation/invalid-role-claim-key
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_JWT_ROLE_CLAIM_KEY: "role.other"
+preconditions: []
+expect:
+  exit_code: nonzero
+  stderr_contains: "failed to parse role-claim-key value (role.other)"
+notes: "An invalid jwt-role-claim-key JSPath aborts startup. Mirrors test_cli.py:test_invalid_role_claim_key (invalidroleclaimkeys[0])."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L220

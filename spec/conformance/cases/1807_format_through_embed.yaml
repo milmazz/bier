@@ -1,0 +1,29 @@
+id: 1807
+feature: domain_representations/read/through_embed
+request:
+  method: GET
+  path: /datarep_next_two_todos?select=id,name,first_item:datarep_todos!datarep_next_two_todos_first_item_id_fkey(label_color,due_at)
+  headers: { Accept: application/json }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    [
+      {
+        "id": 1,
+        "name": "school related",
+        "first_item":
+          { "label_color": "#000100", "due_at": "2018-01-03T00:00:00Z" },
+      },
+      {
+        "id": 2,
+        "name": "do these first",
+        "first_item":
+          { "label_color": "#000000", "due_at": "2018-01-02T00:00:00Z" },
+      },
+    ]
+notes: "Domain representations are applied to embedded (joined) resources. Mirrors QuerySpec.hs 'formats through join'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1599

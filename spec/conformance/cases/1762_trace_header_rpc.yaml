@@ -1,0 +1,19 @@
+id: 1762
+feature: observability/trace-header/rpc
+request:
+  method: HEAD
+  path: /rpc/add_them?a=2&b=4
+  headers: { X-Request-Id: "3" }
+schema: observability
+config:
+  server-trace-header: X-Request-Id
+preconditions: []
+expect:
+  status: 200
+  headers:
+    X-Request-Id: "3"
+  body_exact: null
+notes: >
+  The trace header is echoed on an RPC call (HEAD /rpc/add_them). Mirrors
+  ObservabilitySpec.hs:29-34.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/ObservabilitySpec.hs#L29

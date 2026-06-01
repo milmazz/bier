@@ -1,0 +1,21 @@
+id: 1754
+feature: observability/server-timing/delete
+request:
+  method: DELETE
+  path: /items?id=eq.1
+  headers: {}
+schema: observability
+config:
+  server-timing-enabled: true
+preconditions: []
+expect:
+  status: 204
+  headers_present: [Server-Timing]
+  headers_match:
+    Server-Timing: "jwt;dur=[0-9]+\\.[0-9]+"
+  headers_absent: [Content-Type]
+  body_exact: null
+notes: >
+  DELETE (204, no body) still emits the full Server-Timing metric set. Mirrors
+  ServerTimingSpec.hs:57-65.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L57

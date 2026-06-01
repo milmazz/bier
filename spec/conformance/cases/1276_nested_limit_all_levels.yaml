@@ -1,0 +1,19 @@
+id: 1276
+feature: pagination/embedded/limit_all_levels
+request:
+  method: GET
+  path: /clients?select=id,projects(id,tasks(id))&order=id.asc&limit=1&projects.order=id.asc&projects.limit=2&projects.tasks.order=id.asc&projects.tasks.limit=1
+  headers: { Accept: application/json }
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "0-0/*"
+  body_exact: [{"id":1,"projects":[{"id":1,"tasks":[{"id":1}]},{"id":2,"tasks":[{"id":3}]}]}]
+notes: >
+  limit/offset apply at every nesting level (top-level limit=1, projects.limit=2,
+  projects.tasks.limit=1). Embedded limits do not change the top-level
+  Content-Range, which reflects only the top-level window '0-0/*'. Mirrors
+  RangeSpec.hs:203.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L203

@@ -1,0 +1,16 @@
+id: 1492
+feature: auth/anonymous/disabled-valid-token
+request:
+  method: GET
+  path: /authors_only
+  headers:
+    Accept: application/json
+    Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicG9zdGdyZXN0X3Rlc3RfYXV0aG9yIn0.Xod-F15qsGL0WhdOCr2j3DdKuTw9QJERVgoFD3vGaWA"
+schema: auth
+config:
+  db-anon-role: null
+preconditions: []
+expect:
+  status: 200
+notes: "With anon disabled, a valid token still authenticates normally."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/NoAnonSpec.hs#L15

@@ -1,0 +1,15 @@
+id: 1416
+feature: rpc/args/variadic-get-repeated
+request:
+  method: GET
+  path: /rpc/variadic_param?v=hi&v=there
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: ["hi", "there"]
+notes: "With GET a VARIADIC parameter is supplied via repeated query params (?v=hi&v=there)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L724

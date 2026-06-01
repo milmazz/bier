@@ -1,0 +1,29 @@
+id: 1636
+feature: content_negotiation/custom-media-handler/anyelement
+request:
+  method: GET
+  path: /rpc/get_lines
+  headers: { Accept: application/vnd.geo2+json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/vnd.geo2+json
+  # Wire body is NOT valid JSON: PostgREST prepends a SOH (0x01) control byte to
+  # the result (see the upstream "-- TODO SOH" comment), so this is asserted as
+  # raw bytes, not JSON-equality. \x01 is the leading SOH.
+  body_raw: "\x01{\"type\": \"FeatureCollection\", \"hello\": \"world\"}"
+notes: >-
+  Positive custom media-type handler via an anyelement aggregate. When a custom
+  media type (application/vnd.geo2+json, modeled as a DOMAIN) has an aggregate
+  defined over anyelement, PostgREST negotiates it for any relation/RPC result
+  and emits the custom Content-Type WITHOUT a charset. The geo2json_agg_any
+  finalfunc returns a constant FeatureCollection. Mirrors CustomMediaSpec 'works
+  if there's an anyelement aggregate defined' (GET /rpc/get_lines, Accept
+  application/vnd.geo2+json). The upstream test asserts the raw body
+  "\SOH{...}" with a leading SOH byte (there is a "-- TODO SOH" note upstream),
+  so body_raw is used rather than body_exact. Exercises the override/custom
+  negotiation path (Plan.hs vendored-vs-overridable) positively, complementing
+  the negative 1624.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/CustomMediaSpec.hs#L171

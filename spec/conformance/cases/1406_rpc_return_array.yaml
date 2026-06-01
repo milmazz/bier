@@ -1,0 +1,16 @@
+id: 1406
+feature: rpc/return/scalar-array
+request:
+  method: POST
+  path: /rpc/ret_array
+  headers: { Content-Type: application/json, Accept: application/json }
+  body: {}
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [1, 2, 3]
+notes: "A function returning a scalar array (integer[]) returns a JSON array. Distinct from SETOF: it is a single array value."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L416

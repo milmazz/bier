@@ -1,0 +1,285 @@
+# Behavior model: mutations (POST / PATCH / PUT / DELETE)
+# PostgREST version pinned: v14.12
+#
+# Every entry carries a `source` URL with a line anchor into PostgREST's own
+# test suite or source. Behaviors that could not be traced to a real source
+# line are recorded under `gaps` at the bottom, NOT invented.
+#
+# Ground-truth priority: PostgREST tests > PostgREST source > docs.
+
+area: mutations
+version: v14.12
+
+# --------------------------------------------------------------------------
+# INSERT (POST)
+# --------------------------------------------------------------------------
+insert:
+  method: POST
+  body:
+    # A single JSON object inserts one row; a JSON array inserts many (bulk).
+    accepts_object_or_array: true
+    # Single-object half of the claim (one object -> one row):
+    object_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L24
+    # Array/bulk half of the claim (array -> many rows) on /compound_pk:
+    array_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L271
+    # x-www-form-urlencoded bodies are accepted and treated as a single row.
+    accepts_form_urlencoded: true
+    form_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L172
+    # Leading/trailing insignificant whitespace around the JSON is ignored.
+    ignores_insignificant_whitespace: true
+    whitespace_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L406
+    # An empty object {} (or [{}]) inserts a row using all column defaults.
+    empty_object_inserts_defaults: true
+    empty_object_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L346
+    # An empty array [] inserts nothing and (with return=rep) returns [].
+    empty_array_inserts_nothing: true
+    empty_array_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L242
+  status:
+    # Successful insert returns 201 Created.
+    created: 201
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L30
+  location_header:
+    # The Location header is emitted ONLY when Prefer: return=headers-only is
+    # requested. Every Location assertion in InsertSpec.hs is paired with
+    # return=headers-only (L139 /projects?id=eq.11, L207 /auto_incrementing_pk
+    # ?id=eq.2, L773 composite). A plain POST (no Prefer) and a
+    # return=representation insert do NOT set Location (L102/L114/L125/L268 all
+    # assert matchHeaderAbsent hLocation). Do not assume a bare POST emits it.
+    emitted_only_with_headers_only: true
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L207
+    headers_only_projects_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L139
+    # Under return=representation, selecting columns that exclude the pk emits no
+    # Location header (and does not throw). NOTE: under return=headers-only the
+    # Location IS still emitted even when select excludes the pk (L131-L139),
+    # so this "absent" claim is specific to the representation path.
+    absent_when_select_excludes_pk: true
+    absent_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L125
+    # A table with no pk never gets a Location header.
+    absent_when_no_pk: true
+    no_pk_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L221
+    # Composite pk is encoded as multiple eq filters in the Location (with
+    # return=headers-only). Assertion line is L773 (the it-block opens at L766).
+    composite_pk_encoded: true
+    composite_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L773
+  errors:
+    # Non-uniform JSON array (not all objects, or objects with different keys)
+    # -> 400 PGRST102 "All object keys must match".
+    non_uniform_array: {status: 400, code: PGRST102, message: "All object keys must match"}
+    non_uniform_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L77
+    # Empty or invalid JSON body -> 400 PGRST102 "Empty or invalid json".
+    invalid_json: {status: 400, code: PGRST102, message: "Empty or invalid json"}
+    invalid_json_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L286
+    empty_body: {status: 400, code: PGRST102, message: "Empty or invalid json"}
+    empty_body_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L296
+    # Duplicate pk surfaces Postgres 23505 as 409 Conflict.
+    duplicate_pk: {status: 409, code: "23505"}
+    duplicate_pk_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L317
+    # Conflicting unique constraint also -> 409 (on /withUnique).
+    unique_violation: {status: 409, code: "23505"}
+    unique_violation_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L325
+    # not-null violation surfaces Postgres 23502 as 400.
+    not_null_violation: {status: 400, code: "23502"}
+    not_null_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L213
+    # Unknown table -> 404 PGRST205, even when ?columns is also invalid.
+    table_not_found: {status: 404, code: PGRST205}
+    table_not_found_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L480
+
+# --------------------------------------------------------------------------
+# columns= query parameter (applies to POST, PATCH, PUT)
+# --------------------------------------------------------------------------
+columns_param:
+  # JSON keys NOT listed in ?columns are ignored (not inserted/updated).
+  ignores_unlisted_keys: true
+  source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L439
+  # Blank ?columns= -> 400 PGRST100 (parse error).
+  blank_is_parse_error: {status: 400, code: PGRST100}
+  blank_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L458
+  # A ?columns column that does not exist -> 400 PGRST204 (column not found).
+  unknown_column: {status: 400, code: PGRST204}
+  unknown_column_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L469
+  # On PATCH, an unknown ?columns column is likewise 400 PGRST204.
+  unknown_column_patch: {status: 400, code: PGRST204}
+  unknown_column_patch_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L349
+
+# --------------------------------------------------------------------------
+# missing=default preference (Prefer: missing=default)
+# --------------------------------------------------------------------------
+missing_default:
+  # With Prefer: missing=default + ?columns=, JSON objects lacking a listed
+  # column receive that column's table/view DEFAULT instead of NULL.
+  # Without missing=default, missing values become NULL.
+  applies_table_defaults: true
+  source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L499
+  # Echoed in Preference-Applied as "missing=default, ...".
+  preference_applied: "missing=default"
+  preference_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/InsertSpec.hs#L514
+  # Also works on UPDATE (PATCH).
+  applies_on_update: true
+  update_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L371
+
+# --------------------------------------------------------------------------
+# UPDATE (PATCH)
+# --------------------------------------------------------------------------
+update:
+  method: PATCH
+  status:
+    # Successful update with no representation returns 204 No Content.
+    no_content: 204
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L69
+    # With return=representation the status is 200 and the body is an array.
+    representation: 200
+    representation_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L94
+    # Matching zero rows still returns 204 (no return=) or 200 with [] (return=rep).
+    zero_rows_no_return: 204
+    zero_rows_no_return_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L89
+    zero_rows_return_rep: {status: 200, body: "[]"}
+    zero_rows_return_rep_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L79
+  content_range:
+    # 204 updates emit Content-Range "0-<n-1>/*" reflecting affected rows.
+    single_row: "0-0/*"
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L76
+    multiple_rows: "0-1/*"
+    multiple_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L116
+  empty_body:
+    # An empty body ({} / [] / [{}]) makes no updates; returns 204 with
+    # Content-Range "*/*" (no return=), or 200 with [] (return=rep).
+    no_updates: true
+    content_range: "*/*"
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L233
+    return_rep_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L302
+  errors:
+    invalid_json: {status: 400, code: PGRST102, message: "Empty or invalid json"}
+    invalid_json_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L38
+    empty_payload: {status: 400, code: PGRST102, message: "Empty or invalid json"}
+    empty_payload_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L48
+    # Unknown table -> 404 PGRST205.
+    table_not_found: {status: 404, code: PGRST205}
+    table_not_found_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L16
+
+# --------------------------------------------------------------------------
+# DELETE
+# --------------------------------------------------------------------------
+delete:
+  method: DELETE
+  status:
+    # Successful delete with no representation returns 204; Content-Range "*/*".
+    no_content: {status: 204, content_range: "*/*"}
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L17
+    # With return=representation returns 200 and the deleted rows as an array.
+    representation: 200
+    representation_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L29
+    # No rows matched + return=rep -> 200 with [] body, Content-Range "*/*".
+    zero_rows_return_rep: {status: 200, body: "[]"}
+    zero_rows_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L106
+  count_exact:
+    # count=exact reports the deleted count in Content-Range "*/<n>".
+    content_range: "*/<n>"
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L29
+  select_shaping:
+    # ?select on DELETE+return=rep shapes/renames/casts the returned rows.
+    supports_rename_cast: true
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L69
+  errors:
+    table_not_found: {status: 404, code: PGRST205}
+    table_not_found_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L115
+
+# --------------------------------------------------------------------------
+# UPSERT via POST (Prefer: resolution=...)
+# --------------------------------------------------------------------------
+upsert_post:
+  method: POST
+  resolution_merge_duplicates:
+    # Prefer: resolution=merge-duplicates -> INSERT ... ON CONFLICT DO UPDATE.
+    # On pk conflict the existing rows are updated. Status 201 if any row was
+    # inserted; 200 if everything was an update (nothing inserted).
+    behavior: "insert-or-update on conflict"
+    status_inserted: 201
+    status_all_updated: 200
+    inserted_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L21
+    all_updated_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L36
+    preference_applied: "resolution=merge-duplicates"
+    pref_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L33
+  resolution_ignore_duplicates:
+    # Prefer: resolution=ignore-duplicates -> INSERT ... ON CONFLICT DO NOTHING.
+    # Conflicting rows are skipped; return=rep returns only newly inserted rows.
+    behavior: "insert, skip conflicting"
+    status: 201
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L167
+    preference_applied: "resolution=ignore-duplicates"
+    pref_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L176
+  on_conflict_param:
+    # ?on_conflict=<cols> targets a UNIQUE constraint (not the pk) as the
+    # conflict target for the upsert.
+    targets_unique: true
+    single_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L83
+    compound_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L96
+  no_pk_behavior:
+    # If the table has no pk, the resolution preference is silently ignored and
+    # NO Preference-Applied: resolution=... is emitted.
+    ignores_resolution: true
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L157
+  empty_payload:
+    # Empty array payload with merge-duplicates inserts nothing -> 200, [].
+    status: 200
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L77
+
+# --------------------------------------------------------------------------
+# UPSERT via PUT
+# --------------------------------------------------------------------------
+upsert_put:
+  method: PUT
+  semantics:
+    # PUT addresses a single resource by its full pk via eq filters and either
+    # inserts it (201) or replaces it (200/204). Body is a single-element array.
+    insert_status: 201
+    insert_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L363
+    update_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L416
+  restrictions:
+    # limit/offset are not allowed on PUT -> 400 PGRST114.
+    no_limit_offset: {status: 400, code: PGRST114, message: "limit/offset querystring parameters are not allowed for PUT"}
+    limit_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L297
+    offset_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L304
+    # Filters must be exactly the pk columns with eq operators, else 405 PGRST105.
+    pk_eq_only: {status: 405, code: PGRST105, message: "Filters must include all and only primary key columns with 'eq' operators"}
+    pk_eq_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L311
+    # No-pk table with PUT -> 405 PGRST105.
+    no_pk: {status: 405, code: PGRST105}
+    no_pk_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L357
+    # URL pk must match the payload pk, else 400 PGRST115.
+    pk_mismatch: {status: 400, code: PGRST115, message: "Payload values do not match URL in primary key column(s)"}
+    pk_mismatch_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L346
+  ignores_range_header: true
+  ignores_range_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L479
+
+# --------------------------------------------------------------------------
+# pg-safeupdate: full-table UPDATE/DELETE protection
+# --------------------------------------------------------------------------
+safe_mutations:
+  # When the pg-safeupdate extension is loaded, an UPDATE/DELETE with no WHERE
+  # condition raises Postgres 21000 -> 400.
+  update_requires_where: {status: 400, code: "21000", message: "UPDATE requires a WHERE clause"}
+  update_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L16
+  delete_requires_where: {status: 400, code: "21000", message: "DELETE requires a WHERE clause"}
+  delete_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L35
+  # A filter satisfies the WHERE requirement -> 204.
+  filter_satisfies: {status: 204}
+  filter_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L29
+
+# --------------------------------------------------------------------------
+# max-affected preference (limited / guarded mutations)
+# --------------------------------------------------------------------------
+max_affected:
+  # Prefer: handling=strict, max-affected=N caps the number of rows a mutation
+  # may affect. Exceeding N -> 400 PGRST124. Within N -> success + Preference-Applied.
+  strict_exceeds: {status: 400, code: PGRST124, message: "Query result exceeds max-affected preference constraint"}
+  exceeds_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L124
+  strict_within: {status: 204}
+  within_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L132
+  # handling=lenient ignores the constraint (never fails on it).
+  lenient_ignores: true
+  lenient_source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L158
+
+gaps:
+  - "limit/offset on PATCH/DELETE (true 'limited update/delete' requiring an order=) has no dedicated test case in PostgREST v14.12 test/spec/Feature/Query/{Update,Delete}Spec.hs; modeled here only via max-affected (PGRST124). The classic PGRST109/PGRST110 limited-mutation errors are marked 'no longer used' in src/PostgREST/Error.hs#L172-L173, so they are intentionally omitted."
+  - "CSV insert is marked pendingWith \"Decide on what to do with CSV insert\" in InsertSpec.hs#L639, so the disparate-csv-types path is not asserted upstream and is omitted; only the simpler CSV return=representation cases are tested but were left out of this band to keep fixtures JSON-only."
+  - "PUT return=minimal yields 204 (UpsertSpec.hs#L545) but the exact Content-Length/Content-Type matrix for every return= variant on PUT is partially asserted; only the headline statuses are modeled."

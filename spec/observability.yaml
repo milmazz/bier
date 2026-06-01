@@ -1,0 +1,279 @@
+# Behavior model: observability for PostgREST v14.12.
+#
+# Scope (this area only):
+#   - Server-Timing response header (jwt / parse / plan / transaction / response)
+#     gated by `server-timing-enabled`.
+#   - server-trace-header: echo of an arbitrary request header (e.g.
+#     X-Request-Id) back on the response.
+#   - log-level filtering of the Apache-style access log.
+#   - log-query: emit the executed SQL at the current log level.
+#   - Prometheus metrics surface exposed on the admin /metrics endpoint.
+#   - Structured (JSON) diagnostic log lines on stderr for PGRST00x errors.
+#
+# Every entry carries a `source` URL with a line anchor. Behaviors that
+# could not be traced to a concrete source line are recorded in `gaps`.
+#
+# Version: PostgREST v14.12
+# Conformance case band for this area: 1750..1799
+
+area: observability
+version: v14.12
+
+entries:
+  # -------------------------------------------------------------------------
+  # Server-Timing header
+  # -------------------------------------------------------------------------
+  - id: observability.server_timing.metrics_present
+    claim: >
+      When `server-timing-enabled` is true, every response carries a
+      `Server-Timing` header whose value lists the metrics
+      `jwt`, `parse`, `plan`, `transaction`, `response` (in that order),
+      each rendered as `<name>;dur=<ms>` with millisecond precision (one
+      decimal place). Present on GET, POST (201), PATCH (204), PUT, DELETE
+      (204), and RPC responses.
+    response_header: Server-Timing
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L25
+    source_line: 25
+    case_ids: [1750, 1751, 1752, 1753, 1754, 1755]
+
+  - id: observability.server_timing.render_format
+    claim: >
+      The Server-Timing header is rendered by joining the five metrics with
+      ", " in the fixed order jwt, parse, plan, transaction, response. Each
+      present metric becomes "<name>;dur=<value>" where <value> uses one
+      decimal of precision (showFFloat (Just 1)). A metric whose duration is
+      Nothing renders as the empty string.
+    response_header: Server-Timing
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/src/PostgREST/Response/Performance.hs#L27
+    source_line: 27
+    case_ids: [1750]
+
+  - id: observability.server_timing.root_spec
+    claim: >
+      The root spec (HEAD /) and HEAD requests also emit the full set of
+      Server-Timing metrics (jwt, parse, plan, transaction, response) when
+      server-timing is enabled.
+    response_header: Server-Timing
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L77
+    source_line: 77
+    case_ids: [1756]
+
+  - id: observability.server_timing.options_subset
+    claim: >
+      For OPTIONS requests (on a table, on /rpc/<fn>, and on the root /), the
+      Server-Timing header only contains the `jwt`, `parse`, and `response`
+      metrics; `plan` and `transaction` are absent because no plan/transaction
+      runs for an OPTIONS request.
+    response_header: Server-Timing
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L87
+    source_line: 87
+    case_ids: [1757]
+
+  - id: observability.server_timing.disabled_default
+    claim: >
+      `server-timing-enabled` defaults to false; when false the `Server-Timing`
+      header is omitted entirely. The header is only appended to the response
+      when configServerTimingEnabled is true, and the jwt duration / per-stage
+      timing are only computed in that case.
+    response_header: Server-Timing
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/src/PostgREST/App.hs#L210
+    source_line: 210
+    case_ids: [1758]
+
+  - id: observability.server_timing.transaction_accuracy
+    claim: >
+      The `transaction` duration in Server-Timing reflects the wall-clock time
+      spent in the database transaction: an RPC that sleeps for 2 seconds
+      reports a transaction duration in the range [2000ms, 3000ms).
+    response_header: Server-Timing
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/io/test_io.py#L1789
+    source_line: 1789
+    case_ids: [1759]
+
+  # -------------------------------------------------------------------------
+  # server-trace-header (request-id echo)
+  # -------------------------------------------------------------------------
+  - id: observability.trace_header.echo
+    claim: >
+      When `server-trace-header` names a request header (e.g. X-Request-Id),
+      the value of that incoming request header is copied verbatim onto the
+      response under the same header name. This applies to the root spec, to
+      table reads, and to RPC calls.
+    request_header: X-Request-Id
+    response_header: X-Request-Id
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/Feature/ObservabilitySpec.hs#L14
+    source_line: 14
+    case_ids: [1760, 1761, 1762]
+
+  - id: observability.trace_header.missing_value
+    claim: >
+      The trace-header echo middleware always adds the configured header to the
+      response when server-trace-header is set; if the request did not supply
+      that header, an empty value is echoed (fromMaybe mempty). When
+      server-trace-header is unset (default Nothing) the middleware is a no-op
+      and no such header is added.
+    response_header: X-Request-Id
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/src/PostgREST/App.hs#L221
+    source_line: 221
+    case_ids: [1763]
+
+  # -------------------------------------------------------------------------
+  # log-level (access log filtering)
+  # -------------------------------------------------------------------------
+  - id: observability.log_level.filter
+    claim: >
+      `log-level` filters which responses get an access-log line, by status:
+      crit logs nothing; error logs only >= 500; warn logs only >= 400; info
+      and debug log everything. Default log-level is "error".
+    config_key: log-level
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/src/PostgREST/Logger.hs#L88
+    source_line: 88
+    case_ids: [1764, 1765, 1766, 1767]
+
+  - id: observability.log_level.access_log_format
+    claim: >
+      Access-log lines use the Apache "combined"-style format with the
+      authenticated role as the user field, e.g.
+      `- - <role> [<ts>] "GET / HTTP/1.1" <status> <bytes> "" "<user-agent>"`.
+      An unauthenticated/anonymous request before role resolution shows "-" as
+      the user field.
+    config_key: log-level
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/io/test_io.py#L728
+    source_line: 728
+    case_ids: [1764]
+
+  - id: observability.log_level.values
+    claim: >
+      Valid `log-level` values are crit, error, warn, info, debug (parsed
+      case-sensitively from the config string); any unrecognized / absent value
+      falls back to error. The same five values are rendered back by
+      dumpLogLevel.
+    config_key: log-level
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/src/PostgREST/Config.hs#L357
+    source_line: 357
+    case_ids: [1712, 1723]   # covered by the config area's CLI dump cases
+
+  - id: observability.log_query.emits_sql
+    claim: >
+      `log-query` (default false) causes the executed SQL statement to be
+      logged. Whether a given request's query is logged still obeys log-level:
+      a query is logged only when shouldLogResponse is true for that response's
+      status (QueryObs uses the same status filter as the access log).
+    config_key: log-query
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/src/PostgREST/Logger.hs#L112
+    source_line: 112
+    case_ids: []   # stdout-only; see gaps (log-query SQL is scraped at io level)
+
+  - id: observability.log.pool_debug_observations
+    claim: >
+      Pool lifecycle observations (PoolRequest "Trying to borrow a connection
+      from pool", PoolRequestFullfilled "Borrowed a connection from the pool",
+      HasqlPoolObs, PoolFlushed, JWT cache lookups/evictions) are only logged
+      when log-level is debug (>= LogDebug).
+    config_key: log-level
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/src/PostgREST/Logger.hs#L115
+    source_line: 115
+    case_ids: []   # stdout-only debug observations; see gaps
+
+  - id: observability.log.json_error_to_stderr
+    claim: >
+      Database-client / schema-cache errors are logged to stderr as a JSON
+      object with keys code, details, hint, message. Examples: a dropped
+      connection logs PGRST001 ("Database client error. Retrying the
+      connection.") and an empty schema cache on startup logs PGRST002
+      ("Could not query the database for the schema cache. Retrying.").
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/io/test_io.py#L1550
+    source_line: 1550
+    case_ids: []
+
+  # -------------------------------------------------------------------------
+  # Prometheus metrics (admin /metrics endpoint)
+  # -------------------------------------------------------------------------
+  - id: observability.metrics.admin_endpoint
+    claim: >
+      The admin server exposes GET /metrics returning HTTP 200 with
+      Content-Type "text/plain; charset=utf-8" and a Prometheus text-format
+      body. The body includes at least: pgrst_db_pool_max,
+      pgrst_db_pool_waiting, pgrst_db_pool_available,
+      pgrst_db_pool_timeouts_total, pgrst_schema_cache_query_time_seconds, and
+      pgrst_schema_cache_loads_total{status="SUCCESS"}.
+    config_key: admin-server-port
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/io/test_io.py#L1504
+    source_line: 1504
+    case_ids: []
+
+  - id: observability.metrics.names
+    claim: >
+      The registered Prometheus metrics and their types are:
+      pgrst_db_pool_timeouts_total (counter), pgrst_db_pool_available (gauge),
+      pgrst_db_pool_waiting (gauge), pgrst_db_pool_max (gauge),
+      pgrst_schema_cache_loads_total{status} (labelled counter; status is
+      SUCCESS or FAIL), pgrst_schema_cache_query_time_seconds (gauge),
+      pgrst_jwt_cache_requests_total (counter), pgrst_jwt_cache_hits_total
+      (counter), pgrst_jwt_cache_evictions_total (counter).
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/src/PostgREST/Metrics.hs#L44
+    source_line: 44
+    case_ids: []
+
+  - id: observability.metrics.schema_cache_loads_counts_once
+    claim: >
+      pgrst_schema_cache_loads_total{status="SUCCESS"} increments once per
+      successful schema-cache load; a single load on startup (even after a 503
+      empty-cache response) yields exactly 1.0, and a schema-cache load failure
+      increments the status="FAIL" label instead.
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/io/test_io.py#L1595
+    source_line: 1595
+    case_ids: []
+
+  - id: observability.metrics.pool_available_non_negative
+    claim: >
+      pgrst_db_pool_available is computed as connected - inUse and stays
+      >= 0 even under connection failures; it is derived from tracked pool
+      connection observations rather than statelessly.
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/test/io/test_io.py#L1815
+    source_line: 1815
+    case_ids: []
+
+# Behaviors observed in PostgREST but NOT turned into black-box conformance
+# cases here, because the conformance runner (per AGENT_PLAN.md §5.1) is an
+# in-process HTTP harness with no admin server, no stderr capture, and no
+# multi-process log scraping. These are tracked so the Tester / Developer can
+# decide where they belong (io-level tests, not request/response cases).
+gaps:
+  - >
+    observability.log.json_error_to_stderr: requires capturing the PostgREST
+    process stderr and inducing PGRST001/PGRST002 (dropped DB connection /
+    empty schema cache on startup). Not expressible as a request->response
+    conformance case. Source:
+    https://github.com/PostgREST/postgrest/blob/v14.12/test/io/test_io.py#L1536
+  - >
+    observability.metrics.* (admin /metrics endpoint, metric names, schema
+    cache load count, pool-available non-negativity): served by the separate
+    admin server (admin-server-port), not the main API. The conformance band
+    cases cannot reach it; these need io-level tests with a Prometheus text
+    parser. Source:
+    https://github.com/PostgREST/postgrest/blob/v14.12/test/io/test_io.py#L1504
+  - >
+    observability.log_level access-log assertions and log-query SQL assertions
+    depend on scraping the process's stdout line-by-line (test_io.py
+    read_stdout). The conformance cases below assert only the request/response
+    contract (status codes that drive which level WOULD log); the actual log
+    line emission must be verified at the io level. Source:
+    https://github.com/PostgREST/postgrest/blob/v14.12/test/io/test_io.py#L703
+  - >
+    observability.log_query.emits_sql: log-query=true emits the executed SQL
+    to stdout (gated by log-level via shouldLogResponse). No request/response
+    signal; verified by scraping stdout. No conformance case. Source:
+    https://github.com/PostgREST/postgrest/blob/v14.12/test/io/test_io.py#L766
+  - >
+    observability.log.pool_debug_observations: PoolRequest /
+    PoolRequestFullfilled / HasqlPoolObs / JWT cache observations are logged
+    only at log-level=debug, on stdout. No request/response signal; verified at
+    the io level. No conformance case. Source:
+    https://github.com/PostgREST/postgrest/blob/v14.12/test/io/test_io.py#L1598
+  - >
+    server-timing transaction-duration accuracy (>=2000ms for a 2s sleep)
+    requires a sleep() RPC and timing tolerance; captured as case 1759 but its
+    duration-range assertion is best validated at the io level since exact
+    millisecond bounds are timing-sensitive. Source:
+    https://github.com/PostgREST/postgrest/blob/v14.12/test/io/test_io.py#L1789

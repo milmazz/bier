@@ -1,0 +1,20 @@
+id: 1164
+feature: filters/horizontal/cs
+request:
+  method: GET
+  path: /entities?arr=cs.{1,2}&select=id
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 2 }, { "id": 3 }]
+notes: >
+  cs (contains) array operator with {..} value. entity 2 arr {1,2} and
+  entity 3 arr {1,2,3} contain {1,2}. Mirrors AndOrParamsSpec
+  "can handle array operators" (arr=cs.{1,2}&select=id sub-assertion at L174).
+  This is a different test from "can handle cs and cd"
+  (or=(arr.cs.{1,2,3},arr.cd.{1})) which lives at L119-120.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L174

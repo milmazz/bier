@@ -1,0 +1,22 @@
+id: 1382
+feature: mutations/upsert/put/update
+request:
+  method: PUT
+  path: /tiobe_pls?name=eq.Java
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation
+  body: [{ "name": "Java", "rank": 13 }]
+schema: mutations
+# 'Java' MUST already exist so PUT is a REPLACE (-> 200). Reset to the seed.
+preconditions:
+  - "DELETE FROM test.tiobe_pls WHERE name = 'Java';"
+  - "INSERT INTO test.tiobe_pls (name, rank) VALUES ('Java', 1);"
+expect:
+  status: 200
+  body_exact: [{ "name": "Java", "rank": 13 }]
+notes: >-
+  PUT to an existing pk replaces the row -> 200. Upstream first asserts
+  GET /tiobe_pls?name=eq.Java returns [{Java,1}] then PUTs rank 13.
+  Mirrors UpsertSpec.hs#L417-L427.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L417

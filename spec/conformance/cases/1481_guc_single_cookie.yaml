@@ -1,0 +1,17 @@
+id: 1481
+feature: auth/guc/request-cookies-single
+request:
+  method: POST
+  path: /rpc/get_guc_value
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Cookie: acookie=cookievalue
+  body: { "prefix": "request.cookies", "name": "acookie" }
+schema: auth
+preconditions: []
+expect:
+  status: 200
+  body_exact: "cookievalue"
+notes: "request.cookies GUC exposes parsed Cookie pairs."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L895

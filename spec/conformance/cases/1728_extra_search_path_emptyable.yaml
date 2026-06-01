@@ -1,0 +1,16 @@
+id: 1728
+feature: config/db-extra-search-path/emptyable
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_DB_EXTRA_SEARCH_PATH: ""
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'db-extra-search-path = ""'
+notes: "db-extra-search-path is emptyable: an empty string yields an empty list (not the default ['public']). Source Config.hs splitOnCommasEmptyable (#L457-L459)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L457

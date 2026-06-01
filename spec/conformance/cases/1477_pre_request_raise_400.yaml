@@ -1,0 +1,19 @@
+id: 1477
+feature: auth/pre-request/raise-propagates
+request:
+  method: POST
+  path: /rpc/get_current_user
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6M30.OGxEJAf60NKZiTn-tIb2jy4rqKs_ZruLGWZ40TjrJsM"
+  body: {}
+schema: auth
+config:
+  db-pre-request: test.switch_role
+preconditions: []
+expect:
+  status: 400
+  body_exact: { "hint": "Please contact administrator", "details": null, "code": "P0001", "message": "Disabled ID --> 3" }
+notes: "Pre-request proc, id=3 -> RAISE EXCEPTION surfaces as P0001/400 with the raised message and hint."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L220

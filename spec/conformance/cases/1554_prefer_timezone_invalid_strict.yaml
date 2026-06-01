@@ -1,0 +1,18 @@
+id: 1554
+feature: headers/prefer/timezone-invalid-strict
+request:
+  method: GET
+  path: /timestamps
+  headers:
+    Prefer: "handling=strict, timezone=Invalid/Timezone"
+schema: headers
+preconditions: []
+expect:
+  status: 400
+  body_exact:
+    code: "PGRST122"
+    message: "Invalid preferences given with handling=strict"
+    details: "Invalid preferences: timezone=Invalid/Timezone"
+    hint: null
+notes: "Invalid timezone with handling=strict -> 400 PGRST122. Mirrors PreferencesSpec.hs:97-103."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L96

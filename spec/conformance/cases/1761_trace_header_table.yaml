@@ -1,0 +1,19 @@
+id: 1761
+feature: observability/trace-header/table
+request:
+  method: HEAD
+  path: /projects
+  headers: { X-Request-Id: "2" }
+schema: observability
+config:
+  server-trace-header: X-Request-Id
+preconditions: []
+expect:
+  status: 200
+  headers:
+    X-Request-Id: "2"
+  body_exact: null
+notes: >
+  The trace header is echoed on a table read (HEAD /projects). Mirrors
+  ObservabilitySpec.hs:22-27.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/ObservabilitySpec.hs#L22

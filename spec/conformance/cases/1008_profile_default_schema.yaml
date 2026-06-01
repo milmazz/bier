@@ -1,0 +1,18 @@
+id: 1008
+feature: url_grammar/profile/default
+request:
+  method: GET
+  path: /parents
+  headers: { Accept: application/json }
+schema: multi
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Profile: v1
+  body_exact:
+    - { "id": 1, "name": "parent v1-1" }
+    - { "id": 2, "name": "parent v1-2" }
+notes: "No Accept-Profile header -> first configured schema (v1) is used; resolved schema echoed in Content-Profile. Mirrors MultipleSchemaSpec default read"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L23

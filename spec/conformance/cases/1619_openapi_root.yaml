@@ -1,0 +1,16 @@
+id: 1619
+feature: content_negotiation/openapi/root
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/openapi+json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/openapi+json; charset=utf-8
+  body_jsonpath:
+    - { path: "$.swagger", exists: true }
+notes: "GET / with Accept application/openapi+json returns the OpenAPI doc with the openapi+json Content-Type. Mirrors OpenApiSpec 'root path returns a valid openapi spec'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L20

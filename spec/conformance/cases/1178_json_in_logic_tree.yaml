@@ -1,0 +1,17 @@
+id: 1178
+feature: filters/json/in_logic_tree
+request:
+  method: GET
+  path: /grandchild_entities?or=(jsonb_col->a->>b.eq.foo, jsonb_col->>b.eq.bar)&select=id
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 4 }, { "id": 5 }]
+notes: >
+  JSON arrow paths work inside and/or logic groups. Row 4 jsonb_col a.b=foo,
+  row 5 jsonb_col b=bar. Mirrors JsonOperatorSpec "can be filtered with and/or".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L173

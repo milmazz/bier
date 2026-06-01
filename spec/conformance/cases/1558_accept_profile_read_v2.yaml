@@ -1,0 +1,20 @@
+id: 1558
+feature: headers/profile/accept-profile-read
+request:
+  method: GET
+  path: /parents
+  headers:
+    Accept-Profile: v2
+    Accept: application/json
+schema: headers
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Profile: v2
+  body_exact:
+    - { "id": 3, "name": "parent v2-3" }
+    - { "id": 4, "name": "parent v2-4" }
+notes: "Accept-Profile: v2 reads from schema v2; echoed in Content-Profile. Mirrors MultipleSchemaSpec.hs:44-53."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L44

@@ -1,0 +1,21 @@
+id: 1301
+feature: representations/post/return-representation-select-shaping
+request:
+  method: POST
+  path: /projects?select=name,client_id
+  headers:
+    Prefer: "return=representation"
+    Content-Type: application/json
+  body: { "id": 10, "name": "New Project", "client_id": 2 }
+schema: representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Range: "*/*"
+    Preference-Applied: "return=representation"
+  headers_absent: [Location]
+  body_exact: [{ "name": "New Project", "client_id": 2 }]
+notes: "return=representation honors &select and omits Location when selecting without PK. Mirrors InsertSpec.hs:119."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L119

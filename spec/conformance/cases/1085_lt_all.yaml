@@ -1,0 +1,17 @@
+id: 1085
+feature: operators/quantifier/lt_all
+request:
+  method: GET
+  path: /projects?id=lt(all).{4,3}
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 1, "name": "Windows 7", "client_id": 1 }
+    - { "id": 2, "name": "Windows 10", "client_id": 1 }
+notes: "lt(all) -> `id < ALL('{4,3}')`. Mirrors QuerySpec.hs any/all quantifiers 'works with the lt/lte operator'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1511

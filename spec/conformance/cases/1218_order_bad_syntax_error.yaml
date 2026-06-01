@@ -1,0 +1,22 @@
+id: 1218
+feature: ordering/error/bad_syntax
+request:
+  method: GET
+  path: /items?order=id.asc.nullslasttt
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Length: "169"
+  body_exact:
+    details: "unexpected 't' expecting \",\" or end of input"
+    message: "\"failed to parse order (id.asc.nullslasttt)\" (line 1, column 17)"
+    code: "PGRST100"
+    hint: null
+notes: >
+  meaningful error message on bad order syntax: 400 PGRST100 with parse-error
+  details.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1168

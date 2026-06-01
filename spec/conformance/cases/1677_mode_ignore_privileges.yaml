@@ -1,0 +1,17 @@
+id: 1677
+feature: openapi/mode/ignore-privileges
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: openapi
+config:
+  openapi-mode: ignore-privileges
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.paths['/authors_only'].post.tags[0]", equals: "authors_only" }
+    - { path: "$.paths['/rpc/privileged_hello'].post.tags[0]", equals: "(rpc) privileged_hello" }
+notes: "openapi-mode=ignore-privileges includes privileged table/function even for anonymous. Mirrors IgnorePrivOpenApiSpec.hs:34-40, 66-72"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/IgnorePrivOpenApiSpec.hs#L34

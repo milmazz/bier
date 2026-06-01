@@ -1,0 +1,25 @@
+id: 1562
+feature: headers/location/compound-pk
+request:
+  method: POST
+  path: /car_models
+  headers:
+    Prefer: "return=headers-only"
+    Content-Type: application/json
+  body: { "name": "Enzo", "year": 2021 }
+schema: headers
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Location: "/car_models?name=eq.Enzo&year=eq.2021"
+    Content-Range: "*/*"
+    Content-Length: "0"
+    Preference-Applied: "return=headers-only"
+  headers_absent: [Content-Type]
+  body_exact: null
+notes: >
+  Compound PK -> Location includes every PK column. Mirrors InsertSpec.hs:145-157
+  (upstream uses a partitioned car_models; behavior under test is the multi-column
+  Location filter).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L145

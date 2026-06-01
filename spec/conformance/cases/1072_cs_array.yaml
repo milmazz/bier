@@ -1,0 +1,17 @@
+id: 1072
+feature: operators/cs/array
+request:
+  method: GET
+  path: /complex_items?select=id&arr_data=cs.{2}
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 2 }
+    - { "id": 3 }
+notes: "cs -> `@>` contains, on integer[]. Mirrors QuerySpec.hs 'matches with cs operator'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L555

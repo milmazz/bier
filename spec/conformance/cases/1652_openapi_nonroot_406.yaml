@@ -1,0 +1,12 @@
+id: 1652
+feature: openapi/root/non-root-406
+request:
+  method: GET
+  path: /entities
+  headers: { Accept: application/openapi+json }
+schema: openapi
+preconditions: []
+expect:
+  status: 406
+notes: "application/openapi+json on a non-root path is 406. Mirrors OpenApiSpec.hs:31-34"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L31

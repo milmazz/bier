@@ -1,0 +1,33 @@
+id: 1813
+feature: domain_representations/write/columns_param_uses_defaults
+request:
+  method: POST
+  path: /datarep_todos?columns=id,label_color&select=id,name,label_color,due_at
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Prefer: return=representation
+  body_json:
+    {
+      "id": 5,
+      "name": "party",
+      "label_color": "#001100",
+      "due_at": "invalid but should be ignored",
+    }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    [
+      {
+        "id": 5,
+        "name": null,
+        "label_color": "#001100",
+        "due_at": "2018-01-01T00:00:00Z",
+      },
+    ]
+notes: "?columns=id,label_color parses only those keys; name and due_at not listed, so due_at takes the table DEFAULT isodate '2018-01-01' formatted as 2018-01-01T00:00:00Z and the bad due_at value is ignored. Mirrors InsertSpec.hs 'ignores json keys not included in ?columns; parses only the ones specified'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L845

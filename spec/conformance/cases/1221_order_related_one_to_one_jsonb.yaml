@@ -1,0 +1,22 @@
+id: 1221
+feature: ordering/related/one_to_one_jsonb
+request:
+  method: GET
+  path: /trash?select=id,trash_details(id,jsonb_col)&order=trash_details(jsonb_col->key).asc
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 2, "trash_details": { "id": 2, "jsonb_col": { "key": 6 } } }
+    - { "id": 3, "trash_details": { "id": 3, "jsonb_col": { "key": 8 } } }
+    - { "id": 1, "trash_details": { "id": 1, "jsonb_col": { "key": 10 } } }
+notes: >
+  related order on a one-to-one relationship combined with a JSON arrow inside
+  the relation reference: order=trash_details(jsonb_col->key).asc. trash_details.id
+  references trash.id (one-to-one). The .desc variant is symmetric and asserted at
+  RelatedQueriesSpec.hs#L58.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L49

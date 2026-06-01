@@ -1,0 +1,25 @@
+id: 1127
+feature: select/spread/many-to-many-drop-junction
+request:
+  method: GET
+  path: /users?select=*,tasks:users_tasks(...tasks(*))&limit=1
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - id: 1
+      name: "Angela Martin"
+      tasks:
+        - {"id":1,"name":"Design w7","project_id":1}
+        - {"id":2,"name":"Code w7","project_id":1}
+        - {"id":3,"name":"Design w10","project_id":2}
+        - {"id":4,"name":"Code w10","project_id":2}
+notes: >
+  Spreading the far table inside the junction embed (users_tasks(...tasks(*)))
+  drops the junction columns, leaving only the task columns
+  (SpreadQueriesSpec.hs:80).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SpreadQueriesSpec.hs#L80

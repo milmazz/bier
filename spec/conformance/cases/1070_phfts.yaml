@@ -1,0 +1,15 @@
+id: 1070
+feature: operators/phfts
+request:
+  method: GET
+  path: /tsearch?text_search_vector=phfts.The%20Fat%20Cats
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "text_search_vector": "'ate':3 'cat':2 'fat':1 'rat':4" }]
+notes: "phfts -> `@@ phraseto_tsquery(...)`. Mirrors QuerySpec.hs phraseto_tsquery 'finds matches'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L263

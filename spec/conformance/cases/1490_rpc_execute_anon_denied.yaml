@@ -1,0 +1,15 @@
+id: 1490
+feature: auth/rpc/execute-denied-anon
+request:
+  method: POST
+  path: /rpc/privileged_hello
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+  body: { "name": "anonymous" }
+schema: auth
+preconditions: []
+expect:
+  status: 401
+notes: "Anonymous lacks EXECUTE on privileged_hello -> 401."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L42

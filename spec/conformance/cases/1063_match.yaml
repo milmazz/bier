@@ -1,0 +1,13 @@
+id: 1063
+feature: operators/match
+request:
+  method: GET
+  path: /simple_pk?k=match.^xy
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  body_exact: [{ "k": "xyyx", "extra": "u" }]
+notes: "match -> POSIX regex `~` (case-sensitive). Mirrors QuerySpec.hs 'matches with ~'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L154

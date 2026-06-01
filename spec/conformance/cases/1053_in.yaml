@@ -1,0 +1,18 @@
+id: 1053
+feature: operators/in
+request:
+  method: GET
+  path: /items?id=in.(1,3,5)
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: 0-2/*
+  body_exact:
+    - { "id": 1 }
+    - { "id": 3 }
+    - { "id": 5 }
+notes: "in.() compiles to `= ANY('{...}')`, never SQL IN. Mirrors QuerySpec.hs 'matches items IN'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L59

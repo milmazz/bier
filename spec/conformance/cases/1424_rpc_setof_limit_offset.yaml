@@ -1,0 +1,17 @@
+id: 1424
+feature: rpc/shape/limit-offset
+request:
+  method: GET
+  path: /rpc/getallprojects?id=gt.1&id=lt.5&select=id&limit=2&offset=1
+  headers: { Accept: application/json }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: 1-2/*
+  body_exact:
+    - { "id": 3 }
+    - { "id": 4 }
+notes: "limit/offset window a SETOF proc result and set Content-Range (unbounded total when no count requested)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L309

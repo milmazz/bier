@@ -1,0 +1,15 @@
+id: 1003
+feature: url_grammar/percent-encoding/unicode-path
+request:
+  method: GET
+  path: /%D9%85%D9%88%D8%A7%D8%B1%D8%AF
+  headers: { Accept: application/json }
+schema: unicode
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: []
+notes: "Percent-encoded path decodes to the unicode relation موارد in exposed schema تست. The schema name تست is verified: testUnicodeCfg sets configDbSchemas=[تست] (SpecHelper.hs#L181) and the schema/table are created at schema.sql#L10/L187. Mirrors UnicodeSpec read."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UnicodeSpec.hs#L17

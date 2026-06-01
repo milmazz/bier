@@ -1,0 +1,17 @@
+id: 1151
+feature: filters/horizontal/in
+request:
+  method: GET
+  path: /grandchild_entities?id=in.(1,2,3)&select=id
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 1 }, { "id": 2 }, { "id": 3 }]
+notes: >
+  IN list filter. Mirrors QuerySpec "matches items IN" (uses /items there);
+  reproduced against grandchild_entities (ids 1..5) to stay self-contained.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L59

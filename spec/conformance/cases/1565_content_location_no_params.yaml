@@ -1,0 +1,14 @@
+id: 1565
+feature: headers/content-location/no-params
+request:
+  method: GET
+  path: /simple_pk
+  headers: { Accept: application/json }
+schema: headers
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Location: "/simple_pk"
+notes: "No query params -> Content-Location omits the question mark. Mirrors QuerySpec.hs:1241-1246."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1241

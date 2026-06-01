@@ -1,0 +1,23 @@
+id: 1753
+feature: observability/server-timing/put
+request:
+  method: PUT
+  path: /tiobe_pls?name=eq.Python
+  headers:
+    Prefer: "return=representation"
+    Content-Type: application/json
+  body: [{ "name": "Python", "rank": 19 }]
+schema: observability
+config:
+  server-timing-enabled: true
+preconditions: []
+expect:
+  status: 200
+  headers_present: [Server-Timing]
+  headers_match:
+    Server-Timing: "response;dur=[0-9]+\\.[0-9]+"
+  body_exact: [{ "name": "Python", "rank": 19 }]
+notes: >
+  PUT (single-row upsert by PK) returning representation emits the full
+  Server-Timing metric set. Mirrors ServerTimingSpec.hs:47-55.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L47

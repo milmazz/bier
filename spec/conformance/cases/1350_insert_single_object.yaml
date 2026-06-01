@@ -1,0 +1,31 @@
+id: 1350
+feature: mutations/insert/location-header-headers-only
+request:
+  method: POST
+  path: /items
+  headers:
+    Content-Type: application/json
+    Prefer: return=headers-only
+  body: { "id": 100 }
+schema: mutations
+# Reset items to a known max so the Location row id is deterministic regardless
+# of run order or prior inserts. We insert id=100 explicitly (items.id is serial
+# but accepts an explicit value), so the Location reflects that pk.
+preconditions:
+  - "DELETE FROM test.items WHERE id >= 100;"
+expect:
+  status: 201
+  headers:
+    # Upstream asserts Content-Type is ABSENT and Content-Length 0 on a
+    # headers-only insert (no body), plus the Location header from the pk.
+    Location: /items?id=eq.100
+    Content-Length: "0"
+    Preference-Applied: return=headers-only
+notes: >-
+  PostgREST emits the Location header only when return=headers-only is
+  requested; a plain POST (no Prefer) and return=representation do NOT set
+  Location (see InsertSpec.hs#L114/L125/L268, all matchHeaderAbsent hLocation).
+  This case mirrors the auto_incrementing_pk headers-only insert at
+  InsertSpec.hs#L199-L209 ("Location" <:> "/auto_incrementing_pk?id=eq.2"),
+  applied to the serial-pk `items` table.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L207

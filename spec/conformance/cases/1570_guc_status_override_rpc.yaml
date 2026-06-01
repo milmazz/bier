@@ -1,0 +1,16 @@
+id: 1570
+feature: headers/guc/status-override-rpc
+request:
+  method: GET
+  path: /rpc/send_body_status_403
+  headers: { Accept: application/json }
+schema: headers
+preconditions: []
+expect:
+  status: 403
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    message: "invalid user or password"
+notes: "response.status GUC overrides HTTP status (403) on RPC. Mirrors RpcSpec.hs:1124-1131."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1124

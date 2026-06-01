@@ -1,0 +1,13 @@
+id: 1373
+feature: mutations/delete/error/table-not-found
+request:
+  method: DELETE
+  path: /foozle?id=eq.101
+  headers: {}
+schema: mutations
+preconditions: []
+expect:
+  status: 404
+  body_exact: { "code": "PGRST205", "details": null, "hint": null, "message": "Could not find the table 'test.foozle' in the schema cache" }
+notes: "DELETE on unknown table -> 404 PGRST205."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L115

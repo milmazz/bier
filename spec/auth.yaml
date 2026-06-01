@@ -1,0 +1,252 @@
+# Behavior model: auth (JWT verification, role switching, GUCs)
+# PostgREST version pinned: v14.12
+#
+# Every entry carries a `source` URL with a line anchor into PostgREST's own
+# test suite or source. Behaviors that could not be traced to a real source
+# line are recorded under `gaps` at the bottom, NOT invented.
+#
+# Ground-truth priority: PostgREST tests > PostgREST source > docs.
+
+area: auth
+version: v14.12
+
+# ===========================================================================
+# JWT signature verification & supported algorithms
+# ===========================================================================
+jwt_verification:
+  # The Authorization header carries `Bearer <token>`; both "Bearer" and
+  # "bearer" scheme spellings are accepted.
+  bearer_scheme_case_insensitive:
+    accepted: ["Bearer", "bearer"]
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L229
+  algorithms:
+    # jwt-secret is parsed as a JWKS, a single JWK, or (fallback) a symmetric
+    # HS* secret. A plain text secret yields an HS256 SymmetricJwk.
+    symmetric_text_secret_is_hs256: true
+    symmetric_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L510
+    # A symmetric (HS*) secret must be at least 32 characters long.
+    symmetric_min_length: 32
+    symmetric_min_length_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L511
+    # HS256 verification of a token signed with the configured text secret.
+    hs256_verifies:
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L84
+    # A binary (base64) symmetric secret also verifies an HS256 token.
+    binary_secret_verifies:
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/BinaryJwtSecretSpec.hs#L16
+    # Asymmetric verification: a token signed with RS256 verifies against the
+    # configured public JWK (server started with an asymmetric JWK).
+    rs256_asymmetric_verifies:
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AsymmetricJwtSpec.hs#L16
+    # jwt-secret accepts a JWK or a JWKS (JSON Web Key Set) document; the JWKS
+    # form is used as-is so ES256 / EdDSA / multi-key sets are supported by the
+    # underlying jose library. Only RS256/HS256 are exercised by upstream tests;
+    # ES256/EdDSA are library-supported but not test-anchored (see gaps).
+    jwks_accepted: true
+    jwks_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L493
+  errors:
+    # No JWT secret configured but a token is presented -> 500 PGRST300.
+    secret_missing: {status: 500, code: PGRST300, message: "Server lacks JWT secret"}
+    secret_missing_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/NoJwtSecretSpec.hs#L16
+    # Empty token in Authorization header -> 401 PGRST301.
+    empty_token: {status: 401, code: PGRST301, message: "Empty JWT is sent in Authorization header"}
+    empty_token_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L89
+    # Token without exactly 3 dot-separated parts -> 401 PGRST301, message
+    # "Expected 3 parts in JWT; got N".
+    wrong_parts: {status: 401, code: PGRST301, message: "Expected 3 parts in JWT; got 2"}
+    wrong_parts_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L112
+    # All PGRST301 / PGRST303 decode/claims errors carry a WWW-Authenticate
+    # header: Bearer error="invalid_token", error_description="<message>".
+    invalid_token_header_format: 'Bearer error="invalid_token", error_description="<message>"'
+    invalid_token_header_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L785
+  error_codes:
+    # Canonical JWT error code -> message map (source of truth).
+    PGRST300: "Server lacks JWT secret"
+    PGRST301: "Empty JWT is sent in Authorization header | Expected 3 parts in JWT; got N | No suitable key or wrong key type | Wrong or unsupported encoding algorithm | JWT cryptographic operation failed | Unsupported token type | JWT couldn't be decoded"
+    PGRST302: "Anonymous access is disabled"
+    PGRST303: "JWT expired | JWT not yet valid | JWT issued at future | JWT not in audience | Parsing claims failed | The JWT 'exp' claim must be a number | The JWT 'nbf' claim must be a number | The JWT 'iat' claim must be a number | The JWT 'aud' claim must be a string or an array of strings"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L750
+
+# ===========================================================================
+# Standard-claim validation (exp / nbf / iat / aud) -> all PGRST303
+# ===========================================================================
+claim_validation:
+  # Expired token (exp in the past) -> 401 PGRST303 "JWT expired".
+  expired: {status: 401, code: PGRST303, message: "JWT expired"}
+  expired_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L101
+  # exp claim present but not a number -> 401 PGRST303.
+  exp_not_number: {status: 401, code: PGRST303, message: "The JWT 'exp' claim must be a number"}
+  exp_not_number_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L140
+  # nbf claim present but not a number -> 401 PGRST303.
+  nbf_not_number: {status: 401, code: PGRST303, message: "The JWT 'nbf' claim must be a number"}
+  nbf_not_number_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L152
+  # iat claim present but not a number -> 401 PGRST303.
+  iat_not_number: {status: 401, code: PGRST303, message: "The JWT 'iat' claim must be a number"}
+  iat_not_number_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L164
+  # aud as a single non-string value -> 401 PGRST303.
+  aud_not_string: {status: 401, code: PGRST303, message: "The JWT 'aud' claim must be a string or an array of strings"}
+  aud_not_string_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L176
+  # aud as an array with a non-string element -> 401 PGRST303.
+  aud_array_non_string: {status: 401, code: PGRST303, message: "The JWT 'aud' claim must be a string or an array of strings"}
+  aud_array_non_string_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L188
+  # A token with no claims at all -> 401 (no role claim to switch to).
+  no_claims_unauthorized: {status: 401}
+  no_claims_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L123
+  # A token whose claims contain no `role` -> 401.
+  no_role_claim_unauthorized: {status: 401}
+  no_role_claim_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L128
+
+# ===========================================================================
+# Audience (aud) handling, gated by the jwt-aud config option
+# ===========================================================================
+audience:
+  config_key: jwt-aud
+  config_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L282
+  when_jwt_aud_set:
+    # String aud matching the configured value -> 200.
+    string_match_ok:
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L17
+    # String aud not matching -> 401 PGRST303 "JWT not in audience".
+    string_mismatch: {status: 401, code: PGRST303, message: "JWT not in audience"}
+    string_mismatch_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L29
+    # Empty string aud -> treated as a non-matching value -> 401.
+    empty_string_mismatch: {status: 401, code: PGRST303, message: "JWT not in audience"}
+    empty_string_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L43
+    # Array aud containing the configured value (any position) -> 200.
+    array_contains_ok:
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L70
+    # Array aud not containing the configured value -> 401.
+    array_no_match: {status: 401, code: PGRST303, message: "JWT not in audience"}
+    array_no_match_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L97
+    # Empty array aud -> audience ignored -> 200.
+    empty_array_ignored:
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L111
+    # null aud -> audience ignored -> 200.
+    null_ignored:
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L123
+    # Absent aud claim -> 200.
+    absent_ok:
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L136
+  when_jwt_aud_unset:
+    # With no jwt-aud configured, any aud value is ignored -> 200.
+    any_aud_ignored:
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L154
+
+# ===========================================================================
+# Role switching & anonymous access
+# ===========================================================================
+role_switching:
+  # The role claim (default location `.role`) names the Postgres role to
+  # SET LOCAL ROLE to for the transaction.
+  role_claim_key_default: ".role"
+  role_claim_key_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L698
+  role_claim_key_config: jwt-role-claim-key
+  role_claim_key_config_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L283
+  # With no JWT, requests run as the configured db-anon-role
+  # (postgrest_test_anonymous in the fixtures).
+  anon_role_when_no_jwt:
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L887
+  # A valid token with role=postgrest_test_author can read authors_only (200).
+  valid_role_grants_access:
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L73
+  # Extra unknown claims in the token are ignored (still 200).
+  extra_claims_ignored:
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L78
+  anonymous:
+    # Anonymous (no token) hitting a table it cannot read -> 401 with the
+    # Postgres 42501 permission-denied envelope and WWW-Authenticate: Bearer.
+    no_token_permission_denied:
+      status: 401
+      code: "42501"
+      www_authenticate: "Bearer"
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L17
+    # 401 (any unauthenticated/JWT error) gets WWW-Authenticate: Bearer.
+    www_authenticate_on_401_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L517
+    # An *authenticated* role lacking a privilege gets 403 (NOT 401), and no
+    # WWW-Authenticate header.
+    authenticated_no_privilege:
+      status: 403
+      code: "42501"
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L29
+    # Anonymous calling an RPC it cannot execute -> 401.
+    rpc_no_execute_denied: {status: 401}
+    rpc_no_execute_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L42
+  no_anon_role_configured:
+    # If db-anon-role is unset, an anonymous request -> 401 PGRST302
+    # "Anonymous access is disabled" with WWW-Authenticate: Bearer.
+    anonymous_disabled: {status: 401, code: PGRST302, message: "Anonymous access is disabled", www_authenticate: "Bearer"}
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/NoAnonSpec.hs#L24
+    # A valid token still authenticates normally even when anon is disabled.
+    valid_token_still_works:
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/NoAnonSpec.hs#L15
+
+# ===========================================================================
+# db-pre-request: a stored proc run before the main query, inside the tx,
+# after role switching, that can further SET LOCAL ROLE / raise.
+# ===========================================================================
+pre_request:
+  config_key: db-pre-request
+  config_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L166
+  # The pre-request proc can read request.jwt.claims and switch role based on a
+  # custom claim (here: id). id=1 -> postgrest_test_author.
+  switch_on_claim_author:
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L202
+  # id=2 -> postgrest_test_default_role.
+  switch_on_claim_default:
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L211
+  # A RAISE EXCEPTION in the pre-request proc surfaces as the proc's error;
+  # P0001 with the raised message/hint -> 400.
+  raise_propagates: {status: 400, code: P0001, message: "Disabled ID --> 3", hint: "Please contact administrator"}
+  raise_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L220
+
+# ===========================================================================
+# GUCs exposed to SQL via current_setting()
+# ===========================================================================
+gucs:
+  # request.jwt.claims: the full verified claims object as JSON text.
+  request_jwt_claims:
+    description: "JSON text of the verified JWT claims; current role is exposed as the .role member even when anonymous."
+    anon_role_value: "postgrest_test_anonymous"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L887
+  # request.headers: JSON object of request headers, keys lowercased.
+  request_headers:
+    description: "JSON object of request headers; header names are lowercased. Includes the raw Authorization value."
+    custom_header_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L869
+    standard_header_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L878
+    authorization_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L919
+  # request.cookies: JSON object of parsed Cookie header pairs.
+  request_cookies:
+    description: "JSON object of cookie name->value parsed from the Cookie header."
+    single_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L895
+    multiple_source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L903
+  # request.method: the HTTP method as a plain GUC (not under a JSON prefix).
+  request_method:
+    description: "HTTP method string, e.g. 'POST'."
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L927
+  # request.path: the request path as a plain GUC.
+  request_path:
+    description: "Request path string, e.g. '/rpc/get_guc_value'."
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L935
+
+# ===========================================================================
+# Gaps: behaviors in scope but not traceable to a concrete v14.12 source line.
+# ===========================================================================
+gaps:
+  - "ES256 verification: jose/JWKS supports it (Config.hs#L493 accepts a JWKS),
+     but v14.12 has no ES256 conformance test in test/spec/Feature/Auth. Only
+     HS256 (AuthSpec/BinaryJwtSecretSpec) and RS256 (AsymmetricJwtSpec) are
+     test-anchored. No black-box case authored for ES256."
+  - "EdDSA (Ed25519) verification: same as ES256 -- library-supported via the
+     JWKS path but no upstream conformance test in v14.12. Omitted, not guessed."
+  - "JWKS multi-key rotation / kid selection: KeyError 'No suitable key' is
+     defined (Error.hs#L760) but no v14.12 Feature/Auth test exercises kid
+     matching against a multi-key JWKS. Omitted."
+  - "JWTNotYetValid / JWTIssuedAtFuture (nbf in future, iat in future):
+     error variants exist (Error.hs#L768-L769) but no v14.12 Feature/Auth test
+     asserts the live behavior for a future nbf/iat numeric value. Only the
+     'not a number' validation is test-anchored."
+  - "jwt-role-claim-key with a non-default path (e.g. nested claim): config
+     option exists (Config.hs#L283) but no Feature/Auth test in v14.12 sets a
+     custom role-claim-key. The default '.role' is the only test-anchored path."
+  - "JwtCache (jwt-cache-max-entries) behavior: cache exists
+     (src/PostgREST/Auth/JwtCache.hs) but its observable behavior is not pinned
+     by a Feature/Auth spec line; treated as a non-observable optimization."

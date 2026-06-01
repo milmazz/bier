@@ -1,0 +1,20 @@
+id: 1167
+feature: filters/logical/arity
+request:
+  method: GET
+  path: /entities?or=()
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    code: PGRST100
+    message: '"failed to parse logic tree (())" (line 1, column 4)'
+    details: >-
+      unexpected ")" expecting field name (* or [a..z0..9_$]), negation operator (not) or logic operator (and, or)
+    hint: null
+notes: 'A logic group needs >=1 condition; or=() is a 400 PGRST100. Mirrors AndOrParamsSpec "cannot have zero conditions".'
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L218

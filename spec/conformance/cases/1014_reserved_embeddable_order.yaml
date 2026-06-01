@@ -1,0 +1,19 @@
+id: 1014
+feature: url_grammar/reserved-params/order
+request:
+  method: GET
+  path: /parents?order=id.desc
+  headers:
+    Accept: application/json
+    Accept-Profile: v1
+schema: multi
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 2, "name": "parent v1-2" }
+    - { "id": 1, "name": "parent v1-1" }
+notes: "order is a reserved-embeddable param (matched by last dot-word), not a column filter. Reserved-embeddable set defined in QueryParams.parse"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L166

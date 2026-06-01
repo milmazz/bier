@@ -1,0 +1,16 @@
+id: 1723
+feature: config/coercion/empty-string-is-absent
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_LOG_LEVEL: ""
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'log-level = "error"'
+notes: "An empty string for an optString key is treated as absent, so log-level falls back to its default 'error'. Mirrors cli fixture 'log-level='."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L71

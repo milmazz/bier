@@ -1,0 +1,22 @@
+id: 1506
+feature: errors/headers/proxy_status_pt
+request:
+  method: GET
+  path: /rpc/raise_pt402
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 402
+  headers:
+    Proxy-Status: "PostgREST; error=PT402"
+notes: >
+  The Proxy-Status response header carries the error code for every
+  PostgREST-originated error, in the form "PostgREST; error=<code>". The
+  header value is built by proxyStatusHeader (Error.hs:522-523,
+  "PostgREST; error=" <> code). For a PTxxx custom error the body code is the
+  literal SQLSTATE PT402, so the Proxy-Status value is "PostgREST; error=PT402".
+  This is directly asserted upstream: ErrorSpec.hs "works with raise sqlstate
+  custom error" (L61) hits GET /rpc/raise_pt402 and asserts
+  "Proxy-Status" <:> "PostgREST; error=PT402" at L66.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ErrorSpec.hs#L61

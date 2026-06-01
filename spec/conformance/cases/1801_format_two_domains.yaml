@@ -1,0 +1,24 @@
+id: 1801
+feature: domain_representations/read/format_multiple_distinct
+request:
+  method: GET
+  path: /datarep_todos?select=id,label_color,due_at&id=lt.4
+  headers: { Accept: application/json }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    [
+      { "id": 1, "label_color": "#000000", "due_at": "2018-01-02T00:00:00Z" },
+      { "id": 2, "label_color": "#000100", "due_at": "2018-01-03T00:00:00Z" },
+      {
+        "id": 3,
+        "label_color": "#01E240",
+        "due_at": "2018-01-01T14:12:34.123456Z",
+      },
+    ]
+notes: "Two domain columns each apply their own AS json cast: color -> #RRGGBB, isodate -> timestamptz with trailing Z. Mirrors QuerySpec.hs 'formats two columns with different formatters'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1540

@@ -1,0 +1,16 @@
+id: 1729
+feature: config/app-settings/from-env
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_APP_SETTINGS_FOO: "bar"
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'app.settings.foo = "bar"'
+notes: "PGRST_APP_SETTINGS_<NAME> env vars are normalized into app.settings.<name> GUCs. Source Config.hs parseAppSettings/normalize (#L310-L315)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L310

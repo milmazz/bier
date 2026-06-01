@@ -1,0 +1,25 @@
+id: 1170
+feature: filters/logical/reserved_word_columns
+request:
+  method: GET
+  path: /grandchild_entities?or=(and_starting_col.eq.smth, or_starting_col.eq.smth)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: []
+notes: >
+  Columns beginning with the reserved words and/or can be filtered inside a
+  logic group. Mirrors AndOrParamsSpec
+  "can query columns that begin with and/or reserved words".
+  CAVEAT: the cited it-block only asserts `shouldRespondWith 200` -- it makes
+  NO body assertion. The body_exact [] here is an INFERENCE from the controlled
+  filters.sql fixture (all grandchild_entities rows have NULL
+  and_starting_col/or_starting_col, so eq.smth matches nothing) and is
+  STRONGER than what the pinned source guarantees. A conformance runner that
+  wants to stay faithful to the source should assert only status 200; the []
+  is asserted here because the fixture is fully controlled by this area.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L289

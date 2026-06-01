@@ -1,0 +1,17 @@
+id: 1018
+feature: url_grammar/percent-encoding/plus-is-space
+request:
+  method: GET
+  path: /parents?name=eq.parent+v1-1
+  headers:
+    Accept: application/json
+    Accept-Profile: v1
+schema: multi
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 1, "name": "parent v1-1" }]
+notes: "A literal '+' in a query value decodes to a space because PostgREST parses the query string with parseQueryReplacePlus True; equivalent to %20"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L149

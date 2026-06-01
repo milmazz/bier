@@ -1,0 +1,14 @@
+id: 1359
+feature: mutations/columns-param/unknown-column-error
+request:
+  method: POST
+  path: /articles?columns=helicopter
+  headers: { Content-Type: application/json }
+  body: [{ "id": 204, "body": "yyy" }]
+schema: mutations
+preconditions: []
+expect:
+  status: 400
+  body_exact: { "code": "PGRST204", "details": null, "hint": null, "message": "Could not find the 'helicopter' column of 'articles' in the schema cache" }
+notes: "?columns referencing a missing column -> 400 PGRST204."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L469

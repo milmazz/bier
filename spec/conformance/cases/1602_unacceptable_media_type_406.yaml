@@ -1,0 +1,19 @@
+id: 1602
+feature: content_negotiation/error/unacceptable
+request:
+  method: GET
+  path: /simple_pk
+  headers: { Accept: text/unknowntype }
+schema: test
+preconditions: []
+expect:
+  status: 406
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    code: PGRST107
+    message: "None of these media types are available: text/unknowntype"
+    details: null
+    hint: null
+notes: "A single unsupported Accept type yields 406 with PGRST107 and a JSON error body. Mirrors QuerySpec 'unknown accept type with 406'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1179

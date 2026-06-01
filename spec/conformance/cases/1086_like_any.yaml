@@ -1,0 +1,17 @@
+id: 1086
+feature: operators/quantifier/like_any
+request:
+  method: GET
+  path: /articles?body=like(any).{%plan%,%brain%}&select=id
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 1 }
+    - { "id": 2 }
+notes: "like(any) -> `body like ANY('{%plan%,%brain%}')`. Mirrors QuerySpec.hs any/all quantifiers 'works with the like/ilike operator'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1519

@@ -1,0 +1,17 @@
+id: 1162
+feature: filters/logical/and
+request:
+  method: GET
+  path: /entities?and=(id.eq.1,name.eq.entity 1)&or=(id.eq.1,id.eq.2)&select=id
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 1 }]
+notes: >
+  A top-level and= and a top-level or= are ANDed together. Mirrors
+  AndOrParamsSpec "can be combined unnested".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L61

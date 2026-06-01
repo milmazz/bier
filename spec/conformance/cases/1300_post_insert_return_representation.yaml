@@ -1,0 +1,20 @@
+id: 1300
+feature: representations/post/return-representation
+request:
+  method: POST
+  path: /projects?select=id,name,clients(id,name)
+  headers:
+    Prefer: "return=representation, count=exact"
+    Content-Type: application/json
+  body: { "id": 6, "name": "New Project", "client_id": 2 }
+schema: representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Range: "*/1"
+    Preference-Applied: "return=representation, count=exact"
+  body_exact: [{ "id": 6, "name": "New Project", "clients": { "id": 2, "name": "Apple" } }]
+notes: "POST insert with return=representation yields 201 + JSON array body + Preference-Applied. Mirrors InsertSpec.hs:96."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L96

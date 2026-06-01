@@ -1,0 +1,15 @@
+id: 1118
+feature: select/embed/inner-join-m2o
+request:
+  method: GET
+  path: /projects?select=id,clients!inner(id)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"id":1,"clients":{"id":1}},{"id":2,"clients":{"id":1}},{"id":3,"clients":{"id":2}},{"id":4,"clients":{"id":2}}]
+notes: "!inner ignores null embeddings (project 5 with null client_id is dropped) (EmbedInnerJoinSpec.hs:17)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L17

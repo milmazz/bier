@@ -1,0 +1,18 @@
+id: 1765
+feature: observability/log-level/404-logged-at-warn
+request:
+  method: GET
+  path: /unknown
+  headers: { Accept: application/json }
+schema: observability
+config:
+  log-level: warn
+preconditions: []
+expect:
+  status: 404
+notes: >
+  Drives the log-level filter: at warn, responses with status >= 400 are
+  logged, so a 404 on an unknown relation is logged (but would NOT be at
+  error). Asserts the 404 status the filter keys on; stdout emission verified
+  at io level. Mirrors test_io.py:test_log_level (warn branch).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_io.py#L733

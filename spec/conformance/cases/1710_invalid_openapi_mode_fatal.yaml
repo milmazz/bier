@@ -1,0 +1,15 @@
+id: 1710
+feature: config/validation/invalid-openapi-mode
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_OPENAPI_MODE: "follow-"
+preconditions: []
+expect:
+  exit_code: nonzero
+  stderr_contains: "Invalid openapi-mode. Check your configuration."
+notes: "openapi-mode must be one of follow-privileges|ignore-privileges|disabled. Mirrors test_cli.py:test_invalid_openapi_mode (invalidopenapimodes[0])."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L232

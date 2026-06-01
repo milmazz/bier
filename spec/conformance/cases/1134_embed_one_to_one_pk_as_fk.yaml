@@ -1,0 +1,18 @@
+id: 1134
+feature: select/embed/one-to-one/pk-as-fk
+request:
+  method: GET
+  path: /students_info?select=address,students(name)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"address":"Street 1","students":{"name":"John Doe"}},{"address":"Street 2","students":{"name":"Jane Doe"}}]
+notes: >
+  One-to-one embed where students_info uses its (id, code) primary key as the FK
+  to students: the embed is a single JSON object, not an array
+  (QuerySpec.hs:716, "works when having a pk as fk").
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L716

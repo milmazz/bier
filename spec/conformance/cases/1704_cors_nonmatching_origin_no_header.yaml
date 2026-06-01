@@ -1,0 +1,19 @@
+id: 1704
+feature: config/server-cors-allowed-origins/no-match
+request:
+  method: GET
+  path: /items
+  headers:
+    Accept: "*/*"
+    Origin: http://invalid.com
+schema: config
+config:
+  db-schemas: test
+  db-anon-role: postgrest_test_anonymous
+  server-cors-allowed-origins: "http://example.com, http://example2.com"
+preconditions: []
+expect:
+  status: 200
+  headers_absent: [Access-Control-Allow-Origin]
+notes: "A request from an origin not in the allowlist gets no Access-Control-Allow-Origin header. Mirrors test_io.py:test_no_preflight_request_with_CORS_config_should_not_return_header."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_io.py#L1361

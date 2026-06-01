@@ -1,0 +1,19 @@
+id: 1701
+feature: config/db-max-rows/respects-client-range
+request:
+  method: GET
+  path: /items
+  headers: { Accept: application/json, Range-Unit: items, Range: "0-0" }
+schema: config
+config:
+  db-schemas: test
+  db-anon-role: postgrest_test_anonymous
+  db-max-rows: 2
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: 0-0/*
+  body_exact: [{ "id": 1 }]
+notes: "Additional client Range narrows within the db-max-rows cap. Mirrors QueryLimitedSpec.hs:22."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QueryLimitedSpec.hs#L22

@@ -1,0 +1,15 @@
+id: 1103
+feature: select/alias
+request:
+  method: GET
+  path: /complex_items?id=eq.1&select=myId:id
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"myId":1}]
+notes: "rename simple column (QuerySpec.hs:589)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L589

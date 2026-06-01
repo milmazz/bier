@@ -1,0 +1,15 @@
+id: 1393
+feature: mutations/insert/error/not-null-violation
+request:
+  method: POST
+  path: /simple_pk
+  headers: { Content-Type: application/json }
+  body: { "extra": "foo" }
+schema: mutations
+preconditions: []
+expect:
+  status: 400
+  body_jsonpath:
+    - { path: "$.code", equals: "23502" }
+notes: "Insert omitting NOT NULL pk surfaces Postgres 23502 as 400."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L213

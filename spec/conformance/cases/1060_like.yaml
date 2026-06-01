@@ -1,0 +1,13 @@
+id: 1060
+feature: operators/like
+request:
+  method: GET
+  path: /simple_pk?k=like.*yx
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  body_exact: [{ "k": "xyyx", "extra": "u" }]
+notes: "like with `*` rewritten to SQL `%` (-> like '%yx'). Mirrors QuerySpec.hs 'matches with like'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L131

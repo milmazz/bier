@@ -1,0 +1,17 @@
+id: 1366
+feature: mutations/update/columns-param
+request:
+  method: PATCH
+  path: /articles?id=eq.1&columns=body
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation
+  body: { "body": "Some real content", "smth": "here", "fake_id": 13 }
+schema: mutations
+preconditions:
+  - "insert into test.articles (id, body) values (1, 'orig') on conflict do nothing;"
+expect:
+  status: 200
+  body_exact: [{ "id": 1, "body": "Some real content", "owner": "postgrest_test_anonymous" }]
+notes: "PATCH ?columns=body updates only the body column; extra json keys ignored."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L338

@@ -1,0 +1,20 @@
+id: 1805
+feature: domain_representations/read/manual_cast_on_top
+request:
+  method: GET
+  path: /datarep_todos?select=id,clr:label_color::text&id=lt.4
+  headers: { Accept: application/json }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    [
+      { "id": 1, "clr": "\"#000000\"" },
+      { "id": 2, "clr": "\"#000100\"" },
+      { "id": 3, "clr": "\"#01E240\"" },
+    ]
+notes: "An explicit ::text cast is applied on top of the representation: the already-formatted JSON string is re-serialized, yielding a quoted string. Mirrors QuerySpec.hs 'formats, renames and allows manual casting on top'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1566

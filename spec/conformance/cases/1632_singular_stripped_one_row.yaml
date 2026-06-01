@@ -1,0 +1,19 @@
+id: 1632
+feature: content_negotiation/nulls-stripped/singular
+request:
+  method: GET
+  path: /organizations?limit=1
+  headers: { Accept: application/vnd.pgrst.object+json;nulls=stripped }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/vnd.pgrst.object+json;nulls=stripped; charset=utf-8
+  body_exact: { id: 1, name: "Referee Org", manager_id: 1 }
+notes: >-
+  Accept application/vnd.pgrst.object+json;nulls=stripped (MTVndSingularJSON
+  True) returns a single object (not an array) with null-valued keys omitted;
+  Content-Type echoes the stripped singular media type. Mirrors NullsStripSpec
+  'strips nulls when Accept: application/vnd.pgrst.object+json;nulls=stripped'.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/NullsStripSpec.hs#L58

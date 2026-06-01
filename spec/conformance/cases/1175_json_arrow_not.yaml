@@ -1,0 +1,18 @@
+id: 1175
+feature: filters/json/arrow_not
+request:
+  method: GET
+  path: /json_table?data->foo->>bar=not.eq.baz
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: []
+notes: >
+  not. negates a json arrow filter. Only the id=1 row has foo.bar and it
+  equals baz, so the negation yields []. Mirrors JsonOperatorSpec
+  "can filter by properties inside json column using not".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L163
