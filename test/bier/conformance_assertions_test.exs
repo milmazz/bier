@@ -61,4 +61,38 @@ defmodule Bier.ConformanceAssertionsTest do
       assert_expect(resp(), %{"body_nonsense" => 1})
     end
   end
+
+  test "headers_match: regex on header value" do
+    r = resp(%{headers: %{"server-timing" => "transaction;dur=12.34"}})
+
+    assert_expect(r, %{"headers_match" => %{"Server-Timing" => "transaction;dur=[0-9]+\\.[0-9]+"}})
+
+    assert_raise ExUnit.AssertionError, fn ->
+      assert_expect(r, %{"headers_match" => %{"Server-Timing" => "nope=[0-9]+"}})
+    end
+  end
+
+  test "headers_no_blank: every header value non-blank" do
+    assert_expect(resp(), %{"headers_no_blank" => true})
+
+    assert_raise ExUnit.AssertionError, fn ->
+      assert_expect(resp(%{headers: %{"x-blank" => ""}}), %{"headers_no_blank" => true})
+    end
+  end
+
+  test "headers_absent_in_value: value must not contain substrings" do
+    r = resp(%{headers: %{"server-timing" => "jwt;dur=1.0, response;dur=2.0"}})
+
+    assert_expect(r, %{"headers_absent_in_value" => %{"Server-Timing" => ["plan", "transaction"]}})
+
+    assert_raise ExUnit.AssertionError, fn ->
+      assert_expect(r, %{"headers_absent_in_value" => %{"Server-Timing" => ["jwt"]}})
+    end
+  end
+
+  test "body_exact null/empty asserts empty body" do
+    assert_expect(resp(%{body: ""}), %{"body_exact" => nil})
+    assert_expect(resp(%{body: ""}), %{"body_exact" => ""})
+    assert_raise ExUnit.AssertionError, fn -> assert_expect(resp(), %{"body_exact" => nil}) end
+  end
 end
