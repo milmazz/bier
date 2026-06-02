@@ -1,6 +1,6 @@
 # Boot one shared Bier instance for the conformance suite, then start ExUnit.
-# CLI cases (config dump, observability flags) have no execution target yet, so
-# they are excluded by default and tracked as pending.
+# Cases the harness can't evaluate yet (CLI, JWT signing, JSONPath, status-text
+# reason phrase) are tagged :pending and excluded by default.
 Bier.ConformanceServer.start!()
 
-ExUnit.start(exclude: [:cli])
+ExUnit.start(exclude: [:pending])
