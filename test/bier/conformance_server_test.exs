@@ -9,4 +9,10 @@ defmodule Bier.ConformanceServerTest do
     resp = Req.request!(method: :get, url: base <> "/__definitely_unknown__", retry: false)
     assert resp.status in 100..599
   end
+
+  test "start!/0 raises if called more than once" do
+    assert_raise RuntimeError, ~r/called more than once/, fn ->
+      Bier.ConformanceServer.start!()
+    end
+  end
 end
