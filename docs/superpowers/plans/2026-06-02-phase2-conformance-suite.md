@@ -591,14 +591,13 @@ defmodule Bier.ConformanceTest do
   @moduletag :conformance
 
   for c <- Bier.ConformanceCase.load_all() do
-    @case Macro.escape(c)
-
     case c.kind do
       :http ->
         @tag area: String.to_atom(c.area)
         test "#{c.id} #{c.feature}" do
-          resp = perform(@case)
-          assert_expect(resp, @case.expect)
+          case_data = unquote(Macro.escape(c))
+          resp = perform(case_data)
+          assert_expect(resp, case_data.expect)
         end
 
       :cli ->
@@ -607,12 +606,14 @@ defmodule Bier.ConformanceTest do
         @tag area: String.to_atom(c.area)
         test "#{c.id} #{c.feature} (cli, pending)" do
           # No Bier CLI entrypoint yet; recorded as pending. See COVERAGE.md.
-          flunk("CLI conformance case #{@case.id} has no execution target yet")
+          flunk("CLI conformance case #{unquote(c.id)} has no execution target yet")
         end
     end
   end
 end
 ```
+
+> IMPORTANT (Elixir macro hygiene): embed the case with `unquote(Macro.escape(c))` **inside** the test body — do NOT store `@case Macro.escape(c)` and reference bare `@case`. A module attribute auto-escapes its value when injected into a quoted function body, so `@case` holding already-escaped AST becomes *double-escaped* and arrives at runtime as an AST tuple, not a `%ConformanceCase{}` — every test then crashes with `FunctionClauseError` in `perform/1` before making a request.
 
 - [ ] **Step 4: Run the whole suite — expect it RED but clean**
 
