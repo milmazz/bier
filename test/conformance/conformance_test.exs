@@ -1,31 +1,44 @@
 defmodule Bier.ConformanceTest do
   @moduledoc """
-  One ExUnit test per spec conformance case. HTTP cases run against the shared
-  Bier instance and currently FAIL (lib/ returns canned responses). CLI cases
-  are tagged :cli and excluded until a Bier CLI exists.
+  One ExUnit test per spec conformance case. Fully-evaluable HTTP cases run
+  against the shared Bier instance and currently FAIL (lib/ returns canned
+  responses). Cases the current harness cannot evaluate are tagged :pending and
+  excluded (see pending_reason): :cli (no CLI), :jwt (needs JWT signing),
+  :jsonpath (needs a JSONPath evaluator), :status_text (req does not expose the
+  HTTP reason phrase). These are tracked for a follow-up, like the schema_cache
+  deferral in spec/COVERAGE.md.
   """
   use Bier.HttpCase, async: true
 
   @moduletag :conformance
 
   for c <- Bier.ConformanceCase.load_all() do
-    case c.kind do
-      :http ->
-        @tag area: String.to_atom(c.area)
-        test "#{c.id} #{c.feature}" do
-          case_data = unquote(Macro.escape(c))
-          resp = perform(case_data)
-          assert_expect(resp, case_data.expect)
-        end
+    pending_reason =
+      cond do
+        c.kind == :cli -> :cli
+        Map.has_key?(c.request, "jwt") -> :jwt
+        Map.has_key?(c.expect, "body_jsonpath") -> :jsonpath
+        Map.has_key?(c.expect, "status_text") -> :status_text
+        true -> nil
+      end
 
-      :cli ->
-        @tag :cli
-        @tag :pending
-        @tag area: String.to_atom(c.area)
-        test "#{c.id} #{c.feature} (cli, pending)" do
-          # No Bier CLI entrypoint yet; recorded as pending. See COVERAGE.md.
-          flunk("CLI conformance case #{unquote(c.id)} has no execution target yet")
-        end
+    @tag area: String.to_atom(c.area)
+
+    if pending_reason do
+      @tag :pending
+      @tag pending_reason: pending_reason
+      test "#{c.id} #{c.feature} (pending: #{pending_reason})" do
+        flunk(
+          "conformance case #{unquote(c.id)} pending — harness cannot evaluate " <>
+            "#{unquote(pending_reason)} yet"
+        )
+      end
+    else
+      test "#{c.id} #{c.feature}" do
+        case_data = unquote(Macro.escape(c))
+        resp = perform(case_data)
+        assert_expect(resp, case_data.expect)
+      end
     end
   end
 end
