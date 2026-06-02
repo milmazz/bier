@@ -81,24 +81,35 @@ which the real cases do not use):
 - `body_json` — parse response as JSON, compare to the given structure.
 - `body_contains` — substring/subset containment.
 - `body_raw` — exact byte comparison (covers the custom-media SOH-byte case 1636).
+- `body_exact: null` / `body_exact: ""` — asserts an empty response body.
+- `headers_match` — per-header regex match (`Regex.match?`).
+- `headers_no_blank` — asserts no response header has a blank value.
+- `headers_absent_in_value` — the named header's value must not contain the given substrings.
 - CLI-only keys (`exit_code`, `dump_contains`, `stderr_contains`, …) — not
-  interpreted now; their cases are `:cli`-tagged and excluded.
+  interpreted; their cases are pending-tagged and excluded (see §9).
+
+> Correction to the original draft: the real cases **do** use `body_jsonpath`
+> (39 cases) — they are not absent. Evaluating it needs a JSONPath evaluator,
+> which is deferred (see §9), so those cases are tagged `:pending` and excluded
+> rather than handled here.
 
 ## 5. Tagging strategy
 
 - `@moduletag :conformance` on the generated module.
 - Per test: `@tag area: <area atom>` (e.g. `:operators`, `:rpc`) so Phase-3
   Developers run their slice's cases: `mix test --only area:operators`.
-- CLI cases: `@tag :cli` + `@tag :pending`; excluded by default via
-  `ExUnit.start(exclude: [:cli])`.
+- Harness-unevaluable cases: `@tag :pending` + `@tag pending_reason: <reason>`,
+  excluded by default via `ExUnit.start(exclude: [:pending])`. `pending_reason`
+  is one of `:cli`, `:jwt`, `:jsonpath`, `:status_text` (see §9).
 
 ## 6. Behavior: why it's red and runs clean
 
 Bier boots without a DB, `req` always receives *a* response, and the assertion
 fails on the canned-vs-expected mismatch — so `mix test` runs to completion with
-no crashes "outside the assertion itself" (§5.2 exit criterion). Expected
-outcome on first run: ~500 HTTP cases **failing**, ~30 CLI cases **excluded**
-(pending), zero errors/crashes.
+no crashes "outside the assertion itself" (§5.2 exit criterion). Actual first-run
+outcome: **475 tests, 450 failures, 80 excluded (pending), 0 invalid** — every
+runnable HTTP case fails on a real `assert_expect` mismatch (no `RuntimeError`,
+no `FunctionClauseError`).
 
 ## 7. Error handling
 
@@ -116,17 +127,31 @@ outcome on first run: ~500 HTTP cases **failing**, ~30 CLI cases **excluded**
 | `mix test` runs to completion (no compile errors / crashes) | ✓ — shared instance boots; no DB; assertions fail cleanly |
 | Failure count ≈ total conformance case count | ✓ for HTTP (~500). CLI (~30) tracked as **excluded/pending**, the documented exception (same spirit as the `schema_cache`/`listener` deferral in `COVERAGE.md`) |
 | `mix coveralls` ≥ 90% of test infrastructure | ✓ — every case exercises the loader/runner/assertions; `excoveralls` added |
-| `@tag :pending` count → 0 before Phase 2 closes | CLI cases stay `:cli`/`:pending` until a Bier CLI exists — the one tracked exception, noted here and in `COVERAGE.md` |
+| `@tag :pending` count → 0 before Phase 2 closes | 80 cases stay `:pending` until their harness capability lands (CLI, JWT signing, JSONPath, status-text) — the tracked exceptions, in the same spirit as the `schema_cache`/`listener` deferral in `COVERAGE.md` |
 
-## 9. Out of scope (deferred, by decision)
+## 9. Pending / out of scope (deferred, by decision)
+
+**Pending cases (tagged `:pending`, excluded; 80 total).** The final holistic
+review found the original draft under-specified the assertion vocabulary. These
+cases are spec'd but the current HTTP harness cannot yet evaluate them; each is
+tagged `@tag :pending` + `@tag pending_reason:`. To be implemented in a follow-up:
+
+- `:cli` (26) — `request.kind: cli` (config dump, observability flags); no Bier CLI exists.
+- `:jsonpath` (39) — `expect.body_jsonpath`; needs a JSONPath evaluator
+  (a `test/support/jsonpath.ex` subset). **Correction:** the real cases *do*
+  use `body_jsonpath` — the original draft's claim that they don't was wrong.
+- `:jwt` (12) — `request.jwt` (sign + send a Bearer token); needs a test-only
+  JWT signer. (Auth cases with a pre-minted token in the header run normally.)
+- `:status_text` (3) — `expect.status_text` asserts the HTTP reason phrase,
+  which `req`/Finch does not expose.
+
+**Out of scope for Phase 2 (unchanged):**
 
 - `test/support/postgres_case.ex`, fixture loading, per-test transaction
   rollback — added when the `executor` slice queries Postgres.
 - Property tests (`test/property/**`).
 - Migrating `query_parser.ex` into `lib/bier/query/` and expanding parser unit
   tests — touches `lib/` (Developer-owned) and overlaps Phase 0 / Phase 3.
-- `jsonpath.ex` — the real cases don't use `body_jsonpath`.
-- CLI runner — until a Bier CLI entrypoint exists.
 
 ## 10. Branch / role note
 
