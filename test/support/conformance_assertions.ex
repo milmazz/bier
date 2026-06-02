@@ -39,6 +39,13 @@ defmodule Bier.ConformanceAssertions do
   end
 
   # body_json is an alias of body_exact: both assert deep JSON equality.
+  # Empty/nil expected value means the body itself must be empty.
+  defp check(key, expected, resp)
+       when key in ["body_exact", "body_json"] and expected in [nil, ""] do
+    assert resp.body == "",
+           "#{key} expected empty body, got: #{inspect(resp.body)}"
+  end
+
   defp check(key, expected, resp) when key in ["body_exact", "body_json"] do
     actual = decode_json(resp.body)
 
@@ -63,6 +70,34 @@ defmodule Bier.ConformanceAssertions do
            "body_raw mismatch:\n  expected: #{inspect(expected)}\n  got:      #{inspect(resp.body)}"
   end
 
+  defp check("headers_match", map, resp) when is_map(map) do
+    Enum.each(map, fn {name, regex_string} ->
+      value = Map.get(resp.headers, String.downcase(name), "")
+      regex = Regex.compile!(regex_string)
+
+      assert Regex.match?(regex, value),
+             "header #{name}: value #{inspect(value)} did not match regex #{inspect(regex_string)}"
+    end)
+  end
+
+  defp check("headers_no_blank", true, resp) do
+    Enum.each(resp.headers, fn {name, value} ->
+      refute String.trim(value) == "",
+             "header #{name} has a blank value"
+    end)
+  end
+
+  defp check("headers_absent_in_value", map, resp) when is_map(map) do
+    Enum.each(map, fn {name, substrings} ->
+      value = Map.get(resp.headers, String.downcase(name), "")
+
+      Enum.each(substrings, fn substr ->
+        refute String.contains?(value, substr),
+               "header #{name}: value #{inspect(value)} must not contain #{inspect(substr)}"
+      end)
+    end)
+  end
+
   defp check(key, _val, _resp) do
     raise "unsupported assertion key: #{inspect(key)}"
   end
@@ -70,7 +105,6 @@ defmodule Bier.ConformanceAssertions do
   defp decode_json(body) do
     Bier.json_library().decode!(body)
   rescue
-    JSON.DecodeError ->
-      flunk("response body was not valid JSON: #{inspect(body)}")
+    _ -> flunk("response body was not valid JSON: #{inspect(body)}")
   end
 end
