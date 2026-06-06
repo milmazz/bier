@@ -19,12 +19,38 @@ defmodule Bier.Config do
 
   @type t :: %__MODULE__{
           name: module(),
-          router: router_opts()
+          router: router_opts(),
+          hostname: String.t(),
+          port: pos_integer(),
+          database: String.t(),
+          username: String.t() | nil,
+          password: String.t() | nil,
+          pool_size: pos_integer(),
+          db_schemas: [String.t(), ...],
+          db_anon_role: String.t() | nil,
+          db_extra_search_path: [String.t()],
+          db_max_rows: pos_integer() | nil,
+          db_plan_enabled: boolean(),
+          jwt_secret: String.t() | nil,
+          server_cors_allowed_origins: String.t() | nil
         }
 
   defstruct [
     :router,
-    name: Bier
+    :hostname,
+    :port,
+    :database,
+    :username,
+    :password,
+    :db_anon_role,
+    :db_max_rows,
+    :jwt_secret,
+    :server_cors_allowed_origins,
+    name: Bier,
+    pool_size: 10,
+    db_schemas: ["public"],
+    db_extra_search_path: ["public"],
+    db_plan_enabled: false
   ]
 
   @doc """

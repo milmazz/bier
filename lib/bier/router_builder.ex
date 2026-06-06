@@ -1,51 +1,42 @@
 defmodule Bier.RouterBuilder do
   @moduledoc """
-  Module that builds a router on-the-fly based on the result from the DB introspection
+  Builds the per-instance router module.
 
-  This module builds a router using `Plug.Router`, the idea is to dispatch JSON
-  responses based on the path and method of the incoming requests.
+  Unlike the legacy per-table approach, the router is now a thin catch-all: it
+  forwards *every* request to `Bier.Plugs.ActionController`, which resolves the
+  target `{schema, relation}` at request time from the path plus the
+  `Accept-Profile`/`Content-Profile` headers. This is required to express
+  PostgREST's schema selection (and `/rpc/*`) which a static route table cannot.
 
-  Each one of the routes are built on-the-fly based on the result from the DB
-  introspection process.
+  The generated module is named `<instance_name>.Router` and rebuilt on every
+  boot, so it is not checked in.
   """
 
   @doc """
-  Builds a Router module using `Plug.Router`
+  Builds a `Plug.Router` module that dispatches everything to
+  `Bier.Plugs.ActionController`, threading the instance name through `assigns`.
   """
-  @spec build(Bier.Config.t(), db_structure :: [%{binary() => binary()}]) ::
-          {:module, atom(), binary(), any()}
-  def build(%Bier.Config{} = conf, db_structure) do
+  @spec build(Bier.Config.t(), term()) :: {:module, atom(), binary(), any()}
+  def build(%Bier.Config{} = conf, _db_structure) do
+    supervisor_name = conf.name
+
     content =
-      quote location: :keep,
-            bind_quoted: [db_structure: Macro.escape(db_structure), supervisor_name: conf.name] do
+      quote location: :keep do
         use Plug.Router
 
         alias Bier.Plugs.ActionController
-        alias Bier.Plugs.FallbackController
-
-        require Logger
 
         plug(:match)
 
-        plug(Plug.Parsers,
-          parsers: [:json],
-          pass: ["application/json"],
-          json_decoder: Bier.json_library()
-        )
-
-        # plug(Bier.Plugs.AuthenticateUser, name: supervisor_name)
+        plug(Bier.Plugs.ReadBody)
 
         plug(:dispatch)
 
-        for %{"Name" => table_name, "Schema" => schema, "Type" => _type} <- db_structure do
-          assigns = %{supervisor_name: supervisor_name, schema: schema, table_name: table_name}
-
-          get("/#{table_name}", assigns: assigns, to: ActionController, init_opts: :index)
-          post("/#{table_name}", assigns: assigns, to: ActionController, init_opts: :post)
-          delete("/#{table_name}", assigns: assigns, to: ActionController, init_opts: :delete)
+        match _ do
+          var!(conn)
+          |> Plug.Conn.assign(:supervisor_name, unquote(supervisor_name))
+          |> ActionController.call(ActionController.init([]))
         end
-
-        match(_, to: FallbackController, init_opts: :not_found)
       end
 
     conf.name

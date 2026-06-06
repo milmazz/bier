@@ -11,6 +11,7 @@ defmodule Bier.MixProject do
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       test_coverage: [tool: ExCoveralls],
+      aliases: aliases(),
       deps: deps()
     ]
   end
@@ -36,6 +37,12 @@ defmodule Bier.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
+  defp aliases do
+    [
+      test: ["bier.fixtures.load", "test"]
+    ]
+  end
+
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
@@ -45,6 +52,7 @@ defmodule Bier.MixProject do
       {:nimble_options, "~> 1.0"},
       {:nimble_parsec, "~> 1.4"},
       {:plug, "~> 1.19"},
+      {:postgrex, "~> 0.20"},
       {:req, "~> 0.5", only: :test},
       {:yaml_elixir, "~> 2.11", only: :test}
     ]
