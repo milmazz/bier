@@ -127,7 +127,11 @@ defmodule Bier.Mutation do
         case Postgrex.query(tx, wrapped, wparams) do
           {:ok, %Postgrex.Result{rows: [[body, count, meta]]}} ->
             case enforce_singular(media, body) do
-              :ok -> {body, count || 0, meta, existed}
+              # The response is fully computed inside the transaction (the CTE's
+              # RETURNING is already serialized into `body`). Under db-tx-end
+              # :rollback we abort the transaction here, discarding the write but
+              # returning the same response — see config/test.exs for why.
+              :ok -> finish_tx(tx, config, {body, count || 0, meta, existed})
               {:error, _} = err -> Postgrex.rollback(tx, err)
             end
 
@@ -152,10 +156,34 @@ defmodule Bier.Mutation do
           ok_status
         )
 
+      {:error, {:bier_rollback_ok, {body, count, meta, existed}}} ->
+        respond(
+          conn,
+          body,
+          count,
+          meta,
+          existed,
+          relation,
+          plan,
+          media,
+          pref,
+          mutation,
+          ok_status
+        )
+
       {:error, reason} ->
         reason
     end
   end
+
+  # End the per-request transaction. Under db-tx-end :rollback we abort it (the
+  # response is already computed), so the write never persists; the transaction
+  # then returns `{:error, {:bier_rollback_ok, payload}}`, handled above. Under
+  # :commit we return the payload normally and the transaction commits.
+  defp finish_tx(tx, %{db_tx_end: :rollback}, payload),
+    do: Postgrex.rollback(tx, {:bier_rollback_ok, payload})
+
+  defp finish_tx(_tx, _config, payload), do: payload
 
   # Pre-existence check for PUT: SELECT EXISTS over the PK predicate.
   defp put_existed?(tx, relation, {:put, row, pk}) do
