@@ -22,6 +22,15 @@ defmodule Bier.Plugs.FallbackController do
   end
 
   # ---- target resolution errors -------------------------------------------
+  def call(conn, {:error, {:invalid_schema, schema, exposed}}) do
+    error(conn, 406, %{
+      code: "PGRST106",
+      message: "Invalid schema: #{schema}",
+      details: nil,
+      hint: invalid_schema_hint(exposed)
+    })
+  end
+
   def call(conn, {:error, {:invalid_schema, schema}}) do
     error(conn, 406, %{
       code: "PGRST106",
@@ -58,6 +67,22 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
+  # A fully-built PGRST202 not-found envelope (with hint/details) from the RPC
+  # resolver.
+  def call(conn, {:error, {:rpc_not_found, body}}) do
+    error(conn, 404, body)
+  end
+
+  # PATCH/PUT/DELETE on /rpc/<fn> is unsupported (PGRST101, 405).
+  def call(conn, {:error, {:rpc_invalid_method, method}}) do
+    error(conn, 405, %{
+      code: "PGRST101",
+      message: "Cannot use the #{method} method on RPC",
+      details: nil,
+      hint: nil
+    })
+  end
+
   # ---- content negotiation: no acceptable media type (406 PGRST107) -------
   def call(conn, {:error, {:not_acceptable, accept}}) do
     error(conn, 406, %{
@@ -83,6 +108,129 @@ defmodule Bier.Plugs.FallbackController do
     error(conn, 400, %{
       code: "PGRST102",
       message: "All lines must have same number of fields",
+      details: nil,
+      hint: nil
+    })
+  end
+
+  # ---- mutation body parse errors (400 PGRST102) --------------------------
+  def call(conn, {:error, :invalid_json}) do
+    error(conn, 400, %{
+      code: "PGRST102",
+      message: "Empty or invalid json",
+      details: nil,
+      hint: nil
+    })
+  end
+
+  def call(conn, {:error, :non_uniform}) do
+    error(conn, 400, %{
+      code: "PGRST102",
+      message: "All object keys must match",
+      details: nil,
+      hint: nil
+    })
+  end
+
+  # ---- columns param errors -----------------------------------------------
+  # A blank `?columns=` is a PGRST100 parse error.
+  def call(conn, {:error, :blank_columns}) do
+    error(conn, 400, %{
+      code: "PGRST100",
+      message: "\"failed to parse columns parameter\"",
+      details: nil,
+      hint: nil
+    })
+  end
+
+  # A `?columns=` (or payload key) referencing a column absent from the relation.
+  def call(conn, {:error, {:unknown_column, column, relation}}) do
+    error(conn, 400, %{
+      code: "PGRST204",
+      message: "Could not find the '#{column}' column of '#{relation}' in the schema cache",
+      details: nil,
+      hint: nil
+    })
+  end
+
+  # ---- PUT upsert errors ---------------------------------------------------
+  # limit/offset on PUT (PGRST114).
+  def call(conn, {:error, :put_limit_offset}) do
+    error(conn, 400, %{
+      code: "PGRST114",
+      message: "limit/offset querystring parameters are not allowed for PUT",
+      details: nil,
+      hint: nil
+    })
+  end
+
+  # PUT filter is not exactly the PK columns with `eq` (PGRST105, 405).
+  def call(conn, {:error, :put_pk_filter}) do
+    error(conn, 405, %{
+      code: "PGRST105",
+      message: "Filters must include all and only primary key columns with 'eq' operators",
+      details: nil,
+      hint: nil
+    })
+  end
+
+  # PUT payload PK differs from the URL PK (PGRST115).
+  def call(conn, {:error, :put_pk_mismatch}) do
+    error(conn, 400, %{
+      code: "PGRST115",
+      message: "Payload values do not match URL in primary key column(s)",
+      details: nil,
+      hint: nil
+    })
+  end
+
+  # ---- invalid Prefer with handling=strict (400 PGRST122) -----------------
+  def call(conn, {:error, {:invalid_prefs, details}}) do
+    error(conn, 400, %{
+      code: "PGRST122",
+      message: "Invalid preferences given with handling=strict",
+      details: details,
+      hint: nil
+    })
+  end
+
+  # ---- response.headers GUC malformed (500 PGRST111) ----------------------
+  def call(conn, {:error, :bad_response_headers_guc}) do
+    error(conn, 500, %{
+      code: "PGRST111",
+      message:
+        "response.headers guc must be a JSON array composed of objects with a single key and a string value",
+      details: nil,
+      hint: nil
+    })
+  end
+
+  # ---- response.status GUC invalid (500 PGRST112) -------------------------
+  def call(conn, {:error, :bad_response_status_guc}) do
+    error(conn, 500, %{
+      code: "PGRST112",
+      message: "response.status guc must be a valid status code",
+      details: nil,
+      hint: nil
+    })
+  end
+
+  # ---- max-affected exceeded (400 PGRST124) -------------------------------
+  def call(conn, {:error, {:max_affected, rows}}) do
+    error(conn, 400, %{
+      code: "PGRST124",
+      message: "Query result exceeds max-affected preference constraint",
+      details: "The query affects #{rows} rows",
+      hint: nil
+    })
+  end
+
+  # A request presents a JWT but the server has no secret configured to verify
+  # it (PostgREST returns 500). Drives the log-level=error access-log case.
+  def call(conn, {:error, :jwt_unconfigured}) do
+    error(conn, 500, %{
+      code: "PGRST301",
+      message: "Server lacks JWT secret",
       details: nil,
       hint: nil
     })
@@ -180,24 +328,26 @@ defmodule Bier.Plugs.FallbackController do
   end
 
   # ---- Postgres errors: SQLSTATE -> HTTP ----------------------------------
-  def call(conn, {:error, %Postgrex.Error{postgres: %{} = pg}}) do
-    {status, code} = sqlstate_map(pg[:code], pg[:pg_code])
-
-    error(conn, status, %{
-      code: code || to_string(pg[:pg_code] || pg[:code] || ""),
-      message: pg[:message],
-      details: pg[:detail],
-      hint: pg[:hint]
-    })
-  end
-
+  # Full PostgREST `pgErrorStatus` mapping (incl. `PTxxx`/`PGRST` raises) lives
+  # in `Bier.PgError`. A connection/client error (no `postgres` map) ⇒ 500.
   def call(conn, {:error, %Postgrex.Error{} = err}) do
-    error(conn, 500, %{
-      code: "PGRST",
-      message: Exception.message(err),
-      details: nil,
-      hint: nil
-    })
+    case Bier.PgError.translate(err) do
+      # `status_text` (a custom HTTP reason phrase from a `PGRST` raise) is
+      # carried by `PgError` but not emitted here: Bandit derives the reason
+      # phrase from `Plug.Conn.Status` (configured in config/config.exs), and
+      # Plug offers no per-response override. The conformance cases that assert
+      # a custom reason phrase are tagged `:pending` (`status_text`).
+      {status, body, headers, _status_text} ->
+        error(conn, status, body, headers: headers)
+
+      nil ->
+        error(conn, 500, %{
+          code: "PGRST",
+          message: Exception.message(err),
+          details: nil,
+          hint: nil
+        })
+    end
   end
 
   # ---- legacy shapes (kept) -----------------------------------------------
@@ -241,23 +391,13 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
-  # SQLSTATE mapping skeleton (PostgREST PgError handling). The atom comes from
-  # Postgrex's `:code` field; the raw five-char code from `:pg_code`.
-  defp sqlstate_map(code, _pg_code) do
-    case code do
-      :insufficient_privilege -> {403, nil}
-      :foreign_key_violation -> {409, nil}
-      :unique_violation -> {409, nil}
-      :check_violation -> {400, nil}
-      :not_null_violation -> {400, nil}
-      :invalid_text_representation -> {400, nil}
-      :undefined_table -> {404, "PGRST205"}
-      :undefined_column -> {400, nil}
-      :undefined_function -> {404, "PGRST202"}
-      :raise_exception -> {400, nil}
-      _ -> {400, nil}
-    end
-  end
+  # PGRST106 hint listing the exposed (profile-selectable) schemas in exposure
+  # order, comma-separated and verbatim (special characters are not escaped).
+  defp invalid_schema_hint(nil), do: nil
+  defp invalid_schema_hint([]), do: nil
+
+  defp invalid_schema_hint(schemas) when is_list(schemas),
+    do: "Only the following schemas are exposed: " <> Enum.join(schemas, ", ")
 
   defp range_not_satisfiable(conn, details) do
     error(conn, 416, %{
@@ -268,11 +408,32 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
-  defp error(conn, status, body) do
-    response = Bier.json_library().encode_to_iodata!(body)
+  defp error(conn, status, body, opts \\ []) do
+    response = Bier.json_library().encode_to_iodata!(body) |> IO.iodata_to_binary()
+    code = body_code(body)
 
     conn
     |> put_resp_content_type("application/json", "utf-8")
+    |> put_resp_header("content-length", Integer.to_string(byte_size(response)))
+    |> maybe_proxy_status(code)
+    |> put_extra_headers(Keyword.get(opts, :headers, []))
     |> send_resp(status, response)
   end
+
+  # Every PostgREST-originated error carries `Proxy-Status: PostgREST; error=<code>`
+  # (Error.hs proxyStatusHeader). The code is the error envelope's `code`.
+  defp maybe_proxy_status(conn, nil), do: conn
+
+  defp maybe_proxy_status(conn, code),
+    do: put_resp_header(conn, "proxy-status", "PostgREST; error=#{code}")
+
+  defp put_extra_headers(conn, headers) do
+    Enum.reduce(headers, conn, fn {name, value}, acc ->
+      put_resp_header(acc, String.downcase(to_string(name)), to_string(value))
+    end)
+  end
+
+  defp body_code(%{code: code}), do: code
+  defp body_code(%{"code" => code}), do: code
+  defp body_code(_), do: nil
 end

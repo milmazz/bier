@@ -28,14 +28,25 @@ defmodule Bier.RouterBuilder do
 
         plug(:match)
 
+        # Tag the connection with its owning instance name first, so the
+        # observability middleware (and the action controller) can resolve the
+        # instance config from the registry.
+        plug(:assign_instance)
+
+        plug(Bier.Plugs.Cors)
+
+        plug(Bier.Plugs.Observability)
+
         plug(Bier.Plugs.ReadBody)
 
         plug(:dispatch)
 
+        defp assign_instance(conn, _opts) do
+          Plug.Conn.assign(conn, :supervisor_name, unquote(supervisor_name))
+        end
+
         match _ do
-          var!(conn)
-          |> Plug.Conn.assign(:supervisor_name, unquote(supervisor_name))
-          |> ActionController.call(ActionController.init([]))
+          ActionController.call(var!(conn), ActionController.init([]))
         end
       end
 

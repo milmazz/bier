@@ -54,9 +54,10 @@ defmodule Bier.QueryExecutor do
           {:ok, %{body: String.t(), count: non_neg_integer()}} | {:error, term()}
   def run(conn, %Relation{} = relation, plan, relations \\ %{}, opts \\ []) do
     count_mode = Keyword.get(opts, :count_mode, :none)
+    timezone = Keyword.get(opts, :timezone)
 
     with {:ok, sql, params} <- build(relation, plan, relations) do
-      case Postgrex.query(conn, sql, params) do
+      case query_with_timezone(conn, sql, params, timezone) do
         {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
           resolve_count(conn, relation, plan, relations, count_mode, opts, body, exact_count || 0)
 
@@ -66,6 +67,29 @@ defmodule Bier.QueryExecutor do
         {:error, _} = err ->
           err
       end
+    end
+  end
+
+  # `Prefer: timezone=<name>` shifts timestamptz rendering. The name is validated
+  # against pg_timezone_names before we get here, so a `SET LOCAL TIME ZONE`
+  # inside a one-shot transaction is safe; the literal is single-quote escaped.
+  defp query_with_timezone(conn, sql, params, nil), do: Postgrex.query(conn, sql, params)
+
+  defp query_with_timezone(conn, sql, params, timezone) do
+    tz_sql = "SET LOCAL TIME ZONE '" <> String.replace(timezone, "'", "''") <> "'"
+
+    Postgrex.transaction(conn, fn tx ->
+      Postgrex.query!(tx, tz_sql, [])
+
+      case Postgrex.query(tx, sql, params) do
+        {:ok, result} -> result
+        {:error, err} -> Postgrex.rollback(tx, err)
+      end
+    end)
+    |> case do
+      {:ok, result} -> {:ok, result}
+      {:error, %Postgrex.Error{} = err} -> {:error, err}
+      {:error, other} -> {:error, other}
     end
   end
 
@@ -190,53 +214,74 @@ defmodule Bier.QueryExecutor do
           {:ok, %{body: String.t(), count: non_neg_integer()}} | {:error, term()}
   def run_function(conn, fn_def, %Relation{} = ret_relation, args, plan, opts \\ []) do
     count_mode = Keyword.get(opts, :count_mode, :none)
+    relations = Keyword.get(opts, :relations, %{})
 
     try do
-      {:ok, sql, params} = build_function(fn_def, ret_relation, args, plan)
+      case build_function(fn_def, ret_relation, args, plan, relations) do
+        {:ok, sql, params} ->
+          case Postgrex.query(conn, sql, params) do
+            {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
+              # planned/estimated counts are not needed by the RPC pagination
+              # cases; exact reuses the window count, which (with a non-empty
+              # window) is the full count. Empty RPC windows are not exercised.
+              {:ok, %{body: body, count: count_for(count_mode, exact_count || 0)}}
 
-      case Postgrex.query(conn, sql, params) do
-        {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
-          # planned/estimated counts are not needed by the RPC pagination cases;
-          # exact reuses the window count, which (with a non-empty window) is the
-          # full count. Empty RPC windows are not exercised, so exact suffices.
-          {:ok, %{body: body, count: count_for(count_mode, exact_count || 0)}}
+            {:ok, %Postgrex.Result{rows: []}} ->
+              {:ok, %{body: "[]", count: 0}}
 
-        {:ok, %Postgrex.Result{rows: []}} ->
-          {:ok, %{body: "[]", count: 0}}
+            {:error, _} = err ->
+              err
+          end
 
         {:error, _} = err ->
           err
       end
     catch
       {:bad_request, _} = err -> {:error, err}
+      {:embed_error, _} = err -> {:error, err}
+      {:embed_error_raw, reason} -> {:error, reason}
     end
   end
 
   defp count_for(:none, _exact), do: 0
   defp count_for(_mode, exact), do: exact
 
-  defp build_function(fn_def, ret_relation, args, plan) do
-    state = %State{relation: ret_relation, alias_name: nil}
-
-    {arg_sql, state} = build_function_args(args, state)
+  defp build_function(fn_def, ret_relation, args, plan, relations) do
+    # Bind the function arguments first so their params lead the parameter list;
+    # the function call becomes the FROM source for the read builder.
+    {arg_sql, arg_state} = build_function_args(args, %State{relation: ret_relation})
     from = "#{quote_ident(fn_def.schema)}.#{quote_ident(fn_def.name)}(#{arg_sql})"
 
-    {select_sql, state} = build_select(plan.select, ret_relation, state)
-    {where_sql, state} = build_where(plan.filters || [], state)
-    order_sql = build_order(plan.order || [])
-    {limit_sql, state} = build_limit(plan, state)
+    # Route the projection through the embed-capable read builders so a function
+    # whose result set is embedded (e.g. `/rpc/fn?select=...,children(...)`)
+    # resolves the embedding against `ret_relation`'s foreign keys, exactly like
+    # a table read. The function call is threaded in via `from_override`.
+    #
+    # The simple (flat) path leaves the function call unaliased and renders bare
+    # column references, so `alias_name` must be nil there. The advanced path
+    # aliases the FROM with the relation name and qualifies every column with it,
+    # so `alias_name` is the relation name. Pick accordingly.
+    advanced? = advanced_select?(plan.select, ret_relation) or advanced_order?(plan, ret_relation)
 
-    inner =
-      "SELECT #{select_sql}, count(*) OVER() AS _bier_full_count FROM #{from}" <>
-        where_sql <> order_sql <> limit_sql
+    state = %State{
+      relation: ret_relation,
+      relations: relations,
+      alias_name: if(advanced?, do: ret_relation.name, else: nil),
+      embed_orders: plan[:embed_orders] || %{},
+      embed_limits: plan[:embed_limits] || %{},
+      embed_offsets: plan[:embed_offsets] || %{},
+      from_override: from,
+      params: arg_state.params,
+      count: arg_state.count
+    }
 
-    sql =
-      "SELECT coalesce(json_agg(_postgrest_t._bier_row), '[]')::text AS body, " <>
-        "coalesce(max(_postgrest_t._bier_full_count), 0) AS full_count " <>
-        "FROM (SELECT to_jsonb(_bier_inner) - '_bier_full_count' AS _bier_row, " <>
-        "_bier_inner._bier_full_count FROM (#{inner}) _bier_inner) _postgrest_t"
-
-    {:ok, sql, Enum.reverse(state.params)}
+    with :ok <- validate_embed_filters(plan) do
+      if advanced? do
+        build_advanced(ret_relation, plan, state)
+      else
+        build_simple(ret_relation, plan, state)
+      end
+    end
   end
 
   # Named function arguments rendered as `"name" => $n` keyword-call syntax, with
@@ -541,21 +586,41 @@ defmodule Bier.QueryExecutor do
 
   # ---- select (simple) -----------------------------------------------------
 
-  defp build_select([:star], _relation, state), do: {"*", state}
+  # `select=*` expands to an explicit projection only when the relation has at
+  # least one data-representation column, so each such column's `<domain> AS json`
+  # cast is applied (case 1803). Otherwise `*` is kept verbatim (cheapest path).
+  defp build_select([:star], relation, state) do
+    if Enum.any?(relation.columns, &(&1.data_rep != nil)) do
+      sql =
+        relation.columns
+        |> Enum.map_join(", ", fn c ->
+          "#{apply_read_rep(quote_ident(c.name), relation, c.name)} AS #{quote_ident(c.name)}"
+        end)
 
-  defp build_select(fields, _relation, state) do
+      {sql, state}
+    else
+      {"*", state}
+    end
+  end
+
+  defp build_select(fields, relation, state) do
     sql =
       fields
-      |> Enum.map(&render_select_field/1)
+      |> Enum.map(&render_select_field(&1, relation))
       |> Enum.join(", ")
 
     {sql, state}
   end
 
-  def render_select_field(%{kind: :star}), do: "*"
+  def render_select_field(field, relation \\ nil)
 
-  def render_select_field(%{column: col, alias: al, cast: cast, json_path: path}) do
+  def render_select_field(%{kind: :star}, _relation), do: "*"
+
+  def render_select_field(%{column: col, alias: al, cast: cast, json_path: path}, relation) do
     expr = column_expr(col, path)
+    # The read representation is applied first; an explicit `::cast` (case 1805)
+    # then operates on the already-formatted JSON value.
+    expr = if path == [] and relation, do: apply_read_rep(expr, relation, col), else: expr
     expr = if cast, do: "#{expr}::#{quote_type(cast)}", else: expr
     out_name = al || json_output_name(col, path)
     "#{expr} AS #{quote_ident(out_name)}"
@@ -632,7 +697,7 @@ defmodule Bier.QueryExecutor do
   defp operator_sql(op, col, f, state) when op in ~w(eq neq gt gte lt lte) do
     case f.modifier do
       nil ->
-        {ph, state} = bind(f.value, coltype(f, state), state)
+        {ph, state} = bind_filter_value(f, f.value, state)
         {"#{col} #{cmp(op)} #{ph}", state}
 
       quant when quant in ["any", "all"] ->
@@ -645,11 +710,10 @@ defmodule Bier.QueryExecutor do
   # IN
   defp operator_sql("in", col, f, state) do
     values = parse_in_list(f.value)
-    type = coltype(f, state)
 
     {phs, state} =
       Enum.map_reduce(values, state, fn v, st ->
-        bind(v, type, st)
+        bind_filter_value(f, v, st)
       end)
 
     case phs do
@@ -830,6 +894,28 @@ defmodule Bier.QueryExecutor do
     end
   end
 
+  # Bind a comparison value for filter `f`. When the filter's column is a DOMAIN
+  # with a `text AS <domain>` cast (a data representation), the raw query-string
+  # value is parsed through that function (`textfn($n)`) instead of being coerced
+  # to the column type — a plain `'<v>'::<domain>` cast would strip the domain to
+  # its base type and bypass the parser (cases 1808/1810). Without a text parser
+  # the value reaches the base type as usual (case 1809 errors on the base type).
+  defp bind_filter_value(%{column: col, json_path: []} = _f, value, %State{relation: rel} = state)
+       when not is_nil(rel) do
+    case text_rep_fn(rel, col) do
+      {schema, name} ->
+        {ph, state} = bind(value, :text, state)
+        {"#{quote_ident(schema)}.#{quote_ident(name)}(#{ph})", state}
+
+      nil ->
+        bind(value, coltype(%{column: col}, state), state)
+    end
+  end
+
+  defp bind_filter_value(f, value, state) do
+    bind(value, coltype(f, state), state)
+  end
+
   defp array_of(:text), do: "text[]"
   defp array_of(type) when is_binary(type), do: type <> "[]"
   defp array_of(_), do: "text[]"
@@ -934,6 +1020,61 @@ defmodule Bier.QueryExecutor do
     case Enum.find(rel.columns, &(&1.name == col)) do
       %{type: type} -> type
       _ -> :text
+    end
+  end
+
+  # ---- data representations ------------------------------------------------
+
+  @doc """
+  The read-representation cast function (`<domain> AS json`) for a column, as a
+  `{schema, function}` tuple, or `nil` when the column has no such cast.
+
+  PostgREST applies this cast in the SELECT list so the column's JSON output is
+  produced by the user-defined representation rather than the base type's
+  default rendering. PostgreSQL strips a domain to its base type for a plain
+  `CAST(col AS json)`, so the cast function is invoked by name instead.
+  """
+  def read_rep_fn(rel, col) do
+    case Enum.find(rel.columns, &(&1.name == col)) do
+      %{data_rep: %{read: {_, _} = fn_ref}} -> fn_ref
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The query-string filter parser (`text AS <domain>`) for a column, as a
+  `{schema, function}` tuple, or `nil`. When present, a filter value is parsed
+  through this function before comparison (cases 1808/1810).
+  """
+  def text_rep_fn(rel, col) do
+    case Enum.find(rel.columns, &(&1.name == col)) do
+      %{data_rep: %{text: {_, _} = fn_ref}} -> fn_ref
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The body-value parser (`json AS <domain>`) for a column, as a
+  `{schema, function}` tuple, or `nil`. When present, a JSON body value is
+  parsed through this function on write (cases 1811-1813).
+  """
+  def write_rep_fn(rel, col) do
+    case Enum.find(rel.columns, &(&1.name == col)) do
+      %{data_rep: %{write: {_, _} = fn_ref}} -> fn_ref
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Wrap a column value expression in its read-representation cast function when
+  the column has one, so its JSON output uses the registered representation.
+  Returns `expr` unchanged when there is no read cast. The result is a `json`
+  value (which `to_jsonb`/`json_build_object` embed directly).
+  """
+  def apply_read_rep(expr, rel, col) do
+    case read_rep_fn(rel, col) do
+      {schema, name} -> "#{quote_ident(schema)}.#{quote_ident(name)}(#{expr})"
+      nil -> expr
     end
   end
 end

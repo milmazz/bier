@@ -4,6 +4,15 @@ import Config
 # a Bier instance passing only `:name` and `:router`, all DB/PostgREST settings
 # must be sourced from application env (see config/test.exs and config/runtime.exs).
 
+# A `RAISE SQLSTATE 'PGRST'` (or `PTxxx`) can return an arbitrary, non-standard
+# HTTP status with a custom reason phrase (PostgREST Error.hs). Bandit looks the
+# reason phrase up via `Plug.Conn.Status.reason_phrase/1`, which is compiled
+# from this map and raises for any status it does not know. Register the
+# non-standard codes the conformance suite exercises so the response can be sent.
+config :plug, :statuses, %{
+  332 => "Custom Status"
+}
+
 config :bier,
   # Connection parameters for the per-instance Postgrex pool.
   hostname: "localhost",

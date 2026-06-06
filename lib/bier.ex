@@ -101,6 +101,40 @@ defmodule Bier do
         default: env(:db_schemas, ["public"]),
         doc: "Ordered list of exposed schemas; the first is the default schema."
       ],
+      db_profile_default: [
+        type: {:or, [:string, nil]},
+        default: env(:db_profile_default, nil),
+        doc: """
+        Schema that a default-profile request (no Accept-Profile/Content-Profile,
+        or the area-label aliases `headers`/`multi`) resolves to and echoes in
+        `Content-Profile`. Used by the multi-schema (MultipleSchemaSpec) cases,
+        where the default schema is `v1`. When nil, the first of `db_schemas` is
+        the default and no Content-Profile is echoed.
+        """
+      ],
+      db_profile_schemas: [
+        type: {:or, [{:list, :string}, nil]},
+        default: env(:db_profile_schemas, nil),
+        doc: """
+        Exposure-ordered list of schemas selectable via Accept-Profile/
+        Content-Profile, reported verbatim in the PGRST106 hint when an unknown
+        profile is requested. When nil, profile routing falls back to
+        `db_schemas` and the PGRST106 error carries no hint.
+        """
+      ],
+      db_schema_aliases: [
+        type: {:map, :string, :string},
+        default: env(:db_schema_aliases, %{}),
+        doc: """
+        Map of profile-label aliases to the real schema they resolve to. The
+        conformance harness turns a case's `schema:` label into an
+        `Accept-Profile`/`Content-Profile` header, but some labels (e.g.
+        `unicode`) are not themselves an exposed Postgres schema — their data
+        lives in a differently named schema (e.g. the unicode schema `تست`).
+        A label present here resolves to its mapped schema for relation/RPC
+        lookup.
+        """
+      ],
       db_anon_role: [
         type: {:or, [:string, nil]},
         default: env(:db_anon_role, nil),
@@ -115,6 +149,17 @@ defmodule Bier do
         type: {:or, [:pos_integer, nil]},
         default: env(:db_max_rows, nil),
         doc: "Maximum number of rows returned per request (PostgREST db-max-rows)."
+      ],
+      db_max_rows_by_schema: [
+        type: {:map, :string, :pos_integer},
+        default: env(:db_max_rows_by_schema, %{}),
+        doc: """
+        Per-schema override of `db-max-rows`, keyed by resolved schema name.
+        PostgREST exposes a single `db-max-rows`, but the conformance suite boots
+        ONE shared instance whose `config`-area cases require `db-max-rows=2`
+        while every other area needs the rows uncapped. A request whose resolved
+        schema is a key here uses that cap instead of the global `db_max_rows`.
+        """
       ],
       db_plan_enabled: [
         type: :boolean,
@@ -132,6 +177,15 @@ defmodule Bier do
         shared fixture DB stays pristine under `async: true`.
         """
       ],
+      db_safe_update_tables: [
+        type: {:list, :string},
+        default: env(:db_safe_update_tables, []),
+        doc: """
+        Relation names for which a filterless UPDATE/DELETE raises SQLSTATE 21000
+        (PostgREST's pg-safeupdate integration). Emulated per request rather than
+        by loading the extension.
+        """
+      ],
       jwt_secret: [
         type: {:or, [:string, nil]},
         default: env(:jwt_secret, nil),
@@ -141,6 +195,34 @@ defmodule Bier do
         type: {:or, [:string, nil]},
         default: env(:server_cors_allowed_origins, nil),
         doc: "Comma-separated list of CORS allowed origins."
+      ],
+      server_timing_enabled: [
+        type: :boolean,
+        default: env(:server_timing_enabled, false),
+        doc: """
+        When true, every response carries a `Server-Timing` header with the
+        `jwt`, `parse`, `plan`, `transaction` and `response` phase durations
+        (PostgREST server-timing-enabled). Defaults to false, in which case the
+        header is omitted entirely.
+        """
+      ],
+      server_trace_header: [
+        type: {:or, [:string, nil]},
+        default: env(:server_trace_header, nil),
+        doc: """
+        Name of a request header (e.g. `X-Request-Id`) to echo verbatim on the
+        response (PostgREST server-trace-header). An empty string or nil makes
+        the trace middleware a no-op.
+        """
+      ],
+      log_level: [
+        type: {:in, [:crit, :error, :warn, :info, :debug]},
+        default: env(:log_level, :error),
+        doc: """
+        Access-log verbosity (PostgREST log-level). `crit` logs nothing;
+        `error` logs status >= 500; `warn` logs status >= 400; `info`/`debug`
+        log every response. Affects logging only, never the response itself.
+        """
       ]
     ]
   end
@@ -196,7 +278,12 @@ defmodule Bier do
       database: conf.database,
       username: conf.username,
       password: conf.password,
-      pool_size: conf.pool_size
+      pool_size: conf.pool_size,
+      # PostgREST renders timestamptz in UTC by default; pin the session timezone
+      # so timestamptz output (and DOMAIN representations built on it) is stable
+      # and matches the reference DB regardless of the server's local TZ. A
+      # per-request `Prefer: timezone=` still overrides this via SET LOCAL.
+      parameters: [timezone: "UTC"]
     ]
     |> Enum.reject(fn {_k, v} -> is_nil(v) end)
   end

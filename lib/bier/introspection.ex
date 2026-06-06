@@ -31,7 +31,23 @@ defmodule Bier.Introspection do
             pk?: boolean(),
             notnull?: boolean(),
             default: String.t() | nil,
-            composite?: boolean()
+            composite?: boolean(),
+            data_rep: data_rep() | nil
+          }
+
+    @typedoc """
+    Data-representation cast functions for a DOMAIN-typed column (PostgREST
+    "Data representations"). Each is a `{schema, function}` tuple or `nil`:
+
+      * `read` — `CREATE CAST (<domain> AS json)`: domain value -> JSON output.
+      * `write` — `CREATE CAST (json AS <domain>)`: JSON body value -> domain.
+      * `text` — `CREATE CAST (text AS <domain>)`: query-string filter value ->
+        domain (used to parse `col=eq.<raw>` predicates).
+    """
+    @type data_rep :: %{
+            read: {String.t(), String.t()} | nil,
+            write: {String.t(), String.t()} | nil,
+            text: {String.t(), String.t()} | nil
           }
 
     @type foreign_key :: %{
@@ -97,7 +113,8 @@ defmodule Bier.Introspection do
             pk?: c.pk?,
             notnull?: c.notnull?,
             default: c.default,
-            composite?: c.composite?
+            composite?: c.composite?,
+            data_rep: c.data_rep
           }
         end)
 
@@ -151,16 +168,24 @@ defmodule Bier.Introspection do
   end
 
   @doc """
-  Introspect callable functions that return `SETOF <relation>` across `schemas`.
+  Introspect callable `/rpc/<fn>` functions across `schemas`.
 
-  Returns a map keyed by `{schema, function_name}` (functions can be overloaded;
-  the conformance pagination functions are not, so we keep the last definition
-  per name). Each entry carries the ordered argument names/types and the
-  relation the function returns a set of, so the request pipeline can call the
-  function as a table-valued source and project/filter its columns.
+  Returns a map keyed by `{schema, function_name}` whose value is the **list of
+  overloads** for that name (PostgREST dispatches an overloaded RPC by the
+  supplied argument names). Each overload carries:
+
+    * `args` — ordered IN/INOUT/VARIADIC parameters with `name`, `type`, `mode`
+      (`:in | :inout | :variadic`), `variadic?`, and `has_default?` (derived from
+      `pronargdefaults` vs the trailing input args).
+    * `out_args` — OUT/INOUT/TABLE columns (the result shape for record returns).
+    * `ret_kind` / `ret_schema` / `ret_relation` / `ret_type` — return shape.
+    * `volatility` — `:immutable | :stable | :volatile` (GET is rejected for a
+      volatile proc, which runs in a read-only transaction).
+    * `single_unnamed?` — a single unnamed scalar/json IN parameter binds the
+      raw request body positionally rather than as named args.
   """
   @spec functions(conn :: term(), schemas :: [String.t()]) :: %{
-          optional({String.t(), String.t()}) => map()
+          optional({String.t(), String.t()}) => [map()]
         }
   def functions(conn, schemas) when is_list(schemas) and schemas != [] do
     sql = """
@@ -168,16 +193,21 @@ defmodule Bier.Introspection do
       pn.nspname AS schema,
       p.proname  AS name,
       COALESCE(p.proargnames, ARRAY[]::text[]) AS arg_names,
+      COALESCE(p.proallargtypes::oid[], p.proargtypes::oid[]) AS all_arg_types,
+      COALESCE(p.proargmodes, ARRAY[]::"char"[]) AS arg_modes,
       (
         SELECT array_agg(format_type(t, NULL) ORDER BY ord)
-        FROM unnest(p.proargtypes) WITH ORDINALITY AS u(t, ord)
-      ) AS arg_types,
+        FROM unnest(COALESCE(p.proallargtypes::oid[], p.proargtypes::oid[]))
+             WITH ORDINALITY AS u(t, ord)
+      ) AS all_arg_type_names,
       ret_n.nspname AS ret_schema,
       ret_rel.relname AS ret_relation,
       p.proretset AS retset,
       ret_t.typtype AS ret_typtype,
       format_type(p.prorettype, NULL) AS ret_type,
-      p.pronargs AS nargs
+      p.pronargs AS nargs,
+      p.pronargdefaults AS ndefaults,
+      p.provolatile AS volatility
     FROM pg_proc p
     JOIN pg_namespace pn ON pn.oid = p.pronamespace
     JOIN pg_type ret_t ON ret_t.oid = p.prorettype
@@ -185,50 +215,110 @@ defmodule Bier.Introspection do
     LEFT JOIN pg_namespace ret_n ON ret_n.oid = ret_rel.relnamespace
     WHERE pn.nspname = ANY($1)
       AND p.prokind = 'f'
+      -- Exclude computed-member functions (single composite-typed argument that
+      -- is itself an exposed relation row); those are not /rpc targets.
+      AND NOT (
+        p.pronargs = 1
+        AND EXISTS (
+          SELECT 1 FROM pg_type at
+          WHERE at.oid = p.proargtypes[0] AND at.typtype = 'c'
+        )
+      )
     """
 
     %Postgrex.Result{rows: rows} = Postgrex.query!(conn, sql, [schemas])
 
-    for [
-          schema,
-          name,
-          arg_names,
-          arg_types,
-          ret_schema,
-          ret_relation,
-          retset,
-          ret_typtype,
-          ret_type,
-          nargs
-        ] <- rows,
-        into: %{} do
-      arg_names = arg_names || []
-      arg_types = arg_types || []
-
-      args =
-        arg_types
-        |> Enum.with_index()
-        |> Enum.map(fn {t, i} -> %{name: Enum.at(arg_names, i) || "", type: t} end)
-
-      ret_kind = ret_kind(retset, ret_typtype, ret_relation, ret_type)
-      # A single unnamed argument means the body is passed positionally (scalar
-      # body / octet-stream / single json param) rather than as named args.
-      single_unnamed? = nargs == 1 and (arg_names == [] or Enum.at(arg_names, 0) in [nil, ""])
-
-      {{schema, name},
-       %{
-         schema: schema,
-         name: name,
-         args: args,
-         ret_schema: ret_schema,
-         ret_relation: ret_relation,
-         retset: retset,
-         ret_kind: ret_kind,
-         ret_type: ret_type,
-         single_unnamed?: single_unnamed?
-       }}
-    end
+    rows
+    |> Enum.map(&build_function/1)
+    |> Enum.group_by(fn fn_def -> {fn_def.schema, fn_def.name} end)
   end
+
+  defp build_function([
+         schema,
+         name,
+         arg_names,
+         all_arg_types,
+         arg_modes,
+         all_arg_type_names,
+         ret_schema,
+         ret_relation,
+         retset,
+         ret_typtype,
+         ret_type,
+         _nargs,
+         ndefaults,
+         volatility
+       ]) do
+    arg_names = arg_names || []
+    arg_modes = arg_modes || []
+    type_names = all_arg_type_names || []
+    n = length(all_arg_types || type_names)
+
+    # Pair each catalog argument with its mode + name. Modes: i (IN), o (OUT),
+    # b (INOUT), v (VARIADIC), t (TABLE column). When proargmodes is empty all
+    # args are IN.
+    params =
+      for i <- 0..(n - 1)//1, n > 0 do
+        mode = Enum.at(arg_modes, i, "i") || "i"
+
+        %{
+          name: Enum.at(arg_names, i) || "",
+          type: Enum.at(type_names, i) || "text",
+          raw_mode: mode
+        }
+      end
+
+    in_params = Enum.filter(params, fn %{raw_mode: m} -> m in ["i", "b", "v"] end)
+    out_params = Enum.filter(params, fn %{raw_mode: m} -> m in ["o", "b", "t"] end)
+
+    n_in = length(in_params)
+    default_from = n_in - (ndefaults || 0)
+
+    args =
+      in_params
+      |> Enum.with_index()
+      |> Enum.map(fn {p, idx} ->
+        %{
+          name: p.name,
+          type: p.type,
+          mode: mode_atom(p.raw_mode),
+          variadic?: p.raw_mode == "v",
+          has_default?: idx >= default_from
+        }
+      end)
+
+    out_args =
+      Enum.map(out_params, fn p -> %{name: p.name, type: p.type} end)
+
+    ret_kind = ret_kind(retset, ret_typtype, ret_relation, ret_type, out_args)
+
+    # A single unnamed IN parameter binds the body positionally (scalar / json).
+    single_unnamed? =
+      n_in == 1 and
+        (match?([%{name: ""}], in_params) or match?([%{name: nil}], in_params))
+
+    %{
+      schema: schema,
+      name: name,
+      args: args,
+      out_args: out_args,
+      ret_schema: ret_schema,
+      ret_relation: ret_relation,
+      retset: retset,
+      ret_kind: ret_kind,
+      ret_type: ret_type,
+      volatility: volatility_atom(volatility),
+      single_unnamed?: single_unnamed?
+    }
+  end
+
+  defp mode_atom("b"), do: :inout
+  defp mode_atom("v"), do: :variadic
+  defp mode_atom(_), do: :in
+
+  defp volatility_atom("i"), do: :immutable
+  defp volatility_atom("s"), do: :stable
+  defp volatility_atom(_), do: :volatile
 
   @doc """
   Introspect custom media-type handlers across `schemas`.
@@ -278,12 +368,25 @@ defmodule Bier.Introspection do
   end
 
   # Classify a function's return for the RPC pipeline.
-  defp ret_kind(_retset, _typtype, _ret_relation, "void"), do: :void
-  defp ret_kind(true, "c", ret_relation, _ret_type) when not is_nil(ret_relation), do: :setof_rel
-  defp ret_kind(true, "c", _ret_relation, _ret_type), do: :setof_record
-  defp ret_kind(false, "c", ret_relation, _ret_type) when not is_nil(ret_relation), do: :composite
-  defp ret_kind(true, _typtype, _ret_relation, _ret_type), do: :setof_scalar
-  defp ret_kind(false, _typtype, _ret_relation, _ret_type), do: :scalar
+  #
+  #   * void                           -> :void (204)
+  #   * SETOF <exposed relation>       -> :setof_rel (array, shaped/filtered)
+  #   * SETOF record / TABLE(...)      -> :setof_record (array of OUT-keyed objs)
+  #   * SETOF scalar                   -> :setof_scalar (array of scalars)
+  #   * composite type / multi-OUT/INOUT (single row) -> :composite (one object)
+  #   * single OUT/INOUT param         -> :composite (one object keyed by name)
+  #   * plain scalar / scalar array    -> :scalar (bare value)
+  defp ret_kind(_retset, _typtype, _ret_relation, "void", _out), do: :void
+
+  defp ret_kind(true, "c", ret_relation, _ret_type, _out) when not is_nil(ret_relation),
+    do: :setof_rel
+
+  defp ret_kind(true, _typtype, _ret_relation, _ret_type, out) when out != [], do: :setof_record
+  defp ret_kind(true, _typtype, _ret_relation, _ret_type, _out), do: :setof_scalar
+
+  defp ret_kind(false, "c", _ret_relation, _ret_type, _out), do: :composite
+  defp ret_kind(false, _typtype, _ret_relation, _ret_type, out) when out != [], do: :composite
+  defp ret_kind(false, _typtype, _ret_relation, _ret_type, _out), do: :scalar
 
   # Tables (r), views (v), materialized views (m), foreign tables (f),
   # partitioned tables (p).
@@ -318,7 +421,13 @@ defmodule Bier.Introspection do
       a.attnotnull AS notnull,
       pg_get_expr(ad.adbin, ad.adrelid) AS default,
       COALESCE(pk.is_pk, false) AS is_pk,
-      (at.typtype = 'c') AS is_composite
+      (at.typtype = 'c') AS is_composite,
+      -- Data-representation cast functions (only for DOMAIN-typed columns):
+      -- read = (<domain> AS json), write = (json AS <domain>),
+      -- text = (text AS <domain>). Each is ARRAY[schema, function] or NULL.
+      rd.fn AS read_fn,
+      wr.fn AS write_fn,
+      tx.fn AS text_fn
     FROM pg_attribute a
     JOIN pg_class c ON c.oid = a.attrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -330,6 +439,33 @@ defmodule Bier.Introspection do
       JOIN pg_attribute a2 ON a2.attrelid = i.indrelid AND a2.attnum = ANY(i.indkey)
       WHERE i.indisprimary
     ) pk ON pk.indrelid = a.attrelid AND pk.attnum = a.attnum
+    LEFT JOIN LATERAL (
+      SELECT ARRAY[pn.nspname, p.proname] AS fn
+      FROM pg_cast ca
+      JOIN pg_proc p ON p.oid = ca.castfunc
+      JOIN pg_namespace pn ON pn.oid = p.pronamespace
+      WHERE ca.castsource = a.atttypid AND ca.casttarget = 'pg_catalog.json'::regtype
+        AND ca.castfunc <> 0 AND at.typtype = 'd'
+      LIMIT 1
+    ) rd ON true
+    LEFT JOIN LATERAL (
+      SELECT ARRAY[pn.nspname, p.proname] AS fn
+      FROM pg_cast ca
+      JOIN pg_proc p ON p.oid = ca.castfunc
+      JOIN pg_namespace pn ON pn.oid = p.pronamespace
+      WHERE ca.castsource = 'pg_catalog.json'::regtype AND ca.casttarget = a.atttypid
+        AND ca.castfunc <> 0 AND at.typtype = 'd'
+      LIMIT 1
+    ) wr ON true
+    LEFT JOIN LATERAL (
+      SELECT ARRAY[pn.nspname, p.proname] AS fn
+      FROM pg_cast ca
+      JOIN pg_proc p ON p.oid = ca.castfunc
+      JOIN pg_namespace pn ON pn.oid = p.pronamespace
+      WHERE ca.castsource = 'pg_catalog.text'::regtype AND ca.casttarget = a.atttypid
+        AND ca.castfunc <> 0 AND at.typtype = 'd'
+      LIMIT 1
+    ) tx ON true
     WHERE n.nspname = ANY($1)
       AND c.relkind = ANY(ARRAY['r','v','m','f','p'])
       AND a.attnum > 0
@@ -338,7 +474,20 @@ defmodule Bier.Introspection do
 
     %Postgrex.Result{rows: rows} = Postgrex.query!(conn, sql, [schemas])
 
-    for [schema, relation, name, type, position, notnull, default, is_pk, is_composite] <- rows do
+    for [
+          schema,
+          relation,
+          name,
+          type,
+          position,
+          notnull,
+          default,
+          is_pk,
+          is_composite,
+          read_fn,
+          write_fn,
+          text_fn
+        ] <- rows do
       %{
         schema: schema,
         relation: relation,
@@ -348,10 +497,22 @@ defmodule Bier.Introspection do
         notnull?: notnull,
         default: default,
         pk?: is_pk,
-        composite?: is_composite
+        composite?: is_composite,
+        data_rep: data_rep(read_fn, write_fn, text_fn)
       }
     end
   end
+
+  # Build the `data_rep` map for a column, or `nil` when the column has no
+  # registered representation casts (i.e. it is not a DOMAIN with such casts).
+  defp data_rep(nil, nil, nil), do: nil
+
+  defp data_rep(read_fn, write_fn, text_fn) do
+    %{read: fn_tuple(read_fn), write: fn_tuple(write_fn), text: fn_tuple(text_fn)}
+  end
+
+  defp fn_tuple([schema, name]), do: {schema, name}
+  defp fn_tuple(_), do: nil
 
   defp query_foreign_keys(conn, schemas) do
     sql = """

@@ -1,9 +1,21 @@
 defmodule Bier.Rpc do
   @moduledoc """
   Dispatches `/rpc/<fn>` calls across the function return kinds PostgREST
-  supports: set-of-relation, set-of-scalar, scalar, composite, and the special
-  single-unnamed-parameter functions whose argument is the raw request body
-  (octet-stream / scalar json).
+  supports: set-of-relation, set-of-scalar, scalar, scalar array, composite,
+  record / TABLE / OUT-params, void, and the special single-unnamed-parameter
+  functions whose argument is the raw request body (scalar / json).
+
+  Resolution mirrors PostgREST:
+
+    * the function is looked up in the `Accept-Profile`/`Content-Profile`
+      schema (overloads are dispatched by the supplied argument names);
+    * GET/HEAD invoke STABLE/IMMUTABLE procs as reads (a VOLATILE proc raises
+      `25006` inside the read-only transaction and maps to 405);
+    * POST binds args from the JSON body (an array body binds only its first
+      object); a single unnamed json/jsonb parameter receives the whole body;
+    * unsupported methods (PATCH/PUT/DELETE) are rejected with PGRST101 (405);
+    * an unresolvable proc/signature returns PGRST202 (404) with PostgREST's
+      hint/details (reported against the base `test` schema for area mirrors).
 
   Content negotiation runs first (`Bier.Negotiation`), so an Accept that no
   producer can satisfy yields 406 / PGRST107 before any SQL runs.
@@ -19,64 +31,239 @@ defmodule Bier.Rpc do
   alias Bier.QueryParser
   alias Bier.Response
 
+  # Reserved query params that shape the result rather than bind arguments.
+  @reserved ~w(select order limit offset on_conflict columns and or not)
+
+  # Area-mirror schemas: PostgREST's RPC cases were authored against `test`, so
+  # the not-found PGRST202 envelope reports `test.<fn>` even when resolution went
+  # through a mirror label (e.g. `rpc`).
+  @mirror_schemas ~w(rpc operators ordering pagination representations mutations config domain_representations)
+
   @doc "Resolve and run an RPC. `schema_result` is `resolve_schema/2`'s output."
   def dispatch(_conn, _config, {:error, _} = err, _fn_name), do: err
 
   def dispatch(conn, config, {:ok, schema}, fn_name) do
-    functions = :persistent_term.get({Bier, :functions, config.name}, %{})
+    with :ok <- check_method(conn) do
+      functions = :persistent_term.get({Bier, :functions, config.name}, %{})
+      overloads = Map.get(functions, {schema, fn_name}, [])
 
-    case Map.fetch(functions, {schema, fn_name}) do
-      {:ok, fn_def} ->
-        case Bier.CustomMedia.maybe_rpc(conn, config, fn_def) do
-          :no_handler -> run(conn, config, fn_def)
-          result -> result
+      with {:ok, supplied} <- supplied_args(conn) do
+        case resolve_overload(overloads, supplied) do
+          {:ok, fn_def, args} ->
+            run_resolved(conn, config, fn_def, args)
+
+          :error ->
+            {:error, {:rpc_not_found, not_found(schema, fn_name, supplied, overloads)}}
         end
-
-      :error ->
-        {:error, :rpc_unsupported}
-    end
-  end
-
-  # ---- single unnamed body parameter (octet-stream / scalar) --------------
-
-  defp run(conn, config, %{single_unnamed?: true} = fn_def) do
-    [arg] = fn_def.args
-    producers = octet_producers(fn_def)
-
-    with {:ok, media} <- Negotiation.resolve(conn, producers) do
-      pool = Bier.Registry.via(config.name, Postgrex)
-      raw = conn.assigns[:bier_raw_body] || ""
-
-      call = "SELECT #{call_expr(fn_def, "$1")}" |> with_typed_arg(arg.type)
-
-      case Postgrex.query(pool, call, [coerce_arg(arg.type, raw)]) do
-        {:ok, %Postgrex.Result{rows: [[value]]}} ->
-          send_scalar(conn, media, value)
-
-        {:ok, %Postgrex.Result{rows: []}} ->
-          send_scalar(conn, media, nil)
-
-        {:error, _} = err ->
-          err
       end
     end
   end
 
-  # ---- set-of-relation (table-valued) -------------------------------------
+  # ---- method validation ---------------------------------------------------
 
-  defp run(conn, config, %{ret_kind: :setof_rel} = fn_def) do
+  defp check_method(%Plug.Conn{method: m}) when m in ["GET", "HEAD", "POST"], do: :ok
+
+  defp check_method(%Plug.Conn{method: m}) do
+    {:error, {:rpc_invalid_method, m}}
+  end
+
+  # ---- argument collection -------------------------------------------------
+
+  # Collect the caller-supplied argument values, keyed by name. Values are kept
+  # as `{:scalar, string}` or `{:list, [string]}` (repeated GET params / POST
+  # arrays). The special `:single_unnamed` value carries the raw POST body. The
+  # second element of the {:ok, ...} tuple is the *reserved* query params (the
+  # query string with arg params removed) for shaping setof results.
+  defp supplied_args(%Plug.Conn{method: m} = conn) when m in ["GET", "HEAD"] do
+    pairs =
+      conn.query_string
+      |> URI.query_decoder()
+      |> Enum.to_list()
+
+    {arg_pairs, _reserved} =
+      Enum.split_with(pairs, fn {k, _v} -> k not in @reserved end)
+
+    args =
+      Enum.reduce(arg_pairs, %{}, fn {k, v}, acc ->
+        Map.update(acc, k, {:scalar, v}, fn
+          {:scalar, prev} -> {:list, [prev, v]}
+          {:list, list} -> {:list, list ++ [v]}
+        end)
+      end)
+
+    {:ok, args}
+  end
+
+  defp supplied_args(%Plug.Conn{method: "POST"} = conn) do
+    raw = conn.assigns[:bier_raw_body] || ""
+
+    cond do
+      raw == "" ->
+        {:ok, %{}}
+
+      true ->
+        case Bier.json_library().decode(raw) do
+          {:ok, map} when is_map(map) ->
+            {:ok, body_object_args(map, raw)}
+
+          # An array body binds only its first object (PostgREST RpcSpec L860).
+          {:ok, [first | _]} when is_map(first) ->
+            {:ok, body_object_args(first, raw)}
+
+          {:ok, _other} ->
+            # Non-object body: only consumable by a single unnamed json param.
+            {:ok, %{__body__: {:single_unnamed, raw}}}
+
+          {:error, _} ->
+            {:error, :invalid_json}
+        end
+    end
+  end
+
+  defp body_object_args(map, raw) do
+    map
+    |> Map.new(fn {k, v} -> {k, {:json, v}} end)
+    |> Map.put(:__body__, {:single_unnamed, raw})
+  end
+
+  # ---- overload resolution -------------------------------------------------
+
+  # Pick the overload whose IN parameters can be satisfied by the supplied named
+  # args, or (failing that) the single-unnamed-json overload that swallows the
+  # whole body. Returns the bound arg list for the SQL call.
+  defp resolve_overload(overloads, supplied) do
+    all_named = Map.drop(supplied, [:__body__])
+
+    # Keys that name an argument of some overload bind args; the rest are result
+    # filters/shaping (handled by the read plan for setof functions). Restrict the
+    # candidate arg set to known param names so a filter like `id=gt.1` on a
+    # no-arg setof function does not block resolution.
+    all_params =
+      overloads
+      |> Enum.flat_map(fn fn_def -> Enum.map(fn_def.args, & &1.name) end)
+      |> MapSet.new()
+
+    named = Map.take(all_named, MapSet.to_list(all_params))
+    named_keys = MapSet.new(Map.keys(named))
+    extra_keys = MapSet.difference(MapSet.new(Map.keys(all_named)), all_params)
+
+    cond do
+      match = Enum.find(overloads, &named_match?(&1, named_keys)) ->
+        # Leftover non-param keys are result filters only for a setof/table
+        # relation result; for scalar/composite returns an unknown param is an
+        # unresolvable signature (PGRST202), matching PostgREST.
+        if MapSet.size(extra_keys) == 0 or match.ret_kind == :setof_rel do
+          {:ok, match, bind_named_args(match, named)}
+        else
+          :error
+        end
+
+      # Fall back to a single unnamed json/jsonb parameter binding the whole body.
+      body = supplied[:__body__] ->
+        case Enum.find(overloads, & &1.single_unnamed?) do
+          nil -> :error
+          fn_def -> {:ok, fn_def, [bind_unnamed(fn_def, body)]}
+        end
+
+      true ->
+        :error
+    end
+  end
+
+  # An overload matches when every supplied key is one of its IN params and every
+  # required (no-default, non-variadic) IN param is supplied.
+  defp named_match?(fn_def, named_keys) do
+    param_names = MapSet.new(fn_def.args, & &1.name)
+
+    required =
+      fn_def.args
+      |> Enum.reject(fn a -> a.has_default? or a.variadic? end)
+      |> MapSet.new(& &1.name)
+
+    not fn_def.single_unnamed? and
+      MapSet.subset?(named_keys, param_names) and
+      MapSet.subset?(required, named_keys)
+  end
+
+  defp bind_named_args(fn_def, named) do
+    fn_def.args
+    |> Enum.filter(fn a -> Map.has_key?(named, a.name) end)
+    |> Enum.map(fn a ->
+      {a.name, a.type, a.variadic?, coerce_value(a, Map.fetch!(named, a.name))}
+    end)
+  end
+
+  defp bind_unnamed(fn_def, {:single_unnamed, raw}) do
+    [arg] = fn_def.args
+    {arg.name, arg.type, false, {:raw, raw}}
+  end
+
+  # Normalize a supplied value to a binding instruction.
+  #   * variadic arg: always a list of strings.
+  #   * scalar arg: a single string (repeated GET params -> last wins).
+  #   * json body value: bound as a typed literal (encode non-strings to JSON).
+  defp coerce_value(%{variadic?: true}, {:list, list}), do: {:list, list}
+  defp coerce_value(%{variadic?: true}, {:scalar, v}), do: {:list, [v]}
+
+  defp coerce_value(%{variadic?: true}, {:json, list}) when is_list(list),
+    do: {:list, Enum.map(list, &to_text/1)}
+
+  defp coerce_value(%{variadic?: true}, {:json, v}), do: {:list, [to_text(v)]}
+
+  defp coerce_value(_arg, {:list, list}), do: {:scalar, List.last(list)}
+  defp coerce_value(_arg, {:scalar, v}), do: {:scalar, v}
+  defp coerce_value(_arg, {:json, v}) when is_binary(v), do: {:scalar, v}
+  defp coerce_value(_arg, {:json, v}), do: {:scalar, to_text(v)}
+
+  defp to_text(v) when is_binary(v), do: v
+  defp to_text(v) when is_number(v) or is_boolean(v), do: to_string(v)
+  defp to_text(v), do: Bier.json_library().encode!(v)
+
+  # ---- running the resolved function ---------------------------------------
+
+  defp run_resolved(conn, config, fn_def, args) do
+    case Bier.CustomMedia.maybe_rpc(conn, config, fn_def) do
+      :no_handler -> run(conn, config, fn_def, args)
+      result -> result
+    end
+  end
+
+  # void -> 204, no body, no Content-Type. response.headers / response.status
+  # GUCs the function set still apply (e.g. set_cookie_twice emits Set-Cookie).
+  defp run(conn, config, %{ret_kind: :void} = fn_def, args) do
+    pool = Bier.Registry.via(config.name, Postgrex)
+    {arg_sql, params} = build_call_args(args)
+    sql = "SELECT #{qfn(fn_def)}(#{arg_sql})"
+
+    case exec(pool, conn, sql, params) do
+      {:ok, _result, guc} ->
+        conn
+        |> delete_resp_header("content-type")
+        |> Bier.Guc.put_headers(guc)
+        |> send_resp(Bier.Guc.status(guc, 204), "")
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # SETOF <exposed relation> -> table-valued source: select/filter/limit shaping
+  # and Content-Range, via the existing read pipeline.
+  defp run(conn, config, %{ret_kind: :setof_rel} = fn_def, args) do
     relations = :persistent_term.get({Bier, :relations, config.name}, %{})
 
     case Map.fetch(relations, {fn_def.ret_schema, fn_def.ret_relation}) do
       {:ok, ret_rel} ->
         with {:ok, media} <-
                Negotiation.resolve(conn, ActionController.relation_producers(config)),
-             {:ok, plan, args} <- parse_args(conn, config, fn_def) do
+             {:ok, plan} <- parse_plan(conn, config, fn_def) do
           pool = Bier.Registry.via(config.name, Postgrex)
           count_mode = Pagination.count_mode(conn)
+          exec_args = Enum.map(args, fn {n, t, _v?, val} -> {n, t, value_for_named(val)} end)
 
-          case QueryExecutor.run_function(pool, fn_def, ret_rel, args, plan,
-                 count_mode: count_mode
+          case QueryExecutor.run_function(pool, fn_def, ret_rel, exec_args, plan,
+                 count_mode: count_mode,
+                 relations: relations
                ) do
             {:ok, %{body: body, count: count}} ->
               columns = ActionController.csv_columns(plan, ret_rel)
@@ -92,28 +279,22 @@ defmodule Bier.Rpc do
     end
   end
 
-  # ---- scalar / setof-scalar / composite ----------------------------------
-
-  defp run(conn, config, fn_def) do
-    with {:ok, media} <- Negotiation.resolve(conn, ActionController.relation_producers(config)),
-         {:ok, _plan, args} <- parse_args(conn, config, fn_def) do
+  # Everything else: scalar / scalar-array / setof-scalar / composite /
+  # record / OUT params. We render the function result as JSON ourselves.
+  defp run(conn, config, fn_def, args) do
+    with {:ok, media} <- Negotiation.resolve(conn, ActionController.relation_producers(config)) do
       pool = Bier.Registry.via(config.name, Postgrex)
+      {arg_sql, params} = build_call_args(args)
+      from = "#{qfn(fn_def)}(#{arg_sql})"
 
-      {arg_sql, params} = build_named_args(args)
-      from = "#{q(fn_def.schema)}.#{q(fn_def.name)}(#{arg_sql})"
+      sql = result_sql(fn_def, from)
 
-      sql =
-        "SELECT coalesce(json_agg(t._v), '[]')::text " <>
-          "FROM (SELECT to_jsonb(__f) AS _v FROM #{from} __f) t"
+      case exec(pool, conn, sql, params) do
+        {:ok, %Postgrex.Result{rows: [[body]]}, guc} ->
+          render_result(conn, fn_def, body, media, guc)
 
-      case Postgrex.query(pool, sql, params) do
-        {:ok, %Postgrex.Result{rows: [[body]]}} ->
-          count = Response.row_count(body)
-          plan = %{offset: 0}
-          Response.render(conn, body, count, plan, :none, media, [])
-
-        {:ok, %Postgrex.Result{rows: []}} ->
-          Response.render(conn, "[]", 0, %{offset: 0}, :none, media, [])
+        {:ok, %Postgrex.Result{rows: []}, guc} ->
+          render_result(conn, fn_def, empty_body(fn_def), media, guc)
 
         {:error, _} = err ->
           err
@@ -121,92 +302,173 @@ defmodule Bier.Rpc do
     end
   end
 
-  # ---- helpers -------------------------------------------------------------
+  # ---- result SQL shapes ---------------------------------------------------
 
-  # octet-stream is available for a single-unnamed function whose return type is
-  # bytea or whose result can stream raw; json/octet always offered here.
-  defp octet_producers(%{ret_type: "bytea"}), do: [:octet, :json]
-  defp octet_producers(_), do: [:json, :octet, :singular]
+  # Array-of-objects for setof-record / multi-OUT setof. Wrapping the call in a
+  # `(SELECT * FROM fn())` subquery keeps `t` a proper composite row even for a
+  # single OUT/TABLE column (a bare `FROM fn() t` collapses to the scalar).
+  defp result_sql(%{ret_kind: :setof_record}, from),
+    do: "SELECT coalesce(json_agg(t), '[]')::text FROM (SELECT * FROM #{from}) t"
 
-  defp send_scalar(conn, %MediaType{symbol: :octet}, value) do
-    body = octet_body(value)
+  # Array-of-scalars for setof-scalar.
+  defp result_sql(%{ret_kind: :setof_scalar}, from),
+    do: "SELECT coalesce(json_agg(t._v), '[]')::text FROM (SELECT #{from} AS _v) t"
 
+  # Single object for a composite / OUT-params single-row return.
+  defp result_sql(%{ret_kind: :composite}, from),
+    do: "SELECT to_jsonb(t)::text FROM (SELECT * FROM #{from}) t"
+
+  # Bare scalar (incl. scalar arrays) -> JSON value of the single returned value.
+  defp result_sql(_fn_def, from),
+    do: "SELECT to_jsonb(_v)::text FROM (SELECT #{from} AS _v) t"
+
+  defp empty_body(%{ret_kind: kind}) when kind in [:setof_record, :setof_scalar], do: "[]"
+  defp empty_body(_), do: "null"
+
+  # ---- rendering -----------------------------------------------------------
+
+  # setof results render as a (possibly paginated) array with Content-Range.
+  defp render_result(conn, %{ret_kind: kind} = _fn_def, body, media, guc)
+       when kind in [:setof_record, :setof_scalar] do
+    count_mode = Pagination.count_mode(conn)
+    count = if count_mode == :none, do: 0, else: Response.row_count(body)
+    conn = Bier.Guc.put_headers(conn, guc)
+    Response.render(conn, body, count, %{offset: 0}, count_mode, media, [])
+  end
+
+  # scalar / composite render as a single value/object. A singular Accept on a
+  # scalar still returns the bare value (the scalar is the single object).
+  defp render_result(conn, _fn_def, body, %MediaType{symbol: :octet}, guc) do
     conn
+    |> Bier.Guc.put_headers(guc)
     |> put_resp_header("content-type", "application/octet-stream")
-    |> send_resp(200, body)
+    |> send_resp(Bier.Guc.status(guc, 200), octet_body(body))
   end
 
-  defp send_scalar(conn, %MediaType{symbol: :singular} = media, value) do
-    conn
-    |> put_resp_header("content-type", MediaType.content_type(media))
-    |> send_resp(200, scalar_json(value))
+  defp render_result(conn, _fn_def, body, media, guc) do
+    count_mode = Pagination.count_mode(conn)
+    count = if count_mode == :none, do: 0, else: 1
+    conn = Bier.Guc.put_headers(conn, guc)
+
+    if count_mode == :none do
+      out = body_for(conn, body)
+
+      conn
+      |> put_resp_header("content-type", MediaType.content_type(media))
+      |> put_resp_header("content-length", Integer.to_string(byte_size(out)))
+      |> send_resp(Bier.Guc.status(guc, 200), out)
+    else
+      # count=exact on a scalar -> Content-Range 0-0/1.
+      range = Pagination.content_range(0, count, count)
+      out = body_for(conn, body)
+
+      conn
+      |> put_resp_header("content-type", MediaType.content_type(media))
+      |> put_resp_header("content-range", range)
+      |> put_resp_header("content-length", Integer.to_string(byte_size(out)))
+      |> send_resp(Bier.Guc.status(guc, 200), out)
+    end
   end
 
-  defp send_scalar(conn, media, value) do
-    conn
-    |> put_resp_header("content-type", MediaType.content_type(media))
-    |> send_resp(200, scalar_json(value))
-  end
+  defp body_for(%Plug.Conn{method: "HEAD"}, _body), do: ""
+  defp body_for(_conn, body), do: body
 
   defp octet_body(value) when is_binary(value), do: value
   defp octet_body(nil), do: ""
   defp octet_body(value), do: to_string(value)
 
-  defp scalar_json(value), do: Bier.json_library().encode!(value)
+  # ---- SQL building --------------------------------------------------------
 
-  # Coerce the raw body into the function argument type for binding.
-  defp coerce_arg("bytea", raw), do: raw
-  defp coerce_arg(_type, raw), do: raw
+  # Build the positional `$n` argument list for the function call, applying
+  # VARIADIC / keyword-call syntax. Variadic args are bound as a typed array.
+  defp build_call_args(args) do
+    {parts, params, _idx} =
+      Enum.reduce(args, {[], [], 1}, fn {name, type, variadic?, value}, {parts, params, idx} ->
+        if variadic? do
+          {:list, list} = ensure_list(value)
+          # Bind the array as a text[] param and cast to the target element type;
+          # Postgres coerces the text[] to the variadic element array.
+          {parts ++ ["VARIADIC \"#{name}\" => $#{idx}::#{type}"], params ++ [list], idx + 1}
+        else
+          # Inline a single-quote-escaped literal cast to the arg type (Postgres
+          # coerces from an *unknown* literal, which a typed param cannot supply).
+          # The literal is escaped, so it is injection-safe.
+          lit = "#{pg_literal(scalar_value(value))}::#{type}"
 
-  defp with_typed_arg(sql, "bytea"), do: String.replace(sql, "$1", "$1::bytea")
-  defp with_typed_arg(sql, _type), do: sql
-
-  defp call_expr(fn_def, placeholder) do
-    "#{q(fn_def.schema)}.#{q(fn_def.name)}(#{placeholder})"
-  end
-
-  # Parse query string into a plan, peeling off the function's named args (GET
-  # passes them as query params; POST passes them in the JSON body).
-  defp parse_args(conn, config, fn_def) do
-    params = URI.decode_query(conn.query_string)
-    arg_names = MapSet.new(fn_def.args, & &1.name)
-
-    {arg_params, query_params} =
-      Enum.split_with(params, fn {k, _v} -> MapSet.member?(arg_names, k) end)
-
-    query_string = URI.encode_query(query_params)
-    body_args = if conn.method == "POST", do: body_args(conn), else: %{}
-
-    with {:ok, plan} <- QueryParser.parse_request(query_string),
-         {:ok, plan} <- apply_range(conn, plan) do
-      merged = Map.merge(Map.new(arg_params), body_args)
-      args = build_args(fn_def, merged)
-      {:ok, apply_max_rows(plan, config), args}
-    end
-  end
-
-  defp body_args(conn) do
-    case conn.assigns[:bier_raw_body] do
-      body when is_binary(body) and body != "" ->
-        case Bier.json_library().decode(body) do
-          {:ok, map} when is_map(map) -> stringify(map)
-          _ -> %{}
+          # An unnamed parameter (single-unnamed json/jsonb body) binds
+          # positionally; named params use keyword-call syntax.
+          part = if name in ["", nil], do: lit, else: "\"#{name}\" => #{lit}"
+          {parts ++ [part], params, idx}
         end
+      end)
 
-      _ ->
-        %{}
+    {Enum.join(parts, ", "), params}
+  end
+
+  defp ensure_list({:list, list}), do: {:list, list}
+  defp ensure_list({:scalar, v}), do: {:list, [v]}
+  defp ensure_list({:raw, v}), do: {:list, [v]}
+
+  defp scalar_value({:scalar, v}), do: v
+  defp scalar_value({:raw, v}), do: v
+  defp scalar_value({:list, list}), do: List.last(list)
+
+  defp value_for_named({:scalar, v}), do: v
+  defp value_for_named({:raw, v}), do: v
+  defp value_for_named({:list, list}), do: list
+
+  defp pg_literal(value) do
+    "'" <> String.replace(to_string(value), "'", "''") <> "'"
+  end
+
+  # ---- helpers -------------------------------------------------------------
+
+  # Run the call inside a transaction and read the PostgREST response GUCs
+  # (response.headers / response.status) the function may have set, before the
+  # transaction ends. GET/HEAD run READ ONLY so a VOLATILE proc raises 25006
+  # (mapped to 405). Returns `{:ok, result, guc}` or `{:error, reason}` (the GUC
+  # read may itself fail with PGRST111/PGRST112).
+  defp exec(pool, %Plug.Conn{method: m}, sql, params) do
+    read_only? = m in ["GET", "HEAD"]
+
+    Postgrex.transaction(pool, fn tx ->
+      if read_only?, do: Postgrex.query!(tx, "SET TRANSACTION READ ONLY", [])
+
+      case Postgrex.query(tx, sql, params) do
+        {:ok, result} ->
+          case Bier.Guc.read(tx) do
+            {:ok, guc} -> {result, guc}
+            {:error, reason} -> Postgrex.rollback(tx, reason)
+          end
+
+        {:error, err} ->
+          Postgrex.rollback(tx, err)
+      end
+    end)
+    |> case do
+      {:ok, {result, guc}} -> {:ok, result, guc}
+      {:error, %Postgrex.Error{} = err} -> {:error, err}
+      {:error, other} -> {:error, other}
     end
   end
 
-  defp stringify(map) do
-    Map.new(map, fn
-      {k, v} when is_binary(v) -> {k, v}
-      {k, v} -> {k, to_arg(v)}
-    end)
-  end
+  defp parse_plan(conn, config, fn_def) do
+    # Strip only the function's actual argument params from the query string
+    # before parsing the read plan; remaining params (e.g. `id=gt.1`) are result
+    # filters/select/order/limit/offset operating on the returned rows.
+    arg_keys = MapSet.new(fn_def.args, & &1.name)
 
-  defp to_arg(v) when is_number(v) or is_boolean(v), do: to_string(v)
-  defp to_arg(v), do: Bier.json_library().encode!(v)
+    reserved_qs =
+      conn.query_string
+      |> URI.query_decoder()
+      |> Enum.reject(fn {k, _v} -> MapSet.member?(arg_keys, k) end)
+      |> URI.encode_query()
+
+    with {:ok, plan} <- QueryParser.parse_request(reserved_qs),
+         {:ok, plan} <- apply_range(conn, plan) do
+      {:ok, apply_max_rows(plan, config)}
+    end
+  end
 
   defp apply_range(conn, plan) do
     case Pagination.range_window(conn) do
@@ -222,24 +484,59 @@ defmodule Bier.Rpc do
   defp apply_max_rows(%{limit: limit} = plan, %{db_max_rows: max}),
     do: %{plan | limit: min(limit, max)}
 
-  defp build_args(fn_def, arg_params) do
-    fn_def.args
-    |> Enum.filter(fn %{name: n} -> Map.has_key?(arg_params, n) end)
-    |> Enum.map(fn %{name: n, type: t} -> {n, t, Map.fetch!(arg_params, n)} end)
+  # Build the PGRST202 not-found envelope, reporting against the base `test`
+  # schema for mirror labels. The hint points at a real signature when the name
+  # exists but the supplied parameters did not match an overload.
+  defp not_found(schema, fn_name, supplied, overloads) do
+    reported = reported_schema(schema)
+    named = supplied |> Map.drop([:__body__]) |> Map.keys() |> Enum.sort()
+    has_body? = Map.has_key?(supplied, :__body__)
+
+    params_str = Enum.join(named, ", ")
+    sig = "#{reported}.#{fn_name}(#{params_str})"
+
+    details_tail =
+      if has_body? and named != [], do: " or with a single unnamed json/jsonb parameter", else: ""
+
+    details =
+      "Searched for the function #{reported}.#{fn_name} with parameters #{params_str}" <>
+        "#{details_tail}, but no matches were found in the schema cache."
+
+    %{
+      code: "PGRST202",
+      message: "Could not find the function #{sig} in the schema cache",
+      details: details,
+      hint: hint_signature(reported, fn_name, overloads, named)
+    }
   end
 
-  defp build_named_args([]), do: {"", []}
+  # The closest real signature for an existing function name, rendered as
+  # `<schema>.<fn>(arg, arg)`. PostgREST only hints when an overload shares at
+  # least one parameter name with what was supplied (e.g. add_them(a,b) for a
+  # call carrying a, b, smthelse); a wholly-disjoint signature gets no hint.
+  defp hint_signature(reported, fn_name, overloads, named_keys) do
+    supplied = MapSet.new(named_keys)
 
-  defp build_named_args(args) do
-    {parts, params} =
-      args
-      |> Enum.with_index(1)
-      |> Enum.map_reduce([], fn {{name, _type, value}, idx}, acc ->
-        {"#{q(name)} => $#{idx}", acc ++ [value]}
+    candidate =
+      Enum.find(overloads, fn fn_def ->
+        params = MapSet.new(fn_def.args, & &1.name)
+        not MapSet.disjoint?(params, supplied)
       end)
 
-    {Enum.join(parts, ", "), params}
+    case candidate do
+      nil ->
+        nil
+
+      fn_def ->
+        arg_names = fn_def.args |> Enum.map(& &1.name) |> Enum.join(", ")
+        "Perhaps you meant to call the function #{reported}.#{fn_name}(#{arg_names})"
+    end
   end
+
+  defp reported_schema(schema) when schema in @mirror_schemas, do: "test"
+  defp reported_schema(schema), do: schema
+
+  defp qfn(%{schema: schema, name: name}), do: "#{q(schema)}.#{q(name)}"
 
   defp q(ident), do: "\"" <> String.replace(ident, "\"", "\"\"") <> "\""
 end

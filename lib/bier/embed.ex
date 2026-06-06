@@ -61,12 +61,20 @@ defmodule Bier.Embed do
   # ---- node dispatch -------------------------------------------------------
 
   defp build_node(node, relation, al, _ef, state, _qe) when node == :star do
-    pairs = Enum.map(relation.columns, fn c -> json_pair(c.name, col_expr(al, c.name)) end)
+    pairs =
+      Enum.map(relation.columns, fn c ->
+        json_pair(c.name, star_col_expr(relation, al, c.name))
+      end)
+
     {pairs, state}
   end
 
   defp build_node(%{kind: :star}, relation, al, _ef, state, _qe) do
-    pairs = Enum.map(relation.columns, fn c -> json_pair(c.name, col_expr(al, c.name)) end)
+    pairs =
+      Enum.map(relation.columns, fn c ->
+        json_pair(c.name, star_col_expr(relation, al, c.name))
+      end)
+
     {pairs, state}
   end
 
@@ -104,11 +112,20 @@ defmodule Bier.Embed do
   defp field_expr(%{column: col} = f, relation, al) do
     if col in relation.computed_columns do
       base = "#{QE.quote_ident(relation.schema)}.#{QE.quote_ident(col)}(#{QE.quote_ident(al)})"
+      base = if f.json_path == [], do: QE.apply_read_rep(base, relation, col), else: base
       if f.cast, do: "#{base}::#{QE.quote_type(f.cast)}", else: base
     else
       expr = QE.column_expr_aliased(col, f.json_path, al)
+      # Apply the column's read representation before any explicit `::cast`,
+      # unless a json path navigates into the value (then the base value is used).
+      expr = if f.json_path == [], do: QE.apply_read_rep(expr, relation, col), else: expr
       if f.cast, do: "#{expr}::#{QE.quote_type(f.cast)}", else: expr
     end
+  end
+
+  # Column value for a `*` expansion, applying the column's read representation.
+  defp star_col_expr(relation, al, col) do
+    QE.apply_read_rep(col_expr(al, col), relation, col)
   end
 
   # ---- embed rendering -----------------------------------------------------
