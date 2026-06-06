@@ -23,8 +23,12 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
   use Mix.Task
 
   # Pure table/data areas that are mirrored from `test` as auto-updatable views.
-  # Function-heavy areas (rpc, openapi) are intentionally NOT mirrored here.
-  @mirror_schemas ~w(operators ordering pagination representations mutations headers config domain_representations)
+  # Function-heavy areas (rpc, openapi, headers) are intentionally NOT mirrored
+  # here. `headers` is function- and trigger-heavy (GUC response.headers /
+  # response.status) and additionally needs multi-schema profile routing
+  # (v1/v2/SPECIAL), so it is built by `load_headers_schema/2` from its own
+  # `headers.sql` fragment rather than as a view-mirror of `test`.
+  @mirror_schemas ~w(operators ordering pagination representations mutations config domain_representations)
 
   @roles ~w(postgrest_test_anonymous postgrest_test_default_role postgrest_test_author)
 
@@ -50,6 +54,8 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
     load_fixtures(psql, cfg, fixtures)
     seed_corrections(psql, cfg)
     mirror_area_schemas(cfg)
+    load_rpc_schema(psql, cfg)
+    load_headers_schema(psql, cfg)
     analyze(psql, cfg)
 
     Mix.shell().info("Done. Built area schemas: #{Enum.join(@mirror_schemas, ", ")}")
@@ -107,6 +113,94 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
   # match the small fixture tables (e.g. child_entities -> 6).
   defp analyze(psql, cfg) do
     run_psql!(psql, cfg, cfg[:database], "ANALYZE;")
+  end
+
+  # The `rpc` area is function-heavy: views cannot mirror functions (overloads,
+  # OUT/INOUT/VARIADIC params, defaults, volatility). Per docs/CONFORMANCE_IMPL.md
+  # §2.2 option 2, we re-load the self-contained `rpc` fragment into a real `rpc`
+  # schema by remapping its `test`-qualified DDL to `rpc`. The fragment only
+  # references `test.*` objects and `public`, so a word-boundary rewrite of
+  # `\btest\b` -> `rpc` is lossless (no string literal contains the token `test`).
+  defp load_rpc_schema(psql, cfg) do
+    fragment = Path.expand("spec/conformance/fixtures/rpc.sql", File.cwd!())
+
+    unless File.exists?(fragment) do
+      Mix.raise("RPC fixture fragment not found: #{fragment}")
+    end
+
+    sql =
+      fragment
+      |> File.read!()
+      |> String.replace(~r/\btest\b/, "rpc")
+
+    # Drop first so the load is idempotent, then create the remapped objects and
+    # grant the anon role EXECUTE/SELECT so anonymous /rpc calls succeed.
+    full =
+      ~s(DROP SCHEMA IF EXISTS rpc CASCADE;\n) <>
+        sql <>
+        "\n" <>
+        ~s(GRANT USAGE ON SCHEMA rpc TO postgrest_test_anonymous;\n) <>
+        ~s(GRANT SELECT ON ALL TABLES IN SCHEMA rpc TO postgrest_test_anonymous;\n) <>
+        ~s(GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA rpc TO postgrest_test_anonymous;\n)
+
+    run_psql!(psql, cfg, cfg[:database], full)
+  end
+
+  # The `headers` area is function- and trigger-heavy and additionally exercises
+  # multi-schema profile routing. We build a real `headers` schema from the
+  # self-contained `spec/conformance/fixtures/headers.sql` fragment:
+  #
+  #   * the `test`-schema portion (tables + the `stuff` INSTEAD OF-trigger view +
+  #     the GUC response.headers / response.status RPC functions) is loaded into
+  #     a real `headers` schema by remapping `\btest\b` -> `headers` and the
+  #     fragment's `private` schema -> `headers_private` (so nothing collides with
+  #     the consolidated `private.stuff`).
+  #   * the multi-schema (v1/v2/SPECIAL) tables already exist from the
+  #     consolidated `fixtures.sql`, so the fragment's own multi-schema section is
+  #     dropped. Instead we expose `parents`/`children`/`names` inside the
+  #     `headers` schema as auto-updatable views over `v1` (the default profile),
+  #     so a default-profile (`Accept-Profile: headers`) read of `/parents`
+  #     resolves to v1's rows while still living in the `headers` schema.
+  #
+  # `db_profile_default` (v1) drives the Content-Profile echo for the default
+  # profile; explicit `Accept-Profile: v2|SPECIAL...` reads resolve directly in
+  # those real schemas (which carry their own data).
+  defp load_headers_schema(psql, cfg) do
+    fragment = Path.expand("spec/conformance/fixtures/headers.sql", File.cwd!())
+
+    unless File.exists?(fragment) do
+      Mix.raise("headers fixture fragment not found: #{fragment}")
+    end
+
+    raw = File.read!(fragment)
+
+    # Keep only the test/private portion (everything before the multi-schema
+    # section). That marker is stable in the fragment.
+    [test_portion | _] = String.split(raw, "-- Multi-schema tables", parts: 2)
+
+    sql =
+      test_portion
+      # The fragment qualifies every object with its schema, so word-boundary
+      # rewrites are lossless (no string literal contains a bare `test`/`private`
+      # token; header values use `X-Test`/`Test`, which differ in case).
+      |> String.replace(~r/\btest\b/, "headers")
+      |> String.replace(~r/\bprivate\b/, "headers_private")
+
+    # parents/children/names are exposed in `headers` as views over the
+    # default profile schema v1 so a default-profile read resolves to v1.
+    full =
+      ~s(DROP SCHEMA IF EXISTS headers CASCADE;\n) <>
+        ~s(DROP SCHEMA IF EXISTS headers_private CASCADE;\n) <>
+        ~s(CREATE SCHEMA headers;\n) <>
+        sql <>
+        "\n" <>
+        ~s(CREATE VIEW headers.parents AS SELECT * FROM v1.parents;\n) <>
+        ~s(CREATE VIEW headers.children AS SELECT * FROM v1.children;\n) <>
+        ~s(GRANT USAGE ON SCHEMA headers TO postgrest_test_anonymous;\n) <>
+        ~s(GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA headers TO postgrest_test_anonymous;\n) <>
+        ~s(GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA headers TO postgrest_test_anonymous;\n)
+
+    run_psql!(psql, cfg, cfg[:database], full)
   end
 
   defp mirror_area_schemas(cfg) do
@@ -169,6 +263,7 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
         end
 
         if schema == "representations", do: isolate_representations(conn)
+        if schema == "mutations", do: isolate_mutations(conn)
 
         for %{name: fname, arg_rel: arg_rel, ret_type: ret_type} <- computed_fns,
             arg_rel in relations do
@@ -261,6 +356,67 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
     Postgrex.query!(
       conn,
       ~s|SELECT setval('"representations"."auto_incrementing_pk_id_seq"', 2, false)|,
+      []
+    )
+  end
+
+  # The `mutations` area exercises destructive writes (POST/PATCH/PUT/DELETE).
+  # Like `representations`, the area schemas mirror `test` as auto-updatable
+  # views, so writes would pass through to the shared `test.*` base tables. Even
+  # though the request pipeline rolls every transaction back (db-tx-end =
+  # rollback) so the DB stays pristine, two of the mutation targets need a seed
+  # state that DIFFERS from `test.*`:
+  #
+  #   * `complex_items` — case 1361 (missing=default) requires the column DEFAULT
+  #     `field-with_sep = 1` to be visible to introspection. A VIEW does not carry
+  #     the underlying column default, so a real table (LIKE ... INCLUDING ALL)
+  #     is needed to expose it.
+  #   * `articles` — case 1366 PATCHes id=1 and asserts owner =
+  #     'postgrest_test_anonymous' (the column DEFAULT), but `test.articles`'s
+  #     operators seed has owner='diogo'. The case's precondition (not run by the
+  #     frozen harness) would reset the row; we seed the isolated table to the
+  #     post-precondition state instead.
+  #
+  # The other writable targets (items, tiobe_pls, simple_pk, no_pk,
+  # single_unique, compound_unique, safe_update_items, safe_delete_items) already
+  # match each case's expected starting state in `test.*`, but we isolate them as
+  # independent real tables too so their column defaults/sequences are exposed and
+  # the area is fully self-contained.
+  defp isolate_mutations(conn) do
+    tables =
+      ~w(items articles complex_items tiobe_pls simple_pk no_pk single_unique
+         compound_unique safe_update_items safe_delete_items)
+
+    for t <- tables do
+      Postgrex.query!(conn, ~s|DROP VIEW IF EXISTS "mutations"."#{t}" CASCADE|, [])
+
+      Postgrex.query!(
+        conn,
+        ~s|CREATE TABLE "mutations"."#{t}" (LIKE "test"."#{t}" INCLUDING ALL)|,
+        []
+      )
+
+      Postgrex.query!(
+        conn,
+        ~s|INSERT INTO "mutations"."#{t}" SELECT * FROM "test"."#{t}"|,
+        []
+      )
+    end
+
+    # `complex_items."field-with_sep"` is rewritten by seed_corrections to equal
+    # the row id in `test`. The mutations cases (1361, 1371) want the original
+    # per-column DEFAULT (1) preserved and the seed rows intact, so reset the copy
+    # to the column DEFAULT for existing rows.
+    Postgrex.query!(conn, ~s|UPDATE "mutations"."complex_items" SET "field-with_sep" = 1|, [])
+
+    # Case 1366 PATCHes articles id=1 and asserts owner = 'postgrest_test_anonymous'
+    # (the precondition resets the row, dropping operators' 'diogo' seed). Replace
+    # the seed with the post-precondition state: only id=1, owner defaulted.
+    Postgrex.query!(conn, ~s|DELETE FROM "mutations"."articles"|, [])
+
+    Postgrex.query!(
+      conn,
+      ~s|INSERT INTO "mutations"."articles" (id, body) VALUES (1, 'orig')|,
       []
     )
   end
@@ -373,7 +529,12 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
   end
 
   defp psql_env(cfg) do
-    if cfg[:password], do: [{"PGPASSWORD", to_string(cfg[:password])}], else: []
+    # Load under UTC so timestamps inserted WITHOUT an explicit offset (e.g. the
+    # domain-representation seed `'2017-12-14 01:02:30'::timestamptz`) become the
+    # same absolute instants as PostgREST's reference DB, which runs in UTC. The
+    # request pipeline also pins the session timezone to UTC (see Bier.postgrex_opts/1).
+    base = [{"PGTZ", "UTC"}]
+    if cfg[:password], do: [{"PGPASSWORD", to_string(cfg[:password])} | base], else: base
   end
 
   defp run_psql!(psql, cfg, database, sql) do

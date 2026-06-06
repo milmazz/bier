@@ -27,13 +27,21 @@ defmodule Bier.Config do
           password: String.t() | nil,
           pool_size: pos_integer(),
           db_schemas: [String.t(), ...],
+          db_profile_default: String.t() | nil,
+          db_profile_schemas: [String.t()] | nil,
+          db_schema_aliases: %{optional(String.t()) => String.t()},
           db_anon_role: String.t() | nil,
           db_extra_search_path: [String.t()],
           db_max_rows: pos_integer() | nil,
+          db_max_rows_by_schema: %{optional(String.t()) => pos_integer()},
           db_plan_enabled: boolean(),
           db_tx_end: :commit | :rollback,
+          db_safe_update_tables: [String.t()],
           jwt_secret: String.t() | nil,
-          server_cors_allowed_origins: String.t() | nil
+          server_cors_allowed_origins: String.t() | nil,
+          server_timing_enabled: boolean(),
+          server_trace_header: String.t() | nil,
+          log_level: :crit | :error | :warn | :info | :debug
         }
 
   defstruct [
@@ -47,12 +55,20 @@ defmodule Bier.Config do
     :db_max_rows,
     :jwt_secret,
     :server_cors_allowed_origins,
+    :db_profile_default,
+    :db_profile_schemas,
+    :server_trace_header,
     name: Bier,
     pool_size: 10,
     db_schemas: ["public"],
     db_extra_search_path: ["public"],
+    db_max_rows_by_schema: %{},
+    db_schema_aliases: %{},
     db_plan_enabled: false,
-    db_tx_end: :commit
+    db_tx_end: :commit,
+    db_safe_update_tables: [],
+    server_timing_enabled: false,
+    log_level: :error
   ]
 
   @doc """

@@ -89,13 +89,13 @@ defmodule Bier.QueryParser do
   ## Examples
 
       iex> parse_select("*")
-      {:ok, [default: '*']}
+      {:ok, [default: ~c"*"]}
       iex> parse_select("first_name,age")
-      {:ok, [[name: 'first_name'], [name: 'age']]}
+      {:ok, [[name: ~c"first_name"], [name: ~c"age"]]}
       iex> parse_select("fullName:full_name,birthDate:birth_date")
-      {:ok, [[alias: 'fullName', name: 'full_name'], [alias: 'birthDate', name: 'birth_date']]}
+      {:ok, [[alias: ~c"fullName", name: ~c"full_name"], [alias: ~c"birthDate", name: ~c"birth_date"]]}
       iex> parse_select("uno:first::text, dos:second, third, forth::text")
-      {:ok, [[alias: 'uno', name: 'first', cast: 'text'], [alias: 'dos', name: 'second'], [name: 'third'], [name: 'forth', cast: 'text']]}
+      {:ok, [[alias: ~c"uno", name: ~c"first", cast: ~c"text"], [alias: ~c"dos", name: ~c"second"], [name: ~c"third"], [name: ~c"forth", cast: ~c"text"]]}
   """
   @spec parse_select(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def parse_select(select) do
@@ -194,13 +194,13 @@ defmodule Bier.QueryParser do
   ## Examples
 
       iex> parse_filters(%{age: "lt.13"})
-      {:ok, [{:age, [negation?: false, operator: '<', value: '13']}]}
+      {:ok, [{:age, [negation?: false, operator: ~c"<", value: ~c"13"]}]}
       iex> parse_filters(%{age: "gt.13"})
-      {:ok, [{:age, [negation?: false, operator: '>', value: '13']}]}
+      {:ok, [{:age, [negation?: false, operator: ~c">", value: ~c"13"]}]}
       iex> parse_filters(%{age: "gte.13"})
-      {:ok, [{:age, [negation?: false, operator: '>=', value: '13']}]}
+      {:ok, [{:age, [negation?: false, operator: ~c">=", value: ~c"13"]}]}
       iex> parse_filters(%{age: "not.gte.13"})
-      {:ok, [{:age, [negation?: true, operator: '>=', value: '13']}]}
+      {:ok, [{:age, [negation?: true, operator: ~c">=", value: ~c"13"]}]}
   """
   def parse_filters(params) when is_map(params) do
     result =
@@ -386,6 +386,8 @@ defmodule Bier.QueryParser do
          {:ok, offset} <- pg_offset(params["offset"]),
          {:ok, embed_limits} <- pg_embed_paged(params, "limit", &pg_limit/1),
          {:ok, embed_offsets} <- pg_embed_paged(params, "offset", &pg_offset/1),
+         {:ok, columns} <- pg_columns(params),
+         {:ok, on_conflict} <- pg_on_conflict(params),
          {:ok, {filters, embed_filters}} <- pg_filters(params) do
       {:ok,
        %{
@@ -397,8 +399,63 @@ defmodule Bier.QueryParser do
          limit: limit,
          offset: offset,
          embed_limits: embed_limits,
-         embed_offsets: embed_offsets
+         embed_offsets: embed_offsets,
+         columns: columns,
+         on_conflict: on_conflict,
+         # The presence of `limit`/`offset` query params is needed by PUT (which
+         # rejects them); record it separately since the values may be nil.
+         has_limit: Map.has_key?(params, "limit"),
+         has_offset: Map.has_key?(params, "offset")
        }}
+    end
+  end
+
+  # ---- columns / on_conflict (mutation write params) -----------------------
+
+  # `?columns=a,b,c` selects which JSON keys become target columns for a write
+  # (extra keys in the payload are ignored). A *present but blank* `columns=`
+  # is a PGRST100 parse error; an absent param means "derive columns from the
+  # payload keys" (signalled by `nil`).
+  defp pg_columns(params) do
+    case Map.get(params, "columns") do
+      nil ->
+        {:ok, nil}
+
+      "" ->
+        {:error, :blank_columns}
+
+      raw ->
+        cols =
+          raw
+          |> split_top_commas()
+          |> Enum.map(&String.trim/1)
+
+        if cols == [] or Enum.any?(cols, &(&1 == "")) do
+          {:error, :blank_columns}
+        else
+          {:ok, cols}
+        end
+    end
+  end
+
+  # `?on_conflict=a,b` names the columns of the unique/exclusion constraint to
+  # use as the upsert conflict target. Absent => nil (use the PK).
+  defp pg_on_conflict(params) do
+    case Map.get(params, "on_conflict") do
+      nil ->
+        {:ok, nil}
+
+      "" ->
+        {:ok, nil}
+
+      raw ->
+        cols =
+          raw
+          |> split_top_commas()
+          |> Enum.map(&String.trim/1)
+          |> Enum.reject(&(&1 == ""))
+
+        {:ok, cols}
     end
   end
 
@@ -848,7 +905,15 @@ defmodule Bier.QueryParser do
   end
 
   defp reduce_filters(pairs) do
+    # A column repeated in the query string (e.g. `id=gt.1&id=lt.5`) yields one
+    # ANDed filter node per occurrence, mirroring PostgREST.
     pairs
+    |> Enum.flat_map(fn {key, val} ->
+      case val do
+        list when is_list(list) -> Enum.map(list, &{key, &1})
+        single -> [{key, single}]
+      end
+    end)
     |> Enum.reduce_while([], fn {key, val}, acc ->
       case parse_column_filter(key, val) do
         {:ok, node} -> {:cont, [node | acc]}
