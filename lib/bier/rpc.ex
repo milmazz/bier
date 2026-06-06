@@ -428,11 +428,13 @@ defmodule Bier.Rpc do
   # transaction ends. GET/HEAD run READ ONLY so a VOLATILE proc raises 25006
   # (mapped to 405). Returns `{:ok, result, guc}` or `{:error, reason}` (the GUC
   # read may itself fail with PGRST111/PGRST112).
-  defp exec(pool, %Plug.Conn{method: m}, sql, params) do
+  defp exec(pool, %Plug.Conn{method: m} = conn, sql, params) do
     read_only? = m in ["GET", "HEAD"]
+    auth = ActionController.auth_setup(conn, instance_config(conn))
 
     Postgrex.transaction(pool, fn tx ->
       if read_only?, do: Postgrex.query!(tx, "SET TRANSACTION READ ONLY", [])
+      apply_auth(tx, auth)
 
       case Postgrex.query(tx, sql, params) do
         {:ok, result} ->
@@ -447,9 +449,24 @@ defmodule Bier.Rpc do
     end)
     |> case do
       {:ok, {result, guc}} -> {:ok, result, guc}
-      {:error, %Postgrex.Error{} = err} -> {:error, err}
+      {:error, %Postgrex.Error{} = err} -> map_auth_error(auth, err)
       {:error, other} -> {:error, other}
     end
+  end
+
+  # Apply the auth context (role + request GUCs + pre-request hook) on the
+  # transaction connection. No-op when the request schema does not require it.
+  defp apply_auth(_tx, nil), do: :ok
+
+  defp apply_auth(tx, {context, config}) do
+    Bier.Auth.with_context(tx, context, config, fn _tx -> :ok end)
+  end
+
+  defp map_auth_error(nil, err), do: {:error, err}
+  defp map_auth_error({context, _config}, err), do: Bier.Auth.map_error(context, err)
+
+  defp instance_config(conn) do
+    Bier.Registry.config(conn.assigns.supervisor_name)
   end
 
   defp parse_plan(conn, config, fn_def) do

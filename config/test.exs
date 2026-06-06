@@ -27,6 +27,10 @@ config :bier,
     "openapi",
     "domain_representations",
     "observability",
+    # The auth area: a mirror of `test` (tables as security_invoker views,
+    # functions as wrappers) carrying the SAME restrictive grants, so SET ROLE +
+    # JWT role-switching produce the 42501/403 the auth cases assert.
+    "auth",
     "v1",
     "v2",
     "SPECIAL \"@/\\#~_-",
@@ -66,7 +70,16 @@ config :bier,
   # pg-safeupdate parity: these tables reject a filterless UPDATE/DELETE with
   # SQLSTATE 21000 (mutations safe-update/safe-delete cases).
   db_safe_update_tables: ["safe_update_items", "safe_delete_items"],
-  jwt_secret: nil,
+  # db-pre-request hook (PostgREST). Runs inside the per-request transaction for
+  # auth-schema requests, before the main query. `test.switch_role` reads
+  # request.jwt.claims->>id and SET LOCAL ROLE accordingly (cases 1475-1477); it
+  # is a no-op for tokens without an id of 1/2/3, so it is inert for the other
+  # auth cases.
+  db_pre_request: "auth.switch_role",
+  # HS256 secret matching PostgREST's testCfg default; used to verify the
+  # hardcoded bearer tokens in the auth cases. >= 32 chars (HS256 requirement).
+  jwt_secret: "reallyreallyreallyreallyverysafe",
+  jwt_aud: nil,
   # CORS (PostgREST server-cors-allowed-origins). The config-area cases pin a
   # fixed allowlist: an Origin in the list is echoed with credentials (1702),
   # one outside it gets no Access-Control-Allow-Origin header (1704). CORS

@@ -186,10 +186,29 @@ defmodule Bier do
         by loading the extension.
         """
       ],
+      db_pre_request: [
+        type: {:or, [:string, nil]},
+        default: env(:db_pre_request, nil),
+        doc: """
+        Name of a function (`schema.proc` or `proc`) run inside every request's
+        transaction before the main query (PostgREST db-pre-request). It can
+        inspect `request.*` settings and `SET LOCAL ROLE` or `RAISE` to abort.
+        Applied only for auth-schema requests in the conformance build.
+        """
+      ],
       jwt_secret: [
         type: {:or, [:string, nil]},
         default: env(:jwt_secret, nil),
         doc: "Secret used to verify JWTs."
+      ],
+      jwt_aud: [
+        type: {:or, [:string, nil]},
+        default: env(:jwt_aud, nil),
+        doc: """
+        Expected JWT audience (PostgREST jwt-aud). When set, a presented token
+        whose `aud` claim does not contain this value is rejected. When nil, the
+        `aud` claim is ignored.
+        """
       ],
       server_cors_allowed_origins: [
         type: {:or, [:string, nil]},

@@ -59,8 +59,10 @@ defmodule Bier.Plugs.ActionController do
       ["rpc", fn_name] ->
         case resolve_profile(conn, config) do
           {:ok, schema, content_profile} ->
-            conn = maybe_content_profile(conn, content_profile)
-            Bier.Rpc.dispatch(conn, config, {:ok, schema}, fn_name)
+            with {:ok, conn} <- maybe_auth(conn, config, schema) do
+              conn = maybe_content_profile(conn, content_profile)
+              Bier.Rpc.dispatch(conn, config, {:ok, schema}, fn_name)
+            end
 
           {:error, _} = err ->
             err
@@ -71,16 +73,34 @@ defmodule Bier.Plugs.ActionController do
     end
   end
 
+  # Resolve the per-request auth context (JWT verify + role + request GUCs) for
+  # schemas that require it (the auth area). Stashes the context in
+  # `conn.assigns.bier_auth` so the execution layer (reads/mutations/rpc) runs
+  # its query inside a `SET LOCAL ROLE` + request.* GUC transaction. A JWT
+  # verification failure short-circuits with the PostgREST error envelope.
+  @doc false
+  def maybe_auth(conn, config, schema) do
+    if Bier.Auth.applicable?(schema) do
+      case Bier.Auth.resolve(conn, config) do
+        {:ok, context} -> {:ok, assign(conn, :bier_auth, context)}
+        {:error, _} = err -> err
+      end
+    else
+      {:ok, conn}
+    end
+  end
+
   # ---- root (`/`) ----------------------------------------------------------
 
   # The root path serves the OpenAPI document for `application/openapi+json` /
-  # `application/json` / `*/*`. A request that presents an `Authorization`
-  # bearer token while the server has no JWT secret configured cannot be
-  # authenticated and yields a 500 (mirrors PostgREST's JWT failure path; this
-  # is the single line logged at log-level=error).
-  defp dispatch_root(conn, config) do
+  # `application/json` / `*/*`. The root document endpoint does not run the auth
+  # pipeline (it carries no schema/relation to gate), so a request presenting an
+  # `Authorization` bearer token cannot be authenticated here and yields a 500
+  # (mirrors PostgREST's JWT-failure path; this is the single line logged at
+  # log-level=error, case 1764). A token-free request renders the document.
+  defp dispatch_root(conn, _config) do
     cond do
-      bearer_without_secret?(conn, config) ->
+      bearer_present?(conn) ->
         {:error, :jwt_unconfigured}
 
       conn.method in ["GET", "HEAD"] ->
@@ -91,9 +111,8 @@ defmodule Bier.Plugs.ActionController do
     end
   end
 
-  defp bearer_without_secret?(conn, config) do
-    is_nil(config.jwt_secret) and
-      match?(["Bearer " <> _ | _], get_req_header(conn, "authorization"))
+  defp bearer_present?(conn) do
+    not is_nil(Bier.Auth.bearer_token(conn))
   end
 
   defp render_root(conn) do
@@ -156,6 +175,7 @@ defmodule Bier.Plugs.ActionController do
 
   defp dispatch_relation(conn, config, relations) do
     with {:ok, schema, content_profile} <- resolve_profile(conn, config),
+         {:ok, conn} <- maybe_auth(conn, config, schema),
          conn = maybe_content_profile(conn, content_profile),
          :ok <- reject_openapi_media(conn),
          {:ok, relation} <- resolve_relation(conn, schema, relations) do
@@ -278,11 +298,22 @@ defmodule Bier.Plugs.ActionController do
            QueryExecutor.run(pool, relation, plan, relations,
              count_mode: count_mode,
              max_rows: config.db_max_rows,
-             timezone: prefs.timezone
+             timezone: prefs.timezone,
+             auth: auth_setup(conn, config)
            ) do
       conn
       |> put_preference_applied(prefs.applied)
       |> render(body, count, plan, count_mode, media, csv_columns(plan, relation))
+    end
+  end
+
+  # The auth-context tuple `{context, config}` threaded into the execution layer,
+  # or nil when the request schema does not require role-switching/GUCs.
+  @doc false
+  def auth_setup(conn, config) do
+    case conn.assigns[:bier_auth] do
+      nil -> nil
+      context -> {context, config}
     end
   end
 

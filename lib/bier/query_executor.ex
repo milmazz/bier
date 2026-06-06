@@ -55,9 +55,10 @@ defmodule Bier.QueryExecutor do
   def run(conn, %Relation{} = relation, plan, relations \\ %{}, opts \\ []) do
     count_mode = Keyword.get(opts, :count_mode, :none)
     timezone = Keyword.get(opts, :timezone)
+    auth = Keyword.get(opts, :auth)
 
     with {:ok, sql, params} <- build(relation, plan, relations) do
-      case query_with_timezone(conn, sql, params, timezone) do
+      case query_read(conn, sql, params, timezone, auth) do
         {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
           resolve_count(conn, relation, plan, relations, count_mode, opts, body, exact_count || 0)
 
@@ -67,6 +68,42 @@ defmodule Bier.QueryExecutor do
         {:error, _} = err ->
           err
       end
+    end
+  end
+
+  # Run the read query, honoring the auth context (role switch + request GUCs +
+  # pre-request hook) when present. The auth-context query runs in a single
+  # transaction; a `42501` under the anon role is re-mapped to a 401 envelope.
+  # Note: subsequent count/timezone queries (`resolve_count`) reuse the pool as
+  # the connecting superuser. That is intentional — the auth cases that read GUCs
+  # use count=none, and the privilege-gated reads either succeed (granted) or
+  # raise here before any count query runs.
+  defp query_read(conn, sql, params, timezone, nil),
+    do: query_with_timezone(conn, sql, params, timezone)
+
+  defp query_read(pool, sql, params, timezone, {context, config}) do
+    result =
+      Postgrex.transaction(pool, fn tx ->
+        Bier.Auth.with_context(tx, context, config, fn tx ->
+          if timezone do
+            Postgrex.query!(
+              tx,
+              "SET LOCAL TIME ZONE '#{String.replace(timezone, "'", "''")}'",
+              []
+            )
+          end
+
+          case Postgrex.query(tx, sql, params) do
+            {:ok, result} -> result
+            {:error, err} -> Postgrex.rollback(tx, err)
+          end
+        end)
+      end)
+
+    case result do
+      {:ok, result} -> {:ok, result}
+      {:error, %Postgrex.Error{} = err} -> Bier.Auth.map_error(context, err)
+      {:error, other} -> {:error, other}
     end
   end
 
