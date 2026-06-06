@@ -98,6 +98,12 @@ defmodule Bier.Rpc do
     raw = conn.assigns[:bier_raw_body] || ""
 
     cond do
+      # An application/octet-stream body is NOT JSON: it is bound verbatim as the
+      # whole single-unnamed parameter (e.g. a bytea function), with the raw bytes
+      # passed through a real bound parameter (cases 1622/1623).
+      octet_stream?(conn) ->
+        {:ok, %{__body__: {:single_unnamed_raw, raw}}}
+
       raw == "" ->
         {:ok, %{}}
 
@@ -117,6 +123,13 @@ defmodule Bier.Rpc do
           {:error, _} ->
             {:error, :invalid_json}
         end
+    end
+  end
+
+  defp octet_stream?(conn) do
+    case get_req_header(conn, "content-type") do
+      [value | _] -> String.contains?(String.downcase(value), "application/octet-stream")
+      [] -> false
     end
   end
 
@@ -196,6 +209,13 @@ defmodule Bier.Rpc do
   defp bind_unnamed(fn_def, {:single_unnamed, raw}) do
     [arg] = fn_def.args
     {arg.name, arg.type, false, {:raw, raw}}
+  end
+
+  # An octet-stream body bound to a single unnamed parameter (e.g. bytea): pass
+  # the raw bytes through a real bound parameter so binary content is preserved.
+  defp bind_unnamed(fn_def, {:single_unnamed_raw, raw}) do
+    [arg] = fn_def.args
+    {arg.name, arg.type, false, {:param, raw}}
   end
 
   # Normalize a supplied value to a binding instruction.
@@ -281,13 +301,17 @@ defmodule Bier.Rpc do
 
   # Everything else: scalar / scalar-array / setof-scalar / composite /
   # record / OUT params. We render the function result as JSON ourselves.
+  # A scalar RPC result can additionally be emitted as application/octet-stream
+  # (cases 1622/1623), which is not a generally-available table producer.
   defp run(conn, config, fn_def, args) do
-    with {:ok, media} <- Negotiation.resolve(conn, ActionController.relation_producers(config)) do
+    producers = ActionController.relation_producers(config) ++ [:octet]
+
+    with {:ok, media} <- Negotiation.resolve(conn, producers) do
       pool = Bier.Registry.via(config.name, Postgrex)
       {arg_sql, params} = build_call_args(args)
       from = "#{qfn(fn_def)}(#{arg_sql})"
 
-      sql = result_sql(fn_def, from)
+      sql = result_sql(fn_def, from, media)
 
       case exec(pool, conn, sql, params) do
         {:ok, %Postgrex.Result{rows: [[body]]}, guc} ->
@@ -303,6 +327,13 @@ defmodule Bier.Rpc do
   end
 
   # ---- result SQL shapes ---------------------------------------------------
+
+  # An octet-stream scalar result returns the raw bytes (cast to bytea), not a
+  # JSON encoding (cases 1622/1623).
+  defp result_sql(_fn_def, from, %MediaType{symbol: :octet}),
+    do: "SELECT (#{from})::bytea"
+
+  defp result_sql(fn_def, from, _media), do: result_sql(fn_def, from)
 
   # Array-of-objects for setof-record / multi-OUT setof. Wrapping the call in a
   # `(SELECT * FROM fn())` subquery keeps `t` a proper composite row even for a
@@ -384,21 +415,31 @@ defmodule Bier.Rpc do
   defp build_call_args(args) do
     {parts, params, _idx} =
       Enum.reduce(args, {[], [], 1}, fn {name, type, variadic?, value}, {parts, params, idx} ->
-        if variadic? do
-          {:list, list} = ensure_list(value)
-          # Bind the array as a text[] param and cast to the target element type;
-          # Postgres coerces the text[] to the variadic element array.
-          {parts ++ ["VARIADIC \"#{name}\" => $#{idx}::#{type}"], params ++ [list], idx + 1}
-        else
-          # Inline a single-quote-escaped literal cast to the arg type (Postgres
-          # coerces from an *unknown* literal, which a typed param cannot supply).
-          # The literal is escaped, so it is injection-safe.
-          lit = "#{pg_literal(scalar_value(value))}::#{type}"
+        cond do
+          variadic? ->
+            {:list, list} = ensure_list(value)
+            # Bind the array as a text[] param and cast to the target element type;
+            # Postgres coerces the text[] to the variadic element array.
+            {parts ++ ["VARIADIC \"#{name}\" => $#{idx}::#{type}"], params ++ [list], idx + 1}
 
-          # An unnamed parameter (single-unnamed json/jsonb body) binds
-          # positionally; named params use keyword-call syntax.
-          part = if name in ["", nil], do: lit, else: "\"#{name}\" => #{lit}"
-          {parts ++ [part], params, idx}
+          match?({:param, _}, value) ->
+            # Raw binary (octet-stream) bound through a real parameter and cast to
+            # the arg type (e.g. bytea), preserving the exact bytes.
+            {:param, raw} = value
+            ph = "$#{idx}::#{type}"
+            part = if name in ["", nil], do: ph, else: "\"#{name}\" => #{ph}"
+            {parts ++ [part], params ++ [raw], idx + 1}
+
+          true ->
+            # Inline a single-quote-escaped literal cast to the arg type (Postgres
+            # coerces from an *unknown* literal, which a typed param cannot supply).
+            # The literal is escaped, so it is injection-safe.
+            lit = "#{pg_literal(scalar_value(value))}::#{type}"
+
+            # An unnamed parameter (single-unnamed json/jsonb body) binds
+            # positionally; named params use keyword-call syntax.
+            part = if name in ["", nil], do: lit, else: "\"#{name}\" => #{lit}"
+            {parts ++ [part], params, idx}
         end
       end)
 

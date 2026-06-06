@@ -320,6 +320,16 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
+  # ---- select parse error (PGRST100) --------------------------------------
+  def call(conn, {:error, {:select_parse, select, detail, column}}) do
+    error(conn, 400, %{
+      code: "PGRST100",
+      message: "\"failed to parse select parameter (#{select})\" (line 1, column #{column})",
+      details: detail,
+      hint: nil
+    })
+  end
+
   # ---- order parse error (PGRST100) ---------------------------------------
   def call(conn, {:error, {:order_parse, term, detail, column}}) do
     error(conn, 400, %{

@@ -419,7 +419,13 @@ defmodule Bier.Introspection do
       format_type(a.atttypid, a.atttypmod) AS type,
       a.attnum AS position,
       a.attnotnull AS notnull,
-      pg_get_expr(ad.adbin, ad.adrelid) AS default,
+      -- The column default; falling back to the DOMAIN's own default when the
+      -- column itself has none (a DOMAIN ... DEFAULT applies to omitted columns
+      -- under Prefer: missing=default, case 1814).
+      COALESCE(
+        pg_get_expr(ad.adbin, ad.adrelid),
+        CASE WHEN at.typtype = 'd' THEN pg_get_expr(at.typdefaultbin, 0) END
+      ) AS default,
       COALESCE(pk.is_pk, false) AS is_pk,
       (at.typtype = 'c') AS is_composite,
       -- Data-representation cast functions (only for DOMAIN-typed columns):

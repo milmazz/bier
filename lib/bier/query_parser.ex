@@ -487,10 +487,50 @@ defmodule Bier.QueryParser do
 
   defp pg_select(params) do
     case Map.get(params, "select") do
-      nil -> {:ok, [:star]}
-      "" -> {:ok, [:star]}
-      "*" -> {:ok, [:star]}
-      sel -> parse_select_tree(sel)
+      nil ->
+        {:ok, [:star]}
+
+      "" ->
+        {:ok, [:star]}
+
+      "*" ->
+        {:ok, [:star]}
+
+      sel ->
+        # A select-parse failure is a 400 PGRST100 with PostgREST's parser-error
+        # envelope referencing the *whole* select parameter and the 1-based
+        # column of the offending token (cases 1111/1180). We surface a rich
+        # error tagged with the original select string so the controller can
+        # render the `failed to parse select parameter (...)` message.
+        case parse_select_tree(sel) do
+          {:ok, nodes} -> {:ok, nodes}
+          {:error, {:select_parse, _node}} -> {:error, select_parse_error(sel)}
+          {:error, other} -> {:error, other}
+        end
+    end
+  end
+
+  # Build the PostgREST select parse-error tuple `{:select_parse, select, detail,
+  # column}`. We locate the first malformed json-path token within the select
+  # string to compute the column and detail (`data->>--34` => column 9,
+  # `unexpected "-" expecting digit`).
+  defp select_parse_error(sel) do
+    {detail, column} = locate_select_error(sel)
+    {:select_parse, sel, detail, column}
+  end
+
+  # Find the offending token in a select string carrying a json path. We look for
+  # the first `->`/`->>` arrow followed by an invalid key. After an arrow the
+  # parser expects an integer index (optional single leading `-`) or a key; a
+  # second `-` (e.g. `->>--34`) is "unexpected '-' expecting digit".
+  defp locate_select_error(sel) do
+    case Regex.run(~r/->>?(-)(-)/, sel, return: :index) do
+      [_, _first_dash, {pos, _}] ->
+        {"unexpected \"-\" expecting digit", pos + 1}
+
+      _ ->
+        # Fallback: point just past the last valid prefix.
+        {"unexpected end of input", String.length(sel) + 1}
     end
   end
 
@@ -926,22 +966,68 @@ defmodule Bier.QueryParser do
     end
   end
 
-  # Embed-targeted filters like `clients.id=eq.1` (and deeper paths). Returns a
-  # map: %{["clients"] => [filter_node, ...]}.
+  # Embed-targeted filters like `clients.id=eq.1` (and deeper paths). A trailing
+  # `and`/`or`/`not.and`/`not.or` segment is an embedded logic tree
+  # (`child_entities.or=(...)`, case 1182), parsed into a logic node rather than
+  # a column filter. Returns a map: %{["clients"] => [filter_node, ...]}.
   defp reduce_embed_filters(pairs) do
     pairs
     |> Enum.reduce_while(%{}, fn {key, val}, acc ->
-      path = embed_path(key)
-      col = key |> String.split(".") |> List.last()
-
-      case parse_column_filter(col, val) do
-        {:ok, node} -> {:cont, Map.update(acc, path, [node], &[node | &1])}
+      case parse_embed_filter(key, val) do
+        {:ok, path, node} -> {:cont, Map.update(acc, path, [node], &[node | &1])}
         :error -> {:halt, :error}
       end
     end)
     |> case do
       :error -> {:error, :unprocessable_filter}
       map -> {:ok, map}
+    end
+  end
+
+  # Parse a single embed-targeted filter pair into `{:ok, embed_path, node}`.
+  defp parse_embed_filter(key, val) do
+    path = embed_path(key)
+    last = key |> String.split(".") |> List.last()
+
+    cond do
+      # `<embed>.or=(...)` / `<embed>.and=(...)`
+      last in ["and", "or"] ->
+        op = if last == "or", do: :or, else: :and
+
+        case parse_logic_group(val) do
+          {:ok, children} -> {:ok, path, %{logic: op, negate: false, children: children}}
+          _ -> :error
+        end
+
+      # `<embed>.not.or=(...)` / `<embed>.not.and=(...)`: the path drops the
+      # trailing `not`+keyword pair, the negation applies to the group.
+      neg = embed_logic_negated(key) ->
+        {neg_path, op} = neg
+
+        case parse_logic_group(val) do
+          {:ok, children} -> {:ok, neg_path, %{logic: op, negate: true, children: children}}
+          _ -> :error
+        end
+
+      true ->
+        case parse_column_filter(last, val) do
+          {:ok, node} -> {:ok, path, node}
+          :error -> :error
+        end
+    end
+  end
+
+  # For `<embed>...not.and`/`<embed>...not.or`, returns `{embed_path, :and|:or}`
+  # (the path with the trailing `not.<kw>` removed), else nil.
+  defp embed_logic_negated(key) do
+    segments = String.split(key, ".")
+
+    case Enum.split(segments, -2) do
+      {head, ["not", kw]} when kw in ["and", "or"] and head != [] ->
+        {head, if(kw == "or", do: :or, else: :and)}
+
+      _ ->
+        nil
     end
   end
 
@@ -1040,12 +1126,14 @@ defmodule Bier.QueryParser do
   end
 
   # Returns {negate?, :and|:or, "(...)"} if member begins with and(/or(/not.and(.
+  # Whitespace is permitted between the and/or keyword and its opening paren
+  # (AndOrParamsSpec "allows whitespace", case 1169).
   defp logic_prefix(member) do
     cond do
-      match = Regex.run(~r/^not\.and(\(.*\))$/s, member) -> {true, :and, Enum.at(match, 1)}
-      match = Regex.run(~r/^not\.or(\(.*\))$/s, member) -> {true, :or, Enum.at(match, 1)}
-      match = Regex.run(~r/^and(\(.*\))$/s, member) -> {false, :and, Enum.at(match, 1)}
-      match = Regex.run(~r/^or(\(.*\))$/s, member) -> {false, :or, Enum.at(match, 1)}
+      match = Regex.run(~r/^not\.and\s*(\(.*\))$/s, member) -> {true, :and, Enum.at(match, 1)}
+      match = Regex.run(~r/^not\.or\s*(\(.*\))$/s, member) -> {true, :or, Enum.at(match, 1)}
+      match = Regex.run(~r/^and\s*(\(.*\))$/s, member) -> {false, :and, Enum.at(match, 1)}
+      match = Regex.run(~r/^or\s*(\(.*\))$/s, member) -> {false, :or, Enum.at(match, 1)}
       true -> nil
     end
   end

@@ -663,12 +663,16 @@ defmodule Bier.QueryExecutor do
     "#{expr} AS #{quote_ident(out_name)}"
   end
 
-  # Output column name PostgREST uses: last json path key when present, else col.
+  # Output column name PostgREST uses for a json-path select. The key is the last
+  # path segment *when it is a textual key*; a trailing numeric array index does
+  # NOT name the output column, so the base column name is used instead. E.g.
+  # `data->>0` => `data`, `settings->foo->>bar` => `bar`, `data->1->>x` => `x`.
   def json_output_name(col, []), do: col
 
-  def json_output_name(_col, path) do
+  def json_output_name(col, path) do
     {_kind, key} = List.last(path)
-    key
+
+    if Regex.match?(~r/^-?\d+$/, key), do: col, else: key
   end
 
   # ---- where ---------------------------------------------------------------
@@ -734,7 +738,7 @@ defmodule Bier.QueryExecutor do
   defp operator_sql(op, col, f, state) when op in ~w(eq neq gt gte lt lte) do
     case f.modifier do
       nil ->
-        {ph, state} = bind_filter_value(f, f.value, state)
+        {ph, state} = bind_filter_value(f, dequote(f.value), state)
         {"#{col} #{cmp(op)} #{ph}", state}
 
       quant when quant in ["any", "all"] ->
@@ -843,7 +847,22 @@ defmodule Bier.QueryExecutor do
   defp range_op("nxl"), do: "&>"
   defp range_op("adj"), do: "-|-"
 
-  defp like_value(v), do: String.replace(v, "*", "%")
+  defp like_value(v), do: v |> dequote() |> String.replace("*", "%")
+
+  # PostgREST allows a filter literal to be wrapped in double quotes to protect
+  # the reserved characters `( ) , .` inside the value; the quotes are stripped
+  # before the value is used (AndOrParamsSpec "eq/like can have quotes", cases
+  # 1171/1172). Only a fully-wrapped `"..."` is unquoted; an inner `""` escape is
+  # collapsed to a single `"`.
+  defp dequote(<<?", _::binary>> = v) do
+    if String.length(v) >= 2 and String.ends_with?(v, "\"") do
+      v |> String.slice(1..-2//1) |> String.replace("\"\"", "\"")
+    else
+      v
+    end
+  end
+
+  defp dequote(v), do: v
 
   # ---- order ---------------------------------------------------------------
 
@@ -923,6 +942,17 @@ defmodule Bier.QueryExecutor do
   defp to_param(value), do: to_string(value)
 
   # ---- helpers -------------------------------------------------------------
+
+  # The Postgres type of a filter's left-hand-side expression. With a json path,
+  # the type follows the last arrow: `->>` yields text, `->` yields jsonb — so a
+  # comparison value binds/casts to that, NOT to the json/jsonb column's base
+  # type (cases 1173/1174/1176/1179). Without a path it is the column type.
+  defp coltype(%{json_path: [_ | _] = path}, %State{}) do
+    case List.last(path) do
+      {:arrow_text, _} -> :text
+      {:arrow, _} -> "jsonb"
+    end
+  end
 
   defp coltype(%{column: col}, %State{relation: rel}) do
     case Enum.find(rel.columns, &(&1.name == col)) do

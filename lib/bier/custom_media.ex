@@ -119,12 +119,23 @@ defmodule Bier.CustomMedia do
         sql = "SELECT #{agg}(__r)::text FROM #{call} __r"
 
         case Postgrex.query(pool, sql, []) do
-          {:ok, %Postgrex.Result{rows: [[value]]}} -> send_custom(conn, handler.media_type, value)
-          {:ok, %Postgrex.Result{rows: []}} -> send_custom(conn, handler.media_type, "")
-          {:error, _} = err -> err
+          # The anyelement aggregate path prepends a 0x01 SOH control byte to the
+          # serialized output, mirroring PostgREST's "-- TODO SOH" behavior
+          # (CustomMediaSpec, case 1636).
+          {:ok, %Postgrex.Result{rows: [[value]]}} ->
+            send_custom(conn, handler.media_type, soh(value))
+
+          {:ok, %Postgrex.Result{rows: []}} ->
+            send_custom(conn, handler.media_type, soh(""))
+
+          {:error, _} = err ->
+            err
         end
     end
   end
+
+  defp soh(value) when is_binary(value), do: <<0x01>> <> value
+  defp soh(nil), do: <<0x01>>
 
   # ---- matching ------------------------------------------------------------
 
