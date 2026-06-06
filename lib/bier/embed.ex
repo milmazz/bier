@@ -315,10 +315,12 @@ defmodule Bier.Embed do
       Enum.flat_map_reduce(nodes, state, fn
         %{kind: :embed} = e, st ->
           rel = resolve_relationship(e, relation, st.relations)
-          {own_filters, deeper} = pop_embed_filters(embed_filters, embed_segment(e, rel))
-          inner? = e.join == :inner or own_filters != [] or deeper != %{}
-
-          if inner? do
+          {own_filters, _deeper} = pop_embed_filters(embed_filters, embed_segment(e, rel))
+          # Only an explicit `!inner` propagates an embedded filter to the parent
+          # (dropping parents with no matching child). The default (left) join
+          # applies the filter to the embedded rows only and keeps every parent
+          # row, with an empty array where nothing matches (case 1182 vs 1181).
+          if e.join == :inner do
             {sql, st2} = exists_clause(e, rel, al, own_filters, st, qe)
             {[sql], st2}
           else
