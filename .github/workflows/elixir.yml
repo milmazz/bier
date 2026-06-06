@@ -12,8 +12,39 @@ permissions:
 jobs:
   build:
 
-    name: Build and test
+    name: Build and test (PG ${{ matrix.postgres }})
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # PostgreSQL 15+ is required: the auth profile mirror uses
+        # `security_invoker` views (added in PG15).
+        postgres: [ '15', '16', '17' ]
+
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        # Wait for the server to accept connections before the job runs.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # config/test.exs reads these; the `mix test` alias runs
+      # `mix bier.fixtures.load`, which connects to localhost:5432 and loads
+      # spec/conformance/fixtures.sql into a fresh `bier_test`.
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
 
     steps:
     - uses: actions/checkout@v4
@@ -41,4 +72,6 @@ jobs:
     - name: Build docs (warnings as errors)
       run: mix docs --warnings-as-errors
     - name: Run tests
+      # The `test` alias loads spec/conformance/fixtures.sql into `bier_test`
+      # (via psql, preinstalled on the runner) before running ExUnit.
       run: mix test
