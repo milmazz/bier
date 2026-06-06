@@ -56,6 +56,7 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
     mirror_area_schemas(cfg)
     load_rpc_schema(psql, cfg)
     load_headers_schema(psql, cfg)
+    load_auth_schema(psql, cfg)
     analyze(psql, cfg)
 
     Mix.shell().info("Done. Built area schemas: #{Enum.join(@mirror_schemas, ", ")}")
@@ -201,6 +202,76 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
         ~s(GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA headers TO postgrest_test_anonymous;\n)
 
     run_psql!(psql, cfg, cfg[:database], full)
+  end
+
+  # The `auth` area mirrors `test` into a real `auth` schema that PRESERVES the
+  # restrictive privileges the auth cases depend on. Unlike the read-only area
+  # mirrors, the auth views are `security_invoker` so the base-table grants on
+  # `test.*` apply under SET ROLE, and the views themselves carry grants matching
+  # the base tables:
+  #
+  #   * authors_only  — grant ALL to postgrest_test_author only (anon -> 42501)
+  #   * private_table — no grants (everyone but superuser -> 42501)
+  #   * items         — SELECT to anon
+  #   * has_count_column — SELECT, INSERT to anon
+  #
+  # The auth functions are thin wrappers delegating to their `test.*` originals
+  # (so SECURITY DEFINER / GUC-reading / SET-LOCAL-ROLE behavior is preserved),
+  # with EXECUTE grants matching the originals: privileged_hello is revoked from
+  # PUBLIC and granted to author; the rest stay PUBLIC.
+  defp load_auth_schema(psql, cfg) do
+    sql = """
+    DROP SCHEMA IF EXISTS auth CASCADE;
+    CREATE SCHEMA auth;
+    GRANT USAGE ON SCHEMA auth TO postgrest_test_anonymous, postgrest_test_default_role, postgrest_test_author;
+
+    -- Tables as security_invoker views over test.* so base-table grants apply
+    -- under SET ROLE. View grants mirror the base-table grants.
+    CREATE VIEW auth.authors_only WITH (security_invoker = true) AS SELECT * FROM test.authors_only;
+    CREATE VIEW auth.private_table WITH (security_invoker = true) AS SELECT * FROM test.private_table;
+    CREATE VIEW auth.items WITH (security_invoker = true) AS SELECT * FROM test.items;
+    CREATE VIEW auth.has_count_column WITH (security_invoker = true) AS SELECT * FROM test.has_count_column;
+
+    -- The views are granted to all roles so the view-level privilege check
+    -- passes; security_invoker then forwards to the BASE table, where the real
+    -- grant gap on test.* produces the 42501 "...for table <name>" message the
+    -- cases assert (a view-level denial would say "...for view <name>").
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE auth.authors_only, auth.private_table, auth.items, auth.has_count_column TO postgrest_test_anonymous, postgrest_test_default_role, postgrest_test_author;
+
+    -- Functions: thin wrappers delegating to the test.* originals.
+    CREATE FUNCTION auth.get_current_user() RETURNS text
+      LANGUAGE sql STABLE AS $$ SELECT test.get_current_user(); $$;
+
+    CREATE FUNCTION auth.switch_role() RETURNS void
+      LANGUAGE plpgsql AS $$ BEGIN PERFORM test.switch_role(); END $$;
+
+    CREATE FUNCTION auth.reveal_big_jwt() RETURNS TABLE (
+      iss text, sub text, exp bigint, nbf bigint, iat bigint, jti text,
+      "http://postgrest.com/foo" boolean
+    ) LANGUAGE sql STABLE AS $$ SELECT * FROM test.reveal_big_jwt(); $$;
+
+    CREATE FUNCTION auth.get_guc_value(name text) RETURNS text
+      LANGUAGE sql AS $$ SELECT test.get_guc_value(name); $$;
+
+    CREATE FUNCTION auth.get_guc_value(prefix text, name text) RETURNS text
+      LANGUAGE sql AS $$ SELECT test.get_guc_value(prefix, name); $$;
+
+    CREATE FUNCTION auth.privileged_hello(name text) RETURNS text
+      LANGUAGE sql AS $$ SELECT test.privileged_hello(name); $$;
+
+    CREATE FUNCTION auth.login(id text, pass text) RETURNS public.jwt_token
+      LANGUAGE sql STABLE AS $$ SELECT test.login(id, pass); $$;
+
+    CREATE FUNCTION auth.jwt_test() RETURNS public.jwt_token
+      LANGUAGE sql AS $$ SELECT test.jwt_test(); $$;
+
+    -- EXECUTE grants: privileged_hello author-only; switch_role runs as the
+    -- pre-request hook so the connecting superuser must reach it (PUBLIC is fine).
+    REVOKE EXECUTE ON FUNCTION auth.privileged_hello(text) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION auth.privileged_hello(text) TO postgrest_test_author;
+    """
+
+    run_psql!(psql, cfg, cfg[:database], sql)
   end
 
   defp mirror_area_schemas(cfg) do

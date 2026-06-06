@@ -236,6 +236,64 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
+  # ---- JWT verification failures (Bier.Auth / Bier.JWT) -------------------
+  # No JWT secret configured but a token was presented -> 500 PGRST300.
+  def call(conn, {:error, {:jwt, :no_secret}}) do
+    error(conn, 500, %{
+      code: "PGRST300",
+      message: "Server lacks JWT secret",
+      details: nil,
+      hint: nil
+    })
+  end
+
+  # Anonymous access disabled (no db-anon-role) and no valid token -> 401 PGRST302.
+  def call(conn, {:error, {:jwt, :anon_disabled}}) do
+    error(
+      conn,
+      401,
+      %{code: "PGRST302", message: "Anonymous access is disabled", details: nil, hint: nil},
+      headers: [{"WWW-Authenticate", "Bearer"}]
+    )
+  end
+
+  # Empty bearer token -> 401 PGRST301.
+  def call(conn, {:error, {:jwt, :empty}}) do
+    msg = "Empty JWT is sent in Authorization header"
+    jwt_error(conn, "PGRST301", msg)
+  end
+
+  # Wrong number of JWT segments -> 401 PGRST301.
+  def call(conn, {:error, {:jwt, {:parts, n}}}) do
+    jwt_error(conn, "PGRST301", "Expected 3 parts in JWT; got #{n}")
+  end
+
+  # Expired token -> 401 PGRST303.
+  def call(conn, {:error, {:jwt, :expired}}) do
+    jwt_error(conn, "PGRST303", "JWT expired")
+  end
+
+  # Any other JWT failure (bad signature/json/claims/audience) -> 401 PGRST301.
+  def call(conn, {:error, {:jwt, _reason}}) do
+    jwt_error(conn, "PGRST301", "JWSError JWSInvalidSignature")
+  end
+
+  # A 42501 (or EXECUTE-denied) under the anonymous role surfaces as 401 with
+  # WWW-Authenticate: Bearer (vs 403 for an authenticated role).
+  def call(conn, {:error, {:auth_denied, %Postgrex.Error{postgres: pg}}}) do
+    error(
+      conn,
+      401,
+      %{
+        "code" => "42501",
+        "message" => pg[:message],
+        "details" => pg[:detail],
+        "hint" => pg[:hint]
+      },
+      headers: [{"WWW-Authenticate", "Bearer"}]
+    )
+  end
+
   def call(conn, {:error, :method_not_allowed}) do
     error(conn, 405, %{
       code: "PGRST117",
@@ -398,6 +456,19 @@ defmodule Bier.Plugs.FallbackController do
 
   defp invalid_schema_hint(schemas) when is_list(schemas),
     do: "Only the following schemas are exposed: " <> Enum.join(schemas, ", ")
+
+  # PGRST301/PGRST303 carry a `WWW-Authenticate: Bearer error="invalid_token",
+  # error_description="<message>"` header (PostgREST Auth error rendering).
+  defp jwt_error(conn, code, message) do
+    www = ~s(Bearer error="invalid_token", error_description="#{message}")
+
+    error(
+      conn,
+      401,
+      %{code: code, message: message, details: nil, hint: nil},
+      headers: [{"WWW-Authenticate", www}]
+    )
+  end
 
   defp range_not_satisfiable(conn, details) do
     error(conn, 416, %{
