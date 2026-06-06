@@ -121,6 +121,17 @@ defmodule Bier do
         default: env(:db_plan_enabled, false),
         doc: "Enables the application/vnd.pgrst.plan media type (PostgREST db-plan-enabled)."
       ],
+      db_tx_end: [
+        type: {:in, [:commit, :rollback]},
+        default: env(:db_tx_end, :commit),
+        doc: """
+        How a request's transaction ends (PostgREST db-tx-end). `:commit`
+        persists writes (production default). `:rollback` rolls every request's
+        transaction back after the response is computed — the response is
+        identical, but nothing persists. Used by the conformance suite so the
+        shared fixture DB stays pristine under `async: true`.
+        """
+      ],
       jwt_secret: [
         type: {:or, [:string, nil]},
         default: env(:jwt_secret, nil),

@@ -31,6 +31,7 @@ defmodule Bier.Config do
           db_extra_search_path: [String.t()],
           db_max_rows: pos_integer() | nil,
           db_plan_enabled: boolean(),
+          db_tx_end: :commit | :rollback,
           jwt_secret: String.t() | nil,
           server_cors_allowed_origins: String.t() | nil
         }
@@ -50,7 +51,8 @@ defmodule Bier.Config do
     pool_size: 10,
     db_schemas: ["public"],
     db_extra_search_path: ["public"],
-    db_plan_enabled: false
+    db_plan_enabled: false,
+    db_tx_end: :commit
   ]
 
   @doc """
