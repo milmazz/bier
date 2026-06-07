@@ -5,7 +5,18 @@ defmodule Bier.ConformanceCase do
   """
 
   @enforce_keys [:id, :feature, :area, :kind, :request, :expect]
-  defstruct [:id, :feature, :area, :kind, :request, :schema, :preconditions, :expect, :source]
+  defstruct [
+    :id,
+    :feature,
+    :area,
+    :kind,
+    :request,
+    :schema,
+    :preconditions,
+    :expect,
+    :source,
+    config: %{}
+  ]
 
   @type t :: %__MODULE__{
           id: pos_integer(),
@@ -16,7 +27,11 @@ defmodule Bier.ConformanceCase do
           schema: String.t() | nil,
           preconditions: list(),
           expect: map(),
-          source: String.t() | nil
+          source: String.t() | nil,
+          # PostgREST per-case config overrides (e.g. `openapi-mode: disabled`).
+          # The runner boots a dedicated Bier instance per distinct config and
+          # routes the case to it; `%{}` means the shared instance.
+          config: map()
         }
 
   # test/support -> project root -> spec/conformance/cases
@@ -45,7 +60,8 @@ defmodule Bier.ConformanceCase do
       schema: Map.get(data, "schema"),
       preconditions: Map.get(data, "preconditions", []),
       expect: Map.get(data, "expect", %{}),
-      source: Map.get(data, "source")
+      source: Map.get(data, "source"),
+      config: Map.get(data, "config") || %{}
     }
   end
 end

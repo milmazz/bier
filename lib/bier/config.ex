@@ -43,7 +43,9 @@ defmodule Bier.Config do
           server_cors_allowed_origins: String.t() | nil,
           server_timing_enabled: boolean(),
           server_trace_header: String.t() | nil,
-          log_level: :crit | :error | :warn | :info | :debug
+          log_level: :crit | :error | :warn | :info | :debug,
+          openapi_mode: String.t(),
+          db_root_spec: String.t() | nil
         }
 
   defstruct [
@@ -62,7 +64,9 @@ defmodule Bier.Config do
     :db_profile_default,
     :db_profile_schemas,
     :server_trace_header,
+    :db_root_spec,
     name: Bier,
+    openapi_mode: "follow-privileges",
     pool_size: 10,
     db_schemas: ["public"],
     db_extra_search_path: ["public"],

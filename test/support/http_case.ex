@@ -24,10 +24,10 @@ defmodule Bier.HttpCase do
     "OPTIONS" => :options
   }
 
-  @doc "Run an HTTP conformance case against the shared instance."
-  def perform(%Bier.ConformanceCase{request: req, schema: schema}) do
+  @doc "Run an HTTP conformance case against the matching instance."
+  def perform(%Bier.ConformanceCase{request: req, schema: schema} = case_data) do
     method = to_method(Map.get(req, "method", "GET"))
-    url = Bier.ConformanceServer.base_url() <> encode_target(Map.fetch!(req, "path"))
+    url = Bier.ConformanceServer.url_for(case_data) <> encode_target(Map.fetch!(req, "path"))
 
     resp =
       Req.request!(
