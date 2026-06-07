@@ -98,8 +98,41 @@ defmodule Bier.ConformanceAssertions do
     end)
   end
 
+  defp check("body_jsonpath", entries, resp) when is_list(entries) do
+    decoded = decode_json(resp.body)
+    Enum.each(entries, &check_jsonpath_entry(&1, decoded))
+  end
+
   defp check(key, _val, _resp) do
     raise "unsupported assertion key: #{inspect(key)}"
+  end
+
+  defp check_jsonpath_entry(%{"path" => path} = entry, decoded) do
+    result = Bier.ConformanceJsonPath.fetch(decoded, path)
+
+    cond do
+      Map.has_key?(entry, "equals") ->
+        expected = Map.fetch!(entry, "equals")
+
+        assert result == {:ok, expected},
+               "body_jsonpath #{path} equals mismatch:\n" <>
+                 "  expected: #{inspect(expected)}\n  got:      #{inspect(result)}"
+
+      Map.get(entry, "present") == true or Map.get(entry, "exists") == true ->
+        assert match?({:ok, _}, result),
+               "body_jsonpath #{path} expected to be present, got: #{inspect(result)}"
+
+      Map.get(entry, "absent") == true ->
+        assert result == :missing,
+               "body_jsonpath #{path} expected to be absent, got: #{inspect(result)}"
+
+      true ->
+        raise "unsupported body_jsonpath predicate in entry: #{inspect(entry)}"
+    end
+  end
+
+  defp check_jsonpath_entry(entry, _decoded) do
+    raise "body_jsonpath entry missing \"path\": #{inspect(entry)}"
   end
 
   defp decode_json(body) do
