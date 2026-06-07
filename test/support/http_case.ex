@@ -98,9 +98,16 @@ defmodule Bier.HttpCase do
   defp encode_body(body) when is_binary(body), do: body
   defp encode_body(body), do: Bier.json_library().encode!(body)
 
-  # Req returns headers as %{"name" => [values]} with downcased names.
+  # Req returns headers as %{"name" => [values]} with downcased names. Repeated
+  # headers are folded with ", " — except `Set-Cookie`, whose values legitimately
+  # contain commas (e.g. the `Expires` date), so it must never be comma-folded;
+  # repeated cookies are joined with "\n", the encoding the cases use (case 1568).
   defp normalize_headers(headers) do
-    Map.new(headers, fn {k, v} -> {String.downcase(k), v |> List.wrap() |> Enum.join(", ")} end)
+    Map.new(headers, fn {k, v} ->
+      key = String.downcase(k)
+      sep = if key == "set-cookie", do: "\n", else: ", "
+      {key, v |> List.wrap() |> Enum.join(sep)}
+    end)
   end
 
   defp to_method(str), do: Map.fetch!(@http_methods, String.upcase(str))
