@@ -27,7 +27,7 @@ defmodule Bier.HttpCase do
   @doc "Run an HTTP conformance case against the shared instance."
   def perform(%Bier.ConformanceCase{request: req, schema: schema}) do
     method = to_method(Map.get(req, "method", "GET"))
-    url = Bier.ConformanceServer.base_url() <> Map.fetch!(req, "path")
+    url = Bier.ConformanceServer.base_url() <> encode_target(Map.fetch!(req, "path"))
 
     resp =
       Req.request!(
@@ -54,6 +54,36 @@ defmodule Bier.HttpCase do
       Map.put_new(base, "Accept-Profile", schema)
     end
   end
+
+  # Characters that are invalid in an HTTP request target (RFC 3986/7230) and so
+  # are rejected client-side by Req/Mint before the request is ever sent. The
+  # conformance cases carry raw query grammar (json-path `->`/`->>`, quantifier
+  # `{3,4}`, literal spaces, quoted `"` values, literal `%` LIKE wildcards), so
+  # we percent-encode exactly this set — plus raw non-ASCII bytes and any literal
+  # `%` that is NOT already a valid `%XX` escape — while leaving existing `%XX`,
+  # `+` (server decodes to space), and the reserved delimiters
+  # (`,` `(` `)` `=` `&` `?` `/` `.` `:` `*`) untouched. The server
+  # percent-decodes back to the identical logical request, so this only fixes
+  # client-side deliverability, not behavior.
+  @target_unsafe ~c" \"<>{}|\\^`"
+
+  defguardp is_hex(c) when c in ?0..?9 or c in ?A..?F or c in ?a..?f
+
+  defp encode_target(path), do: IO.iodata_to_binary(encode_chars(path))
+
+  # An existing `%XX` escape (e.g. %20, %22, %D9 in already-encoded cases) is
+  # preserved verbatim; any other `%` is a literal and gets encoded to %25.
+  defp encode_chars(<<?%, a, b, rest::binary>>) when is_hex(a) and is_hex(b),
+    do: [<<?%, a, b>> | encode_chars(rest)]
+
+  defp encode_chars(<<byte, rest::binary>>), do: [encode_byte(byte) | encode_chars(rest)]
+  defp encode_chars(<<>>), do: []
+
+  defp encode_byte(byte)
+       when byte < 0x20 or byte == 0x7F or byte >= 0x80 or byte == ?% or byte in @target_unsafe,
+       do: "%" <> (byte |> Integer.to_string(16) |> String.upcase() |> String.pad_leading(2, "0"))
+
+  defp encode_byte(byte), do: <<byte>>
 
   defp encode_body(nil), do: nil
   defp encode_body(body) when is_binary(body), do: body
