@@ -524,15 +524,24 @@ defmodule Bier.QueryExecutor do
     order_sql = build_order(plan.order)
     {limit_sql, state} = build_limit(plan, state)
 
-    inner =
-      "SELECT #{select_sql}, count(*) OVER() AS _bier_full_count FROM #{from_source(relation, state)}" <>
-        where_sql <> order_sql <> limit_sql
+    # `_bier_cols` projects ONLY the named select-list (filtered, ordered) — no
+    # count column. Rendering its row with `to_json` then yields compact JSON
+    # matching PostgREST's wire bytes; `json_build_object` would space `"k" : v`
+    # and `to_jsonb` would space `{"k": v}`. The full-count window is a SIBLING of
+    # the row (not embedded then removed with the jsonb `-` operator, which the
+    # earlier attempt tripped on), and runs over the unlimited filtered set so it
+    # is the exact total before LIMIT/OFFSET. See issue #17.
+    cols =
+      "SELECT #{select_sql} FROM #{from_source(relation, state)}" <> where_sql <> order_sql
+
+    paged =
+      "SELECT to_json(_bier_cols) AS _bier_row, count(*) OVER() AS _bier_full_count " <>
+        "FROM (#{cols}) _bier_cols" <> limit_sql
 
     sql =
       "SELECT coalesce(json_agg(_postgrest_t._bier_row), '[]')::text AS body, " <>
         "coalesce(max(_postgrest_t._bier_full_count), 0) AS full_count " <>
-        "FROM (SELECT to_jsonb(_bier_inner) - '_bier_full_count' AS _bier_row, " <>
-        "_bier_inner._bier_full_count FROM (#{inner}) _bier_inner) _postgrest_t"
+        "FROM (#{paged}) _postgrest_t"
 
     {:ok, sql, Enum.reverse(state.params)}
   end
