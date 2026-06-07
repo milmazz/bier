@@ -69,6 +69,7 @@ defmodule Bier.MixProject do
       {:nimble_parsec, "~> 1.4", only: :dev, runtime: false},
       {:plug, "~> 1.19"},
       {:postgrex, "~> 0.20"},
+      {:telemetry, "~> 1.0"},
       {:req, "~> 0.5", only: :test},
       {:yaml_elixir, "~> 2.11", only: :test}
     ]

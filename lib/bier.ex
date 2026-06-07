@@ -15,6 +15,14 @@ defmodule Bier do
         {Bier, name: MyApp.Bier, router: [port: 4040, scheme: :http]}
       ]
 
+  Pass `admin_server_port:` to also expose the `/live` and `/ready` health
+  endpoints on a separate listener (it must differ from `router[:port]`):
+
+      children = [
+        {Bier,
+         name: MyApp.Bier, router: [port: 4040, scheme: :http], admin_server_port: 4041}
+      ]
+
   See `start_link/1` for the full list of options.
 
   Per-instance processes are registered through `Bier.Registry`.
@@ -259,6 +267,15 @@ defmodule Bier do
         (PostgREST db-root-spec). When set, the root endpoint serves its result
         instead of the generated spec.
         """
+      ],
+      admin_server_port: [
+        type: {:or, [:pos_integer, nil]},
+        default: env(:admin_server_port, nil),
+        doc: """
+        TCP port for the per-instance admin server exposing the `/live` and
+        `/ready` health endpoints (PostgREST admin-server-port). When `nil`
+        (the default) no admin server starts. Must differ from `router[:port]`.
+        """
       ]
     ]
   end
@@ -291,23 +308,46 @@ defmodule Bier do
 
   @impl Supervisor
   def init(%Bier.Config{name: name} = conf) do
-    children = [
-      # Per-instance Postgrex pool, registered via the Bier registry so that the
-      # introspection step and the request pipeline can resolve it from the
-      # instance name. Started before HttpServerStarter, which needs it for the
-      # boot-time DB introspection.
-      Supervisor.child_spec({Postgrex, postgrex_opts(conf)}, id: {name, Postgrex}),
-      # The DynamicSupervisor must start BEFORE HttpServerStarter: the latter's
-      # `handle_continue(:start_webserver, …)` starts Bandit *as a child of this
-      # DynamicSupervisor*, so it has to already be alive — otherwise that
-      # `start_child` call races the DynamicSupervisor's own startup and crashes
-      # (the supervisor then restarts HttpServerStarter, rebuilding the router).
-      {DynamicSupervisor,
-       strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
-      {Bier.HttpServerStarter, conf}
-    ]
+    children =
+      [
+        # Per-instance Postgrex pool, registered via the Bier registry so that the
+        # introspection step and the request pipeline can resolve it from the
+        # instance name. Started before HttpServerStarter, which needs it for the
+        # boot-time DB introspection.
+        Supervisor.child_spec({Postgrex, postgrex_opts(conf)}, id: {name, Postgrex}),
+        # The DynamicSupervisor must start BEFORE HttpServerStarter: the latter's
+        # `handle_continue(:start_webserver, …)` starts Bandit *as a child of this
+        # DynamicSupervisor*, so it has to already be alive — otherwise that
+        # `start_child` call races the DynamicSupervisor's own startup and crashes
+        # (the supervisor then restarts HttpServerStarter, rebuilding the router).
+        {DynamicSupervisor,
+         strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
+        {Bier.HttpServerStarter, conf}
+      ] ++ admin_children(conf)
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  # When `admin_server_port` is set, run a second Bandit listener serving the
+  # admin health endpoints (separate from the catch-all API router). Started
+  # statically here — it needs no introspection result; `/ready` reports 503
+  # until the schema cache is populated, which is the correct readiness signal.
+  # (Boot ordering after HttpServerStarter means the cache is populated before
+  # this listener binds on the initial boot; across an HttpServerStarter restart
+  # the admin listener keeps serving the last persistent_term cache.)
+  defp admin_children(%Bier.Config{admin_server_port: nil}), do: []
+
+  defp admin_children(%Bier.Config{name: name, admin_server_port: port} = conf) do
+    [
+      Supervisor.child_spec(
+        {Bandit,
+         scheme: conf.router[:scheme],
+         plug: {Bier.Plugs.AdminRouter, name: name},
+         port: port,
+         http_options: [compress: false]},
+        id: {name, :admin_server}
+      )
+    ]
   end
 
   @doc false

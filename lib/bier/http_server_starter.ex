@@ -11,9 +11,19 @@ defmodule Bier.HttpServerStarter do
   @impl GenServer
   def init(%Bier.Config{name: name, db_schemas: schemas} = conf) do
     conn = Bier.Registry.via(name, Postgrex)
-    relations = Bier.Introspection.run(conn, schemas)
-    functions = Bier.Introspection.functions(conn, schemas)
-    media_handlers = Bier.Introspection.media_handlers(conn, schemas)
+
+    # The DB introspection that builds the in-memory schema cache is wrapped in a
+    # `[:bier, :schema_cache, :load, *]` telemetry span (per instance), so host
+    # apps can track load duration and the relation count (and catch failures
+    # via the span's `:exception` event).
+    {relations, functions, media_handlers} =
+      Bier.Telemetry.schema_cache_load(%{instance: name, schemas: schemas}, fn ->
+        relations = Bier.Introspection.run(conn, schemas)
+        functions = Bier.Introspection.functions(conn, schemas)
+        media_handlers = Bier.Introspection.media_handlers(conn, schemas)
+
+        {{relations, functions, media_handlers}, %{relation_count: map_size(relations)}}
+      end)
 
     # The request pipeline resolves {schema, relation} on every request, so the
     # introspection map is stashed in :persistent_term (read-mostly) keyed by the

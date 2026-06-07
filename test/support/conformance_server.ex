@@ -33,7 +33,7 @@ defmodule Bier.ConformanceServer do
   # case to a faithful variant could change its result. (openapi-mode/db-root-spec
   # behavior lands separately.) 1467 verifies an RS256 token against an asymmetric
   # public JWK as jwt-secret (issue #23).
-  @variant_case_ids [1467, 1491, 1493, 1678, 1682, 1758, 1763]
+  @variant_case_ids [1467, 1491, 1493, 1678, 1682, 1703, 1758, 1763]
 
   def url_for(%Bier.ConformanceCase{id: id}) when id in @variant_case_ids,
     do: :persistent_term.get({__MODULE__, :variant, id})
@@ -53,9 +53,9 @@ defmodule Bier.ConformanceServer do
   end
 
   defp start_instance(name, opts) do
-    port = free_port()
+    port = Bier.TestPorts.free_port()
     {:ok, _pid} = Bier.start_link([name: name, router: [port: port, scheme: :http]] ++ opts)
-    wait_until_listening(port)
+    Bier.TestPorts.wait_until_listening(port)
     "http://127.0.0.1:#{port}"
   end
 
@@ -70,9 +70,12 @@ defmodule Bier.ConformanceServer do
   # `kebab-case` keys become the matching snake_case atoms; values pass through
   # as parsed from YAML (`null` -> nil, `false`, `""`, strings), except symbolic
   # placeholders (e.g. the asymmetric JWK) which resolve to their real value.
+  # Special case: `db-schemas` in YAML may be a plain scalar string (e.g. "test")
+  # when only one schema is listed; wrap it in a list so NimbleOptions accepts it.
   defp translate(config) do
-    Enum.map(config, fn {k, v} ->
-      {k |> String.replace("-", "_") |> String.to_atom(), resolve(v)}
+    Enum.map(config, fn
+      {"db-schemas", v} when is_binary(v) -> {:db_schemas, [v]}
+      {k, v} -> {k |> String.replace("-", "_") |> String.to_atom(), resolve(v)}
     end)
   end
 
@@ -148,30 +151,5 @@ defmodule Bier.ConformanceServer do
       server_trace_header: "X-Request-Id",
       log_level: :error
     ]
-  end
-
-  defp free_port do
-    {:ok, sock} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}])
-    {:ok, port} = :inet.port(sock)
-    # TOCTOU: tiny window between closing this probe socket and Bandit binding.
-    # Acceptable for a single suite run; avoid parallel suite runs on one host.
-    :gen_tcp.close(sock)
-    port
-  end
-
-  defp wait_until_listening(port, retries \\ 100) do
-    # Each attempt: up to ~10ms connect + 20ms sleep ≈ 30ms; 100 retries ≈ 3s ceiling.
-    case :gen_tcp.connect(~c"127.0.0.1", port, [], 10) do
-      {:ok, sock} ->
-        :gen_tcp.close(sock)
-        :ok
-
-      {:error, _} when retries > 0 ->
-        Process.sleep(20)
-        wait_until_listening(port, retries - 1)
-
-      {:error, reason} ->
-        raise "Bier conformance server did not come up on port #{port}: #{inspect(reason)}"
-    end
   end
 end
