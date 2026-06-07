@@ -206,6 +206,13 @@ Accept-Profile, then builds **one SQL statement** returning JSON. Mirror that:
    `columns`, `and`, `or`, `not`; everything else is a column filter
    (`col=op.value`, with `not.`, ranges, quantifiers). NB: the harness decodes
    `+`→space per URL rules — handle in the path/query layer.
+
+   > The two parser modules — `lib/bier/query_parser.ex` and
+   > `lib/bier/query_parser/nimble.ex` — are **generated** (dependency-free,
+   > no runtime `nimble_parsec`) from `*.ex.exs` templates via `mix gen.parsers`.
+   > `nimble_parsec` is a `:dev`-only dep used solely to run that task. Edit the
+   > `.ex.exs` templates, re-run `mix gen.parsers`, and commit both the template
+   > and the regenerated `.ex` (the `.ex` is the source `mix compile` reads).
 5. **Build SQL** (`lib/bier/query_executor.ex`). PostgREST's shape, reproduce it:
 
    ```sql
