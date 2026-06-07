@@ -15,7 +15,8 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
        `headers`, `config`, `domain_representations`) as auto-updatable views, so
        requests carrying `Accept-Profile: <area>` resolve to real exposed schemas.
 
-  Connection parameters come from application env (`config/test.exs`).
+  Connection parameters come from the standard `PG*` environment variables
+  (see `db_config/0`).
 
       mix bier.fixtures.load
   """
@@ -594,13 +595,18 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
 
   # --- helpers -------------------------------------------------------------
 
+  # Connection params from the standard PG* environment variables (CI sets
+  # PGUSER/PGPASSWORD/PGHOST/PGPORT), defaulting to a local `bier_test`. Read
+  # here rather than from application env so the task does not depend on a
+  # shipped `config/` (the conformance settings live in the test harness, see
+  # Bier.ConformanceServer.base_opts/0).
   defp db_config do
     [
-      hostname: Application.get_env(:bier, :hostname, "localhost"),
-      port: Application.get_env(:bier, :port, 5432),
-      database: Application.get_env(:bier, :database, "bier_test"),
-      username: Application.get_env(:bier, :username),
-      password: Application.get_env(:bier, :password)
+      hostname: System.get_env("PGHOST") || "localhost",
+      port: String.to_integer(System.get_env("PGPORT") || "5432"),
+      database: System.get_env("PGDATABASE") || "bier_test",
+      username: System.get_env("PGUSER") || System.get_env("USER") || "postgres",
+      password: System.get_env("PGPASSWORD")
     ]
   end
 
