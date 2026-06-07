@@ -61,6 +61,7 @@ defmodule Bier.Plugs.ActionController do
           {:ok, schema, content_profile} ->
             with {:ok, conn} <- maybe_auth(conn, config, schema) do
               conn = maybe_content_profile(conn, content_profile)
+              conn = assign(conn, :bier_target, {schema, fn_name})
               Bier.Rpc.dispatch(conn, config, {:ok, schema}, fn_name)
             end
 
@@ -204,6 +205,9 @@ defmodule Bier.Plugs.ActionController do
          conn = maybe_content_profile(conn, content_profile),
          :ok <- reject_openapi_media(conn),
          {:ok, relation} <- resolve_relation(conn, schema, relations) do
+      # Tag the resolved target so the observability span (`:bier_target`) can
+      # report schema/relation on `[:bier, :request, :stop]`.
+      conn = assign(conn, :bier_target, {relation.schema, relation.name})
       handle(conn.method, conn, config, relation)
     end
   end
