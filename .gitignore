@@ -24,3 +24,6 @@ bier-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+# Local Claude Code settings (per-machine, do not commit)
+.claude/settings.local.json

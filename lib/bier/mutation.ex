@@ -196,7 +196,8 @@ defmodule Bier.Mutation do
               # The response is fully computed inside the transaction (the CTE's
               # RETURNING is already serialized into `body`). Under db-tx-end
               # :rollback we abort the transaction here, discarding the write but
-              # returning the same response — see config/test.exs for why.
+              # returning the same response — see the conformance harness's
+              # base_opts/0 (db_tx_end: :rollback) for why.
               finish_tx(tx, config, {body, count, meta, existed, guc})
             else
               {:error, _} = err -> Postgrex.rollback(tx, err)
