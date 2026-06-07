@@ -33,12 +33,40 @@ defmodule Bier.Plugs.Observability do
 
   @impl Plug
   def call(conn, _opts) do
-    config = Registry.config(conn.assigns.supervisor_name)
+    name = conn.assigns.supervisor_name
+    config = Registry.config(name)
     start = System.monotonic_time(:native)
+
+    # `[:bier, :request, :start]` fires here; `:stop` fires in a before_send
+    # callback so its duration is the real request wall-clock. The span is keyed
+    # by the instance name (a node can host several Bier instances).
+    request_start = Bier.Telemetry.request_start(request_metadata(conn, name))
 
     conn
     |> echo_trace_header(config)
     |> register_before_send(&put_server_timing(&1, config, start))
+    |> register_before_send(&emit_request_stop(&1, name, request_start))
+  end
+
+  # ---- request span --------------------------------------------------------
+
+  defp request_metadata(conn, name) do
+    %{instance: name, method: conn.method, route: conn.request_path}
+  end
+
+  # The `{schema, relation}` target is stashed in `:bier_target` by
+  # `Bier.Plugs.ActionController` once resolved; it is `nil` for the root
+  # document, OPTIONS, and responses that error before resolving a relation.
+  defp emit_request_stop(conn, name, request_start) do
+    {schema, relation} = conn.assigns[:bier_target] || {nil, nil}
+
+    metadata =
+      conn
+      |> request_metadata(name)
+      |> Map.merge(%{status: conn.status, schema: schema, relation: relation})
+
+    Bier.Telemetry.request_stop(request_start, metadata)
+    conn
   end
 
   # ---- trace header --------------------------------------------------------
