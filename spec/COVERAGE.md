@@ -42,7 +42,7 @@ Pinned target: **PostgREST v14.12**. Total cases: **532** across 17 areas.
 | `errors` (Errors) | 1500–1516 (errors), 1432–1434 (rpc errors), 1024, 1185 (not-found), 1455–1464 (auth JWT errors) | SQLSTATE→HTTP mapping, PGRST error codes, RAISE PGRST full control, 4xx/5xx envelopes. |
 | `configuration` (Configuration) | 1700–1730 (config) | Sources (env/file/db-role-settings), aliases, validation, coercion, precedence, app-settings. |
 | `observability` (Observability) | 1750–1767 (observability) | Server-Timing, trace header, log-level→status logging. |
-| `admin_server` (Admin Server) | 1717 (admin-port = server-port fatal) | Only the port-collision validation. Partial — no `/live` `/ready` health-endpoint case. |
+| `admin_server` (Admin Server) | 1717 (admin-port = server-port fatal) | Port-collision validation (case 1717, library-enforced in `Bier.Config`) plus `/live`/`/ready` covered by ExUnit (`test/bier/admin_server_test.exs`). Partial — case 1717 stays `:pending` (CLI `--dump-config`), `/metrics` not yet implemented. |
 | `listener` (Listener) | — (DEFERRED) | LISTEN/NOTIFY channel (`db-channel`) reload trigger needs the same reload-signal harness. See **Scope decisions**. |
 
 ## Scope decisions
