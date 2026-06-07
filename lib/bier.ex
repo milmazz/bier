@@ -300,23 +300,43 @@ defmodule Bier do
 
   @impl Supervisor
   def init(%Bier.Config{name: name} = conf) do
-    children = [
-      # Per-instance Postgrex pool, registered via the Bier registry so that the
-      # introspection step and the request pipeline can resolve it from the
-      # instance name. Started before HttpServerStarter, which needs it for the
-      # boot-time DB introspection.
-      Supervisor.child_spec({Postgrex, postgrex_opts(conf)}, id: {name, Postgrex}),
-      # The DynamicSupervisor must start BEFORE HttpServerStarter: the latter's
-      # `handle_continue(:start_webserver, …)` starts Bandit *as a child of this
-      # DynamicSupervisor*, so it has to already be alive — otherwise that
-      # `start_child` call races the DynamicSupervisor's own startup and crashes
-      # (the supervisor then restarts HttpServerStarter, rebuilding the router).
-      {DynamicSupervisor,
-       strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
-      {Bier.HttpServerStarter, conf}
-    ]
+    children =
+      [
+        # Per-instance Postgrex pool, registered via the Bier registry so that the
+        # introspection step and the request pipeline can resolve it from the
+        # instance name. Started before HttpServerStarter, which needs it for the
+        # boot-time DB introspection.
+        Supervisor.child_spec({Postgrex, postgrex_opts(conf)}, id: {name, Postgrex}),
+        # The DynamicSupervisor must start BEFORE HttpServerStarter: the latter's
+        # `handle_continue(:start_webserver, …)` starts Bandit *as a child of this
+        # DynamicSupervisor*, so it has to already be alive — otherwise that
+        # `start_child` call races the DynamicSupervisor's own startup and crashes
+        # (the supervisor then restarts HttpServerStarter, rebuilding the router).
+        {DynamicSupervisor,
+         strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
+        {Bier.HttpServerStarter, conf}
+      ] ++ admin_children(conf)
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  # When `admin_server_port` is set, run a second Bandit listener serving the
+  # admin health endpoints (separate from the catch-all API router). Started
+  # statically here — it needs no introspection result; `/ready` reports 503
+  # until the schema cache is populated, which is the correct readiness signal.
+  defp admin_children(%Bier.Config{admin_server_port: nil}), do: []
+
+  defp admin_children(%Bier.Config{name: name, admin_server_port: port} = conf) do
+    [
+      Supervisor.child_spec(
+        {Bandit,
+         scheme: conf.router[:scheme],
+         plug: {Bier.Plugs.AdminRouter, name: name},
+         port: port,
+         http_options: [compress: false]},
+        id: {name, :admin_server}
+      )
+    ]
   end
 
   @doc false
