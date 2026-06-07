@@ -1,87 +1,1180 @@
+# Generated from lib/bier/query_parser.ex.exs, do not edit.
+# Generated at 2026-06-07 04:05:49Z.
+
 defmodule Bier.QueryParser do
   @moduledoc """
   Parser for SQL queries given via query strings
+
+  > #### Generated file {: .info}
+  >
+  > The committed `lib/bier/query_parser.ex` is **generated** from this template
+  > (`lib/bier/query_parser.ex.exs`) via `mix gen.parsers`, which runs
+  > `mix nimble_parsec.compile`. Only the legacy `select`/`horizontal_filter`
+  > combinators between the `parsec` marker comments are expanded; everything
+  > else passes through verbatim. The generated `.ex` has no runtime
+  > dependency on `nimble_parsec` (a `:dev`-only dependency). Edit this template
+  > and re-run `mix gen.parsers`; never edit the `.ex` directly.
   """
-  import NimbleParsec
 
-  @space 0x0020
-  @horizontal_tab 0x0009
+  @spec horizontal_filter(binary, keyword) ::
+          {:ok, [term], rest, context, line, byte_offset}
+          | {:error, reason, rest, context, line, byte_offset}
+        when line: {pos_integer, byte_offset},
+             byte_offset: non_neg_integer,
+             rest: binary,
+             reason: String.t(),
+             context: map
+  defp horizontal_filter(binary, opts \\ []) when is_binary(binary) do
+    context = Map.new(Keyword.get(opts, :context, []))
+    byte_offset = Keyword.get(opts, :byte_offset, 0)
 
-  # SQL identifiers and key words must begin with a letter (a-z, but also
-  # letters with diacritical marks and non-Latin letters) or an underscore (_).
-  # Subsequent characters in an identifier or key word can be letters,
-  # underscores, digits (0-9), or dollar signs ($). Note that dollar signs are
-  # not allowed in identifiers according to the letter of the SQL standard, so
-  # their use might render applications less portable. The SQL standard will
-  # not define a key word that contains digits or starts or ends with an
-  # underscore, so identifiers of this form are safe against possible conflict
-  # with future extensions of the standard.
-  #
-  # See: https://www.postgresql.org/docs/9.2/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS
-  # FIXME: Complete this based on previous description
-  identifier =
-    [?_, ?A..?Z, ?a..?z]
-    |> ascii_char()
-    |> repeat(ascii_char([?_, ?a..?z, ?A..?Z, ?0..?9]))
+    line =
+      case Keyword.get(opts, :line, 1) do
+        {_, _} = line -> line
+        line -> {line, byte_offset}
+      end
 
-  whitespace =
-    ascii_char([
-      @horizontal_tab,
-      @space
-    ])
+    case horizontal_filter__0(binary, [], [], context, line, byte_offset) do
+      {:ok, acc, rest, context, line, offset} ->
+        {:ok, :lists.reverse(acc), rest, context, line, offset}
 
-  default_select =
-    ascii_char([?*])
-    |> concat(eos())
-    |> tag(:default)
-
-  column_separator = ascii_char([?,])
-  alias_separator = ascii_char([?:])
-  cast_separator = times(ascii_char([?:]), 2)
-
-  column_alias =
-    identifier
-    |> lookahead_not(cast_separator)
-    |> concat(ignore(alias_separator))
-    |> tag(:alias)
-
-  # TODO: Complete the following list
-  casting_types =
-    choice([
-      string("boolean"),
-      string("date"),
-      string("float"),
-      string("integer"),
-      string("interval"),
-      string("text"),
-      string("timestamp")
-    ])
-
-  defp normalize(rest, [casting_type], %{} = context, {_line, _line_offset}, _byte_offset) do
-    {rest, casting_type |> String.reverse() |> String.to_charlist(), context}
+      {:error, _, _, _, _, _} = error ->
+        error
+    end
   end
 
-  column_cast =
-    cast_separator
-    |> ignore()
-    |> concat(casting_types)
-    |> post_traverse(:normalize)
-    |> tag(:cast)
+  defp horizontal_filter__0(
+         <<"not", x0, rest::binary>>,
+         acc,
+         stack,
+         context,
+         comb__line,
+         comb__offset
+       )
+       when x0 === 46 do
+    horizontal_filter__1(
+      rest,
+      [negation?: true] ++ acc,
+      stack,
+      context,
+      comb__line,
+      comb__offset + 4
+    )
+  end
 
-  column =
-    column_alias
-    |> optional()
-    |> concat(tag(identifier, :name))
-    |> optional(column_cast)
-    |> wrap()
+  defp horizontal_filter__0(<<rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    horizontal_filter__1(rest, [] ++ acc, stack, context, comb__line, comb__offset)
+  end
 
-  detailed_select =
-    column
-    |> optional(ignore(optional(column_separator, whitespace)))
-    |> times(min: 1)
-    |> eos()
+  defp horizontal_filter__1(rest, acc, stack, context, line, offset) do
+    horizontal_filter__31(
+      rest,
+      [],
+      [{rest, context, line, offset}, acc | stack],
+      context,
+      line,
+      offset
+    )
+  end
 
-  defparsecp(:select, choice([default_select, detailed_select]))
+  defp horizontal_filter__3(rest, acc, stack, context, line, offset) do
+    horizontal_filter__4(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp horizontal_filter__4(rest, acc, stack, context, line, offset) do
+    horizontal_filter__5(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp horizontal_filter__5(<<"eq", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    horizontal_filter__6(rest, ["="] ++ acc, stack, context, comb__line, comb__offset + 2)
+  end
+
+  defp horizontal_filter__5(
+         <<"gte", rest::binary>>,
+         acc,
+         stack,
+         context,
+         comb__line,
+         comb__offset
+       ) do
+    horizontal_filter__6(rest, [">="] ++ acc, stack, context, comb__line, comb__offset + 3)
+  end
+
+  defp horizontal_filter__5(<<"gt", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    horizontal_filter__6(rest, [">"] ++ acc, stack, context, comb__line, comb__offset + 2)
+  end
+
+  defp horizontal_filter__5(
+         <<"lte", rest::binary>>,
+         acc,
+         stack,
+         context,
+         comb__line,
+         comb__offset
+       ) do
+    horizontal_filter__6(rest, ["<="] ++ acc, stack, context, comb__line, comb__offset + 3)
+  end
+
+  defp horizontal_filter__5(<<"lt", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    horizontal_filter__6(rest, ["<"] ++ acc, stack, context, comb__line, comb__offset + 2)
+  end
+
+  defp horizontal_filter__5(
+         <<"neq", rest::binary>>,
+         acc,
+         stack,
+         context,
+         comb__line,
+         comb__offset
+       ) do
+    horizontal_filter__6(rest, ["<>"] ++ acc, stack, context, comb__line, comb__offset + 3)
+  end
+
+  defp horizontal_filter__5(<<"in", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    horizontal_filter__6(rest, ["in"] ++ acc, stack, context, comb__line, comb__offset + 2)
+  end
+
+  defp horizontal_filter__5(rest, _acc, _stack, context, line, offset) do
+    {:error,
+     "expected string \"is\", followed by ASCII character equal to \".\", followed by string \"false\" or string \"true\" or string \"like\" or string \"ilike\", followed by ASCII character equal to \".\", followed by ASCII character equal to \"*\" or ASCII character, followed by end of string or string \"eq\" or string \"gte\" or string \"gt\" or string \"lte\" or string \"lt\" or string \"neq\" or string \"in\", followed by ASCII character equal to \".\", followed by ASCII character, followed by end of string",
+     rest, context, line, offset}
+  end
+
+  defp horizontal_filter__6(rest, user_acc, [acc | stack], context, line, offset) do
+    case (case normalize(rest, user_acc, context, line, offset) do
+            {_, _, _} = res ->
+              res
+
+            {:error, reason} ->
+              {:error, reason}
+
+            {acc, context} ->
+              IO.warn(
+                "returning a two-element tuple {acc, context} in pre_traverse/post_traverse is deprecated, " <>
+                  "please return {rest, acc, context} instead"
+              )
+
+              {rest, acc, context}
+          end) do
+      {rest, user_acc, context} when is_list(user_acc) ->
+        horizontal_filter__7(rest, user_acc ++ acc, stack, context, line, offset)
+
+      {:error, reason} ->
+        {:error, reason, rest, context, line, offset}
+    end
+  end
+
+  defp horizontal_filter__7(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+
+    horizontal_filter__8(
+      rest,
+      [operator: :lists.reverse(user_acc)] ++ acc,
+      stack,
+      context,
+      line,
+      offset
+    )
+  end
+
+  defp horizontal_filter__8(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 46 do
+    horizontal_filter__9(rest, [] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp horizontal_filter__8(rest, _acc, _stack, context, line, offset) do
+    {:error,
+     "expected string \"is\", followed by ASCII character equal to \".\", followed by string \"false\" or string \"true\" or string \"like\" or string \"ilike\", followed by ASCII character equal to \".\", followed by ASCII character equal to \"*\" or ASCII character, followed by end of string or string \"eq\" or string \"gte\" or string \"gt\" or string \"lte\" or string \"lt\" or string \"neq\" or string \"in\", followed by ASCII character equal to \".\", followed by ASCII character, followed by end of string",
+     rest, context, line, offset}
+  end
+
+  defp horizontal_filter__9(rest, acc, stack, context, line, offset) do
+    horizontal_filter__10(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp horizontal_filter__10(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    horizontal_filter__12(
+      rest,
+      [x0] ++ acc,
+      stack,
+      context,
+      (
+        line = comb__line
+
+        case x0 do
+          10 -> {elem(line, 0) + 1, comb__offset + 1}
+          _ -> line
+        end
+      ),
+      comb__offset + 1
+    )
+  end
+
+  defp horizontal_filter__10(rest, acc, stack, context, line, offset) do
+    horizontal_filter__11(rest, acc, stack, context, line, offset)
+  end
+
+  defp horizontal_filter__12(rest, acc, stack, context, line, offset) do
+    horizontal_filter__10(rest, acc, stack, context, line, offset)
+  end
+
+  defp horizontal_filter__11(<<""::binary>>, acc, stack, context, comb__line, comb__offset) do
+    horizontal_filter__13("", [] ++ acc, stack, context, comb__line, comb__offset)
+  end
+
+  defp horizontal_filter__11(rest, _acc, _stack, context, line, offset) do
+    {:error,
+     "expected string \"is\", followed by ASCII character equal to \".\", followed by string \"false\" or string \"true\" or string \"like\" or string \"ilike\", followed by ASCII character equal to \".\", followed by ASCII character equal to \"*\" or ASCII character, followed by end of string or string \"eq\" or string \"gte\" or string \"gt\" or string \"lte\" or string \"lt\" or string \"neq\" or string \"in\", followed by ASCII character equal to \".\", followed by ASCII character, followed by end of string",
+     rest, context, line, offset}
+  end
+
+  defp horizontal_filter__13(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+
+    horizontal_filter__14(
+      rest,
+      [value: :lists.reverse(user_acc)] ++ acc,
+      stack,
+      context,
+      line,
+      offset
+    )
+  end
+
+  defp horizontal_filter__14(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    horizontal_filter__2(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp horizontal_filter__15(_, _, [{rest, context, line, offset} | _] = stack, _, _, _) do
+    horizontal_filter__3(rest, [], stack, context, line, offset)
+  end
+
+  defp horizontal_filter__16(rest, acc, stack, context, line, offset) do
+    horizontal_filter__17(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp horizontal_filter__17(rest, acc, stack, context, line, offset) do
+    horizontal_filter__18(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp horizontal_filter__18(
+         <<"like", rest::binary>>,
+         acc,
+         stack,
+         context,
+         comb__line,
+         comb__offset
+       ) do
+    horizontal_filter__19(rest, ["like"] ++ acc, stack, context, comb__line, comb__offset + 4)
+  end
+
+  defp horizontal_filter__18(
+         <<"ilike", rest::binary>>,
+         acc,
+         stack,
+         context,
+         comb__line,
+         comb__offset
+       ) do
+    horizontal_filter__19(rest, ["ilike"] ++ acc, stack, context, comb__line, comb__offset + 5)
+  end
+
+  defp horizontal_filter__18(rest, _acc, stack, context, line, offset) do
+    [_, acc | stack] = stack
+    horizontal_filter__15(rest, acc, stack, context, line, offset)
+  end
+
+  defp horizontal_filter__19(rest, user_acc, [acc | stack], context, line, offset) do
+    case (case normalize(rest, user_acc, context, line, offset) do
+            {_, _, _} = res ->
+              res
+
+            {:error, reason} ->
+              {:error, reason}
+
+            {acc, context} ->
+              IO.warn(
+                "returning a two-element tuple {acc, context} in pre_traverse/post_traverse is deprecated, " <>
+                  "please return {rest, acc, context} instead"
+              )
+
+              {rest, acc, context}
+          end) do
+      {rest, user_acc, context} when is_list(user_acc) ->
+        horizontal_filter__20(rest, user_acc ++ acc, stack, context, line, offset)
+
+      {:error, reason} ->
+        {:error, reason, rest, context, line, offset}
+    end
+  end
+
+  defp horizontal_filter__20(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+
+    horizontal_filter__21(
+      rest,
+      [operator: :lists.reverse(user_acc)] ++ acc,
+      stack,
+      context,
+      line,
+      offset
+    )
+  end
+
+  defp horizontal_filter__21(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 46 do
+    horizontal_filter__22(rest, [] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp horizontal_filter__21(rest, acc, stack, context, line, offset) do
+    horizontal_filter__15(rest, acc, stack, context, line, offset)
+  end
+
+  defp horizontal_filter__22(rest, acc, stack, context, line, offset) do
+    horizontal_filter__23(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp horizontal_filter__23(rest, acc, stack, context, line, offset) do
+    horizontal_filter__25(
+      rest,
+      [],
+      [{rest, acc, context, line, offset} | stack],
+      context,
+      line,
+      offset
+    )
+  end
+
+  defp horizontal_filter__25(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 42 do
+    horizontal_filter__26(rest, ~c"%" ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp horizontal_filter__25(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    horizontal_filter__26(
+      rest,
+      [x0] ++ acc,
+      stack,
+      context,
+      (
+        line = comb__line
+
+        case x0 do
+          10 -> {elem(line, 0) + 1, comb__offset + 1}
+          _ -> line
+        end
+      ),
+      comb__offset + 1
+    )
+  end
+
+  defp horizontal_filter__25(rest, acc, stack, context, line, offset) do
+    horizontal_filter__24(rest, acc, stack, context, line, offset)
+  end
+
+  defp horizontal_filter__24(_, _, [{rest, acc, context, line, offset} | stack], _, _, _) do
+    horizontal_filter__27(rest, acc, stack, context, line, offset)
+  end
+
+  defp horizontal_filter__26(
+         inner_rest,
+         inner_acc,
+         [{rest, acc, context, line, offset} | stack],
+         inner_context,
+         inner_line,
+         inner_offset
+       ) do
+    _ = {rest, acc, context, line, offset}
+
+    horizontal_filter__25(
+      inner_rest,
+      [],
+      [{inner_rest, inner_acc ++ acc, inner_context, inner_line, inner_offset} | stack],
+      inner_context,
+      inner_line,
+      inner_offset
+    )
+  end
+
+  defp horizontal_filter__27(<<""::binary>>, acc, stack, context, comb__line, comb__offset) do
+    horizontal_filter__28("", [] ++ acc, stack, context, comb__line, comb__offset)
+  end
+
+  defp horizontal_filter__27(rest, _acc, stack, context, line, offset) do
+    [acc | stack] = stack
+    horizontal_filter__15(rest, acc, stack, context, line, offset)
+  end
+
+  defp horizontal_filter__28(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+
+    horizontal_filter__29(
+      rest,
+      [value: :lists.reverse(user_acc)] ++ acc,
+      stack,
+      context,
+      line,
+      offset
+    )
+  end
+
+  defp horizontal_filter__29(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    horizontal_filter__2(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp horizontal_filter__30(_, _, [{rest, context, line, offset} | _] = stack, _, _, _) do
+    horizontal_filter__16(rest, [], stack, context, line, offset)
+  end
+
+  defp horizontal_filter__31(rest, acc, stack, context, line, offset) do
+    horizontal_filter__32(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp horizontal_filter__32(rest, acc, stack, context, line, offset) do
+    horizontal_filter__33(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp horizontal_filter__33(
+         <<"is", rest::binary>>,
+         acc,
+         stack,
+         context,
+         comb__line,
+         comb__offset
+       ) do
+    horizontal_filter__34(rest, ["is"] ++ acc, stack, context, comb__line, comb__offset + 2)
+  end
+
+  defp horizontal_filter__33(rest, _acc, stack, context, line, offset) do
+    [_, acc | stack] = stack
+    horizontal_filter__30(rest, acc, stack, context, line, offset)
+  end
+
+  defp horizontal_filter__34(rest, user_acc, [acc | stack], context, line, offset) do
+    case (case normalize(rest, user_acc, context, line, offset) do
+            {_, _, _} = res ->
+              res
+
+            {:error, reason} ->
+              {:error, reason}
+
+            {acc, context} ->
+              IO.warn(
+                "returning a two-element tuple {acc, context} in pre_traverse/post_traverse is deprecated, " <>
+                  "please return {rest, acc, context} instead"
+              )
+
+              {rest, acc, context}
+          end) do
+      {rest, user_acc, context} when is_list(user_acc) ->
+        horizontal_filter__35(rest, user_acc ++ acc, stack, context, line, offset)
+
+      {:error, reason} ->
+        {:error, reason, rest, context, line, offset}
+    end
+  end
+
+  defp horizontal_filter__35(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+
+    horizontal_filter__36(
+      rest,
+      [operator: :lists.reverse(user_acc)] ++ acc,
+      stack,
+      context,
+      line,
+      offset
+    )
+  end
+
+  defp horizontal_filter__36(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 46 do
+    horizontal_filter__37(rest, [] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp horizontal_filter__36(rest, acc, stack, context, line, offset) do
+    horizontal_filter__30(rest, acc, stack, context, line, offset)
+  end
+
+  defp horizontal_filter__37(rest, acc, stack, context, line, offset) do
+    horizontal_filter__38(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp horizontal_filter__38(
+         <<"false", rest::binary>>,
+         acc,
+         stack,
+         context,
+         comb__line,
+         comb__offset
+       ) do
+    horizontal_filter__39(rest, [false] ++ acc, stack, context, comb__line, comb__offset + 5)
+  end
+
+  defp horizontal_filter__38(
+         <<"true", rest::binary>>,
+         acc,
+         stack,
+         context,
+         comb__line,
+         comb__offset
+       ) do
+    horizontal_filter__39(rest, [true] ++ acc, stack, context, comb__line, comb__offset + 4)
+  end
+
+  defp horizontal_filter__38(rest, _acc, stack, context, line, offset) do
+    [acc | stack] = stack
+    horizontal_filter__30(rest, acc, stack, context, line, offset)
+  end
+
+  defp horizontal_filter__39(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+
+    horizontal_filter__40(
+      rest,
+      [
+        value:
+          case :lists.reverse(user_acc) do
+            [one] -> one
+            many -> raise "unwrap_and_tag/3 expected a single token, got: #{inspect(many)}"
+          end
+      ] ++ acc,
+      stack,
+      context,
+      line,
+      offset
+    )
+  end
+
+  defp horizontal_filter__40(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    horizontal_filter__2(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp horizontal_filter__2(rest, acc, _stack, context, line, offset) do
+    {:ok, acc, rest, context, line, offset}
+  end
+
+  @spec select(binary, keyword) ::
+          {:ok, [term], rest, context, line, byte_offset}
+          | {:error, reason, rest, context, line, byte_offset}
+        when line: {pos_integer, byte_offset},
+             byte_offset: non_neg_integer,
+             rest: binary,
+             reason: String.t(),
+             context: map
+  defp select(binary, opts \\ []) when is_binary(binary) do
+    context = Map.new(Keyword.get(opts, :context, []))
+    byte_offset = Keyword.get(opts, :byte_offset, 0)
+
+    line =
+      case Keyword.get(opts, :line, 1) do
+        {_, _} = line -> line
+        line -> {line, byte_offset}
+      end
+
+    case select__0(binary, [], [], context, line, byte_offset) do
+      {:ok, acc, rest, context, line, offset} ->
+        {:ok, :lists.reverse(acc), rest, context, line, offset}
+
+      {:error, _, _, _, _, _} = error ->
+        error
+    end
+  end
+
+  defp select__0(rest, acc, stack, context, line, offset) do
+    select__80(rest, [], [{rest, context, line, offset}, acc | stack], context, line, offset)
+  end
+
+  defp select__2(rest, acc, stack, context, line, offset) do
+    select__3(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp select__3(rest, acc, stack, context, line, offset) do
+    select__7(rest, [], [{rest, context, line, offset}, acc | stack], context, line, offset)
+  end
+
+  defp select__5(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__4(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__6(_, _, [{rest, context, line, offset} | _] = stack, _, _, _) do
+    select__5(rest, [], stack, context, line, offset)
+  end
+
+  defp select__7(rest, acc, stack, context, line, offset) do
+    select__8(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp select__8(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 95 or (x0 >= 65 and x0 <= 90) or (x0 >= 97 and x0 <= 122) do
+    select__9(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__8(rest, _acc, stack, context, line, offset) do
+    [acc | stack] = stack
+    select__6(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__9(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 95 or (x0 >= 97 and x0 <= 122) or (x0 >= 65 and x0 <= 90) or
+              (x0 >= 48 and x0 <= 57) do
+    select__11(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__9(rest, acc, stack, context, line, offset) do
+    select__10(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__11(rest, acc, stack, context, line, offset) do
+    select__9(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__10(<<x0, x1, _::binary>> = rest, _acc, stack, context, line, offset)
+       when x0 === 58 and x1 === 58 do
+    [acc | stack] = stack
+    select__6(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__10(rest, acc, stack, context, line, offset) do
+    select__12(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__12(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 58 do
+    select__13(rest, [] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__12(rest, _acc, stack, context, line, offset) do
+    [acc | stack] = stack
+    select__6(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__13(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+    select__14(rest, [alias: :lists.reverse(user_acc)] ++ acc, stack, context, line, offset)
+  end
+
+  defp select__14(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__4(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__4(rest, acc, stack, context, line, offset) do
+    select__15(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp select__15(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 95 or (x0 >= 65 and x0 <= 90) or (x0 >= 97 and x0 <= 122) do
+    select__16(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__15(rest, _acc, _stack, context, line, offset) do
+    {:error,
+     "expected ASCII character equal to \"*\", followed by end of string or ASCII character equal to \"_\" or in the range \"A\" to \"Z\" or in the range \"a\" to \"z\", followed by ASCII character equal to \"_\" or in the range \"a\" to \"z\" or in the range \"A\" to \"Z\" or in the range \"0\" to \"9\", followed by ASCII character equal to \":\", followed by ASCII character equal to \":\", followed by ASCII character equal to \":\" or nothing, followed by ASCII character equal to \"_\" or in the range \"A\" to \"Z\" or in the range \"a\" to \"z\", followed by ASCII character equal to \"_\" or in the range \"a\" to \"z\" or in the range \"A\" to \"Z\" or in the range \"0\" to \"9\", followed by ASCII character equal to \":\", followed by ASCII character equal to \":\", followed by string \"boolean\" or string \"date\" or string \"float\" or string \"integer\" or string \"interval\" or string \"text\" or string \"timestamp\" or nothing, followed by ASCII character equal to \",\", followed by ASCII character equal to \"\\t\" or equal to \" \" or nothing or nothing, followed by ASCII character equal to \"_\" or in the range \"A\" to \"Z\" or in the range \"a\" to \"z\", followed by ASCII character equal to \"_\" or in the range \"a\" to \"z\" or in the range \"A\" to \"Z\" or in the range \"0\" to \"9\", followed by ASCII character equal to \":\", followed by ASCII character equal to \":\", followed by ASCII character equal to \":\" or nothing, followed by ASCII character equal to \"_\" or in the range \"A\" to \"Z\" or in the range \"a\" to \"z\", followed by ASCII character equal to \"_\" or in the range \"a\" to \"z\" or in the range \"A\" to \"Z\" or in the range \"0\" to \"9\", followed by ASCII character equal to \":\", followed by ASCII character equal to \":\", followed by string \"boolean\" or string \"date\" or string \"float\" or string \"integer\" or string \"interval\" or string \"text\" or string \"timestamp\" or nothing, followed by ASCII character equal to \",\", followed by ASCII character equal to \"\\t\" or equal to \" \" or nothing or nothing, followed by end of string",
+     rest, context, line, offset}
+  end
+
+  defp select__16(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 95 or (x0 >= 97 and x0 <= 122) or (x0 >= 65 and x0 <= 90) or
+              (x0 >= 48 and x0 <= 57) do
+    select__18(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__16(rest, acc, stack, context, line, offset) do
+    select__17(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__18(rest, acc, stack, context, line, offset) do
+    select__16(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__17(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+    select__19(rest, [name: :lists.reverse(user_acc)] ++ acc, stack, context, line, offset)
+  end
+
+  defp select__19(rest, acc, stack, context, line, offset) do
+    select__23(rest, [], [{rest, context, line, offset}, acc | stack], context, line, offset)
+  end
+
+  defp select__21(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__20(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__22(_, _, [{rest, context, line, offset} | _] = stack, _, _, _) do
+    select__21(rest, [], stack, context, line, offset)
+  end
+
+  defp select__23(rest, acc, stack, context, line, offset) do
+    select__24(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp select__24(rest, acc, stack, context, line, offset) do
+    select__25(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp select__25(<<x0, x1, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 58 and x1 === 58 do
+    select__26(rest, [] ++ acc, stack, context, comb__line, comb__offset + 2)
+  end
+
+  defp select__25(rest, _acc, stack, context, line, offset) do
+    [_, acc | stack] = stack
+    select__22(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__26(<<"boolean", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__27(rest, ["boolean"] ++ acc, stack, context, comb__line, comb__offset + 7)
+  end
+
+  defp select__26(<<"date", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__27(rest, ["date"] ++ acc, stack, context, comb__line, comb__offset + 4)
+  end
+
+  defp select__26(<<"float", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__27(rest, ["float"] ++ acc, stack, context, comb__line, comb__offset + 5)
+  end
+
+  defp select__26(<<"integer", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__27(rest, ["integer"] ++ acc, stack, context, comb__line, comb__offset + 7)
+  end
+
+  defp select__26(<<"interval", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__27(rest, ["interval"] ++ acc, stack, context, comb__line, comb__offset + 8)
+  end
+
+  defp select__26(<<"text", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__27(rest, ["text"] ++ acc, stack, context, comb__line, comb__offset + 4)
+  end
+
+  defp select__26(<<"timestamp", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__27(rest, ["timestamp"] ++ acc, stack, context, comb__line, comb__offset + 9)
+  end
+
+  defp select__26(rest, _acc, stack, context, line, offset) do
+    [_, acc | stack] = stack
+    select__22(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__27(rest, user_acc, [acc | stack], context, line, offset) do
+    case (case normalize(rest, user_acc, context, line, offset) do
+            {_, _, _} = res ->
+              res
+
+            {:error, reason} ->
+              {:error, reason}
+
+            {acc, context} ->
+              IO.warn(
+                "returning a two-element tuple {acc, context} in pre_traverse/post_traverse is deprecated, " <>
+                  "please return {rest, acc, context} instead"
+              )
+
+              {rest, acc, context}
+          end) do
+      {rest, user_acc, context} when is_list(user_acc) ->
+        select__28(rest, user_acc ++ acc, stack, context, line, offset)
+
+      {:error, reason} ->
+        {:error, reason, rest, context, line, offset}
+    end
+  end
+
+  defp select__28(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+    select__29(rest, [cast: :lists.reverse(user_acc)] ++ acc, stack, context, line, offset)
+  end
+
+  defp select__29(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__20(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__20(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+    select__30(rest, [:lists.reverse(user_acc)] ++ acc, stack, context, line, offset)
+  end
+
+  defp select__30(rest, acc, stack, context, line, offset) do
+    select__34(rest, [], [{rest, context, line, offset}, acc | stack], context, line, offset)
+  end
+
+  defp select__32(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__31(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__33(_, _, [{rest, context, line, offset} | _] = stack, _, _, _) do
+    select__32(rest, [], stack, context, line, offset)
+  end
+
+  defp select__34(rest, acc, stack, context, line, offset) do
+    select__35(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp select__35(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 44 do
+    select__36(rest, acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__35(rest, _acc, stack, context, line, offset) do
+    [acc | stack] = stack
+    select__33(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__36(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 9 or x0 === 32 do
+    select__37(rest, acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__36(<<rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__37(rest, acc, stack, context, comb__line, comb__offset)
+  end
+
+  defp select__37(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+    select__38(rest, [] ++ acc, stack, context, line, offset)
+  end
+
+  defp select__38(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__31(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__31(rest, acc, stack, context, line, offset) do
+    select__40(rest, [], [{rest, acc, context, line, offset} | stack], context, line, offset)
+  end
+
+  defp select__40(rest, acc, stack, context, line, offset) do
+    select__41(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp select__41(rest, acc, stack, context, line, offset) do
+    select__45(rest, [], [{rest, context, line, offset}, acc | stack], context, line, offset)
+  end
+
+  defp select__43(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__42(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__44(_, _, [{rest, context, line, offset} | _] = stack, _, _, _) do
+    select__43(rest, [], stack, context, line, offset)
+  end
+
+  defp select__45(rest, acc, stack, context, line, offset) do
+    select__46(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp select__46(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 95 or (x0 >= 65 and x0 <= 90) or (x0 >= 97 and x0 <= 122) do
+    select__47(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__46(rest, _acc, stack, context, line, offset) do
+    [acc | stack] = stack
+    select__44(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__47(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 95 or (x0 >= 97 and x0 <= 122) or (x0 >= 65 and x0 <= 90) or
+              (x0 >= 48 and x0 <= 57) do
+    select__49(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__47(rest, acc, stack, context, line, offset) do
+    select__48(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__49(rest, acc, stack, context, line, offset) do
+    select__47(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__48(<<x0, x1, _::binary>> = rest, _acc, stack, context, line, offset)
+       when x0 === 58 and x1 === 58 do
+    [acc | stack] = stack
+    select__44(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__48(rest, acc, stack, context, line, offset) do
+    select__50(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__50(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 58 do
+    select__51(rest, [] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__50(rest, _acc, stack, context, line, offset) do
+    [acc | stack] = stack
+    select__44(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__51(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+    select__52(rest, [alias: :lists.reverse(user_acc)] ++ acc, stack, context, line, offset)
+  end
+
+  defp select__52(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__42(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__42(rest, acc, stack, context, line, offset) do
+    select__53(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp select__53(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 95 or (x0 >= 65 and x0 <= 90) or (x0 >= 97 and x0 <= 122) do
+    select__54(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__53(rest, _acc, stack, context, line, offset) do
+    [_, acc | stack] = stack
+    select__39(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__54(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 95 or (x0 >= 97 and x0 <= 122) or (x0 >= 65 and x0 <= 90) or
+              (x0 >= 48 and x0 <= 57) do
+    select__56(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__54(rest, acc, stack, context, line, offset) do
+    select__55(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__56(rest, acc, stack, context, line, offset) do
+    select__54(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__55(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+    select__57(rest, [name: :lists.reverse(user_acc)] ++ acc, stack, context, line, offset)
+  end
+
+  defp select__57(rest, acc, stack, context, line, offset) do
+    select__61(rest, [], [{rest, context, line, offset}, acc | stack], context, line, offset)
+  end
+
+  defp select__59(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__58(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__60(_, _, [{rest, context, line, offset} | _] = stack, _, _, _) do
+    select__59(rest, [], stack, context, line, offset)
+  end
+
+  defp select__61(rest, acc, stack, context, line, offset) do
+    select__62(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp select__62(rest, acc, stack, context, line, offset) do
+    select__63(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp select__63(<<x0, x1, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 58 and x1 === 58 do
+    select__64(rest, [] ++ acc, stack, context, comb__line, comb__offset + 2)
+  end
+
+  defp select__63(rest, _acc, stack, context, line, offset) do
+    [_, acc | stack] = stack
+    select__60(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__64(<<"boolean", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__65(rest, ["boolean"] ++ acc, stack, context, comb__line, comb__offset + 7)
+  end
+
+  defp select__64(<<"date", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__65(rest, ["date"] ++ acc, stack, context, comb__line, comb__offset + 4)
+  end
+
+  defp select__64(<<"float", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__65(rest, ["float"] ++ acc, stack, context, comb__line, comb__offset + 5)
+  end
+
+  defp select__64(<<"integer", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__65(rest, ["integer"] ++ acc, stack, context, comb__line, comb__offset + 7)
+  end
+
+  defp select__64(<<"interval", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__65(rest, ["interval"] ++ acc, stack, context, comb__line, comb__offset + 8)
+  end
+
+  defp select__64(<<"text", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__65(rest, ["text"] ++ acc, stack, context, comb__line, comb__offset + 4)
+  end
+
+  defp select__64(<<"timestamp", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__65(rest, ["timestamp"] ++ acc, stack, context, comb__line, comb__offset + 9)
+  end
+
+  defp select__64(rest, _acc, stack, context, line, offset) do
+    [_, acc | stack] = stack
+    select__60(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__65(rest, user_acc, [acc | stack], context, line, offset) do
+    case (case normalize(rest, user_acc, context, line, offset) do
+            {_, _, _} = res ->
+              res
+
+            {:error, reason} ->
+              {:error, reason}
+
+            {acc, context} ->
+              IO.warn(
+                "returning a two-element tuple {acc, context} in pre_traverse/post_traverse is deprecated, " <>
+                  "please return {rest, acc, context} instead"
+              )
+
+              {rest, acc, context}
+          end) do
+      {rest, user_acc, context} when is_list(user_acc) ->
+        select__66(rest, user_acc ++ acc, stack, context, line, offset)
+
+      {:error, reason} ->
+        {:error, reason, rest, context, line, offset}
+    end
+  end
+
+  defp select__66(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+    select__67(rest, [cast: :lists.reverse(user_acc)] ++ acc, stack, context, line, offset)
+  end
+
+  defp select__67(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__58(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__58(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+    select__68(rest, [:lists.reverse(user_acc)] ++ acc, stack, context, line, offset)
+  end
+
+  defp select__68(rest, acc, stack, context, line, offset) do
+    select__72(rest, [], [{rest, context, line, offset}, acc | stack], context, line, offset)
+  end
+
+  defp select__70(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__69(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__71(_, _, [{rest, context, line, offset} | _] = stack, _, _, _) do
+    select__70(rest, [], stack, context, line, offset)
+  end
+
+  defp select__72(rest, acc, stack, context, line, offset) do
+    select__73(rest, [], [acc | stack], context, line, offset)
+  end
+
+  defp select__73(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 44 do
+    select__74(rest, acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__73(rest, _acc, stack, context, line, offset) do
+    [acc | stack] = stack
+    select__71(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__74(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 9 or x0 === 32 do
+    select__75(rest, acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__74(<<rest::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__75(rest, acc, stack, context, comb__line, comb__offset)
+  end
+
+  defp select__75(rest, user_acc, [acc | stack], context, line, offset) do
+    _ = user_acc
+    select__76(rest, [] ++ acc, stack, context, line, offset)
+  end
+
+  defp select__76(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__69(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__39(_, _, [{rest, acc, context, line, offset} | stack], _, _, _) do
+    select__77(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__69(
+         inner_rest,
+         inner_acc,
+         [{rest, acc, context, line, offset} | stack],
+         inner_context,
+         inner_line,
+         inner_offset
+       ) do
+    _ = {rest, acc, context, line, offset}
+
+    select__40(
+      inner_rest,
+      [],
+      [{inner_rest, inner_acc ++ acc, inner_context, inner_line, inner_offset} | stack],
+      inner_context,
+      inner_line,
+      inner_offset
+    )
+  end
+
+  defp select__77(<<""::binary>>, acc, stack, context, comb__line, comb__offset) do
+    select__78("", [] ++ acc, stack, context, comb__line, comb__offset)
+  end
+
+  defp select__77(rest, _acc, _stack, context, line, offset) do
+    {:error,
+     "expected ASCII character equal to \"*\", followed by end of string or ASCII character equal to \"_\" or in the range \"A\" to \"Z\" or in the range \"a\" to \"z\", followed by ASCII character equal to \"_\" or in the range \"a\" to \"z\" or in the range \"A\" to \"Z\" or in the range \"0\" to \"9\", followed by ASCII character equal to \":\", followed by ASCII character equal to \":\", followed by ASCII character equal to \":\" or nothing, followed by ASCII character equal to \"_\" or in the range \"A\" to \"Z\" or in the range \"a\" to \"z\", followed by ASCII character equal to \"_\" or in the range \"a\" to \"z\" or in the range \"A\" to \"Z\" or in the range \"0\" to \"9\", followed by ASCII character equal to \":\", followed by ASCII character equal to \":\", followed by string \"boolean\" or string \"date\" or string \"float\" or string \"integer\" or string \"interval\" or string \"text\" or string \"timestamp\" or nothing, followed by ASCII character equal to \",\", followed by ASCII character equal to \"\\t\" or equal to \" \" or nothing or nothing, followed by ASCII character equal to \"_\" or in the range \"A\" to \"Z\" or in the range \"a\" to \"z\", followed by ASCII character equal to \"_\" or in the range \"a\" to \"z\" or in the range \"A\" to \"Z\" or in the range \"0\" to \"9\", followed by ASCII character equal to \":\", followed by ASCII character equal to \":\", followed by ASCII character equal to \":\" or nothing, followed by ASCII character equal to \"_\" or in the range \"A\" to \"Z\" or in the range \"a\" to \"z\", followed by ASCII character equal to \"_\" or in the range \"a\" to \"z\" or in the range \"A\" to \"Z\" or in the range \"0\" to \"9\", followed by ASCII character equal to \":\", followed by ASCII character equal to \":\", followed by string \"boolean\" or string \"date\" or string \"float\" or string \"integer\" or string \"interval\" or string \"text\" or string \"timestamp\" or nothing, followed by ASCII character equal to \",\", followed by ASCII character equal to \"\\t\" or equal to \" \" or nothing or nothing, followed by end of string",
+     rest, context, line, offset}
+  end
+
+  defp select__78(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__1(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__79(_, _, [{rest, context, line, offset} | _] = stack, _, _, _) do
+    select__2(rest, [], stack, context, line, offset)
+  end
+
+  defp select__80(<<x0, ""::binary>>, acc, stack, context, comb__line, comb__offset)
+       when x0 === 42 do
+    select__81("", [default: [x0]] ++ acc, stack, context, comb__line, comb__offset + 1)
+  end
+
+  defp select__80(rest, acc, stack, context, line, offset) do
+    select__79(rest, acc, stack, context, line, offset)
+  end
+
+  defp select__81(rest, acc, [_, previous_acc | stack], context, line, offset) do
+    select__1(rest, acc ++ previous_acc, stack, context, line, offset)
+  end
+
+  defp select__1(rest, acc, _stack, context, line, offset) do
+    {:ok, acc, rest, context, line, offset}
+  end
+
+  # ===========================================================================
+  # Regular (pass-through) code: the `normalize/5` post_traverse callback (called
+  # by the generated `select`/`horizontal_filter` parsers), the public wrappers,
+  # and the whole request pipeline.
+  # ===========================================================================
+
+  # `normalize/5` is the `post_traverse` callback for the legacy
+  # `select`/`horizontal_filter` grammars: it reverses the matched operator/cast
+  # token into a charlist. The `case` over `casting_type` is degenerate at
+  # runtime (it always takes the binary branch) but keeps the inferred return
+  # type a union of the three shapes nimble_parsec's generated dispatch matches
+  # on, so the generated file stays clean under `--warnings-as-errors`.
+  defp normalize(rest, [casting_type], %{} = context, {_line, _line_offset}, _byte_offset) do
+    case context do
+      %{__pt__: :error} ->
+        {:error, "unreachable"}
+
+      %{__pt__: :legacy} ->
+        {[casting_type], context}
+
+      _ ->
+        {rest, casting_type |> String.reverse() |> String.to_charlist(), context}
+    end
+  end
 
   @doc """
   Parse the given `select` query string
@@ -107,84 +1200,6 @@ defmodule Bier.QueryParser do
         {:error, reason}
     end
   end
-
-  ########################
-  ## Horizontal Filters ##
-  ########################
-  filter_separator = ascii_char([?.])
-
-  # TODO: Extract the following into a common combinator
-  # |> post_traverse(:normalize)
-  # |> tag(:operator)
-  # |> ignore(filter_separator)
-
-  is_value =
-    [
-      string("false") |> replace(false),
-      string("true") |> replace(true)
-    ]
-    |> choice()
-    |> unwrap_and_tag(:value)
-
-  is_operator =
-    string("is")
-    |> post_traverse(:normalize)
-    |> tag(:operator)
-    |> ignore(filter_separator)
-    |> concat(is_value)
-
-  like_value =
-    [
-      ascii_char([?*]) |> replace(?%),
-      ascii_char([])
-    ]
-    |> choice()
-    |> repeat()
-    |> eos()
-    |> tag(:value)
-
-  like_operator =
-    [
-      string("like"),
-      string("ilike")
-    ]
-    |> choice()
-    |> post_traverse(:normalize)
-    |> tag(:operator)
-    |> ignore(filter_separator)
-    |> concat(like_value)
-
-  rest_value =
-    ascii_char([])
-    |> repeat()
-    |> eos()
-    |> tag(:value)
-
-  rest_operator =
-    [
-      string("eq") |> replace("="),
-      string("gte") |> replace(">="),
-      string("gt") |> replace(">"),
-      string("lte") |> replace("<="),
-      string("lt") |> replace("<"),
-      string("neq") |> replace("<>"),
-      string("in")
-    ]
-    |> choice()
-    |> post_traverse(:normalize)
-    |> tag(:operator)
-    |> ignore(filter_separator)
-    |> concat(rest_value)
-
-  horizontal_filter =
-    string("not")
-    |> replace(true)
-    |> unwrap_and_tag(:negation?)
-    |> ignore(filter_separator)
-    |> optional()
-    |> choice([is_operator, like_operator, rest_operator])
-
-  defparsecp(:horizontal_filter, horizontal_filter)
 
   @doc """
   Parse the given horizontal filters (rows)
