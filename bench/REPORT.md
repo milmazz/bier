@@ -209,3 +209,144 @@ exactly such clauses, so the realistic path is:
 A **full** migration of the recursive grammars to nimble is **not** recommended:
 it re-encodes balanced-split tolerance the current code already handles cleanly,
 for no behavioral or meaningful performance benefit.
+
+---
+
+## 7. Combinator reuse (compile-time)
+
+NimbleParsec's docs (`parsec/2`, "the only situation where you should use
+`parsec/2` for composition is when a large parser is used over and over again in
+a way compilation times are high … you can use `parsec/2` to improve compilation
+time at the cost of runtime performance") motivated a pass to replace
+*inlined-twice* combinators in the templates with a single `defcombinatorp` +
+`parsec(:p_<name>)` reference, to shrink the generated code and the compiler's
+compile-time AST.
+
+### 7.1 What was cleanly hoistable vs blocked
+
+The templates (`lib/bier/query_parser/nimble.ex.exs`,
+`lib/bier/query_parser.ex.exs`) define grammar fragments as plain combinator
+*variables* and inline them into each `defparsecp`. Candidates were any fragment
+inlined 2+ times.
+
+**Cleanly hoistable — no `--warnings-as-errors` conflict (explored, then
+reverted; see §7.4 — all in `nimble.ex.exs`):**
+
+| Combinator | Grammar | Use sites | Position |
+|---|---|---|---|
+| `:p_fun_token` (`[a-z_]+` → string) | `p_agg_call`, `p_aggregate` | 2 | mandatory `concat` |
+| `:p_ctl_ws_run` (`repeat([\s\t\n\r\f\v])`) | `p_agg_call`, `p_logic_prefix` | 2 | mandatory `ignore(parsec(…))` |
+| `:p_name_run` (`[A-Za-z_][\w ]*` char run, no `reduce`) | `p_embed_parts`, `p_related_order` | 2 | mandatory leading element |
+
+Net: **4 inlined copies → 2 shared combinators** across three grammar pairs.
+
+**Blocked by `--warnings-as-errors` (kept inlined):**
+
+| Candidate | Where | Why blocked |
+|---|---|---|
+| `name_token` (`[A-Za-z_][\w ]*` → string) | 7 sites in `p_embed`/`p_aggregate`/`p_agg_call`/`p_alias` | 5 of 7 sites are inside `optional(…)`/`repeat(…)` |
+| `identifier` | 3 sites in `select` (`query_parser.ex.exs`) | whole `select` is `choice([default, detailed])` |
+| `cast_separator`, `filter_separator` | `select` / `horizontal_filter` | sit under `select`'s top-level `choice` and `horizontal_filter`'s `optional |> choice` |
+
+**Root cause of the block (the Phase-2 finding, now pinpointed).** When
+`parsec(:name)` is expanded inside a *backtracking* context (`optional`,
+`repeat`, `choice`), NimbleParsec's compiler emits a dispatch clause of the form
+
+```elixir
+case p_name__0(rest, acc, [], context, line, offset) do
+  {:ok, acc, rest, context, line, offset} -> next(...)
+  {:error, _, _, _, _, _} = error -> backtrack(...)   # `error` bound, never used
+end
+```
+
+The backtracking branch discards `error` (it pops the stack instead), so the
+generated file has an `unused variable "error"` warning → fails under
+`--warnings-as-errors`. In a *mandatory* position the same expansion is
+`{:error, …} = error -> error` (the value is returned, so it IS used) and the
+file stays clean. This is a property of NimbleParsec's generator, not something
+the template can restructure away without changing grammar semantics — so every
+reuse where the call site is under `optional`/`repeat`/`choice` is genuinely
+blocked.
+
+Three structural tricks were used to *keep* a reuse on the clean side of that
+line: (a) `:p_ctl_ws_run` captures the backtracking `repeat/1` *inside* the
+combinator, so the call site is the mandatory `ignore(parsec(:p_ctl_ws_run))`;
+(b) `:p_name_run` is referenced only as the mandatory *leading* element of two
+`defparsecp` entry points (never wrapped); (c) `:p_fun_token` carries no tag, so
+the `unwrap_and_tag(:fun)` stays at the (mandatory) use site. `name_token` itself
+is deliberately **not** redefined as `parsec(:p_name_run) |> reduce(...)`,
+because that would re-introduce the inner `parsec` into all of `name_token`'s
+`optional(...)` call sites and re-trip the warning.
+
+`query_parser.ex.exs` (the legacy `select`/`horizontal_filter` grammars) yielded
+**zero** clean candidates: every repeated fragment there lives under the
+top-level `choice`/`optional`, so its template is unchanged by this pass.
+
+### 7.2 Before/after measurements
+
+**Generated code size** (`wc -l -c`):
+
+| File | LOC before | LOC after | bytes before | bytes after |
+|---|---:|---:|---:|---:|
+| `lib/bier/query_parser/nimble.ex` | 2812 | 2777 | 91 126 | 90 020 |
+| `lib/bier/query_parser.ex` | 2139 | 2139 | 77 228 | 77 228 |
+| **total** | **4951** | **4916** | **168 354** | **167 248** |
+
+Net **−35 LOC / −1106 bytes** (−1.2% of `nimble.ex`; the `query_parser.ex`
+parser is untouched because no candidate was clean).
+
+**Compile wall-time + peak RSS.** Apple M1 Max, Elixir 1.19.5 / OTP 28.
+`rm -rf _build/dev/lib/bier && /usr/bin/time -l mix compile --warnings-as-errors`
+(deps pre-compiled, so only the `bier` app — dominated by the two generated
+parsers — recompiles). 3 iterations each, same session, median reported:
+
+| | clean rebuild wall (median) | clean rebuild peak RSS (median) | touch+recompile wall (median) |
+|---|---:|---:|---:|
+| **before** (inlined) | 0.97 s | 268 MB | 0.42 s |
+| **after** (parsec reuse) | 0.97 s | 276 MB | 0.43 s |
+
+The differences are **inside the run-to-run noise** (RSS varied 264–283 MB
+between iterations of a *single* configuration). At these parser sizes the four
+deduplicated fragments are far too small to move compile time or peak RSS.
+
+### 7.3 Runtime trade-off
+
+Each `parsec/1` adds a stacktrace entry at parse time (NimbleParsec docs:
+"runtime performance is degraded as `parsec` introduces a stacktrace entry"). A
+focused micro-bench (warmup 0.5 s, time 2 s) of the four affected functions,
+inlined vs reused:
+
+| Function (reuse) | before ips | after ips | Δ |
+|---|---:|---:|---:|
+| `logic_prefix` (`:p_ctl_ws_run`) | 1195 K | 1148 K | ~−4% (±950% dev — noise) |
+| `aggregate?` (`:p_fun_token`) | 208 K | 207 K | ~0% |
+| `parse_embed_parts` (`:p_name_run`) | 211–218 K | 206 K | ~−3% |
+| `parse_order_term` (`:p_name_run`) | 26.3 K | 26.2 K | ~0% |
+
+The stacktrace-frame cost is real in principle but **below the measurement
+floor** here (deviations dwarf the deltas); parity stays 346/346 + 89/89.
+
+### 7.4 Verdict
+
+**Combinator reuse is not worth much for this codebase.** The two parsers are
+small (~90 KB / ~2800 LOC generated), so the `defcombinatorp`/`parsec` pass that
+NimbleParsec recommends *only for large, compile-time-expensive parsers* buys a
+−1.2% generated-size reduction and **no measurable compile-time or RSS
+improvement**, while adding (immeasurably small) runtime stacktrace overhead and
+template complexity. The dominant reuse target — the `name_token`/`identifier`
+name grammar — is **structurally blocked**: its call sites are overwhelmingly
+inside `optional`/`repeat`/`choice`, where `parsec` reuse trips
+`--warnings-as-errors`, so the highest-value dedup is exactly the one we cannot
+take cleanly.
+
+The three reuses that are *cleanly applicable* (`:p_fun_token`, `:p_ctl_ws_run`,
+`:p_name_run`) are a wash on every measured axis, so they were **reverted** — the
+committed parsers stay fully inlined, which is the fastest at runtime and matches
+the performance goal. This section is the record of that exploration. The honest
+conclusion matches the doc's own guidance: reach for `parsec/1` composition only
+when a *large* parser's compile time actually hurts — which is not the case here.
+
+> Reproduce: regen + size diff with `mix gen.parsers && wc -l -c
+> lib/bier/query_parser.ex lib/bier/query_parser/nimble.ex`; compile RSS with
+> `rm -rf _build/dev/lib/bier && /usr/bin/time -l mix compile
+> --warnings-as-errors` (×3, deps pre-warmed).
