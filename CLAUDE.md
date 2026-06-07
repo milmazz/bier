@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Bier is an early-stage (alpha) Elixir library that aims to serve a RESTful API generated on-the-fly from PostgreSQL DB introspection — heavily inspired by PostgREST. The README is the source of truth for the design intent and includes the two key sequence diagrams (boot flow and request flow). Several pieces called out in the README are intentional placeholders today: DB introspection is stubbed, `Bier.Plugs.ActionController` returns canned responses, and `QueryParser` / `QueryExecutor` (and authentication) do not yet exist.
+Bier is an alpha Elixir library that serves a RESTful API generated on-the-fly from PostgreSQL DB introspection — heavily inspired by PostgREST. The README is the source of truth for the design intent and includes the two key sequence diagrams (boot flow and request flow).
+
+The pipeline is real, not stubbed: `Bier.Introspection` queries `pg_catalog`; `Bier.Plugs.ActionController` resolves the target and runs the read/mutation/RPC path; `Bier.QueryParser` (a generated, dependency-free parser) and `Bier.QueryExecutor` build and run one parameterized JSON query; `Bier.Auth` does HS256 JWT verification + role/GUC setup. Development is driven by a frozen conformance suite derived from PostgREST v14.12 (see `docs/CONFORMANCE_IMPL.md` and `spec/`). Known feature gaps (observability/telemetry, schema-cache reload, admin/health endpoints, asymmetric JWT) are tracked as GitHub issues.
 
 ## Toolchain
 
@@ -15,10 +17,17 @@ Elixir/OTP versions are pinned in `mise.toml` (Elixir 1.19.5 / OTP 28) and match
 ```sh
 mix deps.get          # fetch dependencies
 mix compile
-mix test              # run the full suite
+mix test              # loads the fixture DB, then runs the full suite
 mix test test/path/to/file_test.exs:LINE   # single test by file:line
+mix test --only area:<area>                # one conformance area (e.g. area:operators)
 mix format            # uses .formatter.exs
+mix gen.parsers       # regenerate the parser modules from their *.ex.exs templates
 ```
+
+`mix test` is aliased to `["bier.fixtures.load", "test"]` (`mix.exs`), so it
+drops+recreates a local `bier_test` PostgreSQL database and loads
+`spec/conformance/fixtures.sql` before running. A reachable local Postgres is
+required; see `docs/CONFORMANCE_IMPL.md` for the wiring.
 
 CI runs these gates before `mix test`, so run them locally before pushing to avoid red builds:
 
@@ -49,17 +58,31 @@ Implication: do not put per-instance state in `Bier.Application`. Anything tied 
 
 ### Boot sequence (current state)
 
-`Bier.start_link/1` → validates opts via `Bier.Config.new!/2` (NimbleOptions schema in `lib/bier.ex`) → starts `Bier.HttpServerStarter` and a per-instance `DynamicSupervisor`. `HttpServerStarter.init/1` runs (today: fakes) DB introspection, then calls `Bier.RouterBuilder.build/2`, then `handle_continue(:start_webserver, …)` starts Bandit as a child of that DynamicSupervisor with the freshly built plug.
+`Bier.start_link/1` → validates opts via `Bier.Config.new!/2` (NimbleOptions schema in `Bier.schema/0`, `lib/bier.ex`; defaults sourced from application env) → the `Bier` supervisor starts three children in order: a per-instance **`Postgrex` pool** (registered via `Bier.Registry.via(name, Postgrex)`), a per-instance **`DynamicSupervisor`**, then **`Bier.HttpServerStarter`**. The pool and DynamicSupervisor must come first: `HttpServerStarter.init/1` uses the pool for introspection, and its `handle_continue(:start_webserver, …)` starts Bandit *as a child of the DynamicSupervisor*.
+
+`HttpServerStarter.init/1` runs real introspection — `Bier.Introspection.run/functions/media_handlers(pool, db_schemas)` — and stashes the results in **`:persistent_term`** keyed by `{Bier, :relations | :functions | :media_handlers, name}` (read on every request). It then calls `Bier.RouterBuilder.build/2` and starts Bandit with `http_options: [compress: false]` (PostgREST never compresses and always emits `Content-Length`; Bandit otherwise strips it).
 
 ### Dynamic router generation
 
-`Bier.RouterBuilder.build/2` creates a brand-new module at runtime using `Module.create/3` with quoted `Plug.Router` content. The module is named `<instance_name>.Router` (e.g. `Bier.Router` for the default instance — so two instances must have different `:name` values to avoid module redefinition). For each entry in `db_structure` it emits `get/post/delete` routes pointing to `Bier.Plugs.ActionController` with `init_opts` set to the action atom (`:index | :post | :delete`) and `assigns` carrying `supervisor_name`, `schema`, and `table_name`. Anything that doesn't match falls through to `Bier.Plugs.FallbackController` with `:not_found`.
+`Bier.RouterBuilder.build/2` creates a brand-new module at runtime using `Module.create/3` with quoted `Plug.Router` content, named `<instance_name>.Router` (so two instances must have different `:name` values to avoid module redefinition). It is a thin **catch-all**: a fixed plug pipeline (`:match` → `assign_instance` → `Bier.Plugs.Cors` → `Bier.Plugs.Observability` → `Bier.Plugs.ReadBody` → `:dispatch`) and a single `match _` that forwards every request to `Bier.Plugs.ActionController`. The per-table `get/post/delete` generation is gone — Accept-Profile schema resolution and `/rpc/*` can't be expressed as static routes, so the target `{schema, relation}` is resolved at request time instead.
 
 When changing routing/dispatch semantics, edit the quoted block inside `RouterBuilder` — the generated module is rebuilt every boot, so it is not checked in and grepping for routes won't find them.
 
-### Controllers
+### Controllers and the request pipeline
 
-`Bier.Plugs.ActionController.call/2` dispatches by the `init_opts` action atom and lets a non-`Plug.Conn` return value fall through to `FallbackController.call/2`, which pattern-matches on shapes like `{:error, :bad_request}`, `{:error, :mismatch}`, `%{code: :insufficient_privilege}`, and `%{code: :foreign_key_violation}`. New error shapes should be added as additional `FallbackController.call/2` clauses rather than handled inline in the action.
+`Bier.Plugs.ActionController.call/2` resolves the target `{schema, relation}` from the path + `Accept-Profile`/`Content-Profile` (default schema = first of `db_schemas`), runs `Bier.Auth.resolve` for schemas that require it (auth is inline here, not a separate plug), then dispatches by path/method:
+
+- root `/` → OpenAPI document (or `db_root_spec`);
+- `OPTIONS` → `Allow` header;
+- `/rpc/<fn>` → `Bier.Rpc.dispatch`;
+- relation `GET`/`HEAD` → `Bier.Negotiation` → `Bier.QueryParser.parse_request` → `Bier.QueryExecutor.run` (one parameterized SQL → JSON) → `Bier.Response`/`Bier.Render`;
+- relation `POST`/`PATCH`/`PUT`/`DELETE` → `Bier.Mutation.handle`.
+
+Any non-`Plug.Conn` return value falls through to `Bier.Plugs.FallbackController.call/2`, which maps internal reasons and Postgres `SQLSTATE`s to HTTP statuses and PostgREST's `{code, message, details, hint}` envelope (`PGRST*` codes). New error shapes should be added as additional `FallbackController.call/2` clauses rather than handled inline in `ActionController`.
+
+### The query parser (generated)
+
+`lib/bier/query_parser.ex` and `lib/bier/query_parser/nimble.ex` are **generated**, dependency-free modules built from `*.ex.exs` templates via `mix gen.parsers` (which runs `mix nimble_parsec.compile`). `nimble_parsec` is a `:dev`-only dep (`runtime: false`); the shipped code does not depend on it. Edit the `.ex.exs` template, run `mix gen.parsers`, and commit both the template and the regenerated `.ex` (the `.ex` is what `mix compile` reads — never edit it directly).
 
 ### Pluggable JSON
 
@@ -67,4 +90,6 @@ When changing routing/dispatch semantics, edit the quoted block inside `RouterBu
 
 ## Test layout
 
-`test/support/` is added to `elixirc_paths` only in `:test` (see `mix.exs`). Put shared fixtures/helpers there. The current suite is essentially empty (`test/bier_test.exs`).
+`test/support/` is added to `elixirc_paths` only in `:test` (see `mix.exs`). Put shared fixtures/helpers there.
+
+The suite is driven by the **conformance cases** in `test/conformance/conformance_test.exs`, which generates one ExUnit test per case in `spec/` (532 cases, ~475 active; `:pending` cases for jwt/jsonpath/status_text/cli are excluded). Each case is tagged `@tag area: :<area>`. The harness under `test/support/` — `Bier.ConformanceServer` (boots one shared instance), `Bier.HttpCase.perform/1` (issues the request via `Req`), and `Bier.ConformanceAssertions` — plus everything under `spec/` is **frozen ground truth**: it encodes real PostgREST v14.12 behavior. Fix `lib/` to match the cases, never edit `test/**` or `spec/**`. See `docs/CONFORMANCE_IMPL.md` for the full contract.
