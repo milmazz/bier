@@ -47,4 +47,49 @@ defmodule Bier.ConformanceJsonPathTest do
       assert_raise ArgumentError, fn -> JP.parse("$['']") end
     end
   end
+
+  describe "resolve/2" do
+    @doc_term %{
+      "swagger" => "2.0",
+      "info" => %{"title" => "API"},
+      "details" => nil,
+      "paths" => %{"/x" => %{"get" => %{"tags" => ["a", "b"]}}},
+      "list" => [%{"Plan" => 1}]
+    }
+
+    test "whole document for empty segments" do
+      assert JP.resolve([], @doc_term) == {:ok, @doc_term}
+    end
+
+    test "nested key hit" do
+      assert JP.resolve([{:key, "info"}, {:key, "title"}], @doc_term) == {:ok, "API"}
+    end
+
+    test "key present with null value is a hit (not missing)" do
+      assert JP.resolve([{:key, "details"}], @doc_term) == {:ok, nil}
+    end
+
+    test "bracket-keyed path and array index" do
+      assert JP.resolve(
+               [{:key, "paths"}, {:key, "/x"}, {:key, "get"}, {:key, "tags"}, {:index, 1}],
+               @doc_term
+             ) == {:ok, "b"}
+
+      assert JP.resolve([{:index, 0}, {:key, "Plan"}], @doc_term["list"]) == {:ok, 1}
+    end
+
+    test "missing key, out-of-range index, and type mismatch are :missing" do
+      assert JP.resolve([{:key, "nope"}], @doc_term) == :missing
+      assert JP.resolve([{:key, "list"}, {:index, 9}], @doc_term) == :missing
+      assert JP.resolve([{:key, "swagger"}, {:key, "x"}], @doc_term) == :missing
+    end
+  end
+
+  describe "fetch/2" do
+    test "parses then resolves" do
+      term = %{"a" => %{"b" => [10, 20]}}
+      assert JP.fetch(term, "$.a.b[1]") == {:ok, 20}
+      assert JP.fetch(term, "$.a.c") == :missing
+    end
+  end
 end

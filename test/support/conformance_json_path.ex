@@ -75,4 +75,28 @@ defmodule Bier.ConformanceJsonPath do
   defp take_until_quote("", _acc), do: :unterminated
 
   defp bad(orig), do: raise(ArgumentError, "malformed JSONPath: #{inspect(orig)}")
+
+  @doc "Resolve parsed `segments` against a decoded JSON term."
+  @spec resolve([segment()], term()) :: {:ok, term()} | :missing
+  def resolve([], term), do: {:ok, term}
+
+  def resolve([{:key, k} | rest], term) when is_map(term) do
+    case Map.fetch(term, k) do
+      {:ok, value} -> resolve(rest, value)
+      :error -> :missing
+    end
+  end
+
+  def resolve([{:index, i} | rest], term) when is_list(term) do
+    case Enum.fetch(term, i) do
+      {:ok, value} -> resolve(rest, value)
+      :error -> :missing
+    end
+  end
+
+  def resolve(_segments, _term), do: :missing
+
+  @doc "Parse `path` and resolve it against `term`."
+  @spec fetch(term(), String.t()) :: {:ok, term()} | :missing
+  def fetch(term, path), do: path |> parse() |> resolve(term)
 end
