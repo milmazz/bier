@@ -34,7 +34,7 @@ defmodule Bier.HttpCase do
         method: method,
         url: url,
         headers: build_headers(req, schema),
-        body: encode_body(Map.get(req, "body")),
+        body: request_body(req),
         decode_body: false,
         retry: false
       )
@@ -84,6 +84,15 @@ defmodule Bier.HttpCase do
        do: "%" <> (byte |> Integer.to_string(16) |> String.upcase() |> String.pad_leading(2, "0"))
 
   defp encode_byte(byte), do: <<byte>>
+
+  # A case carries at most one request-body form:
+  #   * `body_raw`  — sent verbatim (CSV, deliberately-invalid JSON, octet bytes)
+  #   * `body_json` — the value is always JSON-encoded
+  #   * `body`      — JSON-encoded unless already a string
+  defp request_body(%{"body_raw" => raw}), do: raw
+  defp request_body(%{"body_json" => json}), do: Bier.json_library().encode!(json)
+  defp request_body(%{"body" => body}), do: encode_body(body)
+  defp request_body(_), do: nil
 
   defp encode_body(nil), do: nil
   defp encode_body(body) when is_binary(body), do: body
