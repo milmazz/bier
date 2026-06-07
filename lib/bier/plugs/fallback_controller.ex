@@ -67,6 +67,15 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
+  def call(conn, {:error, :openapi_disabled}) do
+    error(conn, 404, %{
+      code: "PGRST126",
+      message: "Root endpoint metadata is disabled",
+      details: nil,
+      hint: nil
+    })
+  end
+
   # A fully-built PGRST202 not-found envelope (with hint/details) from the RPC
   # resolver.
   def call(conn, {:error, {:rpc_not_found, body}}) do
