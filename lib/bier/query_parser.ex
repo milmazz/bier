@@ -366,6 +366,18 @@ defmodule Bier.QueryParser do
 
   @reserved ~w(select order limit offset on_conflict columns and or not)
 
+  # ---- pluggable leaf-grammar backend --------------------------------------
+  #
+  # The leaf grammars below (`parse_json_path/1`, `split_op_value/1`,
+  # `parse_filter_expr/2`, `parse_order_term/1`, `parse_scalar_select/1`,
+  # `valid_identifier?/1`, `embed?/1`, `aggregate?/1`) can be served either by the
+  # default regex/string implementation in THIS module or by the experimental
+  # `nimble_parsec` twins in `Bier.QueryParser.Nimble`. The backend is selected at
+  # runtime via `config :bier, :parser_backend, :regex | :nimble` (default
+  # `:regex`). Both backends MUST be behavior-identical; see `bench/REPORT.md`.
+  @compile {:inline, parser_backend: 0}
+  defp parser_backend, do: Application.get_env(:bier, :parser_backend, :regex)
+
   @doc """
   Parse a full request query string into a structured query plan.
 
@@ -582,6 +594,13 @@ defmodule Bier.QueryParser do
   # not preceded by a `.` aggregate marker, i.e. `name(...)` / `alias:name(...)`
   # / `name!hint(...)`.
   defp embed?(field) do
+    case parser_backend() do
+      :nimble -> Bier.QueryParser.Nimble.embed?(field)
+      _ -> embed_regex?(field)
+    end
+  end
+
+  defp embed_regex?(field) do
     Regex.match?(~r/^(?:[a-zA-Z_][\w ]*:)?[a-zA-Z_][\w ]*(?:![\w ]+)*\(/u, field)
   end
 
@@ -594,6 +613,13 @@ defmodule Bier.QueryParser do
   # embed (e.g. `child_entities()` used for null filtering). A `col.fn()` form is
   # always an aggregate.
   defp aggregate?(field) do
+    case parser_backend() do
+      :nimble -> Bier.QueryParser.Nimble.aggregate?(field)
+      _ -> aggregate_regex?(field)
+    end
+  end
+
+  defp aggregate_regex?(field) do
     case Regex.run(
            ~r/^(?:[a-zA-Z_][\w ]*:)?(?:([a-zA-Z_][\w ]*)\.)?([a-z_]+)\(\s*\)(::[A-Za-z0-9_ ]+)?$/u,
            field
@@ -683,6 +709,13 @@ defmodule Bier.QueryParser do
 
   # Split a leading `alias:` (not a `::` cast) off the front of a term.
   defp split_alias(field) do
+    case parser_backend() do
+      :nimble -> Bier.QueryParser.Nimble.split_alias(field)
+      _ -> split_alias_regex(field)
+    end
+  end
+
+  defp split_alias_regex(field) do
     case Regex.run(~r/^([a-zA-Z_][\w ]*?):(?!:)(.+)$/, field) do
       [_, a, r] -> {String.trim(a), r}
       _ -> {nil, field}
@@ -690,6 +723,13 @@ defmodule Bier.QueryParser do
   end
 
   defp parse_scalar_select(field) do
+    case parser_backend() do
+      :nimble -> Bier.QueryParser.Nimble.parse_scalar_select(field)
+      _ -> parse_scalar_select_regex(field)
+    end
+  end
+
+  defp parse_scalar_select_regex(field) do
     {col_alias, rest} = split_alias(field)
 
     {cast, rest} =
@@ -779,6 +819,13 @@ defmodule Bier.QueryParser do
   #   * related order: `<rel>(<col>[->json])[.asc|.desc][.nulls...]` — orders by a
   #     column of a to-one related (embedded) resource.
   defp parse_order_term(term) do
+    case parser_backend() do
+      :nimble -> Bier.QueryParser.Nimble.parse_order_term(term)
+      _ -> parse_order_term_regex(term)
+    end
+  end
+
+  defp parse_order_term_regex(term) do
     case Regex.run(~r/^([a-zA-Z_][\w ]*)\((.+)\)((?:\.[a-z]+)*)$/u, term) do
       [_, rel, inner, mods] ->
         parse_related_order_term(String.trim(rel), String.trim(inner), mods)
@@ -817,7 +864,8 @@ defmodule Bier.QueryParser do
   # PostgREST renders a precise parser error for bad order syntax. We reproduce
   # the common case (an unexpected trailing token after a valid prefix) used by
   # the conformance suite; other malformed terms fall back to the same envelope.
-  defp order_error(term) do
+  @doc false
+  def order_error(term) do
     count = leading_valid_order_length(term)
     bad_rest = String.slice(term, count..-1//1)
 
@@ -1147,6 +1195,13 @@ defmodule Bier.QueryParser do
   # Parse `op.value` (with optional `not.` prefix, quantifier `op(any|all)`,
   # fts language `fts(lang)`) against column `col` (which may have a json path).
   defp parse_filter_expr(col_raw, opval) do
+    case parser_backend() do
+      :nimble -> Bier.QueryParser.Nimble.parse_filter_expr(col_raw, opval)
+      _ -> parse_filter_expr_regex(col_raw, opval)
+    end
+  end
+
+  defp parse_filter_expr_regex(col_raw, opval) do
     {negate?, opval} =
       case String.split(opval, ".", parts: 2) do
         ["not", rest] -> {true, rest}
@@ -1172,6 +1227,13 @@ defmodule Bier.QueryParser do
 
   # Splits `op.value`, handling `op(any)`/`op(all)` quantifiers and `fts(lang)`.
   defp split_op_value(opval) do
+    case parser_backend() do
+      :nimble -> Bier.QueryParser.Nimble.split_op_value(opval)
+      _ -> split_op_value_regex(opval)
+    end
+  end
+
+  defp split_op_value_regex(opval) do
     case Regex.run(~r/^([a-z]+)(\(([a-z_]+)\))?\.(.*)$/s, opval) do
       [_, op, "", _, value] -> {:ok, op, nil, value}
       [_, op, _, modifier, value] -> {:ok, op, modifier, value}
@@ -1184,6 +1246,13 @@ defmodule Bier.QueryParser do
   # Parse a column reference that may carry a JSON path: `col`, `col->a->>b`,
   # `col->0`, `col->>-3`. Returns {:ok, {base_col, [{:arrow|:arrow_text, key}]}}.
   defp parse_json_path(str) do
+    case parser_backend() do
+      :nimble -> Bier.QueryParser.Nimble.parse_json_path(str)
+      _ -> parse_json_path_regex(str)
+    end
+  end
+
+  defp parse_json_path_regex(str) do
     case String.split(str, ~r/->>?/, include_captures: true) do
       [col] ->
         {:ok, {col, []}}
@@ -1213,6 +1282,13 @@ defmodule Bier.QueryParser do
   end
 
   defp valid_identifier?(col) do
+    case parser_backend() do
+      :nimble -> Bier.QueryParser.Nimble.valid_identifier?(col)
+      _ -> valid_identifier_regex?(col)
+    end
+  end
+
+  defp valid_identifier_regex?(col) do
     # PostgREST allows letters, digits, underscore, space and dash in unquoted
     # column references (e.g. `field-with_sep`).
     Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_ -]*$/u, col)
