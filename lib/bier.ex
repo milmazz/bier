@@ -242,6 +242,23 @@ defmodule Bier do
         `error` logs status >= 500; `warn` logs status >= 400; `info`/`debug`
         log every response. Affects logging only, never the response itself.
         """
+      ],
+      openapi_mode: [
+        type: {:in, ["follow-privileges", "ignore-privileges", "disabled"]},
+        default: env(:openapi_mode, "follow-privileges"),
+        doc: """
+        How the root OpenAPI document is served (PostgREST openapi-mode).
+        `disabled` makes the root endpoint return 404 PGRST126 instead of a spec.
+        """
+      ],
+      db_root_spec: [
+        type: {:or, [:string, nil]},
+        default: env(:db_root_spec, nil),
+        doc: """
+        Name of a DB function returning a custom root OpenAPI document
+        (PostgREST db-root-spec). When set, the root endpoint serves its result
+        instead of the generated spec.
+        """
       ]
     ]
   end
@@ -280,9 +297,14 @@ defmodule Bier do
       # instance name. Started before HttpServerStarter, which needs it for the
       # boot-time DB introspection.
       Supervisor.child_spec({Postgrex, postgrex_opts(conf)}, id: {name, Postgrex}),
-      {Bier.HttpServerStarter, conf},
+      # The DynamicSupervisor must start BEFORE HttpServerStarter: the latter's
+      # `handle_continue(:start_webserver, …)` starts Bandit *as a child of this
+      # DynamicSupervisor*, so it has to already be alive — otherwise that
+      # `start_child` call races the DynamicSupervisor's own startup and crashes
+      # (the supervisor then restarts HttpServerStarter, rebuilding the router).
       {DynamicSupervisor,
-       strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)}
+       strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
+      {Bier.HttpServerStarter, conf}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

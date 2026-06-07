@@ -13,17 +13,57 @@ defmodule Bier.ConformanceServer do
       raise "ConformanceServer.start!/0 called more than once — call it only from test_helper.exs"
     end
 
-    port = free_port()
-    opts = [name: @instance, router: [port: port, scheme: :http]] ++ base_opts()
-    {:ok, _pid} = Bier.start_link(opts)
-    base = "http://127.0.0.1:#{port}"
-    wait_until_listening(port)
+    base = start_instance(@instance, base_opts())
     :persistent_term.put(@key, base)
+    start_variants()
     base
   end
 
   @doc "Base URL of the shared instance (e.g. \"http://127.0.0.1:54321\")."
   def base_url, do: :persistent_term.get(@key)
+
+  @doc """
+  Base URL to send a case to: the shared instance, or — for a case carrying a
+  per-case `config:` block (PostgREST per-case config) — a dedicated instance
+  booted with those overrides merged onto `base_opts/0`.
+  """
+  # Cases whose `config:` is mutually exclusive with the shared instance's, so
+  # they need a dedicated instance. Most config cases are ALREADY satisfied by
+  # `base_opts/0` and stay on the shared instance — routing a currently-passing
+  # case to a faithful variant could change its result. (1467 RS256 is deferred,
+  # issue #23; openapi-mode/db-root-spec behavior lands separately.)
+  @variant_case_ids [1491, 1493, 1678, 1682, 1758, 1763]
+
+  def url_for(%Bier.ConformanceCase{id: id}) when id in @variant_case_ids,
+    do: :persistent_term.get({__MODULE__, :variant, id})
+
+  def url_for(%Bier.ConformanceCase{}), do: base_url()
+
+  # One Bier instance per variant case. The set is tiny, so they are started
+  # eagerly here rather than lazily (which would race under `async: true`).
+  defp start_variants do
+    Bier.ConformanceCase.load_all()
+    |> Enum.filter(&(&1.id in @variant_case_ids))
+    |> Enum.each(fn %{id: id, config: config} ->
+      name = Module.concat(__MODULE__, "Variant#{id}")
+      base = start_instance(name, Keyword.merge(base_opts(), translate(config)))
+      :persistent_term.put({__MODULE__, :variant, id}, base)
+    end)
+  end
+
+  defp start_instance(name, opts) do
+    port = free_port()
+    {:ok, _pid} = Bier.start_link([name: name, router: [port: port, scheme: :http]] ++ opts)
+    wait_until_listening(port)
+    "http://127.0.0.1:#{port}"
+  end
+
+  # Translate a PostgREST per-case `config:` map into `Bier.start_link/1` opts:
+  # `kebab-case` keys become the matching snake_case atoms; values pass through
+  # as parsed from YAML (`null` -> nil, `false`, `""`, strings).
+  defp translate(config) do
+    Enum.map(config, fn {k, v} -> {k |> String.replace("-", "_") |> String.to_atom(), v} end)
+  end
 
   @doc """
   Base `Bier.start_link/1` options for the conformance suite.
