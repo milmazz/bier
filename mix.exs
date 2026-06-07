@@ -39,7 +39,15 @@ defmodule Bier.MixProject do
 
   defp aliases do
     [
-      test: ["bier.fixtures.load", "test"]
+      test: ["bier.fixtures.load", "test"],
+      # Regenerate the dependency-free parser modules from their `.ex.exs`
+      # templates. Run in `:dev` (nimble_parsec is a dev-only dep). The
+      # generated `.ex` files are the source `mix compile` reads; commit both.
+      "gen.parsers": [
+        "nimble_parsec.compile lib/bier/query_parser/nimble.ex.exs",
+        "nimble_parsec.compile lib/bier/query_parser.ex.exs",
+        "format"
+      ]
     ]
   end
 
@@ -51,7 +59,11 @@ defmodule Bier.MixProject do
       {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
       {:nimble_options, "~> 1.0"},
-      {:nimble_parsec, "~> 1.4"},
+      # nimble_parsec is only needed to RUN `mix gen.parsers` (the
+      # `nimble_parsec.compile` template task). The committed parser modules
+      # `Bier.QueryParser`/`Bier.QueryParser.Nimble` are generated, dependency-free
+      # `.ex` files, so `:test`/`:prod` compile without it.
+      {:nimble_parsec, "~> 1.4", only: :dev, runtime: false},
       {:plug, "~> 1.19"},
       {:postgrex, "~> 0.20"},
       {:req, "~> 0.5", only: :test},
