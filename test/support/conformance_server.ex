@@ -52,9 +52,9 @@ defmodule Bier.ConformanceServer do
   end
 
   defp start_instance(name, opts) do
-    port = free_port()
+    port = Bier.TestPorts.free_port()
     {:ok, _pid} = Bier.start_link([name: name, router: [port: port, scheme: :http]] ++ opts)
-    wait_until_listening(port)
+    Bier.TestPorts.wait_until_listening(port)
     "http://127.0.0.1:#{port}"
   end
 
@@ -134,30 +134,5 @@ defmodule Bier.ConformanceServer do
       server_trace_header: "X-Request-Id",
       log_level: :error
     ]
-  end
-
-  defp free_port do
-    {:ok, sock} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}])
-    {:ok, port} = :inet.port(sock)
-    # TOCTOU: tiny window between closing this probe socket and Bandit binding.
-    # Acceptable for a single suite run; avoid parallel suite runs on one host.
-    :gen_tcp.close(sock)
-    port
-  end
-
-  defp wait_until_listening(port, retries \\ 100) do
-    # Each attempt: up to ~10ms connect + 20ms sleep ≈ 30ms; 100 retries ≈ 3s ceiling.
-    case :gen_tcp.connect(~c"127.0.0.1", port, [], 10) do
-      {:ok, sock} ->
-        :gen_tcp.close(sock)
-        :ok
-
-      {:error, _} when retries > 0 ->
-        Process.sleep(20)
-        wait_until_listening(port, retries - 1)
-
-      {:error, reason} ->
-        raise "Bier conformance server did not come up on port #{port}: #{inspect(reason)}"
-    end
   end
 end
