@@ -57,6 +57,9 @@ defmodule Bier.MixProject do
       {:bandit, "~> 1.0"},
       {:benchee, "~> 1.3", only: :dev},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false},
+      # JWT signature verification (HS*/RS*/ES*/PS*/EdDSA) from the configured
+      # secret or JWK — see Bier.JWT.
+      {:jose, "~> 1.11"},
       {:excoveralls, "~> 0.18", only: :test},
       {:nimble_options, "~> 1.0"},
       # nimble_parsec is only needed to RUN `mix gen.parsers` (the
