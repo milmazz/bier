@@ -98,13 +98,13 @@ defmodule Bier.Plugs.ActionController do
   # `Authorization` bearer token cannot be authenticated here and yields a 500
   # (mirrors PostgREST's JWT-failure path; this is the single line logged at
   # log-level=error, case 1764). A token-free request renders the document.
-  defp dispatch_root(conn, _config) do
+  defp dispatch_root(conn, config) do
     cond do
       bearer_present?(conn) ->
         {:error, :jwt_unconfigured}
 
       conn.method in ["GET", "HEAD"] ->
-        render_root(conn)
+        render_root(conn, config)
 
       true ->
         {:error, :method_not_allowed}
@@ -115,27 +115,52 @@ defmodule Bier.Plugs.ActionController do
     not is_nil(Bier.Auth.bearer_token(conn))
   end
 
-  defp render_root(conn) do
+  defp render_root(conn, config) do
     case Negotiation.resolve(conn, [:openapi, :json]) do
       {:ok, media} ->
         conn = put_resp_header(conn, "content-type", MediaType.content_type(media))
 
-        # HEAD / returns no body and (mirroring PostgREST OpenApiSpec.hs:22-29) no
-        # Content-Length header. GET / returns the document with its byte length.
-        case conn.method do
-          "HEAD" ->
-            send_resp(conn, 200, "")
+        cond do
+          # openapi-mode = disabled: the root metadata endpoint is off (PGRST126).
+          config.openapi_mode == "disabled" ->
+            {:error, :openapi_disabled}
 
-          _ ->
-            body = Bier.json_library().encode!(root_openapi_doc())
+          # db-root-spec: serve the named DB function's JSON verbatim.
+          config.db_root_spec ->
+            root_spec_body(conn, config)
 
-            conn
-            |> put_resp_header("content-length", Integer.to_string(byte_size(body)))
-            |> send_resp(200, body)
+          true ->
+            root_doc_body(conn, Bier.json_library().encode!(root_openapi_doc()))
         end
 
       {:error, _} = err ->
         err
+    end
+  end
+
+  # GET / returns the body with its byte length; HEAD / returns no body and no
+  # Content-Length (mirroring PostgREST OpenApiSpec.hs:22-29).
+  defp root_doc_body(%{method: "HEAD"} = conn, _body), do: send_resp(conn, 200, "")
+
+  defp root_doc_body(conn, body) do
+    conn
+    |> put_resp_header("content-length", Integer.to_string(byte_size(body)))
+    |> send_resp(200, body)
+  end
+
+  # db-root-spec: `GET /` invokes `<default-schema>.<root-spec>()` and returns its
+  # JSON body instead of the generated document (PostgREST ApiRequest.hs:120-122).
+  defp root_spec_body(%{method: "HEAD"} = conn, _config), do: send_resp(conn, 200, "")
+
+  defp root_spec_body(conn, config) do
+    [schema | _] = config.db_schemas
+
+    fun =
+      "#{Bier.QueryExecutor.quote_ident(schema)}.#{Bier.QueryExecutor.quote_ident(config.db_root_spec)}"
+
+    case Postgrex.query(Registry.via(config.name, Postgrex), "SELECT (#{fun}())::text", []) do
+      {:ok, %Postgrex.Result{rows: [[body]]}} -> root_doc_body(conn, body)
+      {:error, _} = err -> err
     end
   end
 
