@@ -32,7 +32,7 @@ defmodule Bier.ConformanceServer do
   # `base_opts/0` and stay on the shared instance — routing a currently-passing
   # case to a faithful variant could change its result. (1467 RS256 is deferred,
   # issue #23; openapi-mode/db-root-spec behavior lands separately.)
-  @variant_case_ids [1491, 1493, 1678, 1682, 1758, 1763]
+  @variant_case_ids [1491, 1493, 1678, 1682, 1703, 1758, 1763]
 
   def url_for(%Bier.ConformanceCase{id: id}) when id in @variant_case_ids,
     do: :persistent_term.get({__MODULE__, :variant, id})
@@ -61,8 +61,13 @@ defmodule Bier.ConformanceServer do
   # Translate a PostgREST per-case `config:` map into `Bier.start_link/1` opts:
   # `kebab-case` keys become the matching snake_case atoms; values pass through
   # as parsed from YAML (`null` -> nil, `false`, `""`, strings).
+  # Special case: `db-schemas` in YAML may be a plain scalar string (e.g. "test")
+  # when only one schema is listed; wrap it in a list so NimbleOptions accepts it.
   defp translate(config) do
-    Enum.map(config, fn {k, v} -> {k |> String.replace("-", "_") |> String.to_atom(), v} end)
+    Enum.map(config, fn
+      {"db-schemas", v} when is_binary(v) -> {:db_schemas, [v]}
+      {k, v} -> {k |> String.replace("-", "_") |> String.to_atom(), v}
+    end)
   end
 
   @doc """

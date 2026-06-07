@@ -95,4 +95,59 @@ defmodule Bier.ConformanceAssertionsTest do
     assert_expect(resp(%{body: ""}), %{"body_exact" => ""})
     assert_raise ExUnit.AssertionError, fn -> assert_expect(resp(), %{"body_exact" => nil}) end
   end
+
+  test "body_jsonpath equals (incl. null), present, exists, absent" do
+    body =
+      ~s({"code":"PGRST106","details":null,"swagger":"2.0",) <>
+        ~s("paths":{"/x":{"get":{"tags":["t0"]}}}})
+
+    r = resp(%{body: body})
+
+    assert_expect(r, %{
+      "body_jsonpath" => [
+        %{"path" => "$.code", "equals" => "PGRST106"},
+        %{"path" => "$.details", "equals" => nil},
+        %{"path" => "$.paths['/x'].get.tags[0]", "equals" => "t0"},
+        %{"path" => "$.swagger", "present" => true},
+        %{"path" => "$.swagger", "exists" => true},
+        %{"path" => "$.paths['/missing']", "absent" => true}
+      ]
+    })
+  end
+
+  test "body_jsonpath equals mismatch fails" do
+    r = resp(%{body: ~s({"code":"PGRST106"})})
+
+    assert_raise ExUnit.AssertionError, fn ->
+      assert_expect(r, %{"body_jsonpath" => [%{"path" => "$.code", "equals" => "OTHER"}]})
+    end
+  end
+
+  test "body_jsonpath absent fails when the node is present" do
+    r = resp(%{body: ~s({"a":1})})
+
+    assert_raise ExUnit.AssertionError, fn ->
+      assert_expect(r, %{"body_jsonpath" => [%{"path" => "$.a", "absent" => true}]})
+    end
+  end
+
+  test "body_jsonpath present fails when the node is missing" do
+    r = resp(%{body: ~s({"a":1})})
+
+    assert_raise ExUnit.AssertionError, fn ->
+      assert_expect(r, %{"body_jsonpath" => [%{"path" => "$.b", "present" => true}]})
+    end
+  end
+
+  test "body_jsonpath unknown predicate raises (never silently passes)" do
+    r = resp(%{body: ~s({"a":1})})
+
+    assert_raise RuntimeError, ~r/unsupported body_jsonpath predicate/, fn ->
+      assert_expect(r, %{"body_jsonpath" => [%{"path" => "$.a", "bogus" => true}]})
+    end
+  end
+
+  test "body_jsonpath with an empty entry list passes (no body decode)" do
+    assert_expect(resp(%{body: ""}), %{"body_jsonpath" => []})
+  end
 end
