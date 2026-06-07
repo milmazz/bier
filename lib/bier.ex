@@ -15,6 +15,14 @@ defmodule Bier do
         {Bier, name: MyApp.Bier, router: [port: 4040, scheme: :http]}
       ]
 
+  Pass `admin_server_port:` to also expose the `/live` and `/ready` health
+  endpoints on a separate listener (it must differ from `router[:port]`):
+
+      children = [
+        {Bier,
+         name: MyApp.Bier, router: [port: 4040, scheme: :http], admin_server_port: 4041}
+      ]
+
   See `start_link/1` for the full list of options.
 
   Per-instance processes are registered through `Bier.Registry`.
