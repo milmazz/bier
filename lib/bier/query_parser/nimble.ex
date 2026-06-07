@@ -1,13 +1,14 @@
 defmodule Bier.QueryParser.Nimble do
   @moduledoc """
-  An alternative, `nimble_parsec`-based implementation of the request-pipeline
-  *leaf grammars* used by `Bier.QueryParser.parse_request/1`.
+  The `nimble_parsec`-based implementation of the request-pipeline *leaf
+  grammars* used by `Bier.QueryParser.parse_request/1`.
 
-  This module is a drop-in alternative backend for the regex/string parsing path
-  that lives in `Bier.QueryParser` (everything below the `# Request pipeline
-  parsing` banner). Every public function here returns the EXACT same data
-  structure as its regex twin, so it can be swapped in via the
-  `:bier, :parser_backend` application env (`:regex` | `:nimble`).
+  These grammars compile to binary-matching clauses at compile time and replaced
+  the original regex/`String.split` parsing (1.6x–5.9x faster per function,
+  proven behavior-identical against the conformance suite — see
+  `bench/REPORT.md`). The recursive/orchestration layer (the select tree, logic
+  groups, embeds, and `split_top_commas/1`) deliberately stays on the string
+  path in `Bier.QueryParser`, where `nimble_parsec` offers no benefit.
 
   ## What is implemented in nimble_parsec
 
@@ -30,8 +31,7 @@ defmodule Bier.QueryParser.Nimble do
   recursive grammar would have to *parse* the bracket contents (which here we
   deliberately keep opaque — the splitter must tolerate arbitrary inner text such
   as `{1,"a,b"}`). Re-expressing it as a combinator buys nothing and loses the
-  tolerant behaviour, so we delegate to the original. It is exposed here so the
-  backend switch can route through this module uniformly.
+  tolerant behaviour, so it stays in `Bier.QueryParser`.
 
   The genuinely recursive grammars (`parse_select_tree/1`, logic groups
   `and=(...)`, embed sub-selects) are likewise left in `Bier.QueryParser`: they
@@ -597,12 +597,4 @@ defmodule Bier.QueryParser.Nimble do
   # on string ops, so we delegate to the shared regex implementation to guarantee
   # byte-identical error columns/details.
   defp order_error(term), do: Bier.QueryParser.order_error(term)
-
-  # ---------------------------------------------------------------------------
-  # split_top_commas/1 — delegated (see moduledoc).
-  # ---------------------------------------------------------------------------
-
-  @doc false
-  @spec split_top_commas(String.t()) :: [String.t()]
-  def split_top_commas(str), do: Bier.QueryParser.split_top_commas(str)
 end
