@@ -324,6 +324,9 @@ defmodule Bier do
   # admin health endpoints (separate from the catch-all API router). Started
   # statically here — it needs no introspection result; `/ready` reports 503
   # until the schema cache is populated, which is the correct readiness signal.
+  # (Boot ordering after HttpServerStarter means the cache is populated before
+  # this listener binds on the initial boot; across an HttpServerStarter restart
+  # the admin listener keeps serving the last persistent_term cache.)
   defp admin_children(%Bier.Config{admin_server_port: nil}), do: []
 
   defp admin_children(%Bier.Config{name: name, admin_server_port: port} = conf) do

@@ -6,11 +6,13 @@ defmodule Bier.AdminServerTest do
   """
   use ExUnit.Case, async: false
 
+  alias Bier.TestPorts
+
   @moduletag :integration
 
   setup do
-    api_port = free_port()
-    admin_port = free_port()
+    api_port = TestPorts.free_port()
+    admin_port = TestPorts.free_port()
 
     opts =
       [
@@ -20,7 +22,7 @@ defmodule Bier.AdminServerTest do
       ] ++ Bier.ConformanceServer.base_opts()
 
     start_supervised!({Bier, opts})
-    wait_until_listening(admin_port)
+    TestPorts.wait_until_listening(admin_port)
 
     %{admin_port: admin_port}
   end
@@ -38,27 +40,5 @@ defmodule Bier.AdminServerTest do
   test "unknown admin paths return 404", %{admin_port: admin_port} do
     resp = Req.get!("http://127.0.0.1:#{admin_port}/nope", retry: false)
     assert resp.status == 404
-  end
-
-  defp free_port do
-    {:ok, sock} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}])
-    {:ok, port} = :inet.port(sock)
-    :gen_tcp.close(sock)
-    port
-  end
-
-  defp wait_until_listening(port, retries \\ 100) do
-    case :gen_tcp.connect(~c"127.0.0.1", port, [], 10) do
-      {:ok, sock} ->
-        :gen_tcp.close(sock)
-        :ok
-
-      {:error, _} when retries > 0 ->
-        Process.sleep(20)
-        wait_until_listening(port, retries - 1)
-
-      {:error, reason} ->
-        raise "admin server did not come up on port #{port}: #{inspect(reason)}"
-    end
   end
 end
