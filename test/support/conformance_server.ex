@@ -30,9 +30,10 @@ defmodule Bier.ConformanceServer do
   # Cases whose `config:` is mutually exclusive with the shared instance's, so
   # they need a dedicated instance. Most config cases are ALREADY satisfied by
   # `base_opts/0` and stay on the shared instance — routing a currently-passing
-  # case to a faithful variant could change its result. (1467 RS256 is deferred,
-  # issue #23; openapi-mode/db-root-spec behavior lands separately.)
-  @variant_case_ids [1491, 1493, 1678, 1682, 1758, 1763]
+  # case to a faithful variant could change its result. (openapi-mode/db-root-spec
+  # behavior lands separately.) 1467 verifies an RS256 token against an asymmetric
+  # public JWK as jwt-secret (issue #23).
+  @variant_case_ids [1467, 1491, 1493, 1678, 1682, 1758, 1763]
 
   def url_for(%Bier.ConformanceCase{id: id}) when id in @variant_case_ids,
     do: :persistent_term.get({__MODULE__, :variant, id})
@@ -58,12 +59,25 @@ defmodule Bier.ConformanceServer do
     "http://127.0.0.1:#{port}"
   end
 
+  # The asymmetric RS256 *public* JWK PostgREST's test suite verifies against
+  # (`testCfgAsymJWK` in test/spec/SpecHelper.hs). The spec case carries the
+  # symbolic value `asymmetric_jwk_public_key`; the real key lives here in the
+  # harness so the case file stays declarative. The matching private key is
+  # upstream-only — we only ever verify.
+  @asymmetric_jwk_public_key ~s({"alg":"RS256","e":"AQAB","key_ops":["verify"],"kty":"RSA","n":"0etQ2Tg187jb04MWfpuogYGV75IFrQQBxQaGH75eq_FpbkyoLcEpRUEWSbECP2eeFya2yZ9vIO5ScD-lPmovePk4Aa4SzZ8jdjhmAbNykleRPCxMg0481kz6PQhnHRUv3nF5WP479CnObJKqTVdEagVL66oxnX9VhZG9IZA7k0Th5PfKQwrKGyUeTGczpOjaPqbxlunP73j9AfnAt4XCS8epa-n3WGz1j-wfpr_ys57Aq-zBCfqP67UYzNpeI1AoXsJhD9xSDOzvJgFRvc3vm2wjAW4LEMwi48rCplamOpZToIHEPIaPzpveYQwDnB1HFTR1ove9bpKJsHmi-e2uzQ","use":"sig"})
+
   # Translate a PostgREST per-case `config:` map into `Bier.start_link/1` opts:
   # `kebab-case` keys become the matching snake_case atoms; values pass through
-  # as parsed from YAML (`null` -> nil, `false`, `""`, strings).
+  # as parsed from YAML (`null` -> nil, `false`, `""`, strings), except symbolic
+  # placeholders (e.g. the asymmetric JWK) which resolve to their real value.
   defp translate(config) do
-    Enum.map(config, fn {k, v} -> {k |> String.replace("-", "_") |> String.to_atom(), v} end)
+    Enum.map(config, fn {k, v} ->
+      {k |> String.replace("-", "_") |> String.to_atom(), resolve(v)}
+    end)
   end
+
+  defp resolve("asymmetric_jwk_public_key"), do: @asymmetric_jwk_public_key
+  defp resolve(value), do: value
 
   @doc """
   Base `Bier.start_link/1` options for the conformance suite.
