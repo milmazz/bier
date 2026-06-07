@@ -533,13 +533,38 @@ defmodule Bier.QueryParser do
   # parser expects an integer index (optional single leading `-`) or a key; a
   # second `-` (e.g. `->>--34`) is "unexpected '-' expecting digit".
   defp locate_select_error(sel) do
-    case Regex.run(~r/->>?(-)(-)/, sel, return: :index) do
-      [_, _first_dash, {pos, _}] ->
-        {"unexpected \"-\" expecting digit", pos + 1}
+    case scan_arrow_double_dash(sel, 0) do
+      {:ok, second_dash_byte} ->
+        # The match operates on ASCII bytes (`-`/`>`), so the byte offset of the
+        # second dash equals its 0-based char position; +1 makes it 1-based.
+        {"unexpected \"-\" expecting digit", second_dash_byte + 1}
 
-      _ ->
+      :error ->
         # Fallback: point just past the last valid prefix.
         {"unexpected end of input", String.length(sel) + 1}
+    end
+  end
+
+  # Non-regex twin of the `->>?(-)(-)` pattern: scan for the leftmost `->`/`->>` arrow
+  # immediately followed by `--`, returning the byte offset of the *second* dash
+  # (the regex's group-2 index). Mirrors the regex's greedy `>?` (prefer `->>`,
+  # fall back to `->`) and left-to-right scan.
+  defp scan_arrow_double_dash(sel, from) do
+    case :binary.match(sel, "->", scope: {from, byte_size(sel) - from}) do
+      :nomatch ->
+        :error
+
+      {pos, _len} ->
+        rest = binary_part(sel, pos, byte_size(sel) - pos)
+
+        cond do
+          # `->>--`: arrow is `->>`, then `--`; second dash is at pos + 4.
+          match?("->>--" <> _, rest) -> {:ok, pos + 4}
+          # `->--`: arrow is `->`, then `--`; second dash is at pos + 3.
+          match?("->--" <> _, rest) -> {:ok, pos + 3}
+          # No double-dash here; resume scanning just past this `->`.
+          true -> scan_arrow_double_dash(sel, pos + 2)
+        end
     end
   end
 
@@ -603,22 +628,18 @@ defmodule Bier.QueryParser do
   defp parse_aggregate(field) do
     {out_alias, rest} = split_alias(field)
 
-    {cast, rest} =
-      case Regex.run(~r/^(.*\))::([A-Za-z0-9_ ]+)$/, rest) do
-        [_, r, c] -> {String.trim(c), r}
-        _ -> {nil, rest}
-      end
+    {cast, rest} = Bier.QueryParser.Nimble.peel_agg_cast(rest)
 
-    case Regex.run(~r/^(?:([a-zA-Z_][\w ]*)\.)?([a-z_]+)\(\s*\)$/u, rest) do
-      [_, "", fun] ->
+    case Bier.QueryParser.Nimble.parse_agg_call(rest) do
+      {:ok, nil, fun} ->
         {:ok, %{kind: :agg, column: nil, fun: fun, alias: out_alias, cast: cast}}
 
-      [_, col, fun] ->
+      {:ok, col, fun} ->
         if valid_identifier?(col),
           do: {:ok, %{kind: :agg, column: col, fun: fun, alias: out_alias, cast: cast}},
           else: {:error, {:select_parse, field}}
 
-      _ ->
+      :error ->
         {:error, {:select_parse, field}}
     end
   end
@@ -627,8 +648,8 @@ defmodule Bier.QueryParser do
   defp parse_embed(field, spread?) do
     {emb_alias, rest} = split_alias(field)
 
-    case Regex.run(~r/^([a-zA-Z_][\w ]*(?:![\w ]+)*)\((.*)\)$/su, rest) do
-      [_, head, inner] ->
+    case Bier.QueryParser.Nimble.parse_embed_parts(rest) do
+      {:ok, head, inner} ->
         {target, hints} = parse_embed_head(head)
 
         {join_type, hints} = extract_join_type(hints)
@@ -1047,15 +1068,7 @@ defmodule Bier.QueryParser do
   # Returns {negate?, :and|:or, "(...)"} if member begins with and(/or(/not.and(.
   # Whitespace is permitted between the and/or keyword and its opening paren
   # (AndOrParamsSpec "allows whitespace", case 1169).
-  defp logic_prefix(member) do
-    cond do
-      match = Regex.run(~r/^not\.and\s*(\(.*\))$/s, member) -> {true, :and, Enum.at(match, 1)}
-      match = Regex.run(~r/^not\.or\s*(\(.*\))$/s, member) -> {true, :or, Enum.at(match, 1)}
-      match = Regex.run(~r/^and\s*(\(.*\))$/s, member) -> {false, :and, Enum.at(match, 1)}
-      match = Regex.run(~r/^or\s*(\(.*\))$/s, member) -> {false, :or, Enum.at(match, 1)}
-      true -> nil
-    end
-  end
+  defp logic_prefix(member), do: Bier.QueryParser.Nimble.logic_prefix(member)
 
   # A top-level `col=op.value` filter param.
   defp parse_column_filter(key, val) do
