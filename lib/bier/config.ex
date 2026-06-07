@@ -45,7 +45,8 @@ defmodule Bier.Config do
           server_trace_header: String.t() | nil,
           log_level: :crit | :error | :warn | :info | :debug,
           openapi_mode: String.t(),
-          db_root_spec: String.t() | nil
+          db_root_spec: String.t() | nil,
+          admin_server_port: pos_integer() | nil
         }
 
   defstruct [
@@ -65,6 +66,7 @@ defmodule Bier.Config do
     :db_profile_schemas,
     :server_trace_header,
     :db_root_spec,
+    :admin_server_port,
     name: Bier,
     openapi_mode: "follow-privileges",
     pool_size: 10,
@@ -89,6 +91,21 @@ defmodule Bier.Config do
   def new!(opts, schema) do
     conf = NimbleOptions.validate!(opts, schema)
 
+    validate_admin_server_port!(conf)
+
     struct!(__MODULE__, conf)
+  end
+
+  # PostgREST rejects an admin-server-port equal to server-port at startup
+  # (test_cli.py:test_server_port_and_admin_port_same_value; conformance case
+  # 1717). NimbleOptions validates fields independently, so this cross-field
+  # check lives here.
+  defp validate_admin_server_port!(conf) do
+    admin_port = conf[:admin_server_port]
+    server_port = get_in(conf, [:router, :port])
+
+    if not is_nil(admin_port) and admin_port == server_port do
+      raise ArgumentError, "admin-server-port cannot be the same as server-port"
+    end
   end
 end

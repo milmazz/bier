@@ -259,6 +259,15 @@ defmodule Bier do
         (PostgREST db-root-spec). When set, the root endpoint serves its result
         instead of the generated spec.
         """
+      ],
+      admin_server_port: [
+        type: {:or, [:pos_integer, nil]},
+        default: env(:admin_server_port, nil),
+        doc: """
+        TCP port for the per-instance admin server exposing the `/live` and
+        `/ready` health endpoints (PostgREST admin-server-port). When `nil`
+        (the default) no admin server starts. Must differ from `router[:port]`.
+        """
       ]
     ]
   end
