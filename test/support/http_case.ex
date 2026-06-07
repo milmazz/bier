@@ -35,7 +35,14 @@ defmodule Bier.HttpCase do
         url: url,
         headers: build_headers(req, schema),
         body: request_body(req),
-        decode_body: false,
+        # Req's decompress_body step strips Content-Length (and content-encoding)
+        # off the response, so exact/`headers_present` Content-Length assertions
+        # would see nil even though Bandit emits a correct value on the wire.
+        # `raw: true` keeps the body as raw bytes (implies decode_body: false) and
+        # `compressed: false` stops Req sending accept-encoding, so the server's
+        # real Content-Length survives untouched. See issue #11.
+        raw: true,
+        compressed: false,
         retry: false
       )
 
