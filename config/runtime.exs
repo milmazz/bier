@@ -44,12 +44,3 @@ config :bier,
 if max_rows = System.get_env("PGRST_DB_MAX_ROWS") do
   config :bier, db_max_rows: String.to_integer(max_rows)
 end
-
-# QueryParser leaf-grammar backend: `:regex` (default) or `:nimble`
-# (the experimental nimble_parsec twins). Used to prove behavior-equivalence of
-# the two backends against the conformance suite. See `bench/REPORT.md`.
-case System.get_env("BIER_PARSER_BACKEND") do
-  "nimble" -> config :bier, parser_backend: :nimble
-  "regex" -> config :bier, parser_backend: :regex
-  _ -> :ok
-end
