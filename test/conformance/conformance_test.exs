@@ -4,9 +4,10 @@ defmodule Bier.ConformanceTest do
   against the shared Bier instance and currently FAIL (lib/ returns canned
   responses). Cases the current harness cannot evaluate are tagged :pending and
   excluded (see pending_reason): :cli (no CLI), :jwt (needs JWT signing),
-  :jsonpath (needs a JSONPath evaluator), :status_text (req does not expose the
-  HTTP reason phrase). These are tracked for a follow-up, like the schema_cache
-  deferral in spec/COVERAGE.md.
+  :openapi_doc (openapi body_jsonpath cases need the generated OpenAPI
+  document, #39), :status_text (req does not expose the HTTP reason phrase).
+  These are tracked for a follow-up, like the schema_cache deferral in
+  spec/COVERAGE.md.
   """
   use Bier.HttpCase, async: true
 
@@ -15,11 +16,23 @@ defmodule Bier.ConformanceTest do
   for c <- Bier.ConformanceCase.load_all() do
     pending_reason =
       cond do
-        c.kind == :cli -> :cli
-        Map.has_key?(c.request, "jwt") -> :jwt
-        Map.has_key?(c.expect, "body_jsonpath") -> :jsonpath
-        Map.has_key?(c.expect, "status_text") -> :status_text
-        true -> nil
+        c.kind == :cli ->
+          :cli
+
+        Map.has_key?(c.request, "jwt") ->
+          :jwt
+
+        # body_jsonpath now evaluates (see Bier.ConformanceJsonPath), EXCEPT the
+        # openapi-area cases, which assert the generated OpenAPI document that is
+        # still a stub until #39. Keep those excluded under an honest reason.
+        Map.has_key?(c.expect, "body_jsonpath") and c.area == "openapi" ->
+          :openapi_doc
+
+        Map.has_key?(c.expect, "status_text") ->
+          :status_text
+
+        true ->
+          nil
       end
 
     @tag area: String.to_atom(c.area)
