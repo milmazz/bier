@@ -146,4 +146,8 @@ defmodule Bier.ConformanceAssertionsTest do
       assert_expect(r, %{"body_jsonpath" => [%{"path" => "$.a", "bogus" => true}]})
     end
   end
+
+  test "body_jsonpath with an empty entry list passes (no body decode)" do
+    assert_expect(resp(%{body: ""}), %{"body_jsonpath" => []})
+  end
 end

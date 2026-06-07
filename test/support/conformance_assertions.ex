@@ -98,6 +98,8 @@ defmodule Bier.ConformanceAssertions do
     end)
   end
 
+  defp check("body_jsonpath", [], _resp), do: :ok
+
   defp check("body_jsonpath", entries, resp) when is_list(entries) do
     decoded = decode_json(resp.body)
     Enum.each(entries, &check_jsonpath_entry(&1, decoded))
