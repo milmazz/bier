@@ -70,10 +70,13 @@ defmodule Bier.ConformanceTest do
         case_data = unquote(Macro.escape(c))
 
         resp =
-          case case_data.kind do
-            :cli -> Bier.CliCase.perform(case_data)
-            :http -> perform(case_data)
-          end
+          unquote(
+            if c.kind == :cli do
+              quote(do: Bier.CliCase.perform(var!(case_data)))
+            else
+              quote(do: perform(var!(case_data)))
+            end
+          )
 
         assert_expect(resp, case_data.expect)
       end
