@@ -1,0 +1,23 @@
+# Build artifacts and deps are rebuilt inside the image.
+/_build/
+/deps/
+/cover/
+/doc/
+/tmp/
+
+# Tests, fixtures, and docs are not needed for the prod release.
+/test/
+/spec/
+/docs/
+/bench/
+
+# Git, editor, and local tooling.
+/.git/
+/.github/
+/.elixir_ls/
+/.claude/
+erl_crash.dump
+
+# The escript binary and package tarballs.
+/bier
+bier-*.tar
