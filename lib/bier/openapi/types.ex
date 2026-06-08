@@ -73,20 +73,10 @@ defmodule Bier.OpenAPI.Types do
     stripped = strip_cast(raw)
 
     cond do
-      type == "boolean" ->
-        stripped == "true"
-
-      type in ["smallint", "integer", "bigint"] ->
-        case Integer.parse(stripped) do
-          {n, ""} -> n
-          _ -> stripped
-        end
-
-      type in ["numeric", "real", "double precision"] ->
-        parse_number(stripped)
-
-      true ->
-        unquote_sql(stripped)
+      type == "boolean" -> parse_bool(stripped)
+      type in ["smallint", "integer", "bigint"] -> parse_int(stripped)
+      type in ["numeric", "real", "double precision"] -> parse_num(stripped)
+      true -> unquote_sql(stripped)
     end
   end
 
@@ -115,10 +105,21 @@ defmodule Bier.OpenAPI.Types do
     s |> String.trim() |> String.trim_leading("'") |> String.trim_trailing("'")
   end
 
-  defp parse_number(s) do
+  defp parse_bool("true"), do: true
+  defp parse_bool("false"), do: false
+  defp parse_bool(_), do: :omit
+
+  defp parse_int(s) do
+    case Integer.parse(s) do
+      {n, ""} -> n
+      _ -> :omit
+    end
+  end
+
+  defp parse_num(s) do
     case Float.parse(s) do
       {f, ""} -> if f == Float.round(f) and not String.contains?(s, "."), do: trunc(f), else: f
-      _ -> s
+      _ -> :omit
     end
   end
 end

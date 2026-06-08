@@ -171,8 +171,10 @@ defmodule Bier.OpenAPITest do
                "13:00:00"
     end
 
-    test "integer default that is a sequence call falls back to the raw string (no crash)" do
-      assert Types.default("nextval('s'::regclass)", "integer") == "nextval('s'"
+    test "non-literal defaults (function calls, expressions) are omitted" do
+      assert Types.default("nextval('s'::regclass)", "integer") == :omit
+      assert Types.default("now()", "numeric") == :omit
+      assert Types.default("some_fn()", "boolean") == :omit
     end
   end
 
