@@ -25,6 +25,8 @@ defmodule Bier.OpenAPI.Types do
 
   @doc "Schema-mode mapping (definition properties, RPC POST body properties)."
   def schema(type, opts) do
+    type = normalize(type)
+
     cond do
       enum = Keyword.get(opts, :enum) ->
         %{"type" => "string", "format" => type, "enum" => enum}
@@ -41,6 +43,8 @@ defmodule Bier.OpenAPI.Types do
 
   @doc "Query-param mode mapping (RPC GET parameters)."
   def query_param(type, opts) do
+    type = normalize(type)
+
     cond do
       Keyword.get(opts, :variadic, false) ->
         elem = array_element(type) || type
@@ -100,6 +104,10 @@ defmodule Bier.OpenAPI.Types do
 
   defp maybe_max_length(m, nil), do: m
   defp maybe_max_length(m, n), do: Map.put(m, "maxLength", n)
+
+  # Strip PG length/precision modifiers like "(1)", "(10,2)", "(6)" while
+  # preserving the rest of the type string (notably a trailing "[]").
+  defp normalize(type), do: String.replace(type, ~r/\(\d[\d,\s]*\)/, "")
 
   defp strip_cast(s), do: s |> String.split("::", parts: 2) |> hd()
 

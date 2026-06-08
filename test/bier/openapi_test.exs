@@ -74,6 +74,58 @@ defmodule Bier.OpenAPITest do
     end
   end
 
+  describe "schema/2 normalizes length modifiers" do
+    test "char(1) -> base format character with maxLength" do
+      assert Types.schema("character(1)", max_length: 1) == %{
+               "type" => "string",
+               "format" => "character",
+               "maxLength" => 1
+             }
+    end
+
+    test "numeric(10,2) -> numeric" do
+      assert Types.schema("numeric(10,2)", []) == %{"type" => "number", "format" => "numeric"}
+    end
+
+    test "character varying(255) -> character varying" do
+      assert Types.schema("character varying(255)", []) == %{
+               "type" => "string",
+               "format" => "character varying"
+             }
+    end
+
+    test "character(1)[] array -> character[] with string items" do
+      assert Types.schema("character(1)[]", []) == %{
+               "format" => "character[]",
+               "type" => "array",
+               "items" => %{"type" => "string"}
+             }
+    end
+
+    test "timestamp(6) without time zone -> timestamp without time zone" do
+      assert Types.schema("timestamp(6) without time zone", []) == %{
+               "type" => "string",
+               "format" => "timestamp without time zone"
+             }
+    end
+  end
+
+  describe "query_param/2 normalizes length modifiers" do
+    test "char(1) -> character" do
+      assert Types.query_param("character(1)", []) == %{
+               "type" => "string",
+               "format" => "character"
+             }
+    end
+
+    test "numeric(10,2) array -> string format numeric[]" do
+      assert Types.query_param("numeric(10,2)[]", []) == %{
+               "type" => "string",
+               "format" => "numeric[]"
+             }
+    end
+  end
+
   describe "query_param/2 (1671, 1672)" do
     test "scalars match schema; arrays become string; json -> string" do
       assert Types.query_param("double precision", []) == %{
