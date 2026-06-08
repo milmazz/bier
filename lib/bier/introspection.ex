@@ -32,7 +32,10 @@ defmodule Bier.Introspection do
             notnull?: boolean(),
             default: String.t() | nil,
             composite?: boolean(),
-            data_rep: data_rep() | nil
+            data_rep: data_rep() | nil,
+            comment: String.t() | nil,
+            enum_labels: [String.t()] | nil,
+            max_length: pos_integer() | nil
           }
 
     @typedoc """
@@ -67,7 +70,8 @@ defmodule Bier.Introspection do
             primary_key: [String.t()],
             foreign_keys: [foreign_key()],
             computed_columns: [String.t()],
-            computed_relations: [map()]
+            computed_relations: [map()],
+            comment: String.t() | nil
           }
 
     defstruct schema: nil,
@@ -77,7 +81,8 @@ defmodule Bier.Introspection do
               primary_key: [],
               foreign_keys: [],
               computed_columns: [],
-              computed_relations: []
+              computed_relations: [],
+              comment: nil
   end
 
   @type t :: %{optional({String.t(), String.t()}) => Relation.t()}
@@ -114,7 +119,11 @@ defmodule Bier.Introspection do
             notnull?: c.notnull?,
             default: c.default,
             composite?: c.composite?,
-            data_rep: c.data_rep
+            data_rep: c.data_rep,
+            # Not yet SELECTed by query_columns/2 — populated in a later task (nil for now).
+            comment: Map.get(c, :comment),
+            enum_labels: Map.get(c, :enum_labels),
+            max_length: Map.get(c, :max_length)
           }
         end)
 
@@ -162,7 +171,9 @@ defmodule Bier.Introspection do
          primary_key: pk,
          foreign_keys: fks,
          computed_columns: comp_cols,
-         computed_relations: comp_rels
+         computed_relations: comp_rels,
+         # populated by a future query
+         comment: nil
        }}
     end
   end
