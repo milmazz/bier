@@ -324,4 +324,27 @@ defmodule Bier.CLI.Config do
         :ok
     end
   end
+
+  @doc """
+  Render a resolved config map as PostgREST `--dump-config` text: one
+  `key = value` line per spec key, sorted by key for determinism (so the output
+  is reparse-stable).
+  """
+  @spec dump(map()) :: iodata()
+  def dump(resolved) do
+    spec()
+    |> Enum.map(& &1.key)
+    |> Enum.sort()
+    |> Enum.map(fn key -> [key, " = ", render(Map.fetch!(resolved, key)), "\n"] end)
+  end
+
+  defp render(:unset), do: ~s("")
+  defp render(value) when is_integer(value), do: Integer.to_string(value)
+  defp render(true), do: "true"
+  defp render(false), do: "false"
+  defp render(value) when is_list(value), do: quote_string(Enum.join(value, ","))
+  defp render(value) when is_atom(value), do: quote_string(Atom.to_string(value))
+  defp render(value) when is_binary(value), do: quote_string(value)
+
+  defp quote_string(s), do: [?", String.replace(s, ~S("), ~S(\")), ?"]
 end

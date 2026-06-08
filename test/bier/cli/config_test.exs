@@ -149,4 +149,65 @@ defmodule Bier.CLI.ConfigTest do
       assert resolved["log-level"] == :debug
     end
   end
+
+  describe "dump/1" do
+    test "renders strings, ints, lists and unset values PostgREST-style" do
+      {:ok, resolved} =
+        Config.load(
+          %{
+            "PGRST_DB_SCHEMAS" => "multi,tenant,setup",
+            "PGRST_DB_MAX_ROWS" => "1000",
+            "PGRST_LOG_LEVEL" => "info"
+          },
+          nil,
+          %{}
+        )
+
+      dump = Config.dump(resolved) |> IO.iodata_to_binary()
+
+      assert dump =~ ~s(db-schemas = "multi,tenant,setup")
+      assert dump =~ ~s(db-max-rows = 1000)
+      assert dump =~ ~s(log-level = "info")
+      assert dump =~ ~s(db-anon-role = "")
+    end
+
+    test "an unset db-max-rows renders as empty string (case 1721)" do
+      {:ok, resolved} = Config.load(%{}, %{"db-max-rows" => true}, %{})
+      dump = Config.dump(resolved) |> IO.iodata_to_binary()
+      assert dump =~ ~s(db-max-rows = "")
+    end
+
+    test "db-tx-end round-trips its value (case 1722)" do
+      {:ok, resolved} = Config.load(%{"PGRST_DB_TX_END" => "commit-allow-override"}, nil, %{})
+      dump = Config.dump(resolved) |> IO.iodata_to_binary()
+      assert dump =~ ~s(db-tx-end = "commit-allow-override")
+    end
+
+    test "db-extra-search-path renders empty list as empty string (case 1728)" do
+      {:ok, resolved} = Config.load(%{"PGRST_DB_EXTRA_SEARCH_PATH" => ""}, nil, %{})
+      dump = Config.dump(resolved) |> IO.iodata_to_binary()
+      assert dump =~ ~s(db-extra-search-path = "")
+    end
+
+    test "dump output is reparse-stable (case 1726)" do
+      {:ok, resolved} =
+        Config.load(
+          %{
+            "PGRST_DB_MAX_ROWS" => "1000",
+            "PGRST_SERVER_PORT" => "80",
+            "PGRST_LOG_LEVEL" => "info"
+          },
+          nil,
+          %{}
+        )
+
+      dump1 = Config.dump(resolved) |> IO.iodata_to_binary()
+
+      {:ok, file} = Bier.CLI.ConfigFile.parse(dump1)
+      {:ok, resolved2} = Config.load(%{}, file, %{})
+      dump2 = Config.dump(resolved2) |> IO.iodata_to_binary()
+
+      assert dump1 == dump2
+    end
+  end
 end
