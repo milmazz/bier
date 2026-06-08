@@ -106,7 +106,7 @@ defmodule Bier.Introspection do
     comp_cols_by_rel = Enum.group_by(computed.columns, &{&1.schema, &1.relation})
     comp_rels_by_rel = Enum.group_by(computed.relations, &{&1.schema, &1.relation})
 
-    for {{schema, name}, kind} <- relations, into: %{} do
+    for {{schema, name}, {kind, rel_comment}} <- relations, into: %{} do
       cols =
         columns_by_rel
         |> Map.get({schema, name}, [])
@@ -120,7 +120,6 @@ defmodule Bier.Introspection do
             default: c.default,
             composite?: c.composite?,
             data_rep: c.data_rep,
-            # Not yet SELECTed by query_columns/2 — populated in a later task (nil for now).
             comment: Map.get(c, :comment),
             enum_labels: Map.get(c, :enum_labels),
             max_length: Map.get(c, :max_length)
@@ -172,8 +171,7 @@ defmodule Bier.Introspection do
          foreign_keys: fks,
          computed_columns: comp_cols,
          computed_relations: comp_rels,
-         # populated by a future query
-         comment: nil
+         comment: rel_comment
        }}
     end
   end
@@ -218,7 +216,8 @@ defmodule Bier.Introspection do
       format_type(p.prorettype, NULL) AS ret_type,
       p.pronargs AS nargs,
       p.pronargdefaults AS ndefaults,
-      p.provolatile AS volatility
+      p.provolatile AS volatility,
+      obj_description(p.oid, 'pg_proc') AS comment
     FROM pg_proc p
     JOIN pg_namespace pn ON pn.oid = p.pronamespace
     JOIN pg_type ret_t ON ret_t.oid = p.prorettype
@@ -258,7 +257,8 @@ defmodule Bier.Introspection do
          ret_type,
          _nargs,
          ndefaults,
-         volatility
+         volatility,
+         comment
        ]) do
     arg_names = arg_names || []
     arg_modes = arg_modes || []
@@ -319,7 +319,8 @@ defmodule Bier.Introspection do
       ret_kind: ret_kind,
       ret_type: ret_type,
       volatility: volatility_atom(volatility),
-      single_unnamed?: single_unnamed?
+      single_unnamed?: single_unnamed?,
+      comment: comment
     }
   end
 
@@ -378,6 +379,17 @@ defmodule Bier.Introspection do
     end
   end
 
+  @doc "Returns the COMMENT on `schema`, or nil."
+  @spec schema_comment(conn :: term(), schema :: String.t()) :: String.t() | nil
+  def schema_comment(conn, schema) do
+    sql = "SELECT obj_description(oid, 'pg_namespace') FROM pg_namespace WHERE nspname = $1"
+
+    case Postgrex.query!(conn, sql, [schema]).rows do
+      [[comment]] -> comment
+      _ -> nil
+    end
+  end
+
   # Classify a function's return for the RPC pipeline.
   #
   #   * void                           -> :void (204)
@@ -403,7 +415,8 @@ defmodule Bier.Introspection do
   # partitioned tables (p).
   defp query_relations(conn, schemas) do
     sql = """
-    SELECT n.nspname AS schema, c.relname AS name, c.relkind AS kind
+    SELECT n.nspname AS schema, c.relname AS name, c.relkind AS kind,
+           obj_description(c.oid, 'pg_class') AS comment
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = ANY($1)
@@ -412,8 +425,8 @@ defmodule Bier.Introspection do
 
     %Postgrex.Result{rows: rows} = Postgrex.query!(conn, sql, [schemas])
 
-    for [schema, name, kind] <- rows, into: %{} do
-      {{schema, name}, relkind(kind)}
+    for [schema, name, kind, comment] <- rows, into: %{} do
+      {{schema, name}, {relkind(kind), comment}}
     end
   end
 
@@ -444,7 +457,15 @@ defmodule Bier.Introspection do
       -- text = (text AS <domain>). Each is ARRAY[schema, function] or NULL.
       rd.fn AS read_fn,
       wr.fn AS write_fn,
-      tx.fn AS text_fn
+      tx.fn AS text_fn,
+      col_description(c.oid, a.attnum::int) AS comment,
+      CASE WHEN at.typtype = 'e'
+           THEN (SELECT array_agg(e.enumlabel ORDER BY e.enumsortorder)
+                 FROM pg_enum e WHERE e.enumtypid = at.oid)
+      END AS enum_labels,
+      CASE WHEN at.typname IN ('bpchar','varchar') AND a.atttypmod > 4
+           THEN a.atttypmod - 4
+      END AS max_length
     FROM pg_attribute a
     JOIN pg_class c ON c.oid = a.attrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -503,7 +524,10 @@ defmodule Bier.Introspection do
           is_composite,
           read_fn,
           write_fn,
-          text_fn
+          text_fn,
+          comment,
+          enum_labels,
+          max_length
         ] <- rows do
       %{
         schema: schema,
@@ -515,7 +539,10 @@ defmodule Bier.Introspection do
         default: default,
         pk?: is_pk,
         composite?: is_composite,
-        data_rep: data_rep(read_fn, write_fn, text_fn)
+        data_rep: data_rep(read_fn, write_fn, text_fn),
+        comment: comment,
+        enum_labels: enum_labels,
+        max_length: max_length
       }
     end
   end
