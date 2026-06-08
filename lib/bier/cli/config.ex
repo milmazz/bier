@@ -137,12 +137,23 @@ defmodule Bier.CLI.Config do
   @spec spec() :: [map()]
   def spec, do: @entries
 
+  @type kind ::
+          :string
+          | :opt_string
+          | :int
+          | :opt_int
+          | :bool
+          | :csv
+          | :csv_emptyable
+          | {:enum_atom, atom()}
+          | {:enum_str, atom()}
+
   @doc """
   Coerce a raw value (string from env/file, or already-typed from the file
   parser) to the typed value for `kind`. `:unset` marks an absent optional
   value (falls back to default). Enum mismatches return PostgREST's message.
   """
-  @spec coerce(term(), term()) :: {:ok, term()} | {:error, String.t()}
+  @spec coerce(kind(), term()) :: {:ok, term()} | {:error, String.t()}
   def coerce(:string, v), do: {:ok, to_string(v)}
 
   def coerce(:opt_string, v) do
@@ -166,7 +177,21 @@ defmodule Bier.CLI.Config do
     end
   end
 
-  def coerce(:bool, v), do: {:ok, v in [true, "true", "1", 1]}
+  # Mirrors PostgREST's coerceBool: case-insensitive "true" and any positive
+  # integer (as a string or number) are truthy; everything else is false.
+  def coerce(:bool, v) when is_boolean(v), do: {:ok, v}
+
+  def coerce(:bool, v) when is_integer(v), do: {:ok, v > 0}
+
+  def coerce(:bool, v) do
+    s = v |> to_string() |> String.downcase()
+
+    truthy =
+      s == "true" or
+        match?({n, ""} when n > 0, Integer.parse(s))
+
+    {:ok, truthy}
+  end
 
   def coerce(:csv, v), do: {:ok, split_csv(to_string(v))}
 

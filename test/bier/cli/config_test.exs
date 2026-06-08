@@ -4,6 +4,25 @@ defmodule Bier.CLI.ConfigTest do
   alias Bier.CLI.Config
 
   describe "coerce/2" do
+    test ":string coerces any value to a string" do
+      assert Config.coerce(:string, "postgresql://") == {:ok, "postgresql://"}
+      assert Config.coerce(:string, 3000) == {:ok, "3000"}
+    end
+
+    test ":csv trims whitespace around items and drops empties" do
+      assert Config.coerce(:csv, " a , b ,") == {:ok, ["a", "b"]}
+    end
+
+    test ":bool is case-insensitive and accepts positive integers (PostgREST coerceBool)" do
+      assert Config.coerce(:bool, "TRUE") == {:ok, true}
+      assert Config.coerce(:bool, "true") == {:ok, true}
+      assert Config.coerce(:bool, "2") == {:ok, true}
+      assert Config.coerce(:bool, true) == {:ok, true}
+      assert Config.coerce(:bool, "0") == {:ok, false}
+      assert Config.coerce(:bool, "no") == {:ok, false}
+      assert Config.coerce(:bool, false) == {:ok, false}
+    end
+
     test ":csv splits on commas" do
       assert Config.coerce(:csv, "multi,tenant,setup") == {:ok, ["multi", "tenant", "setup"]}
     end
