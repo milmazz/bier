@@ -43,7 +43,7 @@ defmodule Bier.CliCase do
     Enum.map_join(file_map, "\n", fn {k, v} -> "#{k} = #{render_value(v)}" end) <> "\n"
   end
 
-  defp render_value(v) when is_binary(v), do: ~s("#{v}")
+  defp render_value(v) when is_binary(v), do: ~s("#{String.replace(v, ~S("), ~S(\"))}")
   defp render_value(v) when is_boolean(v), do: to_string(v)
   defp render_value(v) when is_integer(v), do: Integer.to_string(v)
 end

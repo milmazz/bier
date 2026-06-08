@@ -114,6 +114,10 @@ defmodule Bier.ConformanceAssertions do
            "expected exit #{expected}, got #{resp.exit}\nstderr: #{resp.stderr}"
   end
 
+  defp check("dump_contains", [], _resp) do
+    raise "dump_contains must list at least one substring"
+  end
+
   defp check("dump_contains", needles, resp) when is_list(needles) do
     Enum.each(needles, fn needle ->
       assert String.contains?(resp.stdout, needle),
