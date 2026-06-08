@@ -484,7 +484,136 @@ defmodule Bier.OpenAPITest do
     end
   end
 
+  describe "rpc path items (1670-1674)" do
+    setup do
+      fns = [
+        %{
+          name: "varied_arguments_openapi",
+          comment: "An RPC function\nJust a test for RPC function arguments",
+          volatility: :immutable,
+          in_params: [
+            p("double", "double precision", false, false),
+            p("text_arr", "text[]", false, false),
+            p("integer", "integer", false, true),
+            p("json", "json", false, true)
+          ]
+        },
+        %{name: "reset_table", comment: nil, volatility: :volatile, in_params: []},
+        %{name: "getallusers", comment: nil, volatility: :stable, in_params: []},
+        %{
+          name: "variadic_param",
+          comment: nil,
+          volatility: :immutable,
+          in_params: [p_var("v", "text[]")]
+        }
+      ]
+
+      %{doc: build_fns(fns)}
+    end
+
+    test "summary/description + get params (1670/1671)", %{doc: doc} do
+      get = doc["paths"]["/rpc/varied_arguments_openapi"]["get"]
+      assert get["summary"] == "An RPC function"
+      assert get["description"] == "Just a test for RPC function arguments"
+
+      assert Enum.at(get["parameters"], 0) == %{
+               "format" => "double precision",
+               "in" => "query",
+               "name" => "double",
+               "required" => true,
+               "type" => "number"
+             }
+
+      assert Enum.at(get["parameters"], 1) == %{
+               "format" => "text[]",
+               "in" => "query",
+               "name" => "text_arr",
+               "required" => true,
+               "type" => "string"
+             }
+
+      assert Enum.at(get["parameters"], 2) == %{
+               "format" => "int32",
+               "in" => "query",
+               "name" => "integer",
+               "required" => false,
+               "type" => "integer"
+             }
+
+      assert Enum.at(get["parameters"], 3) == %{
+               "format" => "json",
+               "in" => "query",
+               "name" => "json",
+               "required" => false,
+               "type" => "string"
+             }
+
+      assert get["tags"] == ["(rpc) varied_arguments_openapi"]
+    end
+
+    test "variadic arg (1672)", %{doc: doc} do
+      assert hd(doc["paths"]["/rpc/variadic_param"]["get"]["parameters"]) ==
+               %{
+                 "collectionFormat" => "multi",
+                 "in" => "query",
+                 "items" => %{"format" => "text", "type" => "string"},
+                 "name" => "v",
+                 "required" => false,
+                 "type" => "array"
+               }
+    end
+
+    test "post body schema (1673)", %{doc: doc} do
+      body = hd(doc["paths"]["/rpc/varied_arguments_openapi"]["post"]["parameters"])
+      assert body["name"] == "args"
+      assert body["in"] == "body"
+      assert body["schema"]["type"] == "object"
+
+      assert body["schema"]["description"] ==
+               "An RPC function\n\nJust a test for RPC function arguments"
+
+      assert body["schema"]["properties"]["double"] == %{
+               "format" => "double precision",
+               "type" => "number"
+             }
+
+      assert body["schema"]["properties"]["text_arr"] == %{
+               "format" => "text[]",
+               "type" => "array",
+               "items" => %{"type" => "string"}
+             }
+
+      assert body["schema"]["required"] == ["double", "text_arr"]
+
+      assert doc["paths"]["/rpc/varied_arguments_openapi"]["post"]["tags"] == [
+               "(rpc) varied_arguments_openapi"
+             ]
+    end
+
+    test "volatility methods (1674)", %{doc: doc} do
+      refute Map.has_key?(doc["paths"]["/rpc/reset_table"], "get")
+      assert Map.has_key?(doc["paths"]["/rpc/reset_table"], "post")
+      assert Map.has_key?(doc["paths"]["/rpc/getallusers"], "get")
+      assert Map.has_key?(doc["paths"]["/rpc/getallusers"], "post")
+    end
+  end
+
   # --- helpers ---
+  defp p(name, type, variadic?, has_default?),
+    do: %{name: name, type: type, variadic?: variadic?, has_default?: has_default?}
+
+  defp p_var(name, type), do: p(name, type, true, false)
+
+  defp build_fns(fns) do
+    Bier.OpenAPI.build(%{
+      relations: [],
+      functions: fns,
+      schema_comment: nil,
+      security_active?: false,
+      docs_version: "v14"
+    })
+  end
+
   defp col_map(name, type, opts \\ []) do
     %{
       name: name,

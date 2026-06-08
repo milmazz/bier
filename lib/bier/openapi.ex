@@ -60,8 +60,62 @@ defmodule Bier.OpenAPI do
     Map.merge(rel_paths, function_paths(input))
   end
 
-  # Replaced by Task A5; stub keeps table paths working in isolation.
-  defp function_paths(_input), do: %{}
+  defp function_paths(input) do
+    Map.new(input.functions, fn fun -> {"/rpc/#{fun.name}", function_path_item(fun)} end)
+  end
+
+  defp function_path_item(fun) do
+    {summary, description} = split_comment(fun.comment)
+    tags = ["(rpc) #{fun.name}"]
+
+    post =
+      %{
+        "tags" => tags,
+        "parameters" => [rpc_body_param(fun, summary, description)],
+        "responses" => %{"200" => %{"description" => "OK"}}
+      }
+      |> put_optional("summary", summary)
+      |> put_optional("description", description)
+
+    item = %{"post" => post}
+
+    if fun.volatility == :volatile do
+      item
+    else
+      get =
+        %{
+          "tags" => tags,
+          "parameters" => Enum.map(fun.in_params, &rpc_query_param/1),
+          "responses" => %{"200" => %{"description" => "OK"}}
+        }
+        |> put_optional("summary", summary)
+        |> put_optional("description", description)
+
+      Map.put(item, "get", get)
+    end
+  end
+
+  defp rpc_query_param(p) do
+    p.type
+    |> Types.query_param(variadic: p.variadic?)
+    |> Map.merge(%{"name" => p.name, "in" => "query", "required" => rpc_required?(p)})
+  end
+
+  defp rpc_body_param(fun, summary, description) do
+    props = Map.new(fun.in_params, fn p -> {p.name, Types.schema(p.type, [])} end)
+    required = for p <- fun.in_params, rpc_required?(p), do: p.name
+    desc = [summary, description] |> Enum.reject(&is_nil/1) |> Enum.join("\n\n") |> nil_if_empty()
+
+    schema =
+      %{"type" => "object", "properties" => props}
+      |> put_optional("description", desc)
+      |> put_required(required)
+
+    %{"name" => "args", "in" => "body", "required" => false, "schema" => schema}
+  end
+
+  # A VARIADIC arg or an arg with a DEFAULT is optional; everything else is required.
+  defp rpc_required?(p), do: not (p.has_default? or p.variadic?)
 
   defp relation_path_item(rel) do
     {summary, description} = split_comment(rel.comment)
