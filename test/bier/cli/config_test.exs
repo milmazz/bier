@@ -74,4 +74,71 @@ defmodule Bier.CLI.ConfigTest do
       assert entry.kind == :csv
     end
   end
+
+  describe "load/3" do
+    test "reads from environment only" do
+      env = %{
+        "PGRST_DB_SCHEMAS" => "multi,tenant,setup",
+        "PGRST_DB_MAX_ROWS" => "1000",
+        "PGRST_LOG_LEVEL" => "info"
+      }
+
+      assert {:ok, resolved} = Config.load(env, nil, %{})
+      assert resolved["db-schemas"] == ["multi", "tenant", "setup"]
+      assert resolved["db-max-rows"] == 1000
+      assert resolved["log-level"] == :info
+    end
+
+    test "env overrides file (case 1720)" do
+      file = %{"db-max-rows" => 100, "log-level" => "warn"}
+      env = %{"PGRST_DB_MAX_ROWS" => "999", "PGRST_LOG_LEVEL" => "debug"}
+      assert {:ok, resolved} = Config.load(env, file, %{})
+      assert resolved["db-max-rows"] == 999
+      assert resolved["log-level"] == :debug
+    end
+
+    test "resolves the db-schema alias (case 1730)" do
+      assert {:ok, resolved} = Config.load(%{}, %{"db-schema" => "aliased_schema"}, %{})
+      assert resolved["db-schemas"] == ["aliased_schema"]
+    end
+
+    test "wrong type for an optional int falls back to its default :unset (case 1721)" do
+      assert {:ok, resolved} = Config.load(%{}, %{"db-max-rows" => true}, %{})
+      assert resolved["db-max-rows"] == :unset
+    end
+
+    test "wrong type for a required int falls back to its numeric default (server-port)" do
+      assert {:ok, resolved} = Config.load(%{"PGRST_SERVER_PORT" => "garbage"}, nil, %{})
+      assert resolved["server-port"] == 3000
+    end
+
+    test "empty log-level falls back to default error, not an enum error (case 1723)" do
+      assert {:ok, resolved} = Config.load(%{"PGRST_LOG_LEVEL" => ""}, nil, %{})
+      assert resolved["log-level"] == :error
+    end
+
+    test "empty db-extra-search-path is the empty list, not the default (case 1728)" do
+      assert {:ok, resolved} = Config.load(%{"PGRST_DB_EXTRA_SEARCH_PATH" => ""}, nil, %{})
+      assert resolved["db-extra-search-path"] == []
+    end
+
+    test "a too-short jwt-secret is fatal (case 1708)" do
+      assert Config.load(%{"PGRST_JWT_SECRET" => "short_secret"}, nil, %{}) ==
+               {:error, "The JWT secret must be at least 32 characters long."}
+    end
+
+    test "an unknown log-level is fatal (case 1712)" do
+      assert Config.load(%{"PGRST_LOG_LEVEL" => "never"}, nil, %{}) ==
+               {:error, "Invalid logging level. Check your configuration."}
+    end
+
+    test "admin-server-port equal to server-port is fatal (case 1717)" do
+      assert Config.load(
+               %{"PGRST_SERVER_PORT" => "3000", "PGRST_ADMIN_SERVER_PORT" => "3000"},
+               nil,
+               %{}
+             ) ==
+               {:error, "admin-server-port cannot be the same as server-port"}
+    end
+  end
 end

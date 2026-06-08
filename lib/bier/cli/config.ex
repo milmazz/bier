@@ -229,4 +229,99 @@ defmodule Bier.CLI.Config do
   defp split_csv(s) do
     s |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
   end
+
+  @doc """
+  Resolve every spec key from flags > env > file > default, applying aliases and
+  coercion, then run the shared semantic validators. Returns the resolved
+  `%{kebab_key => typed_value}` map, or `{:error, message}` on a fatal problem.
+
+  `env` is a `%{"PGRST_*" => string}` map (the caller supplies it — the core
+  never reads `System.get_env/0`). `file` is `nil` or a `%{kebab_key => raw}`
+  map (already parsed). `flags` is a `%{kebab_key => raw}` map of command-line
+  overrides.
+  """
+  @spec load(map(), map() | nil, map()) :: {:ok, map()} | {:error, String.t()}
+  def load(env, file, flags) do
+    file = file || %{}
+
+    spec()
+    |> Enum.reduce_while({:ok, %{}}, fn entry, {:ok, acc} ->
+      case resolve(entry, env, file, flags) do
+        {:ok, value} -> {:cont, {:ok, Map.put(acc, entry.key, value)}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> validate()
+  end
+
+  defp resolve(entry, env, file, flags) do
+    case raw_source(entry, env, file, flags) do
+      :absent ->
+        {:ok, entry.default}
+
+      {:present, raw} ->
+        case coerce(entry.kind, raw) do
+          # A wrong-typed/unparseable value coerces to :unset, which means
+          # "fall back to the key's default" (PostgREST's wrong-type rule).
+          {:ok, :unset} -> {:ok, entry.default}
+          other -> other
+        end
+    end
+  end
+
+  # Precedence: flags > env > file. Aliases are consulted for file keys only
+  # (PostgREST aliases are file/env spellings; flags use canonical keys).
+  defp raw_source(entry, env, file, flags) do
+    cond do
+      present?(entry, Map.get(flags, entry.key)) -> {:present, Map.fetch!(flags, entry.key)}
+      present?(entry, Map.get(env, entry.env)) -> {:present, Map.fetch!(env, entry.env)}
+      true -> file_source(entry, file)
+    end
+  end
+
+  defp file_source(entry, file) do
+    keys = [entry.key | entry.aliases]
+
+    case Enum.find(keys, fn k -> present?(entry, Map.get(file, k)) end) do
+      nil -> :absent
+      key -> {:present, Map.fetch!(file, key)}
+    end
+  end
+
+  # nil/missing is absent. An empty string is absent for every kind EXCEPT
+  # :csv_emptyable, where "" is a meaningful value (the empty list) — PostgREST's
+  # splitOnCommasEmptyable (case 1728). Any other value is present.
+  defp present?(_entry, nil), do: false
+  defp present?(%{kind: :csv_emptyable}, ""), do: true
+  defp present?(_entry, ""), do: false
+  defp present?(_entry, _), do: true
+
+  defp validate({:error, _} = err), do: err
+
+  defp validate({:ok, resolved}) do
+    with :ok <- run_validator(resolved, "jwt-secret", &Bier.Config.validate_jwt_secret/1),
+         :ok <- run_validator(resolved, "jwt-aud", &Bier.Config.validate_jwt_aud/1),
+         :ok <- validate_admin_port(resolved) do
+      {:ok, resolved}
+    end
+  end
+
+  defp run_validator(resolved, key, fun) do
+    case Map.get(resolved, key) do
+      :unset -> :ok
+      value -> fun.(value)
+    end
+  end
+
+  # admin-server-port must differ from server-port (case 1717). server-port has
+  # a default, so it is always an integer; admin-server-port may be :unset.
+  defp validate_admin_port(resolved) do
+    case {Map.get(resolved, "admin-server-port"), Map.get(resolved, "server-port")} do
+      {port, port} when is_integer(port) ->
+        {:error, "admin-server-port cannot be the same as server-port"}
+
+      _ ->
+        :ok
+    end
+  end
 end
