@@ -140,5 +140,13 @@ defmodule Bier.CLI.ConfigTest do
              ) ==
                {:error, "admin-server-port cannot be the same as server-port"}
     end
+
+    test "flags override both env and file for the same key" do
+      flags = %{"log-level" => "debug"}
+      env = %{"PGRST_LOG_LEVEL" => "info"}
+      file = %{"log-level" => "warn"}
+      assert {:ok, resolved} = Config.load(env, file, flags)
+      assert resolved["log-level"] == :debug
+    end
   end
 end
