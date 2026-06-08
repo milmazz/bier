@@ -18,10 +18,16 @@ defmodule Bier.Plan do
   def explain(conn, pool, relation, plan, %MediaType{symbol: :plan} = media) do
     {format, _} = {media.params.format, media.params}
 
-    with {:ok, sql, params} <- QueryExecutor.build(relation, plan, relations(conn)) do
+    with {:ok, sql, params} <-
+           Bier.ServerTiming.measure(:plan, fn ->
+             QueryExecutor.build(relation, plan, relations(conn))
+           end) do
       explain_sql = "EXPLAIN (#{explain_opts(format, media)}) " <> sql
 
-      case Postgrex.query(pool, explain_sql, params) do
+      Bier.ServerTiming.measure(:transaction, fn ->
+        Postgrex.query(pool, explain_sql, params)
+      end)
+      |> case do
         {:ok, %Postgrex.Result{rows: rows}} ->
           body = plan_body(format, rows)
 

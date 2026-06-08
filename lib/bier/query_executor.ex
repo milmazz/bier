@@ -57,17 +57,29 @@ defmodule Bier.QueryExecutor do
     timezone = Keyword.get(opts, :timezone)
     auth = Keyword.get(opts, :auth)
 
-    with {:ok, sql, params} <- build(relation, plan, relations) do
-      case query_read(conn, sql, params, timezone, auth) do
-        {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
-          resolve_count(conn, relation, plan, relations, count_mode, opts, body, exact_count || 0)
+    with {:ok, sql, params} <-
+           Bier.ServerTiming.measure(:plan, fn -> build(relation, plan, relations) end) do
+      Bier.ServerTiming.measure(:transaction, fn ->
+        case query_read(conn, sql, params, timezone, auth) do
+          {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
+            resolve_count(
+              conn,
+              relation,
+              plan,
+              relations,
+              count_mode,
+              opts,
+              body,
+              exact_count || 0
+            )
 
-        {:ok, %Postgrex.Result{rows: []}} ->
-          {:ok, %{body: "[]", count: 0}}
+          {:ok, %Postgrex.Result{rows: []}} ->
+            {:ok, %{body: "[]", count: 0}}
 
-        {:error, _} = err ->
-          err
-      end
+          {:error, _} = err ->
+            err
+        end
+      end)
     end
   end
 
@@ -254,21 +266,25 @@ defmodule Bier.QueryExecutor do
     relations = Keyword.get(opts, :relations, %{})
 
     try do
-      case build_function(fn_def, ret_relation, args, plan, relations) do
+      case Bier.ServerTiming.measure(:plan, fn ->
+             build_function(fn_def, ret_relation, args, plan, relations)
+           end) do
         {:ok, sql, params} ->
-          case Postgrex.query(conn, sql, params) do
-            {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
-              # planned/estimated counts are not needed by the RPC pagination
-              # cases; exact reuses the window count, which (with a non-empty
-              # window) is the full count. Empty RPC windows are not exercised.
-              {:ok, %{body: body, count: count_for(count_mode, exact_count || 0)}}
+          Bier.ServerTiming.measure(:transaction, fn ->
+            case Postgrex.query(conn, sql, params) do
+              {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
+                # planned/estimated counts are not needed by the RPC pagination
+                # cases; exact reuses the window count, which (with a non-empty
+                # window) is the full count. Empty RPC windows are not exercised.
+                {:ok, %{body: body, count: count_for(count_mode, exact_count || 0)}}
 
-            {:ok, %Postgrex.Result{rows: []}} ->
-              {:ok, %{body: "[]", count: 0}}
+              {:ok, %Postgrex.Result{rows: []}} ->
+                {:ok, %{body: "[]", count: 0}}
 
-            {:error, _} = err ->
-              err
-          end
+              {:error, _} = err ->
+                err
+            end
+          end)
 
         {:error, _} = err ->
           err

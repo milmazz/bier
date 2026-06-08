@@ -171,41 +171,45 @@ defmodule Bier.Mutation do
     relations = :persistent_term.get({Bier, :relations, config.name}, %{})
 
     {:ok, wrapped, wparams} =
-      QueryExecutor.build_representation(relation, plan, relations, {sql, params})
+      Bier.ServerTiming.measure(:plan, fn ->
+        QueryExecutor.build_representation(relation, plan, relations, {sql, params})
+      end)
 
     result =
-      Postgrex.transaction(pool, fn tx ->
-        # pg-safeupdate parity: when this table is configured "safe", an UPDATE
-        # or DELETE without a filter must raise 21000.
-        maybe_enable_safeupdate(tx, config, relation, mutation, plan)
+      Bier.ServerTiming.measure(:transaction, fn ->
+        Postgrex.transaction(pool, fn tx ->
+          # pg-safeupdate parity: when this table is configured "safe", an UPDATE
+          # or DELETE without a filter must raise 21000.
+          maybe_enable_safeupdate(tx, config, relation, mutation, plan)
 
-        # For PUT, distinguish insert (201) from replace (200) by whether the PK
-        # already existed before the upsert.
-        existed = put_existed?(tx, relation, mutation)
+          # For PUT, distinguish insert (201) from replace (200) by whether the PK
+          # already existed before the upsert.
+          existed = put_existed?(tx, relation, mutation)
 
-        case Postgrex.query(tx, wrapped, wparams) do
-          {:ok, %Postgrex.Result{rows: [[body, count, meta]]}} ->
-            count = count || 0
+          case Postgrex.query(tx, wrapped, wparams) do
+            {:ok, %Postgrex.Result{rows: [[body, count, meta]]}} ->
+              count = count || 0
 
-            with :ok <- enforce_max_affected(pref, count),
-                 :ok <- enforce_singular(media, body),
-                 # Read any response.headers / response.status GUC an INSTEAD OF
-                 # trigger set during the write, BEFORE the transaction ends
-                 # (the GUCs are transaction-local; a rollback would discard them).
-                 {:ok, guc} <- Bier.Guc.read(tx) do
-              # The response is fully computed inside the transaction (the CTE's
-              # RETURNING is already serialized into `body`). Under db-tx-end
-              # :rollback we abort the transaction here, discarding the write but
-              # returning the same response — see the conformance harness's
-              # base_opts/0 (db_tx_end: :rollback) for why.
-              finish_tx(tx, config, {body, count, meta, existed, guc})
-            else
-              {:error, _} = err -> Postgrex.rollback(tx, err)
-            end
+              with :ok <- enforce_max_affected(pref, count),
+                   :ok <- enforce_singular(media, body),
+                   # Read any response.headers / response.status GUC an INSTEAD OF
+                   # trigger set during the write, BEFORE the transaction ends
+                   # (the GUCs are transaction-local; a rollback would discard them).
+                   {:ok, guc} <- Bier.Guc.read(tx) do
+                # The response is fully computed inside the transaction (the CTE's
+                # RETURNING is already serialized into `body`). Under db-tx-end
+                # :rollback we abort the transaction here, discarding the write but
+                # returning the same response — see the conformance harness's
+                # base_opts/0 (db_tx_end: :rollback) for why.
+                finish_tx(tx, config, {body, count, meta, existed, guc})
+              else
+                {:error, _} = err -> Postgrex.rollback(tx, err)
+              end
 
-          {:error, _} = err ->
-            Postgrex.rollback(tx, err)
-        end
+            {:error, _} = err ->
+              Postgrex.rollback(tx, err)
+          end
+        end)
       end)
 
     case result do

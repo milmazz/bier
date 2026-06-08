@@ -473,20 +473,22 @@ defmodule Bier.Rpc do
     read_only? = m in ["GET", "HEAD"]
     auth = ActionController.auth_setup(conn, instance_config(conn))
 
-    Postgrex.transaction(pool, fn tx ->
-      if read_only?, do: Postgrex.query!(tx, "SET TRANSACTION READ ONLY", [])
-      apply_auth(tx, auth)
+    Bier.ServerTiming.measure(:transaction, fn ->
+      Postgrex.transaction(pool, fn tx ->
+        if read_only?, do: Postgrex.query!(tx, "SET TRANSACTION READ ONLY", [])
+        apply_auth(tx, auth)
 
-      case Postgrex.query(tx, sql, params) do
-        {:ok, result} ->
-          case Bier.Guc.read(tx) do
-            {:ok, guc} -> {result, guc}
-            {:error, reason} -> Postgrex.rollback(tx, reason)
-          end
+        case Postgrex.query(tx, sql, params) do
+          {:ok, result} ->
+            case Bier.Guc.read(tx) do
+              {:ok, guc} -> {result, guc}
+              {:error, reason} -> Postgrex.rollback(tx, reason)
+            end
 
-        {:error, err} ->
-          Postgrex.rollback(tx, err)
-      end
+          {:error, err} ->
+            Postgrex.rollback(tx, err)
+        end
+      end)
     end)
     |> case do
       {:ok, {result, guc}} -> {:ok, result, guc}
@@ -522,10 +524,12 @@ defmodule Bier.Rpc do
       |> Enum.reject(fn {k, _v} -> MapSet.member?(arg_keys, k) end)
       |> URI.encode_query()
 
-    with {:ok, plan} <- QueryParser.parse_request(reserved_qs),
-         {:ok, plan} <- apply_range(conn, plan) do
-      {:ok, apply_max_rows(plan, config)}
-    end
+    Bier.ServerTiming.measure(:parse, fn ->
+      with {:ok, plan} <- QueryParser.parse_request(reserved_qs),
+           {:ok, plan} <- apply_range(conn, plan) do
+        {:ok, apply_max_rows(plan, config)}
+      end
+    end)
   end
 
   defp apply_range(conn, plan) do
