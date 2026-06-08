@@ -368,20 +368,26 @@ defmodule Bier.CLI.Config do
   defp db_uri_opts(uri) do
     %URI{host: host, port: port, path: path, userinfo: userinfo} = URI.parse(uri)
     {user, pass} = split_userinfo(userinfo)
-    database = path |> to_string() |> String.trim_leading("/")
+    database = path |> to_string() |> String.trim_leading("/") |> decode()
 
     [hostname: host, port: port, database: database, username: user, password: pass]
     |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
   end
 
+  # URI.parse/1 leaves percent-encoding intact, but Postgrex expects decoded
+  # credentials/db name (a password is commonly encoded because `@`/`:` are URI
+  # delimiters, e.g. `p%40ss` -> `p@ss`).
   defp split_userinfo(nil), do: {nil, nil}
 
   defp split_userinfo(userinfo) do
     case String.split(userinfo, ":", parts: 2) do
-      [user, pass] -> {user, pass}
-      [user] -> {user, nil}
+      [user, pass] -> {decode(user), decode(pass)}
+      [user] -> {decode(user), nil}
     end
   end
+
+  defp decode(nil), do: nil
+  defp decode(value), do: URI.decode(value)
 
   @doc """
   Render a resolved config map as PostgREST `--dump-config` text: one

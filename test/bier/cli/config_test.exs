@@ -176,6 +176,17 @@ defmodule Bier.CLI.ConfigTest do
       assert get_in(opts, [:router, :port]) == 4000
     end
 
+    test "percent-decodes db-uri credentials and database" do
+      {:ok, resolved} =
+        Config.load(%{"PGRST_DB_URI" => "postgresql://al%20ice:p%40ss@host/my%20db"}, nil, %{})
+
+      opts = Config.to_start_opts(resolved)
+
+      assert opts[:username] == "al ice"
+      assert opts[:password] == "p@ss"
+      assert opts[:database] == "my db"
+    end
+
     test "omits unset optional keys so Bier defaults apply" do
       {:ok, resolved} = Config.load(%{}, nil, %{})
       opts = Config.to_start_opts(resolved)
