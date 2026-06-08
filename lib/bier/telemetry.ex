@@ -32,10 +32,11 @@ defmodule Bier.Telemetry do
       document, `OPTIONS`, and error responses that never resolve a relation).
 
   > #### Per-phase timings {: .info}
-  > These events carry only the **total** request duration. The per-phase
-  > splits (jwt / parse / plan / transaction / response) that `Server-Timing`
-  > reports are still fabricated today; threading real per-phase timings through
-  > the pipeline is tracked as the Server-Timing fidelity follow-up (#26).
+  > These events carry only the **total** request duration. The per-phase splits
+  > (jwt / parse / plan / transaction / response) are measured separately and
+  > surfaced through the `Server-Timing` response header — see
+  > `Bier.ServerTiming` and `Bier.Plugs.Observability`. They are not (yet)
+  > attached to these `:telemetry` events.
 
   ### `[:bier, :schema_cache, :load, :start | :stop | :exception]`
 

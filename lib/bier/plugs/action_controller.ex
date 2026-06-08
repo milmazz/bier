@@ -82,7 +82,7 @@ defmodule Bier.Plugs.ActionController do
   @doc false
   def maybe_auth(conn, config, schema) do
     if Bier.Auth.applicable?(schema) do
-      case Bier.Auth.resolve(conn, config) do
+      case Bier.ServerTiming.measure(:jwt, fn -> Bier.Auth.resolve(conn, config) end) do
         {:ok, context} -> {:ok, assign(conn, :bier_auth, context)}
         {:error, _} = err -> err
       end
@@ -159,7 +159,10 @@ defmodule Bier.Plugs.ActionController do
     fun =
       "#{Bier.QueryExecutor.quote_ident(schema)}.#{Bier.QueryExecutor.quote_ident(config.db_root_spec)}"
 
-    case Postgrex.query(Registry.via(config.name, Postgrex), "SELECT (#{fun}())::text", []) do
+    Bier.ServerTiming.measure(:transaction, fn ->
+      Postgrex.query(Registry.via(config.name, Postgrex), "SELECT (#{fun}())::text", [])
+    end)
+    |> case do
       {:ok, %Postgrex.Result{rows: [[body]]}} -> root_doc_body(conn, body)
       {:error, _} = err -> err
     end
@@ -466,10 +469,12 @@ defmodule Bier.Plugs.ActionController do
 
   @doc false
   def parse(conn, config) do
-    with {:ok, plan} <- QueryParser.parse_request(conn.query_string),
-         {:ok, plan} <- apply_range_header(conn, plan) do
-      {:ok, apply_max_rows(plan, config)}
-    end
+    Bier.ServerTiming.measure(:parse, fn ->
+      with {:ok, plan} <- QueryParser.parse_request(conn.query_string),
+           {:ok, plan} <- apply_range_header(conn, plan) do
+        {:ok, apply_max_rows(plan, config)}
+      end
+    end)
   end
 
   defp apply_range_header(conn, plan) do
