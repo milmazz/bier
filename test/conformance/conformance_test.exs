@@ -4,8 +4,7 @@ defmodule Bier.ConformanceTest do
   against the shared Bier instance and currently FAIL (lib/ returns canned
   responses). Cases the current harness cannot evaluate are tagged :pending and
   excluded (see pending_reason): :cli (no CLI), :jwt (needs JWT signing),
-  :openapi_doc (openapi body_jsonpath cases need the generated OpenAPI
-  document, #39), :status_text (req does not expose the HTTP reason phrase).
+  :status_text (req does not expose the HTTP reason phrase).
   These are tracked for a follow-up, like the schema_cache deferral in
   spec/COVERAGE.md.
   """
@@ -21,12 +20,6 @@ defmodule Bier.ConformanceTest do
 
         Map.has_key?(c.request, "jwt") ->
           :jwt
-
-        # body_jsonpath now evaluates (see Bier.ConformanceJsonPath), EXCEPT the
-        # openapi-area cases, which assert the generated OpenAPI document that is
-        # still a stub until #39. Keep those excluded under an honest reason.
-        Map.has_key?(c.expect, "body_jsonpath") and c.area == "openapi" ->
-          :openapi_doc
 
         Map.has_key?(c.expect, "status_text") ->
           :status_text

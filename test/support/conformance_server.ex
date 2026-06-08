@@ -33,7 +33,7 @@ defmodule Bier.ConformanceServer do
   # case to a faithful variant could change its result. (openapi-mode/db-root-spec
   # behavior lands separately.) 1467 verifies an RS256 token against an asymmetric
   # public JWK as jwt-secret (issue #23).
-  @variant_case_ids [1467, 1491, 1493, 1678, 1682, 1703, 1758, 1763, 1764]
+  @variant_case_ids [1467, 1491, 1493, 1654, 1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764]
 
   def url_for(%Bier.ConformanceCase{id: id}) when id in @variant_case_ids,
     do: :persistent_term.get({__MODULE__, :variant, id})
@@ -62,6 +62,10 @@ defmodule Bier.ConformanceServer do
     end)
   end
 
+  # Case 1654 asserts the default title/description when the exposed schema has
+  # no COMMENT; expose a comment-less schema so the shared "test" schema (which
+  # has a comment needed by case 1656) is not affected.
+  defp variant_extra_opts(1654), do: [db_schemas: ["openapi_no_comment"]]
   # Case 1764 asserts the no-JWT-secret 500 path (PGRST300); its instance must
   # run without a secret even though base_opts configures one.
   defp variant_extra_opts(1764), do: [jwt_secret: nil]

@@ -316,7 +316,7 @@ defmodule Bier.OpenAPI do
   defp put_default(map, v), do: Map.put(map, "default", v)
 
   defp column_description(col, rel) do
-    [col.comment, pk_note(col), fk_note(col, rel)]
+    [col.comment, pk_note(col, rel), fk_note(col, rel)]
     |> Enum.reject(&is_nil/1)
     |> case do
       [] -> nil
@@ -324,8 +324,9 @@ defmodule Bier.OpenAPI do
     end
   end
 
-  defp pk_note(%{pk?: true}), do: "Note:\nThis is a Primary Key.<pk/>"
-  defp pk_note(_), do: nil
+  defp pk_note(col, rel) do
+    if col.name in rel.primary_key, do: "Note:\nThis is a Primary Key.<pk/>", else: nil
+  end
 
   defp fk_note(col, rel) do
     case Enum.find(rel.foreign_keys, fn fk -> fk.columns == [col.name] end) do
