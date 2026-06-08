@@ -29,7 +29,7 @@ defmodule Bier.CLITest do
   test "--version prints the version and exits 0" do
     result = CLI.run(["--version"], env: %{})
     assert result.exit == 0
-    assert IO.iodata_to_binary(result.stdout) =~ "bier"
+    assert IO.iodata_to_binary(result.stdout) =~ ~r/bier \S/
   end
 
   test "--help prints usage and exits 0" do

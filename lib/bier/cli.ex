@@ -38,7 +38,11 @@ defmodule Bier.CLI do
   defp dispatch(:run, resolved), do: {:boot, resolved}
 
   # The optional positional config-file path is any argv element not starting
-  # with "-". Recognized flags select the command; default command is :run.
+  # with "-". The first recognized flag selects the command; the default is
+  # :run. Unknown flags are currently ignored (the server boots), and when two
+  # commands are passed the first wins — PostgREST instead errors on unknown /
+  # conflicting flags. Tightening this belongs with the deferred --ready /
+  # --example work (issue #45), not this conformance slice.
   defp parse_argv(argv) do
     file_path = Enum.find(argv, fn arg -> not String.starts_with?(arg, "-") end)
     command = Enum.find_value(argv, :run, &flag_command/1)
