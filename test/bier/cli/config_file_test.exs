@@ -38,4 +38,18 @@ defmodule Bier.CLI.ConfigFileTest do
 
     assert ConfigFile.read(path) == {:ok, %{"log-level" => "info"}}
   end
+
+  test "an empty quoted string parses to an empty string" do
+    assert ConfigFile.parse(~s(jwt-secret = "")) == {:ok, %{"jwt-secret" => ""}}
+  end
+
+  test "a value containing '=' keeps everything after the first '='" do
+    assert ConfigFile.parse("db-uri = postgresql://u:p@h/db?x=1") ==
+             {:ok, %{"db-uri" => "postgresql://u:p@h/db?x=1"}}
+  end
+
+  test "a line with no '=' is a malformed-line error" do
+    assert {:error, message} = ConfigFile.parse("not-a-valid-line")
+    assert message =~ "malformed config line"
+  end
 end

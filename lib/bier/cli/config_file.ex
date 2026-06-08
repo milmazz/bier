@@ -44,9 +44,15 @@ defmodule Bier.CLI.ConfigFile do
     end
   end
 
-  defp parse_value(<<?", rest::binary>>) do
-    rest
-    |> String.slice(0, byte_size(rest) - 1)
+  # A double-quoted string: strip the surrounding quotes and unescape \" → ".
+  # The guard requires a non-empty suffix that ends with a closing quote, so
+  # `""` parses to "" and an unterminated `"foo` falls through to the
+  # bare-string clause below.
+  defp parse_value(<<?", inner::binary>>)
+       when byte_size(inner) >= 1 and
+              binary_part(inner, byte_size(inner) - 1, 1) == "\"" do
+    inner
+    |> binary_part(0, byte_size(inner) - 1)
     |> String.replace(~S(\"), ~S("))
   end
 
