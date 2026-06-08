@@ -205,4 +205,173 @@ defmodule Bier.OpenAPITest do
                "Add the token prepending \"Bearer \" (without quotes) to it"
     end
   end
+
+  describe "definitions (1659/1660/1664)" do
+    test "table: properties, pk/fk notes, required, table-comment description" do
+      child = %Bier.Introspection.Relation{
+        schema: "test",
+        name: "child_entities",
+        kind: :table,
+        primary_key: ["id"],
+        foreign_keys: [
+          %{
+            constraint: "fk",
+            columns: ["parent_id"],
+            ref_schema: "test",
+            ref_relation: "entities",
+            ref_columns: ["id"],
+            unique?: false
+          }
+        ],
+        columns: [
+          col_map("id", "integer",
+            pk?: true,
+            notnull?: true,
+            comment: "child_entities id comment"
+          ),
+          col_map("name", "text",
+            comment: "child_entities name comment. Can be longer than sixty-three characters long"
+          ),
+          col_map("parent_id", "integer")
+        ],
+        comment: "child_entities comment"
+      }
+
+      d = build_one(child)["definitions"]["child_entities"]
+      assert d["type"] == "object"
+      assert d["description"] == "child_entities comment"
+
+      assert d["properties"]["id"]["description"] ==
+               "child_entities id comment\n\nNote:\nThis is a Primary Key.<pk/>"
+
+      assert d["properties"]["name"]["description"] ==
+               "child_entities name comment. Can be longer than sixty-three characters long"
+
+      assert d["properties"]["parent_id"]["description"] ==
+               "Note:\nThis is a Foreign Key to `entities.id`.<fk table='entities' column='id'/>"
+
+      assert d["required"] == ["id"]
+    end
+
+    test "view: object + comment description + pk/fk notes, NO required key (1664)" do
+      view = %Bier.Introspection.Relation{
+        schema: "test",
+        name: "child_entities_view",
+        kind: :view,
+        primary_key: ["id"],
+        foreign_keys: [
+          %{
+            constraint: "fk",
+            columns: ["parent_id"],
+            ref_schema: "test",
+            ref_relation: "entities",
+            ref_columns: ["id"],
+            unique?: false
+          }
+        ],
+        columns: [
+          col_map("id", "integer",
+            pk?: true,
+            notnull?: false,
+            comment: "child_entities_view id comment"
+          ),
+          col_map("parent_id", "integer")
+        ],
+        comment: "child_entities_view comment"
+      }
+
+      d = build_one(view)["definitions"]["child_entities_view"]
+      assert d["type"] == "object"
+      assert d["description"] == "child_entities_view comment"
+
+      assert d["properties"]["id"]["description"] ==
+               "child_entities_view id comment\n\nNote:\nThis is a Primary Key.<pk/>"
+
+      assert d["properties"]["parent_id"]["description"] ==
+               "Note:\nThis is a Foreign Key to `entities.id`.<fk table='entities' column='id'/>"
+
+      refute Map.has_key?(d, "required")
+    end
+
+    test "commented FK column joins comment and FK note" do
+      rel = %Bier.Introspection.Relation{
+        schema: "test",
+        name: "t",
+        kind: :table,
+        primary_key: [],
+        foreign_keys: [
+          %{
+            constraint: "fk",
+            columns: ["parent_id"],
+            ref_schema: "test",
+            ref_relation: "entities",
+            ref_columns: ["id"],
+            unique?: false
+          }
+        ],
+        columns: [col_map("parent_id", "integer", comment: "the parent link")],
+        comment: nil
+      }
+
+      desc = build_one(rel)["definitions"]["t"]["properties"]["parent_id"]["description"]
+
+      assert desc ==
+               "the parent link\n\nNote:\nThis is a Foreign Key to `entities.id`.<fk table='entities' column='id'/>"
+    end
+  end
+
+  describe "definitions defaults (1669)" do
+    test "decoded column defaults" do
+      rel = %Bier.Introspection.Relation{
+        schema: "test",
+        name: "openapi_defaults",
+        kind: :table,
+        primary_key: [],
+        foreign_keys: [],
+        comment: nil,
+        columns: [
+          col_map("text", "text", default: "'default'::text"),
+          col_map("boolean", "boolean", default: "false"),
+          col_map("integer", "integer", default: "42"),
+          col_map("numeric", "numeric", default: "42.2"),
+          col_map("date", "date", default: "'1900-01-01'::date"),
+          col_map("time", "time without time zone", default: "'13:00:00'::time without time zone")
+        ]
+      }
+
+      p = build_one(rel)["definitions"]["openapi_defaults"]["properties"]
+      assert p["text"]["default"] == "default"
+      assert p["boolean"]["default"] == false
+      assert p["integer"]["default"] == 42
+      assert p["numeric"]["default"] == 42.2
+      assert p["date"]["default"] == "1900-01-01"
+      assert p["time"]["default"] == "13:00:00"
+    end
+  end
+
+  # --- helpers ---
+  defp col_map(name, type, opts \\ []) do
+    %{
+      name: name,
+      type: type,
+      pk?: Keyword.get(opts, :pk?, false),
+      notnull?: Keyword.get(opts, :notnull?, false),
+      default: Keyword.get(opts, :default),
+      composite?: false,
+      data_rep: nil,
+      comment: Keyword.get(opts, :comment),
+      enum_labels: Keyword.get(opts, :enum_labels),
+      max_length: Keyword.get(opts, :max_length)
+    }
+  end
+
+  defp build_one(rel) do
+    Bier.OpenAPI.build(%{
+      relations: [rel],
+      functions: [],
+      schema_comment: nil,
+      security_active?: false,
+      docs_version: "v14"
+    })
+  end
 end
