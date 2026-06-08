@@ -101,6 +101,27 @@ defmodule Bier.CLI.Config do
       kind: :opt_string,
       default: :unset,
       aliases: []
+    },
+    %{
+      key: "db-plan-enabled",
+      env: "PGRST_DB_PLAN_ENABLED",
+      kind: :bool,
+      default: false,
+      aliases: []
+    },
+    %{
+      key: "server-trace-header",
+      env: "PGRST_SERVER_TRACE_HEADER",
+      kind: :opt_string,
+      default: :unset,
+      aliases: []
+    },
+    %{
+      key: "server-timing-enabled",
+      env: "PGRST_SERVER_TIMING_ENABLED",
+      kind: :bool,
+      default: false,
+      aliases: []
     }
   ]
 
@@ -346,7 +367,10 @@ defmodule Bier.CLI.Config do
         jwt_aud: resolved["jwt-aud"],
         openapi_mode: resolved["openapi-mode"],
         log_level: resolved["log-level"],
-        server_cors_allowed_origins: resolved["server-cors-allowed-origins"]
+        server_cors_allowed_origins: resolved["server-cors-allowed-origins"],
+        db_plan_enabled: resolved["db-plan-enabled"],
+        server_trace_header: resolved["server-trace-header"],
+        server_timing_enabled: resolved["server-timing-enabled"]
       ]
       |> Enum.reject(fn {_k, v} -> v == :unset end)
 

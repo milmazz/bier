@@ -207,6 +207,48 @@ defmodule Bier.CLI.ConfigTest do
       opts = Config.to_start_opts(resolved)
       assert %Bier.Config{} = Bier.Config.new!(opts, Bier.schema())
     end
+
+    test "maps the bool observability keys and trace header" do
+      {:ok, resolved} =
+        Config.load(
+          %{"PGRST_DB_PLAN_ENABLED" => "true", "PGRST_SERVER_TRACE_HEADER" => "X-Request-Id"},
+          nil,
+          %{}
+        )
+
+      opts = Config.to_start_opts(resolved)
+
+      assert opts[:db_plan_enabled] == true
+      assert opts[:server_timing_enabled] == false
+      assert opts[:server_trace_header] == "X-Request-Id"
+    end
+
+    test "a fully-populated resolve produces options that all validate via Bier.Config.new!/2" do
+      env = %{
+        "PGRST_DB_URI" => "postgresql://u:p@h:5432/db",
+        "PGRST_DB_SCHEMAS" => "api,public",
+        "PGRST_DB_ANON_ROLE" => "anon",
+        "PGRST_DB_EXTRA_SEARCH_PATH" => "public,extra",
+        "PGRST_DB_MAX_ROWS" => "100",
+        "PGRST_DB_TX_END" => "rollback",
+        "PGRST_DB_PRE_REQUEST" => "auth.hook",
+        "PGRST_DB_ROOT_SPEC" => "root_fn",
+        "PGRST_SERVER_PORT" => "4000",
+        "PGRST_ADMIN_SERVER_PORT" => "4001",
+        "PGRST_JWT_SECRET" => "reallyreallyreallyreallyverysafe",
+        "PGRST_JWT_AUD" => "https://example.com",
+        "PGRST_OPENAPI_MODE" => "ignore-privileges",
+        "PGRST_LOG_LEVEL" => "info",
+        "PGRST_SERVER_CORS_ALLOWED_ORIGINS" => "http://example.com",
+        "PGRST_DB_PLAN_ENABLED" => "true",
+        "PGRST_SERVER_TRACE_HEADER" => "X-Request-Id",
+        "PGRST_SERVER_TIMING_ENABLED" => "true"
+      }
+
+      {:ok, resolved} = Config.load(env, nil, %{})
+      opts = Config.to_start_opts(resolved)
+      assert %Bier.Config{} = Bier.Config.new!(opts, Bier.schema())
+    end
   end
 
   describe "dump/1" do
@@ -246,6 +288,13 @@ defmodule Bier.CLI.ConfigTest do
       {:ok, resolved} = Config.load(%{"PGRST_DB_EXTRA_SEARCH_PATH" => ""}, nil, %{})
       dump = Config.dump(resolved) |> IO.iodata_to_binary()
       assert dump =~ ~s(db-extra-search-path = "")
+    end
+
+    test "bool keys render bare; default db-plan-enabled is false" do
+      {:ok, resolved} = Config.load(%{"PGRST_SERVER_TIMING_ENABLED" => "true"}, nil, %{})
+      dump = Config.dump(resolved) |> IO.iodata_to_binary()
+      assert dump =~ "server-timing-enabled = true"
+      assert dump =~ "db-plan-enabled = false"
     end
 
     test "dump output is reparse-stable (case 1726)" do
