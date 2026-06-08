@@ -379,6 +379,54 @@ defmodule Bier.Introspection do
     end
   end
 
+  @doc """
+  Per-role access map for `openapi-mode = follow-privileges`.
+
+  Returns `%{relations: %{{schema, name} => %{select?, insert?, update?, delete?}},
+  functions: %{{schema, name} => %{execute?}}}`. PostgreSQL resolves role
+  membership, so a role inherits grants from roles it belongs to. Functions are
+  aggregated across overloads (`execute?` is true when ANY overload is callable).
+  """
+  @spec privileges(conn :: term(), schemas :: [String.t()], role :: String.t()) ::
+          %{relations: map(), functions: map()}
+  def privileges(conn, schemas, role)
+      when is_list(schemas) and schemas != [] and is_binary(role) do
+    rel_sql = """
+    SELECT n.nspname, c.relname,
+           has_table_privilege($1, c.oid, 'SELECT'),
+           has_table_privilege($1, c.oid, 'INSERT'),
+           has_table_privilege($1, c.oid, 'UPDATE'),
+           has_table_privilege($1, c.oid, 'DELETE')
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = ANY($2)
+      AND c.relkind = ANY(ARRAY['r','v','m','f','p'])
+    """
+
+    relations =
+      for [s, r, sel, ins, upd, del] <- Postgrex.query!(conn, rel_sql, [role, schemas]).rows,
+          into: %{} do
+        {{s, r}, %{select?: sel, insert?: ins, update?: upd, delete?: del}}
+      end
+
+    fn_sql = """
+    SELECT n.nspname, p.proname,
+           bool_or(has_function_privilege($1, p.oid, 'EXECUTE'))
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = ANY($2)
+      AND p.prokind = 'f'
+    GROUP BY n.nspname, p.proname
+    """
+
+    functions =
+      for [s, f, exec] <- Postgrex.query!(conn, fn_sql, [role, schemas]).rows, into: %{} do
+        {{s, f}, %{execute?: exec}}
+      end
+
+    %{relations: relations, functions: functions}
+  end
+
   @doc "Returns the COMMENT on `schema`, or nil."
   @spec schema_comment(conn :: term(), schema :: String.t()) :: String.t() | nil
   def schema_comment(conn, schema) do

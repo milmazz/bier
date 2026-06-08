@@ -43,4 +43,18 @@ defmodule Bier.IntrospectionTest do
     assert Bier.Introspection.schema_comment(conn, "test") =~ "My API title"
     assert Bier.Introspection.schema_comment(conn, "nonexistent_schema_xyz") == nil
   end
+
+  test "privileges/3 reflects role grants", %{conn: conn} do
+    anon = Bier.Introspection.privileges(conn, ["test"], "postgrest_test_anonymous")
+    author = Bier.Introspection.privileges(conn, ["test"], "postgrest_test_author")
+
+    refute anon.relations[{"test", "authors_only"}].select?
+    assert author.relations[{"test", "authors_only"}].select?
+
+    refute anon.functions[{"test", "privileged_hello"}].execute?
+    assert author.functions[{"test", "privileged_hello"}].execute?
+
+    # a broadly-granted relation is visible to anon
+    assert anon.relations[{"test", "child_entities"}].select?
+  end
 end
