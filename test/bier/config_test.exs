@@ -21,6 +21,7 @@ defmodule Bier.ConfigTest do
 
     test "a value containing ':' must be a valid URI" do
       assert Bier.Config.validate_jwt_aud("https://example.com/aud") == :ok
+      assert Bier.Config.validate_jwt_aud("urn:example:audience") == :ok
 
       assert Bier.Config.validate_jwt_aud("foo://%%$$^^.com") ==
                {:error, "jwt-aud should be a string or a valid URI"}
@@ -31,6 +32,12 @@ defmodule Bier.ConfigTest do
     test "a too-short jwt_secret raises" do
       assert_raise ArgumentError, ~r/JWT secret must be at least 32/, fn ->
         Bier.Config.new!([jwt_secret: "short_secret"], Bier.schema())
+      end
+    end
+
+    test "an invalid jwt_aud raises" do
+      assert_raise ArgumentError, ~r/jwt-aud should be a string or a valid URI/, fn ->
+        Bier.Config.new!([jwt_aud: "foo://%%$$^^.com"], Bier.schema())
       end
     end
   end

@@ -115,32 +115,26 @@ defmodule Bier.Config do
 
   @doc """
   `jwt-aud` may be any plain string, but a value containing ':' must parse as a
-  valid absolute URI (scheme + host). Mirrors PostgREST conformance case 1709.
+  valid absolute URI. Mirrors PostgREST conformance case 1709.
   """
   @spec validate_jwt_aud(String.t() | nil) :: :ok | {:error, String.t()}
   def validate_jwt_aud(nil), do: :ok
 
   def validate_jwt_aud(aud) when is_binary(aud) do
-    cond do
-      not String.contains?(aud, ":") ->
-        :ok
-
-      valid_uri?(aud) ->
-        :ok
-
-      true ->
-        {:error, "jwt-aud should be a string or a valid URI"}
+    if not String.contains?(aud, ":") or valid_uri?(aud) do
+      :ok
+    else
+      {:error, "jwt-aud should be a string or a valid URI"}
     end
   end
 
+  # Mirrors PostgREST's `isURI` (Network.URI): any absolute RFC 3986 URI is
+  # valid, including opaque URIs / URNs (scheme, no authority) like
+  # "urn:example:audience". A host is NOT required.
   defp valid_uri?(value) do
     case URI.new(value) do
-      {:ok, %URI{scheme: scheme, host: host}}
-      when is_binary(scheme) and is_binary(host) and host != "" ->
-        true
-
-      _ ->
-        false
+      {:ok, %URI{scheme: scheme}} when is_binary(scheme) and scheme != "" -> true
+      _ -> false
     end
   end
 
