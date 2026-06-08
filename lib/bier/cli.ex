@@ -14,6 +14,8 @@ defmodule Bier.CLI do
 
   @type result :: %{stdout: iodata(), stderr: iodata(), exit: non_neg_integer()}
 
+  @version Mix.Project.config()[:version]
+
   @doc ~S"""
   Run the CLI core. `opts[:env]` is a `%{"PGRST_*" => string}` map (defaults to
   an empty map). Returns a `%{stdout, stderr, exit}` map for terminal commands,
@@ -59,10 +61,7 @@ defmodule Bier.CLI do
   defp read_file(nil), do: {:ok, nil}
   defp read_file(path), do: ConfigFile.read(path)
 
-  defp version_line do
-    vsn = Application.spec(:bier, :vsn) || ~c"unknown"
-    "bier #{vsn}\n"
-  end
+  defp version_line, do: "bier #{@version}\n"
 
   defp usage do
     """
@@ -76,6 +75,31 @@ defmodule Bier.CLI do
       -v, --version   Print the version and exit
       -h, --help      Print this help and exit
     """
+  end
+
+  @doc """
+  escript entry point. Supplies the real process environment, writes the
+  command's output to stdout/stderr, and halts with its exit code. For the
+  default run action it boots one standalone Bier instance and blocks.
+  """
+  @spec main([String.t()]) :: no_return()
+  def main(argv) do
+    case run(argv, env: System.get_env()) do
+      {:boot, resolved} -> boot(resolved)
+      %{stdout: out, stderr: err, exit: code} -> emit(out, err, code)
+    end
+  end
+
+  defp emit(out, err, code) do
+    IO.write(out)
+    IO.write(:stderr, err)
+    System.halt(code)
+  end
+
+  defp boot(resolved) do
+    {:ok, _} = Application.ensure_all_started(:bier)
+    {:ok, _pid} = Bier.start_link(Config.to_start_opts(resolved))
+    Process.sleep(:infinity)
   end
 
   defp ok(stdout), do: %{stdout: stdout, stderr: "", exit: 0}

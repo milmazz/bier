@@ -150,6 +150,54 @@ defmodule Bier.CLI.ConfigTest do
     end
   end
 
+  describe "to_start_opts/1" do
+    test "maps resolved keys to Bier.start_link/1 options" do
+      {:ok, resolved} =
+        Config.load(
+          %{
+            "PGRST_DB_URI" => "postgresql://alice:secret@db.example.com:5433/shop",
+            "PGRST_DB_SCHEMAS" => "api,public",
+            "PGRST_SERVER_PORT" => "4000",
+            "PGRST_LOG_LEVEL" => "info"
+          },
+          nil,
+          %{}
+        )
+
+      opts = Config.to_start_opts(resolved)
+
+      assert opts[:hostname] == "db.example.com"
+      assert opts[:port] == 5433
+      assert opts[:database] == "shop"
+      assert opts[:username] == "alice"
+      assert opts[:password] == "secret"
+      assert opts[:db_schemas] == ["api", "public"]
+      assert opts[:log_level] == :info
+      assert get_in(opts, [:router, :port]) == 4000
+    end
+
+    test "omits unset optional keys so Bier defaults apply" do
+      {:ok, resolved} = Config.load(%{}, nil, %{})
+      opts = Config.to_start_opts(resolved)
+      refute Keyword.has_key?(opts, :db_max_rows)
+      refute Keyword.has_key?(opts, :jwt_secret)
+    end
+
+    test "collapses db-tx-end allow-override variants to Bier's base mode" do
+      {:ok, resolved} = Config.load(%{"PGRST_DB_TX_END" => "commit-allow-override"}, nil, %{})
+      opts = Config.to_start_opts(resolved)
+      assert opts[:db_tx_end] == :commit
+    end
+
+    test "produced options validate via Bier.Config.new!/2" do
+      {:ok, resolved} =
+        Config.load(%{"PGRST_DB_SCHEMAS" => "api", "PGRST_SERVER_PORT" => "4000"}, nil, %{})
+
+      opts = Config.to_start_opts(resolved)
+      assert %Bier.Config{} = Bier.Config.new!(opts, Bier.schema())
+    end
+  end
+
   describe "dump/1" do
     test "renders strings, ints, lists and unset values PostgREST-style" do
       {:ok, resolved} =

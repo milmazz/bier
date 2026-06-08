@@ -326,6 +326,64 @@ defmodule Bier.CLI.Config do
   end
 
   @doc """
+  Translate a resolved config map into a keyword list for `Bier.start_link/1`.
+  `:unset` optional keys are omitted so Bier's own defaults apply. `db-uri` is
+  parsed into discrete connection fields; `server-port` maps to `router[:port]`.
+  """
+  @spec to_start_opts(map()) :: keyword()
+  def to_start_opts(resolved) do
+    direct =
+      [
+        db_schemas: resolved["db-schemas"],
+        db_anon_role: resolved["db-anon-role"],
+        db_extra_search_path: resolved["db-extra-search-path"],
+        db_max_rows: resolved["db-max-rows"],
+        db_tx_end: bier_tx_end(resolved["db-tx-end"]),
+        db_pre_request: resolved["db-pre-request"],
+        db_root_spec: resolved["db-root-spec"],
+        admin_server_port: resolved["admin-server-port"],
+        jwt_secret: resolved["jwt-secret"],
+        jwt_aud: resolved["jwt-aud"],
+        openapi_mode: resolved["openapi-mode"],
+        log_level: resolved["log-level"],
+        server_cors_allowed_origins: resolved["server-cors-allowed-origins"]
+      ]
+      |> Enum.reject(fn {_k, v} -> v == :unset end)
+
+    router = [port: resolved["server-port"], scheme: :http]
+
+    direct ++ [router: router] ++ db_uri_opts(resolved["db-uri"])
+  end
+
+  # Bier's runtime supports only :commit / :rollback. PostgREST's
+  # *-allow-override variants (per-request Prefer override) collapse to their
+  # base mode — the closest behavior Bier currently offers.
+  defp bier_tx_end(v) when v in [:commit, :"commit-allow-override"], do: :commit
+  defp bier_tx_end(v) when v in [:rollback, :"rollback-allow-override"], do: :rollback
+
+  # Parse a libpq URI into Bier's discrete connection fields. An empty
+  # "postgresql://" carries no fields, so Bier's defaults apply.
+  defp db_uri_opts(uri) when uri in [nil, "", "postgresql://", "postgres://"], do: []
+
+  defp db_uri_opts(uri) do
+    %URI{host: host, port: port, path: path, userinfo: userinfo} = URI.parse(uri)
+    {user, pass} = split_userinfo(userinfo)
+    database = path |> to_string() |> String.trim_leading("/")
+
+    [hostname: host, port: port, database: database, username: user, password: pass]
+    |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
+  end
+
+  defp split_userinfo(nil), do: {nil, nil}
+
+  defp split_userinfo(userinfo) do
+    case String.split(userinfo, ":", parts: 2) do
+      [user, pass] -> {user, pass}
+      [user] -> {user, nil}
+    end
+  end
+
+  @doc """
   Render a resolved config map as PostgREST `--dump-config` text: one
   `key = value` line per spec key, sorted by key for determinism (so the output
   is reparse-stable).

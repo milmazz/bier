@@ -12,6 +12,7 @@ defmodule Bier.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       test_coverage: [tool: ExCoveralls],
       aliases: aliases(),
+      escript: escript(),
       deps: deps()
     ]
   end
@@ -36,6 +37,10 @@ defmodule Bier.MixProject do
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
+
+  defp escript do
+    [main_module: Bier.CLI, app: nil]
+  end
 
   defp aliases do
     [
