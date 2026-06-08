@@ -105,6 +105,41 @@ defmodule Bier.ConformanceAssertions do
     Enum.each(entries, &check_jsonpath_entry(&1, decoded))
   end
 
+  defp check("exit_code", "nonzero", resp) do
+    assert resp.exit != 0, "expected nonzero exit, got #{resp.exit}\nstderr: #{resp.stderr}"
+  end
+
+  defp check("exit_code", expected, resp) do
+    assert resp.exit == expected,
+           "expected exit #{expected}, got #{resp.exit}\nstderr: #{resp.stderr}"
+  end
+
+  defp check("dump_contains", needles, resp) when is_list(needles) do
+    Enum.each(needles, fn needle ->
+      assert String.contains?(resp.stdout, needle),
+             "dump did not contain #{inspect(needle)}\nfull dump:\n#{resp.stdout}"
+    end)
+  end
+
+  defp check("stderr_contains", needle, resp) when is_binary(needle) do
+    assert String.contains?(resp.stderr, needle),
+           "stderr did not contain #{inspect(needle)}\nfull stderr:\n#{resp.stderr}"
+  end
+
+  defp check("dump_reparse_stable", true, resp) do
+    path = Path.join(System.tmp_dir!(), "bier_reparse_#{System.unique_integer([:positive])}.conf")
+    File.write!(path, resp.stdout)
+
+    try do
+      second = Bier.CLI.run(["--dump-config", path], env: %{})
+
+      assert IO.iodata_to_binary(second.stdout) == resp.stdout,
+             "re-dumping the dumped config was not byte-identical"
+    after
+      File.rm(path)
+    end
+  end
+
   defp check(key, _val, _resp) do
     raise "unsupported assertion key: #{inspect(key)}"
   end
