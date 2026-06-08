@@ -28,7 +28,8 @@ defmodule Bier.OpenAPI do
       },
       "basePath" => "/",
       "paths" => paths(input),
-      "definitions" => definitions(input)
+      "definitions" => definitions(input),
+      "parameters" => parameters(input)
     }
     |> with_security(input.security_active?)
   end
@@ -54,8 +55,177 @@ defmodule Bier.OpenAPI do
   defp put_optional(map, _k, nil), do: map
   defp put_optional(map, k, v), do: Map.put(map, k, v)
 
-  # Filled in by later tasks (A4/A5); stub keeps the skeleton self-consistent.
-  defp paths(_input), do: %{}
+  defp paths(input) do
+    rel_paths = Map.new(input.relations, fn rel -> {"/" <> rel.name, relation_path_item(rel)} end)
+    Map.merge(rel_paths, function_paths(input))
+  end
+
+  # Replaced by Task A5; stub keeps table paths working in isolation.
+  defp function_paths(_input), do: %{}
+
+  defp relation_path_item(rel) do
+    {summary, description} = split_comment(rel.comment)
+
+    op = fn extra ->
+      %{"tags" => [rel.name]}
+      |> put_optional("summary", summary)
+      |> put_optional("description", description)
+      |> Map.merge(extra)
+    end
+
+    get =
+      op.(%{
+        "parameters" =>
+          row_filter_refs(rel) ++
+            refs(~w(select order range rangeUnit offset limit preferCount)),
+        "responses" => %{
+          "200" => %{
+            "description" => "OK",
+            "schema" => %{
+              "type" => "array",
+              "items" => %{"$ref" => "#/definitions/#{rel.name}"}
+            }
+          },
+          "206" => %{"description" => "Partial Content"}
+        }
+      })
+
+    item = %{"get" => get}
+
+    if rel.kind == :table do
+      item
+      |> Map.put(
+        "post",
+        op.(%{
+          "parameters" => refs(["body.#{rel.name}", "select", "preferPost"]),
+          "responses" => %{"201" => %{"description" => "Created"}}
+        })
+      )
+      |> Map.put(
+        "patch",
+        op.(%{
+          "parameters" =>
+            row_filter_refs(rel) ++ refs(["body.#{rel.name}", "select", "preferReturn"]),
+          "responses" => %{"204" => %{"description" => "No Content"}}
+        })
+      )
+      |> Map.put(
+        "delete",
+        op.(%{
+          "parameters" => row_filter_refs(rel) ++ refs(["select", "preferReturn"]),
+          "responses" => %{"204" => %{"description" => "No Content"}}
+        })
+      )
+    else
+      item
+    end
+  end
+
+  defp row_filter_refs(rel) do
+    Enum.map(rel.columns, fn c ->
+      %{"$ref" => "#/parameters/rowFilter.#{rel.name}.#{c.name}"}
+    end)
+  end
+
+  defp refs(names), do: Enum.map(names, fn n -> %{"$ref" => "#/parameters/#{n}"} end)
+
+  defp parameters(input) do
+    shared = %{
+      "select" => %{
+        "name" => "select",
+        "in" => "query",
+        "type" => "string",
+        "required" => false,
+        "description" => "Filtering Columns"
+      },
+      "order" => %{
+        "name" => "order",
+        "in" => "query",
+        "type" => "string",
+        "required" => false,
+        "description" => "Ordering"
+      },
+      "range" => %{
+        "name" => "Range",
+        "in" => "header",
+        "type" => "string",
+        "required" => false,
+        "description" => "Limiting and Pagination"
+      },
+      "rangeUnit" => %{
+        "name" => "Range-Unit",
+        "in" => "header",
+        "type" => "string",
+        "required" => false,
+        "default" => "items",
+        "description" => "Limiting and Pagination"
+      },
+      "offset" => %{
+        "name" => "offset",
+        "in" => "query",
+        "type" => "string",
+        "required" => false,
+        "description" => "Limiting and Pagination"
+      },
+      "limit" => %{
+        "name" => "limit",
+        "in" => "query",
+        "type" => "string",
+        "required" => false,
+        "description" => "Limiting and Pagination"
+      },
+      "preferCount" => %{
+        "name" => "Prefer",
+        "in" => "header",
+        "type" => "string",
+        "required" => false,
+        "enum" => ["count=none"],
+        "description" => "Preference"
+      },
+      "preferPost" => %{
+        "name" => "Prefer",
+        "in" => "header",
+        "type" => "string",
+        "required" => false,
+        "enum" => ["return=representation", "return=minimal", "return=none"],
+        "description" => "Preference"
+      },
+      "preferReturn" => %{
+        "name" => "Prefer",
+        "in" => "header",
+        "type" => "string",
+        "required" => false,
+        "enum" => ["return=representation", "return=minimal", "return=none"],
+        "description" => "Preference"
+      }
+    }
+
+    row_filters =
+      for rel <- input.relations, col <- rel.columns, into: %{} do
+        {"rowFilter.#{rel.name}.#{col.name}",
+         %{
+           "name" => col.name,
+           "in" => "query",
+           "type" => "string",
+           "required" => false,
+           "format" => col.type
+         }}
+      end
+
+    bodies =
+      for rel <- input.relations, rel.kind == :table, into: %{} do
+        {"body.#{rel.name}",
+         %{
+           "name" => rel.name,
+           "description" => rel.name,
+           "required" => false,
+           "in" => "body",
+           "schema" => %{"$ref" => "#/definitions/#{rel.name}"}
+         }}
+      end
+
+    shared |> Map.merge(row_filters) |> Map.merge(bodies)
+  end
 
   defp definitions(input) do
     Map.new(input.relations, fn rel -> {rel.name, definition(rel)} end)

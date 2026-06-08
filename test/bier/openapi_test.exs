@@ -349,6 +349,141 @@ defmodule Bier.OpenAPITest do
     end
   end
 
+  describe "table path items (1657/1658/1661/1662/1663)" do
+    setup do
+      child = %Bier.Introspection.Relation{
+        schema: "test",
+        name: "child_entities",
+        kind: :table,
+        primary_key: ["id"],
+        foreign_keys: [],
+        comment: "child_entities comment",
+        columns: [
+          col_map("id", "integer"),
+          col_map("name", "text"),
+          col_map("parent_id", "integer")
+        ]
+      }
+
+      %{doc: build_one(child)}
+    end
+
+    test "get summary (single-line comment), no description, param $refs, responses (1657/1661/1662/1663)",
+         %{doc: doc} do
+      get = doc["paths"]["/child_entities"]["get"]
+      assert get["summary"] == "child_entities comment"
+      refute Map.has_key?(get, "description")
+
+      assert Enum.map(get["parameters"], & &1["$ref"]) == [
+               "#/parameters/rowFilter.child_entities.id",
+               "#/parameters/rowFilter.child_entities.name",
+               "#/parameters/rowFilter.child_entities.parent_id",
+               "#/parameters/select",
+               "#/parameters/order",
+               "#/parameters/range",
+               "#/parameters/rangeUnit",
+               "#/parameters/offset",
+               "#/parameters/limit",
+               "#/parameters/preferCount"
+             ]
+
+      assert get["responses"]["200"]["description"] == "OK"
+
+      assert get["responses"]["200"]["schema"] == %{
+               "type" => "array",
+               "items" => %{"$ref" => "#/definitions/child_entities"}
+             }
+
+      assert get["responses"]["206"]["description"] == "Partial Content"
+      assert get["tags"] == ["child_entities"]
+    end
+
+    test "post/patch/delete params, responses, tags (1661/1662)", %{doc: doc} do
+      item = doc["paths"]["/child_entities"]
+
+      assert Enum.map(item["post"]["parameters"], & &1["$ref"]) ==
+               [
+                 "#/parameters/body.child_entities",
+                 "#/parameters/select",
+                 "#/parameters/preferPost"
+               ]
+
+      assert item["post"]["responses"]["201"]["description"] == "Created"
+      assert item["post"]["tags"] == ["child_entities"]
+
+      assert Enum.map(item["patch"]["parameters"], & &1["$ref"]) == [
+               "#/parameters/rowFilter.child_entities.id",
+               "#/parameters/rowFilter.child_entities.name",
+               "#/parameters/rowFilter.child_entities.parent_id",
+               "#/parameters/body.child_entities",
+               "#/parameters/select",
+               "#/parameters/preferReturn"
+             ]
+
+      assert item["patch"]["responses"]["204"]["description"] == "No Content"
+
+      assert Enum.map(item["delete"]["parameters"], & &1["$ref"]) == [
+               "#/parameters/rowFilter.child_entities.id",
+               "#/parameters/rowFilter.child_entities.name",
+               "#/parameters/rowFilter.child_entities.parent_id",
+               "#/parameters/select",
+               "#/parameters/preferReturn"
+             ]
+
+      assert item["delete"]["responses"]["204"]["description"] == "No Content"
+    end
+
+    test "parameters block has shared targets and per-column rowFilter (1661)", %{doc: doc} do
+      params = doc["parameters"]
+
+      for k <- ~w(select order range rangeUnit offset limit preferCount preferPost preferReturn) do
+        assert Map.has_key?(params, k), "missing shared parameter #{k}"
+      end
+
+      assert Map.has_key?(params, "rowFilter.child_entities.id")
+      assert Map.has_key?(params, "body.child_entities")
+    end
+  end
+
+  describe "multi-line table comment (1658)" do
+    test "summary + description split" do
+      gc = %Bier.Introspection.Relation{
+        schema: "test",
+        name: "grandchild_entities",
+        kind: :table,
+        primary_key: [],
+        foreign_keys: [],
+        comment:
+          "grandchild_entities summary\n\ngrandchild_entities description\nthat spans\nmultiple lines",
+        columns: [col_map("id", "integer")]
+      }
+
+      get = build_one(gc)["paths"]["/grandchild_entities"]["get"]
+      assert get["summary"] == "grandchild_entities summary"
+      assert get["description"] == "grandchild_entities description\nthat spans\nmultiple lines"
+    end
+  end
+
+  describe "view path item is GET-only" do
+    test "no post/patch/delete for views" do
+      view = %Bier.Introspection.Relation{
+        schema: "test",
+        name: "av",
+        kind: :view,
+        primary_key: [],
+        foreign_keys: [],
+        comment: nil,
+        columns: [col_map("id", "integer")]
+      }
+
+      item = build_one(view)["paths"]["/av"]
+      assert Map.has_key?(item, "get")
+      refute Map.has_key?(item, "post")
+      refute Map.has_key?(item, "patch")
+      refute Map.has_key?(item, "delete")
+    end
+  end
+
   # --- helpers ---
   defp col_map(name, type, opts \\ []) do
     %{
