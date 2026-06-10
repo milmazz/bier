@@ -84,8 +84,11 @@ defmodule Bier.MixProject do
       # nimble_parsec is only needed to RUN `mix gen.parsers` (the
       # `nimble_parsec.compile` template task). The committed parser modules
       # `Bier.QueryParser`/`Bier.QueryParser.Nimble` are generated, dependency-free
-      # `.ex` files, so `:test`/`:prod` compile without it.
-      {:nimble_parsec, "~> 1.4", only: :dev, runtime: false},
+      # `.ex` files, so `:prod` compiles without it. Declared for :test too only
+      # because ex_doc (:dev/:test for `mix precommit`) pulls makeup_elixir,
+      # whose nimble_parsec requirement spans [:dev, :test] — Mix requires the
+      # top-level :only to cover every dependent's environments.
+      {:nimble_parsec, "~> 1.4", only: [:dev, :test], runtime: false},
       {:plug, "~> 1.19"},
       {:postgrex, "~> 0.20"},
       {:telemetry, "~> 1.0"},
