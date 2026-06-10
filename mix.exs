@@ -56,6 +56,8 @@ defmodule Bier.MixProject do
     [
       {:bandit, "~> 1.0"},
       {:benchee, "~> 1.3", only: :dev},
+      # Static analysis (`mix credo --strict`, a CI gate). See .credo.exs.
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       # JWT signature verification (HS*/RS*/ES*/PS*/EdDSA) from the configured
       # secret or JWK — see Bier.JWT.

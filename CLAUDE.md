@@ -36,10 +36,12 @@ mix deps.unlock --check-unused
 mix format --check-formatted
 mix hex.audit
 mix compile --warnings-as-errors
+mix credo --strict
 mix docs --warnings-as-errors
 ```
 
-No credo or dialyzer step is configured.
+Credo is configured in `.credo.exs` (strict mode; the generated parser modules
+are excluded). No dialyzer step is configured.
 
 ## Architecture
 

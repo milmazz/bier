@@ -241,11 +241,13 @@ mix deps.unlock --check-unused
 mix format --check-formatted
 mix hex.audit
 mix compile --warnings-as-errors
+mix credo --strict
 mix docs --warnings-as-errors
 ```
 
 The test suite loads `spec/conformance/fixtures.sql` into a local `bier_test`
-database; see `docs/CONFORMANCE_IMPL.md` for the database wiring.
+database; see `docs/CONFORMANCE_IMPL.md` for the database wiring, and
+[CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
 
 ## Why "Bier"?
 

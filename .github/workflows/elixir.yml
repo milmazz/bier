@@ -69,6 +69,8 @@ jobs:
       run: mix hex.audit
     - name: Compile (warnings as errors)
       run: mix compile --warnings-as-errors
+    - name: Lint (credo)
+      run: mix credo --strict
     - name: Build docs (warnings as errors)
       run: mix docs --warnings-as-errors
     - name: Run tests (conformance regression ratchet)
