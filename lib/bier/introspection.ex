@@ -62,6 +62,14 @@ defmodule Bier.Introspection do
             unique?: boolean()
           }
 
+    @typedoc """
+    HTTP methods the OpenAPI document advertises for this relation. `nil`
+    (the introspection default) means "derive from `kind`": tables get the
+    full set, views GET only. `openapi-mode = follow-privileges` overrides
+    it with the methods the request role is actually granted.
+    """
+    @type methods :: [:get | :post | :patch | :delete] | nil
+
     @type t :: %__MODULE__{
             schema: String.t(),
             name: String.t(),
@@ -71,7 +79,8 @@ defmodule Bier.Introspection do
             foreign_keys: [foreign_key()],
             computed_columns: [String.t()],
             computed_relations: [map()],
-            comment: String.t() | nil
+            comment: String.t() | nil,
+            methods: methods()
           }
 
     defstruct schema: nil,
@@ -82,7 +91,8 @@ defmodule Bier.Introspection do
               foreign_keys: [],
               computed_columns: [],
               computed_relations: [],
-              comment: nil
+              comment: nil,
+              methods: nil
   end
 
   @type t :: %{optional({String.t(), String.t()}) => Relation.t()}

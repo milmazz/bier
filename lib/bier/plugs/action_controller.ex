@@ -168,37 +168,50 @@ defmodule Bier.Plugs.ActionController do
 
   # Builds the Swagger 2.0 document for the instance's default exposed schema,
   # honoring openapi-mode (follow-privileges filters by the request role's
-  # privileges; ignore-privileges includes everything).
+  # privileges; ignore-privileges includes everything). Relations, functions,
+  # and the schema comment come from the boot-time :persistent_term snapshot —
+  # the same cache the request pipeline routes against — so the document never
+  # advertises a relation the instance cannot serve. Only `privileges/3` runs
+  # per request, because it depends on the request role.
   defp build_openapi_document(config, role) do
-    pg = Registry.via(config.name, Postgrex)
     schema = hd(config.db_schemas)
 
-    relations = pg |> Bier.Introspection.run([schema]) |> Map.values()
-    functions = Bier.Introspection.functions(pg, [schema])
+    relations =
+      {Bier, :relations, config.name}
+      |> :persistent_term.get(%{})
+      |> Map.values()
+      |> Enum.filter(&(&1.schema == schema))
 
-    {relations, functions} = filter_by_mode(config, role, pg, schema, relations, functions)
+    functions =
+      {Bier, :functions, config.name}
+      |> :persistent_term.get(%{})
+      |> Map.filter(fn {{s, _name}, _overloads} -> s == schema end)
+
+    {relations, functions} = filter_by_mode(config, role, schema, relations, functions)
 
     Bier.OpenAPI.build(%{
       relations: relations,
       functions: function_inputs(functions),
-      schema_comment: Bier.Introspection.schema_comment(pg, schema),
+      schema_comment: :persistent_term.get({Bier, :schema_comment, config.name}, nil),
       security_active?: config.openapi_security_active,
       docs_version: "v14"
     })
   end
 
-  defp filter_by_mode(config, role, pg, schema, relations, functions) do
+  defp filter_by_mode(config, role, schema, relations, functions) do
     case config.openapi_mode do
       "ignore-privileges" ->
         {relations, functions}
 
       _follow_privileges ->
+        pg = Registry.via(config.name, Postgrex)
         privs = Bier.Introspection.privileges(pg, [schema], role)
 
         rels =
-          Enum.filter(relations, fn r ->
-            match?(%{select?: true}, privs.relations[{r.schema, r.name}])
-          end)
+          for r <- relations,
+              %{select?: true} = grants <- [privs.relations[{r.schema, r.name}]] do
+            %{r | methods: granted_methods(r, grants)}
+          end
 
         fns =
           functions
@@ -210,6 +223,21 @@ defmodule Bier.Plugs.ActionController do
         {rels, fns}
     end
   end
+
+  # follow-privileges trims a table's advertised write methods to what the
+  # role is granted (PostgREST OpenApiSpec). Views stay GET-only (kind default).
+  defp granted_methods(%{kind: :table}, grants) do
+    [:get] ++
+      for {method, granted?} <- [
+            post: grants.insert?,
+            patch: grants.update?,
+            delete: grants.delete?
+          ],
+          granted?,
+          do: method
+  end
+
+  defp granted_methods(_view, _grants), do: nil
 
   # Flatten the introspection functions map (keyed by {schema,name} => [overloads])
   # into the builder's function-input list.

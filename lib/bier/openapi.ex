@@ -117,6 +117,14 @@ defmodule Bier.OpenAPI do
   # A VARIADIC arg or an arg with a DEFAULT is optional; everything else is required.
   defp rpc_required?(p), do: not (p.has_default? or p.variadic?)
 
+  # `:methods` (set by openapi-mode = follow-privileges) trims the advertised
+  # operations; nil falls back to the kind default (tables fully writable,
+  # views GET-only).
+  defp methods(rel), do: rel.methods || default_methods(rel.kind)
+
+  defp default_methods(:table), do: [:get, :post, :patch, :delete]
+  defp default_methods(_), do: [:get]
+
   defp relation_path_item(rel) do
     {summary, description} = split_comment(rel.comment)
 
@@ -144,36 +152,38 @@ defmodule Bier.OpenAPI do
         }
       })
 
-    item = %{"get" => get}
+    methods = methods(rel)
 
-    if rel.kind == :table do
-      item
-      |> Map.put(
-        "post",
-        op.(%{
-          "parameters" => refs(["body.#{rel.name}", "select", "preferPost"]),
-          "responses" => %{"201" => %{"description" => "Created"}}
-        })
-      )
-      |> Map.put(
-        "patch",
-        op.(%{
-          "parameters" =>
-            row_filter_refs(rel) ++ refs(["body.#{rel.name}", "select", "preferReturn"]),
-          "responses" => %{"204" => %{"description" => "No Content"}}
-        })
-      )
-      |> Map.put(
-        "delete",
-        op.(%{
-          "parameters" => row_filter_refs(rel) ++ refs(["select", "preferReturn"]),
-          "responses" => %{"204" => %{"description" => "No Content"}}
-        })
-      )
-    else
-      item
-    end
+    %{"get" => get}
+    |> put_method(
+      :post in methods,
+      "post",
+      op.(%{
+        "parameters" => refs(["body.#{rel.name}", "select", "preferPost"]),
+        "responses" => %{"201" => %{"description" => "Created"}}
+      })
+    )
+    |> put_method(
+      :patch in methods,
+      "patch",
+      op.(%{
+        "parameters" =>
+          row_filter_refs(rel) ++ refs(["body.#{rel.name}", "select", "preferReturn"]),
+        "responses" => %{"204" => %{"description" => "No Content"}}
+      })
+    )
+    |> put_method(
+      :delete in methods,
+      "delete",
+      op.(%{
+        "parameters" => row_filter_refs(rel) ++ refs(["select", "preferReturn"]),
+        "responses" => %{"204" => %{"description" => "No Content"}}
+      })
+    )
   end
+
+  defp put_method(item, false, _verb, _op), do: item
+  defp put_method(item, true, verb, op), do: Map.put(item, verb, op)
 
   defp row_filter_refs(rel) do
     Enum.map(rel.columns, fn c ->
@@ -267,7 +277,7 @@ defmodule Bier.OpenAPI do
       end
 
     bodies =
-      for rel <- input.relations, rel.kind == :table, into: %{} do
+      for rel <- input.relations, :post in methods(rel) or :patch in methods(rel), into: %{} do
         {"body.#{rel.name}",
          %{
            "name" => rel.name,
