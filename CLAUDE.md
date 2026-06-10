@@ -22,6 +22,7 @@ mix test test/path/to/file_test.exs:LINE   # single test by file:line
 mix test --only area:<area>                # one conformance area (e.g. area:operators)
 mix format            # uses .formatter.exs
 mix gen.parsers       # regenerate the parser modules from their *.ex.exs templates
+mix precommit         # run every CI gate (format/audit/compile/credo/docs/test)
 ```
 
 `mix test` is aliased to `["bier.fixtures.load", "test"]` (`mix.exs`), so it
@@ -29,19 +30,21 @@ drops+recreates a local `bier_test` PostgreSQL database and loads
 `spec/conformance/fixtures.sql` before running. A reachable local Postgres is
 required; see `docs/CONFORMANCE_IMPL.md` for the wiring.
 
-CI runs these gates before `mix test`, so run them locally before pushing to avoid red builds:
+Run every CI gate locally before pushing with one command:
 
 ```sh
-mix deps.unlock --check-unused
-mix format --check-formatted
-mix hex.audit
-mix compile --warnings-as-errors
-mix credo --strict
-mix docs --warnings-as-errors
+mix precommit
 ```
 
-Credo is configured in `.credo.exs` (strict mode; the generated parser modules
-are excluded). No dialyzer step is configured.
+It is an alias chaining, in order: `deps.unlock --check-unused`,
+`format --check-formatted`, `hex.audit`, `compile --warnings-as-errors`,
+`credo --strict`, `docs --warnings-as-errors`, `test`. CI runs the same steps
+individually (NOT the alias) so each gate reports separately — keep
+`.github/workflows/elixir.yml` that way.
+
+Credo is configured in `.credo.exs` (strict mode). The generated parser
+modules (`query_parser.ex`, `query_parser/nimble.ex`) are excluded, but their
+`*.ex.exs` templates ARE analyzed. No dialyzer step is configured.
 
 ## Architecture
 

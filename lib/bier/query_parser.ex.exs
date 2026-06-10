@@ -13,6 +13,8 @@ defmodule Bier.QueryParser do
   > and re-run `mix gen.parsers`; never edit the `.ex` directly.
   """
 
+  alias Bier.QueryParser.Nimble
+
   # parsec:Bier.QueryParser
   import NimbleParsec
 
@@ -650,7 +652,7 @@ defmodule Bier.QueryParser do
   # A field references an embedding when it has a `(` at the top level that is
   # not preceded by a `.` aggregate marker, i.e. `name(...)` / `alias:name(...)`
   # / `name!hint(...)`.
-  defp embed?(field), do: Bier.QueryParser.Nimble.embed?(field)
+  defp embed?(field), do: Nimble.embed?(field)
 
   # Aggregate forms: `count()`, `col.sum()`, `alias:col.sum()::cast`.
   #
@@ -658,14 +660,14 @@ defmodule Bier.QueryParser do
   # the known aggregate functions; otherwise `name()` is an empty-projection
   # embed (e.g. `child_entities()` used for null filtering). A `col.fn()` form is
   # always an aggregate.
-  defp aggregate?(field), do: Bier.QueryParser.Nimble.aggregate?(field)
+  defp aggregate?(field), do: Nimble.aggregate?(field)
 
   defp parse_aggregate(field) do
     {out_alias, rest} = split_alias(field)
 
-    {cast, rest} = Bier.QueryParser.Nimble.peel_agg_cast(rest)
+    {cast, rest} = Nimble.peel_agg_cast(rest)
 
-    case Bier.QueryParser.Nimble.parse_agg_call(rest) do
+    case Nimble.parse_agg_call(rest) do
       {:ok, nil, fun} ->
         {:ok, %{kind: :agg, column: nil, fun: fun, alias: out_alias, cast: cast}}
 
@@ -683,7 +685,7 @@ defmodule Bier.QueryParser do
   defp parse_embed(field, spread?) do
     {emb_alias, rest} = split_alias(field)
 
-    case Bier.QueryParser.Nimble.parse_embed_parts(rest) do
+    case Nimble.parse_embed_parts(rest) do
       {:ok, head, inner} ->
         {target, hints} = parse_embed_head(head)
 
@@ -734,9 +736,9 @@ defmodule Bier.QueryParser do
   end
 
   # Split a leading `alias:` (not a `::` cast) off the front of a term.
-  defp split_alias(field), do: Bier.QueryParser.Nimble.split_alias(field)
+  defp split_alias(field), do: Nimble.split_alias(field)
 
-  defp parse_scalar_select(field), do: Bier.QueryParser.Nimble.parse_scalar_select(field)
+  defp parse_scalar_select(field), do: Nimble.parse_scalar_select(field)
 
   # ---- order ---------------------------------------------------------------
 
@@ -807,7 +809,7 @@ defmodule Bier.QueryParser do
   #   * column order:  `<col>[->json][.asc|.desc][.nullsfirst|.nullslast]`
   #   * related order: `<rel>(<col>[->json])[.asc|.desc][.nulls...]` — orders by a
   #     column of a to-one related (embedded) resource.
-  defp parse_order_term(term), do: Bier.QueryParser.Nimble.parse_order_term(term)
+  defp parse_order_term(term), do: Nimble.parse_order_term(term)
 
   # PostgREST renders a precise parser error for bad order syntax. We reproduce
   # the common case (an unexpected trailing token after a valid prefix) used by
@@ -905,10 +907,9 @@ defmodule Bier.QueryParser do
   defp pg_filters(params) do
     {own, embed} =
       params
-      |> Enum.reject(fn {k, _v} -> base_key(k) in @reserved end)
       |> Enum.reject(fn {k, _v} ->
-        String.ends_with?(k, ".order") or String.ends_with?(k, ".limit") or
-          String.ends_with?(k, ".offset")
+        base_key(k) in @reserved or String.ends_with?(k, ".order") or
+          String.ends_with?(k, ".limit") or String.ends_with?(k, ".offset")
       end)
       |> Enum.split_with(fn {k, _v} -> embed_path(k) == [] end)
 
@@ -968,27 +969,26 @@ defmodule Bier.QueryParser do
       # `<embed>.or=(...)` / `<embed>.and=(...)`
       last in ["and", "or"] ->
         op = if last == "or", do: :or, else: :and
-
-        case parse_logic_group(val) do
-          {:ok, children} -> {:ok, path, %{logic: op, negate: false, children: children}}
-          _ -> :error
-        end
+        embed_logic_node(path, op, false, val)
 
       # `<embed>.not.or=(...)` / `<embed>.not.and=(...)`: the path drops the
       # trailing `not`+keyword pair, the negation applies to the group.
       neg = embed_logic_negated(key) ->
         {neg_path, op} = neg
-
-        case parse_logic_group(val) do
-          {:ok, children} -> {:ok, neg_path, %{logic: op, negate: true, children: children}}
-          _ -> :error
-        end
+        embed_logic_node(neg_path, op, true, val)
 
       true ->
         case parse_column_filter(last, val) do
           {:ok, node} -> {:ok, path, node}
           :error -> :error
         end
+    end
+  end
+
+  defp embed_logic_node(path, op, negate, val) do
+    case parse_logic_group(val) do
+      {:ok, children} -> {:ok, path, %{logic: op, negate: negate, children: children}}
+      _ -> :error
     end
   end
 
@@ -1103,7 +1103,7 @@ defmodule Bier.QueryParser do
   # Returns {negate?, :and|:or, "(...)"} if member begins with and(/or(/not.and(.
   # Whitespace is permitted between the and/or keyword and its opening paren
   # (AndOrParamsSpec "allows whitespace", case 1169).
-  defp logic_prefix(member), do: Bier.QueryParser.Nimble.logic_prefix(member)
+  defp logic_prefix(member), do: Nimble.logic_prefix(member)
 
   # A top-level `col=op.value` filter param.
   defp parse_column_filter(key, val) do
@@ -1114,11 +1114,11 @@ defmodule Bier.QueryParser do
   # Parse `op.value` (with optional `not.` prefix, quantifier `op(any|all)`,
   # fts language `fts(lang)`) against column `col` (which may have a json path).
   defp parse_filter_expr(col_raw, opval),
-    do: Bier.QueryParser.Nimble.parse_filter_expr(col_raw, opval)
+    do: Nimble.parse_filter_expr(col_raw, opval)
 
   # ---- shared helpers ------------------------------------------------------
 
-  defp valid_identifier?(col), do: Bier.QueryParser.Nimble.valid_identifier?(col)
+  defp valid_identifier?(col), do: Nimble.valid_identifier?(col)
 
   # Split on commas that are at the top level (not nested in () or {} or []),
   # and not inside double quotes.

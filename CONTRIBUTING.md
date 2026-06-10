@@ -46,11 +46,18 @@ behavior, with each case citing its upstream source. It is **ground truth**:
 `lib/bier/query_parser.ex` and `lib/bier/query_parser/nimble.ex` are
 **generated** from their `*.ex.exs` templates. Edit the template, run
 `mix gen.parsers`, and commit both the template and the regenerated `.ex`.
-Never edit the generated `.ex` files directly.
+Never edit the generated `.ex` files directly. Credo analyzes the templates
+(the files you edit) but skips the generated output.
 
 ## Before you push
 
-CI runs these gates — run them locally to avoid red builds:
+Run all of CI's gates with one command:
+
+```sh
+mix precommit
+```
+
+It is an alias (see `mix.exs`) for the individual gates, in order:
 
 ```sh
 mix deps.unlock --check-unused
@@ -61,6 +68,9 @@ mix credo --strict
 mix docs --warnings-as-errors
 mix test
 ```
+
+CI runs the same steps individually (not the alias) so each gate reports its
+result separately.
 
 CI tolerates a documented baseline of known environment/harness test failures
 (see `.github/workflows/elixir.yml`); it fails only when the failure count

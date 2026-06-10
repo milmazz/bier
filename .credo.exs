@@ -2,9 +2,10 @@
 #
 # Scope: `lib/` only. `test/**` and `spec/**` are the frozen conformance
 # harness (ground truth derived from PostgREST v14.12 — see
-# docs/CONFORMANCE_IMPL.md) and must not be churned for style. The query
-# parser modules are GENERATED from their `*.ex.exs` templates via
-# `mix gen.parsers` and are excluded for the same reason.
+# docs/CONFORMANCE_IMPL.md) and must not be churned for style. The committed
+# query parser `.ex` modules are GENERATED from their `*.ex.exs` templates via
+# `mix gen.parsers`, so only the generated output is excluded — the templates
+# themselves (the files contributors actually edit) ARE analyzed.
 %{
   configs: [
     %{
@@ -14,9 +15,7 @@
         included: ["lib/", "config/"],
         excluded: [
           "lib/bier/query_parser.ex",
-          "lib/bier/query_parser.ex.exs",
-          "lib/bier/query_parser/nimble.ex",
-          "lib/bier/query_parser/nimble.ex.exs"
+          "lib/bier/query_parser/nimble.ex"
         ]
       },
       checks: %{

@@ -1,5 +1,5 @@
 # Generated from lib/bier/query_parser/nimble.ex.exs, do not edit.
-# Generated at 2026-06-07 04:05:49Z.
+# Generated at 2026-06-10 05:35:05Z.
 
 defmodule Bier.QueryParser.Nimble do
   @moduledoc """

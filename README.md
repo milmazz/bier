@@ -234,16 +234,17 @@ mix format
 mix gen.parsers     # regenerate the parser modules after editing a *.ex.exs template
 ```
 
-CI gates (run these before pushing):
+Run every CI gate before pushing with:
 
 ```sh
-mix deps.unlock --check-unused
-mix format --check-formatted
-mix hex.audit
-mix compile --warnings-as-errors
-mix credo --strict
-mix docs --warnings-as-errors
+mix precommit
 ```
+
+which chains, in order: `mix deps.unlock --check-unused`,
+`mix format --check-formatted`, `mix hex.audit`,
+`mix compile --warnings-as-errors`, `mix credo --strict`,
+`mix docs --warnings-as-errors`, and `mix test`. (CI runs the same steps
+individually so each gate reports separately.)
 
 The test suite loads `spec/conformance/fixtures.sql` into a local `bier_test`
 database; see `docs/CONFORMANCE_IMPL.md` for the database wiring, and
