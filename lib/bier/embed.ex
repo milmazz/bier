@@ -44,38 +44,28 @@ defmodule Bier.Embed do
 
     obj = "json_build_object(" <> Enum.join(plain, ", ") <> ")"
 
-    merged =
-      Enum.reduce(spreads, obj <> "::jsonb", fn {:spread, expr}, acc ->
-        "(#{acc} || #{expr})"
-      end)
+    case spreads do
+      [] ->
+        {obj, state}
 
-    merged =
-      case spreads do
-        [] -> obj
-        _ -> "(#{merged})::json"
-      end
+      _ ->
+        merged =
+          Enum.reduce(spreads, obj <> "::jsonb", fn {:spread, expr}, acc ->
+            "(#{acc} || #{expr})"
+          end)
 
-    {merged, state}
+        {"(#{merged})::json", state}
+    end
   end
 
   # ---- node dispatch -------------------------------------------------------
 
   defp build_node(node, relation, al, _ef, state, _qe) when node == :star do
-    pairs =
-      Enum.map(relation.columns, fn c ->
-        json_pair(c.name, star_col_expr(relation, al, c.name))
-      end)
-
-    {pairs, state}
+    {star_pairs(relation, al), state}
   end
 
   defp build_node(%{kind: :star}, relation, al, _ef, state, _qe) do
-    pairs =
-      Enum.map(relation.columns, fn c ->
-        json_pair(c.name, star_col_expr(relation, al, c.name))
-      end)
-
-    {pairs, state}
+    {star_pairs(relation, al), state}
   end
 
   defp build_node(%{kind: :field} = f, relation, al, _ef, state, _qe) do
@@ -107,20 +97,26 @@ defmodule Bier.Embed do
     build_embed(e, rel, relation, al, ef, state, qe)
   end
 
+  defp star_pairs(relation, al) do
+    Enum.map(relation.columns, fn c ->
+      json_pair(c.name, star_col_expr(relation, al, c.name))
+    end)
+  end
+
   # ---- scalar field expr ---------------------------------------------------
 
   defp field_expr(%{column: col} = f, relation, al) do
-    if col in relation.computed_columns do
-      base = "#{QE.quote_ident(relation.schema)}.#{QE.quote_ident(col)}(#{QE.quote_ident(al)})"
-      base = if f.json_path == [], do: QE.apply_read_rep(base, relation, col), else: base
-      if f.cast, do: "#{base}::#{QE.quote_type(f.cast)}", else: base
-    else
-      expr = QE.column_expr_aliased(col, f.json_path, al)
-      # Apply the column's read representation before any explicit `::cast`,
-      # unless a json path navigates into the value (then the base value is used).
-      expr = if f.json_path == [], do: QE.apply_read_rep(expr, relation, col), else: expr
-      if f.cast, do: "#{expr}::#{QE.quote_type(f.cast)}", else: expr
-    end
+    base =
+      if col in relation.computed_columns do
+        "#{QE.quote_ident(relation.schema)}.#{QE.quote_ident(col)}(#{QE.quote_ident(al)})"
+      else
+        QE.column_expr_aliased(col, f.json_path, al)
+      end
+
+    # Apply the column's read representation before any explicit `::cast`,
+    # unless a json path navigates into the value (then the base value is used).
+    base = if f.json_path == [], do: QE.apply_read_rep(base, relation, col), else: base
+    if f.cast, do: "#{base}::#{QE.quote_type(f.cast)}", else: base
   end
 
   # Column value for a `*` expansion, applying the column's read representation.
@@ -150,34 +146,24 @@ defmodule Bier.Embed do
     {own_limit, deeper_limits} = pop_embed_paged(state.embed_limits, order_segments)
     {own_offset, deeper_offsets} = pop_embed_paged(state.embed_offsets, order_segments)
 
-    saved_rel = state.relation
-    saved_orders = state.embed_orders
-    saved_limits = state.embed_limits
-    saved_offsets = state.embed_offsets
+    # Descend into the child scope (the embed's own relation + the embed-keyed
+    # orders/limits/offsets routed deeper), then restore the parent scope —
+    # only the parameter accumulator and embed sequence survive the descent.
+    saved =
+      Map.take(state, [:relation, :embed_orders, :embed_limits, :embed_offsets])
+
+    child_scope = %{
+      state
+      | relation: target,
+        embed_orders: deeper_orders,
+        embed_limits: deeper_limits,
+        embed_offsets: deeper_offsets
+    }
 
     {child_obj, state} =
-      build_row_object(
-        e.select,
-        target,
-        child_alias,
-        deeper_filters,
-        %{
-          state
-          | relation: target,
-            embed_orders: deeper_orders,
-            embed_limits: deeper_limits,
-            embed_offsets: deeper_offsets
-        },
-        qe
-      )
+      build_row_object(e.select, target, child_alias, deeper_filters, child_scope, qe)
 
-    state = %{
-      state
-      | relation: saved_rel,
-        embed_orders: saved_orders,
-        embed_limits: saved_limits,
-        embed_offsets: saved_offsets
-    }
+    state = struct!(state, saved)
 
     {where_sql, state} =
       build_embed_where(join, own_filters, child_alias, src_alias, state, qe)
@@ -230,8 +216,7 @@ defmodule Bier.Embed do
         %{kind: :agg} = a -> [a.alias || a.fun]
         _ -> []
       end)
-      |> Enum.map(fn key -> "#{QE.pg_literal(key)}, null" end)
-      |> Enum.join(", ")
+      |> Enum.map_join(", ", fn key -> "#{QE.pg_literal(key)}, null" end)
 
     "json_build_object(#{pairs})"
   end
@@ -279,11 +264,9 @@ defmodule Bier.Embed do
 
   # Join predicate linking child to source.
   defp render_join({:direct, pairs}, child_alias, src_alias) do
-    pairs
-    |> Enum.map(fn {ccol, scol} ->
+    Enum.map_join(pairs, " AND ", fn {ccol, scol} ->
       "#{col_expr(child_alias, ccol)} = #{col_expr(src_alias, scol)}"
     end)
-    |> Enum.join(" AND ")
   end
 
   defp render_join({:via, jpairs, tpairs}, child_alias, src_alias) do
@@ -529,11 +512,7 @@ defmodule Bier.Embed do
       end)
 
     if has_agg? and plain != [] do
-      exprs =
-        plain
-        |> Enum.map(fn f -> QE.column_expr_aliased(f.column, f.json_path, al) end)
-        |> Enum.join(", ")
-
+      exprs = Enum.map_join(plain, ", ", &QE.column_expr_aliased(&1.column, &1.json_path, al))
       {" GROUP BY " <> exprs, ""}
     else
       {"", ""}
@@ -642,41 +621,42 @@ defmodule Bier.Embed do
       target ->
         relations
         |> Map.values()
-        |> Enum.flat_map(fn jrel ->
-          if jrel.schema != source.schema or jrel.name in [source.name, target.name] do
-            []
-          else
-            fks_to_source =
-              Enum.filter(
-                jrel.foreign_keys,
-                &(&1.ref_relation == source.name and &1.ref_schema == source.schema)
-              )
+        |> Enum.reject(&(&1.schema != source.schema or &1.name in [source.name, target.name]))
+        |> Enum.flat_map(&junction_candidates(&1, source, target, target_name))
+    end
+  end
 
-            fks_to_target =
-              Enum.filter(
-                jrel.foreign_keys,
-                &(&1.ref_relation == target.name and &1.ref_schema == target.schema)
-              )
+  # All m2m relationships routed through one junction relation: the cartesian
+  # product of its FKs into `source` with its FKs into `target`.
+  defp junction_candidates(jrel, source, target, target_name) do
+    fks_to_source =
+      Enum.filter(
+        jrel.foreign_keys,
+        &(&1.ref_relation == source.name and &1.ref_schema == source.schema)
+      )
 
-            for fs <- fks_to_source, ft <- fks_to_target do
-              jpairs = Enum.zip(fs.columns, fs.ref_columns)
-              tpairs = Enum.zip(ft.columns, ft.ref_columns)
+    fks_to_target =
+      Enum.filter(
+        jrel.foreign_keys,
+        &(&1.ref_relation == target.name and &1.ref_schema == target.schema)
+      )
 
-              %{
-                relation: target,
-                kind: :many,
-                cardinality: "many-to-many",
-                join_cond: {:via, jpairs, tpairs},
-                via: {jrel, ft},
-                embed_key: target_name,
-                constraint: jrel.name,
-                hint_names: [jrel.name, target_name, fs.constraint, ft.constraint],
-                rel_desc:
-                  "#{jrel.name} using #{fs.constraint}(#{Enum.join(fs.columns, ", ")}) and #{ft.constraint}(#{Enum.join(ft.columns, ", ")})"
-              }
-            end
-          end
-        end)
+    for fs <- fks_to_source, ft <- fks_to_target do
+      jpairs = Enum.zip(fs.columns, fs.ref_columns)
+      tpairs = Enum.zip(ft.columns, ft.ref_columns)
+
+      %{
+        relation: target,
+        kind: :many,
+        cardinality: "many-to-many",
+        join_cond: {:via, jpairs, tpairs},
+        via: {jrel, ft},
+        embed_key: target_name,
+        constraint: jrel.name,
+        hint_names: [jrel.name, target_name, fs.constraint, ft.constraint],
+        rel_desc:
+          "#{jrel.name} using #{fs.constraint}(#{Enum.join(fs.columns, ", ")}) and #{ft.constraint}(#{Enum.join(ft.columns, ", ")})"
+      }
     end
   end
 
@@ -707,34 +687,27 @@ defmodule Bier.Embed do
 
   defp embed_segment(e, rel), do: e.alias || rel.embed_key || e.target
 
+  # Split embed-keyed orders between this embed (`own`, accumulated with `++`)
+  # and deeper embeds (re-keyed by the remaining path).
   defp pop_embed_orders(embed_orders, segments) do
-    Enum.reduce(embed_orders, {[], %{}}, fn {path, terms}, {own, deeper} ->
-      case path do
-        [head] ->
-          if head in segments, do: {own ++ terms, deeper}, else: {own, deeper}
-
-        [head | rest] ->
-          if head in segments, do: {own, Map.put(deeper, rest, terms)}, else: {own, deeper}
-
-        _ ->
-          {own, deeper}
-      end
-    end)
+    pop_embed_routed(embed_orders, segments, [], fn own, terms -> own ++ terms end)
   end
 
   # Like `pop_embed_orders`, but each embed path maps to a single integer (limit
   # or offset). Returns `{own_value | nil, deeper_map}`.
   defp pop_embed_paged(embed_paged, segments) do
-    Enum.reduce(embed_paged, {nil, %{}}, fn {path, value}, {own, deeper} ->
-      case path do
-        [head] ->
-          if head in segments, do: {value, deeper}, else: {own, deeper}
+    pop_embed_routed(embed_paged, segments, nil, fn _own, value -> value end)
+  end
 
-        [head | rest] ->
-          if head in segments, do: {own, Map.put(deeper, rest, value)}, else: {own, deeper}
-
-        _ ->
-          {own, deeper}
+  # Route each `{path, value}` entry: a single-segment path naming this embed is
+  # merged into `own` via `merge`; a longer path naming this embed is re-keyed by
+  # its tail for the child scope; anything else is dropped.
+  defp pop_embed_routed(entries, segments, initial, merge) do
+    Enum.reduce(entries, {initial, %{}}, fn {path, value}, {own, deeper} = acc ->
+      case {path, List.first(path) in segments} do
+        {[_head], true} -> {merge.(own, value), deeper}
+        {[_head | rest], true} when rest != [] -> {own, Map.put(deeper, rest, value)}
+        _ -> acc
       end
     end)
   end
@@ -789,9 +762,7 @@ defmodule Bier.Embed do
       end)
 
     suggestions =
-      candidates
-      |> Enum.map(fn c -> "'#{target_name}!#{c.constraint}'" end)
-      |> Enum.join(", ")
+      Enum.map_join(candidates, ", ", fn c -> "'#{target_name}!#{c.constraint}'" end)
 
     %{
       status: 300,
