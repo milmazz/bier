@@ -39,10 +39,8 @@ defmodule Bier.Rpc do
   # through a mirror label (e.g. `rpc`).
   @mirror_schemas ~w(rpc operators ordering pagination representations mutations config domain_representations)
 
-  @doc "Resolve and run an RPC. `schema_result` is `resolve_schema/2`'s output."
-  def dispatch(_conn, _config, {:error, _} = err, _fn_name), do: err
-
-  def dispatch(conn, config, {:ok, schema}, fn_name) do
+  @doc "Resolve and run an RPC in the (already resolved) profile `schema`."
+  def dispatch(conn, config, schema, fn_name) do
     with :ok <- check_method(conn) do
       functions = :persistent_term.get({Bier, :functions, config.name}, %{})
       overloads = Map.get(functions, {schema, fn_name}, [])
@@ -378,28 +376,21 @@ defmodule Bier.Rpc do
 
   defp render_result(conn, _fn_def, body, media, guc) do
     count_mode = Pagination.count_mode(conn)
-    count = if count_mode == :none, do: 0, else: 1
-    conn = Bier.Guc.put_headers(conn, guc)
+    out = body_for(conn, body)
 
-    if count_mode == :none do
-      out = body_for(conn, body)
-
-      conn
-      |> put_resp_header("content-type", MediaType.content_type(media))
-      |> put_resp_header("content-length", Integer.to_string(byte_size(out)))
-      |> send_resp(Bier.Guc.status(guc, 200), out)
-    else
-      # count=exact on a scalar -> Content-Range 0-0/1.
-      range = Pagination.content_range(0, count, count)
-      out = body_for(conn, body)
-
-      conn
-      |> put_resp_header("content-type", MediaType.content_type(media))
-      |> put_resp_header("content-range", range)
-      |> put_resp_header("content-length", Integer.to_string(byte_size(out)))
-      |> send_resp(Bier.Guc.status(guc, 200), out)
-    end
+    conn
+    |> Bier.Guc.put_headers(guc)
+    |> put_resp_header("content-type", MediaType.content_type(media))
+    |> maybe_scalar_content_range(count_mode)
+    |> put_resp_header("content-length", Integer.to_string(byte_size(out)))
+    |> send_resp(Bier.Guc.status(guc, 200), out)
   end
+
+  # A requested count on a scalar/composite result -> Content-Range 0-0/1.
+  defp maybe_scalar_content_range(conn, :none), do: conn
+
+  defp maybe_scalar_content_range(conn, _count_mode),
+    do: put_resp_header(conn, "content-range", Pagination.content_range(0, 1, 1))
 
   defp body_for(%Plug.Conn{method: "HEAD"}, _body), do: ""
   defp body_for(_conn, body), do: body
@@ -413,38 +404,34 @@ defmodule Bier.Rpc do
   # Build the positional `$n` argument list for the function call, applying
   # VARIADIC / keyword-call syntax. Variadic args are bound as a typed array.
   defp build_call_args(args) do
-    {parts, params, _idx} =
-      Enum.reduce(args, {[], [], 1}, fn {name, type, variadic?, value}, {parts, params, idx} ->
-        cond do
-          variadic? ->
-            {:list, list} = ensure_list(value)
-            # Bind the array as a text[] param and cast to the target element type;
-            # Postgres coerces the text[] to the variadic element array.
-            {parts ++ ["VARIADIC \"#{name}\" => $#{idx}::#{type}"], params ++ [list], idx + 1}
-
-          match?({:param, _}, value) ->
-            # Raw binary (octet-stream) bound through a real parameter and cast to
-            # the arg type (e.g. bytea), preserving the exact bytes.
-            {:param, raw} = value
-            ph = "$#{idx}::#{type}"
-            part = if name in ["", nil], do: ph, else: "\"#{name}\" => #{ph}"
-            {parts ++ [part], params ++ [raw], idx + 1}
-
-          true ->
-            # Inline a single-quote-escaped literal cast to the arg type (Postgres
-            # coerces from an *unknown* literal, which a typed param cannot supply).
-            # The literal is escaped, so it is injection-safe.
-            lit = "#{pg_literal(scalar_value(value))}::#{type}"
-
-            # An unnamed parameter (single-unnamed json/jsonb body) binds
-            # positionally; named params use keyword-call syntax.
-            part = if name in ["", nil], do: lit, else: "\"#{name}\" => #{lit}"
-            {parts ++ [part], params, idx}
-        end
-      end)
-
-    {Enum.join(parts, ", "), params}
+    {parts, {params, _idx}} = Enum.map_reduce(args, {[], 1}, &call_arg/2)
+    {Enum.join(parts, ", "), Enum.reverse(params)}
   end
+
+  # Bind the array as a text[] param and cast to the target element type;
+  # Postgres coerces the text[] to the variadic element array.
+  defp call_arg({name, type, true = _variadic?, value}, {params, idx}) do
+    {:list, list} = ensure_list(value)
+    {"VARIADIC \"#{name}\" => $#{idx}::#{type}", {[list | params], idx + 1}}
+  end
+
+  # Raw binary (octet-stream) bound through a real parameter and cast to the
+  # arg type (e.g. bytea), preserving the exact bytes.
+  defp call_arg({name, type, _variadic?, {:param, raw}}, {params, idx}) do
+    {keyword_call(name, "$#{idx}::#{type}"), {[raw | params], idx + 1}}
+  end
+
+  # Inline a single-quote-escaped literal cast to the arg type (Postgres
+  # coerces from an *unknown* literal, which a typed param cannot supply).
+  # The literal is escaped, so it is injection-safe.
+  defp call_arg({name, type, _variadic?, value}, acc) do
+    {keyword_call(name, "#{pg_literal(scalar_value(value))}::#{type}"), acc}
+  end
+
+  # An unnamed parameter (single-unnamed json/jsonb body) binds positionally;
+  # named params use keyword-call syntax.
+  defp keyword_call(name, value) when name in ["", nil], do: value
+  defp keyword_call(name, value), do: "\"#{name}\" => #{value}"
 
   defp ensure_list({:list, list}), do: {:list, list}
   defp ensure_list({:scalar, v}), do: {:list, [v]}
@@ -477,23 +464,22 @@ defmodule Bier.Rpc do
       Postgrex.transaction(pool, fn tx ->
         if read_only?, do: Postgrex.query!(tx, "SET TRANSACTION READ ONLY", [])
         apply_auth(tx, auth)
-
-        case Postgrex.query(tx, sql, params) do
-          {:ok, result} ->
-            case Bier.Guc.read(tx) do
-              {:ok, guc} -> {result, guc}
-              {:error, reason} -> Postgrex.rollback(tx, reason)
-            end
-
-          {:error, err} ->
-            Postgrex.rollback(tx, err)
-        end
+        query_then_read_gucs(tx, sql, params)
       end)
     end)
     |> case do
       {:ok, {result, guc}} -> {:ok, result, guc}
       {:error, %Postgrex.Error{} = err} -> map_auth_error(auth, err)
       {:error, other} -> {:error, other}
+    end
+  end
+
+  defp query_then_read_gucs(tx, sql, params) do
+    with {:ok, result} <- Postgrex.query(tx, sql, params),
+         {:ok, guc} <- Bier.Guc.read(tx) do
+      {result, guc}
+    else
+      {:error, reason} -> Postgrex.rollback(tx, reason)
     end
   end
 
@@ -525,26 +511,11 @@ defmodule Bier.Rpc do
       |> URI.encode_query()
 
     Bier.ServerTiming.measure(:parse, fn ->
-      with {:ok, plan} <- QueryParser.parse_request(reserved_qs),
-           {:ok, plan} <- apply_range(conn, plan) do
-        {:ok, apply_max_rows(plan, config)}
+      with {:ok, plan} <- QueryParser.parse_request(reserved_qs) do
+        Pagination.apply_window(plan, conn, config.db_max_rows)
       end
     end)
   end
-
-  defp apply_range(conn, plan) do
-    case Pagination.range_window(conn) do
-      {:ok, nil} -> {:ok, plan}
-      {:ok, {offset, limit}} -> {:ok, %{plan | offset: offset, limit: limit}}
-      {:error, :range_offside} -> {:error, :range_offside}
-    end
-  end
-
-  defp apply_max_rows(plan, %{db_max_rows: nil}), do: plan
-  defp apply_max_rows(%{limit: nil} = plan, %{db_max_rows: max}), do: %{plan | limit: max}
-
-  defp apply_max_rows(%{limit: limit} = plan, %{db_max_rows: max}),
-    do: %{plan | limit: min(limit, max)}
 
   # Build the PGRST202 not-found envelope, reporting against the base `test`
   # schema for mirror labels. The hint points at a real signature when the name
@@ -590,7 +561,7 @@ defmodule Bier.Rpc do
         nil
 
       fn_def ->
-        arg_names = fn_def.args |> Enum.map(& &1.name) |> Enum.join(", ")
+        arg_names = Enum.map_join(fn_def.args, ", ", & &1.name)
         "Perhaps you meant to call the function #{reported}.#{fn_name}(#{arg_names})"
     end
   end

@@ -249,24 +249,9 @@ defmodule Bier.Introspection do
          ndefaults,
          volatility
        ]) do
-    arg_names = arg_names || []
-    arg_modes = arg_modes || []
     type_names = all_arg_type_names || []
     n = length(all_arg_types || type_names)
-
-    # Pair each catalog argument with its mode + name. Modes: i (IN), o (OUT),
-    # b (INOUT), v (VARIADIC), t (TABLE column). When proargmodes is empty all
-    # args are IN.
-    params =
-      for i <- 0..(n - 1)//1, n > 0 do
-        mode = Enum.at(arg_modes, i, "i") || "i"
-
-        %{
-          name: Enum.at(arg_names, i) || "",
-          type: Enum.at(type_names, i) || "text",
-          raw_mode: mode
-        }
-      end
+    params = catalog_params(arg_names || [], arg_modes || [], type_names, n)
 
     in_params = Enum.filter(params, fn %{raw_mode: m} -> m in ["i", "b", "v"] end)
     out_params = Enum.filter(params, fn %{raw_mode: m} -> m in ["o", "b", "t"] end)
@@ -310,6 +295,19 @@ defmodule Bier.Introspection do
       volatility: volatility_atom(volatility),
       single_unnamed?: single_unnamed?
     }
+  end
+
+  # Pair each catalog argument with its mode + name. Modes: i (IN), o (OUT),
+  # b (INOUT), v (VARIADIC), t (TABLE column). When proargmodes is empty all
+  # args are IN.
+  defp catalog_params(arg_names, arg_modes, type_names, n) do
+    for i <- 0..(n - 1)//1, n > 0 do
+      %{
+        name: Enum.at(arg_names, i) || "",
+        type: Enum.at(type_names, i) || "text",
+        raw_mode: Enum.at(arg_modes, i, "i") || "i"
+      }
+    end
   end
 
   defp mode_atom("b"), do: :inout

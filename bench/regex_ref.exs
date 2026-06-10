@@ -1,6 +1,6 @@
 # Faithful copies of the private regex/string leaf-grammar implementations in
 # `Bier.QueryParser` (the module's twins are private, so we mirror them here to
-# benchmark and parity-check them directly against `Bier.QueryParser.Nimble`).
+# benchmark and parity-check them directly against `Bier.QueryParser`).
 #
 # These bodies are kept byte-for-byte equivalent to the `*_regex` clauses in
 # lib/bier/query_parser.ex; if those change, update here too.

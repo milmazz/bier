@@ -21,7 +21,10 @@ defmodule Bier.MixProject do
       preferred_envs: [
         coveralls: :test,
         "coveralls.html": :test,
-        "coveralls.json": :test
+        "coveralls.json": :test,
+        # `precommit` ends with the test suite, and the suite needs the :test
+        # build (test/support, fixtures task), so the whole alias runs there.
+        precommit: :test
       ]
     ]
   end
@@ -40,11 +43,22 @@ defmodule Bier.MixProject do
   defp aliases do
     [
       test: ["bier.fixtures.load", "test"],
-      # Regenerate the dependency-free parser modules from their `.ex.exs`
-      # templates. Run in `:dev` (nimble_parsec is a dev-only dep). The
-      # generated `.ex` files are the source `mix compile` reads; commit both.
+      # Every CI gate in one command (see CONTRIBUTING.md). The `test` step
+      # expands to the alias above, so it loads the fixture DB first. CI runs
+      # the same steps individually to report each gate separately.
+      precommit: [
+        "deps.unlock --check-unused",
+        "format --check-formatted",
+        "hex.audit",
+        "compile --warnings-as-errors",
+        "credo --strict",
+        "docs --warnings-as-errors",
+        "test"
+      ],
+      # Regenerate the dependency-free parser module from its `.ex.exs`
+      # template. Run in `:dev` (nimble_parsec is a dev/test-only dep). The
+      # generated `.ex` file is the source `mix compile` reads; commit both.
       "gen.parsers": [
-        "nimble_parsec.compile lib/bier/query_parser/nimble.ex.exs",
         "nimble_parsec.compile lib/bier/query_parser.ex.exs",
         "format"
       ]
@@ -56,17 +70,24 @@ defmodule Bier.MixProject do
     [
       {:bandit, "~> 1.0"},
       {:benchee, "~> 1.3", only: :dev},
-      {:ex_doc, "~> 0.40", only: :dev, runtime: false},
+      # Static analysis (`mix credo --strict`, a CI gate). See .credo.exs.
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      # :test as well so the `docs` step of `mix precommit` (which runs in the
+      # :test env) can build the docs.
+      {:ex_doc, "~> 0.40", only: [:dev, :test], runtime: false},
       # JWT signature verification (HS*/RS*/ES*/PS*/EdDSA) from the configured
       # secret or JWK — see Bier.JWT.
       {:jose, "~> 1.11"},
       {:excoveralls, "~> 0.18", only: :test},
       {:nimble_options, "~> 1.0"},
       # nimble_parsec is only needed to RUN `mix gen.parsers` (the
-      # `nimble_parsec.compile` template task). The committed parser modules
-      # `Bier.QueryParser`/`Bier.QueryParser.Nimble` are generated, dependency-free
-      # `.ex` files, so `:test`/`:prod` compile without it.
-      {:nimble_parsec, "~> 1.4", only: :dev, runtime: false},
+      # `nimble_parsec.compile` template task). The committed parser module
+      # `Bier.QueryParser` is a generated, dependency-free `.ex` file, so
+      # `:prod` compiles without it. Declared for :test too only
+      # because ex_doc (:dev/:test for `mix precommit`) pulls makeup_elixir,
+      # whose nimble_parsec requirement spans [:dev, :test] — Mix requires the
+      # top-level :only to cover every dependent's environments.
+      {:nimble_parsec, "~> 1.4", only: [:dev, :test], runtime: false},
       {:plug, "~> 1.19"},
       {:postgrex, "~> 0.20"},
       {:telemetry, "~> 1.0"},

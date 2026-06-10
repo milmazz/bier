@@ -57,16 +57,12 @@ defmodule Bier.Plugs.ActionController do
         dispatch_options(conn, config, relations)
 
       ["rpc", fn_name] ->
-        case resolve_profile(conn, config) do
-          {:ok, schema, content_profile} ->
-            with {:ok, conn} <- maybe_auth(conn, config, schema) do
-              conn = maybe_content_profile(conn, content_profile)
-              conn = assign(conn, :bier_target, {schema, fn_name})
-              Bier.Rpc.dispatch(conn, config, {:ok, schema}, fn_name)
-            end
-
-          {:error, _} = err ->
-            err
+        with {:ok, schema, content_profile} <- resolve_profile(conn, config),
+             {:ok, conn} <- maybe_auth(conn, config, schema) do
+          conn
+          |> maybe_content_profile(content_profile)
+          |> assign(:bier_target, {schema, fn_name})
+          |> Bier.Rpc.dispatch(config, schema, fn_name)
         end
 
       _ ->
@@ -335,7 +331,9 @@ defmodule Bier.Plugs.ActionController do
            ) do
       conn
       |> put_preference_applied(prefs.applied)
-      |> render(body, count, plan, count_mode, media, csv_columns(plan, relation))
+      |> Response.render(body, count, plan, count_mode, media,
+        columns: csv_columns(plan, relation)
+      )
     end
   end
 
@@ -362,16 +360,8 @@ defmodule Bier.Plugs.ActionController do
   # cases whose default schema is v1.
   @profile_aliases ~w(headers multi)
 
-  @doc false
-  def resolve_schema(conn, config) do
-    case resolve_profile(conn, config) do
-      {:ok, schema, _content_profile} -> {:ok, schema}
-      {:error, _} = err -> err
-    end
-  end
-
   # Resolve the target schema for relation/RPC lookup AND the schema name to echo
-  # in `Content-Profile`. Returns `{:ok, resolve_schema, content_profile}` where
+  # in `Content-Profile`. Returns `{:ok, schema, content_profile}` where
   # `content_profile` is nil when no profile should be echoed.
   @doc false
   def resolve_profile(conn, config) do
@@ -392,19 +382,7 @@ defmodule Bier.Plugs.ActionController do
       # relations live in that area's own schema (e.g. `headers`) but the echoed
       # Content-Profile names the logical default (e.g. `v1`).
       is_nil(profile) or profile in @profile_aliases ->
-        echo = config.db_profile_default
-        # An alias label that is itself an exposed schema (e.g. `headers`, whose
-        # mirror schema physically holds the relations) resolves to that schema.
-        # A pure label like `multi` is not a real schema — its data lives in the
-        # default profile schema (e.g. `v1`), so resolve there.
-        resolved =
-          cond do
-            is_nil(profile) -> default
-            profile in config.db_schemas -> profile
-            true -> config.db_profile_default || default
-          end
-
-        {:ok, resolved, echo}
+        {:ok, default_profile_schema(profile, config, default), config.db_profile_default}
 
       # An explicit, exposed schema: resolve there and echo it verbatim.
       profile in config.db_schemas ->
@@ -413,6 +391,16 @@ defmodule Bier.Plugs.ActionController do
       true ->
         {:error, {:invalid_schema, profile, exposed_profiles(config)}}
     end
+  end
+
+  # An alias label that is itself an exposed schema (e.g. `headers`, whose
+  # mirror schema physically holds the relations) resolves to that schema.
+  # A pure label like `multi` is not a real schema — its data lives in the
+  # default profile schema (e.g. `v1`), so resolve there.
+  defp default_profile_schema(nil, _config, default), do: default
+
+  defp default_profile_schema(profile, config, default) do
+    if profile in config.db_schemas, do: profile, else: config.db_profile_default || default
   end
 
   defp request_profile(conn) do
@@ -470,19 +458,10 @@ defmodule Bier.Plugs.ActionController do
   @doc false
   def parse(conn, config) do
     Bier.ServerTiming.measure(:parse, fn ->
-      with {:ok, plan} <- QueryParser.parse_request(conn.query_string),
-           {:ok, plan} <- apply_range_header(conn, plan) do
-        {:ok, apply_max_rows(plan, config)}
+      with {:ok, plan} <- QueryParser.parse_request(conn.query_string) do
+        Pagination.apply_window(plan, conn, config.db_max_rows)
       end
     end)
-  end
-
-  defp apply_range_header(conn, plan) do
-    case Pagination.range_window(conn) do
-      {:ok, nil} -> {:ok, plan}
-      {:ok, {offset, limit}} -> {:ok, %{plan | offset: offset, limit: limit}}
-      {:error, :range_offside} -> {:error, :range_offside}
-    end
   end
 
   # Resolve the effective config for a relation read. PostgREST has a single
@@ -498,14 +477,6 @@ defmodule Bier.Plugs.ActionController do
   end
 
   defp effective_config(config, _relation), do: config
-
-  defp apply_max_rows(plan, %{db_max_rows: nil}), do: plan
-
-  defp apply_max_rows(%{limit: nil} = plan, %{db_max_rows: max}),
-    do: %{plan | limit: max}
-
-  defp apply_max_rows(%{limit: limit} = plan, %{db_max_rows: max}),
-    do: %{plan | limit: min(limit, max)}
 
   # The available producers for a relation/RPC result set. Plan is gated on
   # db-plan-enabled. octet-stream and geo+json are not generally available
@@ -532,12 +503,6 @@ defmodule Bier.Plugs.ActionController do
       %{alias: al, column: col, json_path: jp} -> [QueryExecutor.json_output_name(al || col, jp)]
       _ -> []
     end)
-  end
-
-  # ---- render --------------------------------------------------------------
-
-  defp render(conn, body, count, plan, count_mode, media, columns) do
-    Response.render(conn, body, count, plan, count_mode, media, columns: columns)
   end
 
   defp header(conn, name) do

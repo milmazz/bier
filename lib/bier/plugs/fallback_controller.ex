@@ -31,15 +31,6 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
-  def call(conn, {:error, {:invalid_schema, schema}}) do
-    error(conn, 406, %{
-      code: "PGRST106",
-      message: "Invalid schema: #{schema}",
-      details: nil,
-      hint: nil
-    })
-  end
-
   def call(conn, {:error, {:unknown_relation, schema, relation}}) do
     error(conn, 404, %{
       code: "PGRST205",
@@ -425,37 +416,6 @@ defmodule Bier.Plugs.FallbackController do
           hint: nil
         })
     end
-  end
-
-  # ---- legacy shapes (kept) -----------------------------------------------
-  def call(conn, :not_found) do
-    error(conn, 404, %{
-      code: "PGRST205",
-      message: "Not found",
-      details: nil,
-      hint: nil
-    })
-  end
-
-  def call(conn, {:error, :bad_request}) do
-    error(conn, 400, %{code: "PGRST100", message: "Bad Request", details: nil, hint: nil})
-  end
-
-  def call(conn, {:error, :mismatch}) do
-    error(conn, 400, %{
-      code: "PGRST102",
-      message: "All object keys must match",
-      details: nil,
-      hint: nil
-    })
-  end
-
-  def call(conn, %{code: :insufficient_privilege} = err) do
-    error(conn, 403, Map.put(err, :code, "42501"))
-  end
-
-  def call(conn, %{code: :foreign_key_violation} = err) do
-    error(conn, 409, Map.put(err, :code, "23503"))
   end
 
   # ---- catch-all -----------------------------------------------------------
