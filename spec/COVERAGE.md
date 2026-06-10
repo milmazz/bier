@@ -35,14 +35,14 @@ Pinned target: **PostgREST v14.12**. Total cases: **532** across 17 areas.
 | Docs page (`references/...`) | Covering case ids | Notes |
 |------------------------------|-------------------|-------|
 | `auth` (Authentication) | 1450–1494 (auth) | JWT validation/claims, roles, anonymous, audience, pre-request, GUC claims, login token minting. |
-| `cli` (CLI) | 1705–1707, 1726, 1727 (config dump-config/example flag) | `--dump-config`, `--example`, config dump idempotence. |
+| `cli` (CLI) | 1705–1730 (config CLI cases) | `--dump-config`, validation, env/file/precedence, coercion, aliases. Implemented by `Bier.CLI` (escript + in-process core), driven in-process by `Bier.CliCase`. Most cases pass; full-table dump (1705) and `--example` (1727) deferred as `:cli_parity`. See **Scope decisions**. |
 | `transactions` (Transactions) | 1387–1392 (safe-update/delete, max-affected), 1722 (db-tx-end), 1713 (db-tx-end validation), 1759 (transaction timing) | Tx-scoped GUCs, safe-update/safe-delete (rollback on missing WHERE), db-tx-end. Partial — no explicit characteristics/isolation-level case. |
 | `connection_pool` (Connection Pool) | — (OUT OF SCOPE) | Pool sizing/acquisition behavior is operational and not observable as deterministic black-box HTTP. See **Scope decisions**. Config surface lives at `db-pool`, `db-pool-acquisition-timeout`, `db-pool-max-lifetime`, `db-pool-max-idletime` (alias `db-pool-timeout`), `db-pool-automatic-recovery` — those keys are exercised for parsing/aliasing by the config area (e.g. 1707). |
 | `schema_cache` (Schema Cache) | — (DEFERRED) | Schema-cache reload (`NOTIFY pgrst, 'reload schema'` / SIGUSR1) needs a reload-signal harness. See **Scope decisions**. |
 | `errors` (Errors) | 1500–1516 (errors), 1432–1434 (rpc errors), 1024, 1185 (not-found), 1455–1464 (auth JWT errors) | SQLSTATE→HTTP mapping, PGRST error codes, RAISE PGRST full control, 4xx/5xx envelopes. |
 | `configuration` (Configuration) | 1700–1730 (config) | Sources (env/file/db-role-settings), aliases, validation, coercion, precedence, app-settings. |
 | `observability` (Observability) | 1750–1767 (observability) | Server-Timing, trace header, log-level→status logging. |
-| `admin_server` (Admin Server) | 1717 (admin-port = server-port fatal) | Port-collision validation (case 1717, library-enforced in `Bier.Config`) plus `/live`/`/ready` covered by ExUnit (`test/bier/admin_server_test.exs`). Partial — case 1717 stays `:pending` (CLI `--dump-config`), `/metrics` not yet implemented. |
+| `admin_server` (Admin Server) | 1717 (admin-port = server-port fatal) | Port-collision validation (case 1717, library-enforced in `Bier.Config`) plus `/live`/`/ready` covered by ExUnit (`test/bier/admin_server_test.exs`). Partial — case 1717 now runs via the CLI harness (`Bier.CliCase`); `/metrics` not yet implemented. |
 | `listener` (Listener) | — (DEFERRED) | LISTEN/NOTIFY channel (`db-channel`) reload trigger needs the same reload-signal harness. See **Scope decisions**. |
 
 ## Scope decisions
@@ -71,6 +71,19 @@ This pass formalizes which uncovered docs pages are intentional vs. true gaps.
 - **`listener` — DEFERRED (future work).** The LISTEN/NOTIFY channel
   (`db-channel`, `db-channel-enabled`) is the transport for the same
   reload-signal harness. Deferred together with `schema_cache`.
+
+- **`cli` (config CLI cases 1705–1730) — now COVERED, with honest deferrals.**
+  `Bier.CLI` provides a standalone, drop-in PostgREST-compatible CLI (`PGRST_*`
+  env, kebab config file, `--dump-config`), driven in-process by `Bier.CliCase`.
+  The 15 cases that map onto config Bier implements pass (1706, 1708–1710,
+  1712, 1713, 1717, 1719–1723, 1726, 1728, 1730). The rest keep an explicit
+  `pending_reason` instead of a parity façade: `:cli_parity` (full default-table
+  dump 1705, `--example` 1727 — would require modeling keys Bier does not
+  implement); `:unmodeled_key` (1707, 1711, 1714, 1715, 1716, 1718, 1729 —
+  `jwt-role-claim-key`, `server-unix-socket-mode`, `openapi-server-proxy-uri`,
+  `jwt-secret-is-base64`, `app.settings.*`); `:db_config` (1724, 1725 — DB
+  role-settings source, needs a live connection at parse time). Standalone
+  packaging (`mix release` + Dockerfile) and `--ready` are tracked in #45.
 
 ## Coverage summary
 
