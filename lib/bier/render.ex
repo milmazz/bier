@@ -17,8 +17,16 @@ defmodule Bier.Render do
   plurality violation).
 
     * `:columns` — ordered column names used for CSV output.
+
+  The transform is timed as the `response` phase of `Server-Timing`
+  (`Bier.ServerTiming`); it runs before the caller calls `send_resp`, so the
+  duration is recorded in time for the header.
   """
-  def render(%MediaType{symbol: :singular} = mt, body, _opts) do
+  def render(media, body, opts) do
+    Bier.ServerTiming.measure(:response, fn -> do_render(media, body, opts) end)
+  end
+
+  defp do_render(%MediaType{symbol: :singular} = mt, body, _opts) do
     rows = decode(body)
 
     case rows do
@@ -27,19 +35,19 @@ defmodule Bier.Render do
     end
   end
 
-  def render(%MediaType{symbol: :array_strip}, body, _opts) do
+  defp do_render(%MediaType{symbol: :array_strip}, body, _opts) do
     rows = decode(body)
     {:ok, encode(Enum.map(rows, &strip_nulls/1))}
   end
 
-  def render(%MediaType{symbol: :csv}, body, opts) do
+  defp do_render(%MediaType{symbol: :csv}, body, opts) do
     rows = decode(body)
     columns = csv_columns(rows, Keyword.get(opts, :columns))
     {:ok, to_csv(rows, columns)}
   end
 
   # json / openapi / plan / other: pass through unchanged.
-  def render(_mt, body, _opts), do: {:ok, body}
+  defp do_render(_mt, body, _opts), do: {:ok, body}
 
   # ---- helpers -------------------------------------------------------------
 

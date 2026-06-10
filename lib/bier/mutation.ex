@@ -31,6 +31,19 @@ defmodule Bier.Mutation do
   alias Bier.QueryExecutor
   alias Bier.Render
 
+  defmodule Write do
+    @moduledoc false
+    # Everything the execution/response pipeline needs to know about one write
+    # request, bundled so it can be threaded as a single value instead of a
+    # dozen positional arguments.
+    #
+    #   * `mutation`  — `:insert | :update | :delete`, or the tagged forms
+    #     `{:put, row, pk}` / `{:upsert, conflict_cols, rows}` used to decide
+    #     200-vs-201 by pre-existence.
+    #   * `ok_status` — the success status before GUC/pre-existence overrides.
+    defstruct [:config, :relation, :plan, :media, :pref, :mutation, :ok_status]
+  end
+
   @doc "Handle a mutation request after media negotiation."
   def handle(conn, config, relation, media) do
     case conn.method do
@@ -50,17 +63,16 @@ defmodule Bier.Mutation do
          {:ok, columns} <- resolve_columns(plan, rows, relation) do
       pref = preferences(conn, relation, plan)
 
-      cond do
-        rows == [] ->
-          # Empty payload: insert nothing. Status 200 when an upsert resolution
-          # was requested, 201 otherwise (a plain bulk insert of zero rows).
-          status = if pref.resolution != nil, do: 200, else: 201
-          respond_empty_set(conn, media, pref, status)
-
-        true ->
-          {sql, params} = insert_sql(relation, columns, rows, plan, pref)
-          mutation = insert_mutation(relation, plan, pref, rows)
-          run(conn, config, relation, plan, media, pref, sql, params, mutation, 201)
+      if rows == [] do
+        # Empty payload: insert nothing. Status 200 when an upsert resolution
+        # was requested, 201 otherwise (a plain bulk insert of zero rows).
+        status = if pref.resolution != nil, do: 200, else: 201
+        respond_empty_set(conn, media, pref, status)
+      else
+        {sql, params} = insert_sql(relation, columns, rows, plan, pref)
+        mutation = insert_mutation(relation, plan, pref, rows)
+        write = write(config, relation, plan, media, pref, mutation, 201)
+        run(conn, write, sql, params)
       end
     end
   end
@@ -92,7 +104,7 @@ defmodule Bier.Mutation do
         {where_sql, params} = where_clause(plan.filters, relation, params)
 
         sql = "UPDATE #{qrel(relation)} SET #{set_sql}#{where_sql} RETURNING *"
-        run(conn, config, relation, plan, media, pref, sql, params, :update, 200)
+        run(conn, write(config, relation, plan, media, pref, :update, 200), sql, params)
       end
     end
   end
@@ -104,7 +116,7 @@ defmodule Bier.Mutation do
       pref = preferences(conn, relation, plan)
       {where_sql, params} = where_clause(plan.filters, relation, [])
       sql = "DELETE FROM #{qrel(relation)}#{where_sql} RETURNING *"
-      run(conn, config, relation, plan, media, pref, sql, params, :delete, 200)
+      run(conn, write(config, relation, plan, media, pref, :delete, 200), sql, params)
     end
   end
 
@@ -121,7 +133,8 @@ defmodule Bier.Mutation do
       [row] = rows
 
       {sql, params} = upsert_sql(relation, columns, [row], pk, pref)
-      run(conn, config, relation, plan, media, pref, sql, params, {:put, row, pk}, 200)
+      write = write(config, relation, plan, media, pref, {:put, row, pk}, 200)
+      run(conn, write, sql, params)
     end
   end
 
@@ -163,75 +176,78 @@ defmodule Bier.Mutation do
 
   # ---- shared execution ----------------------------------------------------
 
+  defp write(config, relation, plan, media, pref, mutation, ok_status) do
+    %Write{
+      config: config,
+      relation: relation,
+      plan: plan,
+      media: media,
+      pref: pref,
+      mutation: mutation,
+      ok_status: ok_status
+    }
+  end
+
   # Run the mutation. We always wrap the RETURNING in a representation query so
   # we can (a) shape the body by &select / embedding and (b) count the mutated
   # rows for Content-Range and the Location header, even for minimal responses.
-  defp run(conn, config, relation, plan, media, pref, sql, params, mutation, ok_status) do
-    pool = Bier.Registry.via(config.name, Postgrex)
-    relations = :persistent_term.get({Bier, :relations, config.name}, %{})
+  defp run(conn, %Write{} = write, sql, params) do
+    pool = Bier.Registry.via(write.config.name, Postgrex)
+    relations = :persistent_term.get({Bier, :relations, write.config.name}, %{})
 
     {:ok, wrapped, wparams} =
-      QueryExecutor.build_representation(relation, plan, relations, {sql, params})
+      Bier.ServerTiming.measure(:plan, fn ->
+        QueryExecutor.build_representation(write.relation, write.plan, relations, {sql, params})
+      end)
 
     result =
-      Postgrex.transaction(pool, fn tx ->
-        # pg-safeupdate parity: when this table is configured "safe", an UPDATE
-        # or DELETE without a filter must raise 21000.
-        maybe_enable_safeupdate(tx, config, relation, mutation, plan)
-
-        # For PUT, distinguish insert (201) from replace (200) by whether the PK
-        # already existed before the upsert.
-        existed = put_existed?(tx, relation, mutation)
-
-        case Postgrex.query(tx, wrapped, wparams) do
-          {:ok, %Postgrex.Result{rows: [[body, count, meta]]}} ->
-            count = count || 0
-
-            with :ok <- enforce_max_affected(pref, count),
-                 :ok <- enforce_singular(media, body),
-                 # Read any response.headers / response.status GUC an INSTEAD OF
-                 # trigger set during the write, BEFORE the transaction ends
-                 # (the GUCs are transaction-local; a rollback would discard them).
-                 {:ok, guc} <- Bier.Guc.read(tx) do
-              # The response is fully computed inside the transaction (the CTE's
-              # RETURNING is already serialized into `body`). Under db-tx-end
-              # :rollback we abort the transaction here, discarding the write but
-              # returning the same response — see the conformance harness's
-              # base_opts/0 (db_tx_end: :rollback) for why.
-              finish_tx(tx, config, {body, count, meta, existed, guc})
-            else
-              {:error, _} = err -> Postgrex.rollback(tx, err)
-            end
-
-          {:error, _} = err ->
-            Postgrex.rollback(tx, err)
-        end
+      Bier.ServerTiming.measure(:transaction, fn ->
+        Postgrex.transaction(pool, fn tx -> execute(tx, write, wrapped, wparams) end)
       end)
 
     case result do
-      {:ok, payload} ->
-        respond_payload(conn, payload, relation, plan, media, pref, mutation, ok_status)
-
-      {:error, {:bier_rollback_ok, payload}} ->
-        respond_payload(conn, payload, relation, plan, media, pref, mutation, ok_status)
-
-      {:error, reason} ->
-        reason
+      {:ok, outcome} -> respond(conn, write, outcome)
+      {:error, {:bier_rollback_ok, outcome}} -> respond(conn, write, outcome)
+      {:error, reason} -> reason
     end
   end
 
-  defp respond_payload(
-         conn,
-         {body, count, meta, existed, guc},
-         relation,
-         plan,
-         media,
-         pref,
-         mutation,
-         ok
-       ) do
-    conn = Bier.Guc.put_headers(conn, guc)
-    respond(conn, body, count, meta, existed, relation, plan, media, pref, mutation, ok, guc)
+  # Run the wrapped representation query inside the per-request transaction and
+  # collect the response payload: body/count/meta from the CTE, the PUT/upsert
+  # pre-existence flag, and the response GUCs.
+  defp execute(tx, %Write{} = write, wrapped, wparams) do
+    # pg-safeupdate parity: when this table is configured "safe", an UPDATE
+    # or DELETE without a filter must raise 21000.
+    maybe_enable_safeupdate(tx, write)
+
+    # For PUT, distinguish insert (201) from replace (200) by whether the PK
+    # already existed before the upsert.
+    existed = put_existed?(tx, write.relation, write.mutation)
+
+    case Postgrex.query(tx, wrapped, wparams) do
+      {:ok, %Postgrex.Result{rows: [[body, count, meta]]}} ->
+        count = count || 0
+
+        with :ok <- enforce_max_affected(write.pref, count),
+             :ok <- enforce_singular(write.media, body),
+             # Read any response.headers / response.status GUC an INSTEAD OF
+             # trigger set during the write, BEFORE the transaction ends
+             # (the GUCs are transaction-local; a rollback would discard them).
+             {:ok, guc} <- Bier.Guc.read(tx) do
+          # The response is fully computed inside the transaction (the CTE's
+          # RETURNING is already serialized into `body`). Under db-tx-end
+          # :rollback we abort the transaction here, discarding the write but
+          # returning the same response — see the conformance harness's
+          # base_opts/0 (db_tx_end: :rollback) for why.
+          outcome = %{body: body, count: count, meta: meta, existed: existed, guc: guc}
+          finish_tx(tx, write.config, outcome)
+        else
+          {:error, _} = err -> Postgrex.rollback(tx, err)
+        end
+
+      {:error, _} = err ->
+        Postgrex.rollback(tx, err)
+    end
   end
 
   # End the per-request transaction. Under db-tx-end :rollback we abort it (the
@@ -247,8 +263,8 @@ defmodule Bier.Mutation do
   # safeupdate guard for this transaction, so a filterless UPDATE/DELETE raises
   # SQLSTATE 21000 ("UPDATE/DELETE requires a WHERE clause"). We emulate the
   # extension with a session GUC check rather than loading it.
-  defp maybe_enable_safeupdate(tx, config, relation, mutation, plan) do
-    kind = mutation_kind(mutation)
+  defp maybe_enable_safeupdate(tx, %Write{config: config, relation: relation, plan: plan} = write) do
+    kind = mutation_kind(write.mutation)
 
     if kind in [:update, :delete] and relation.name in safe_tables(config) and
          plan.filters == [] do
@@ -276,48 +292,34 @@ defmodule Bier.Mutation do
   defp safe_tables(_config), do: []
 
   # Pre-existence check for PUT: SELECT EXISTS over the PK predicate.
-  defp put_existed?(tx, relation, {:put, row, pk}) do
-    {where, params} =
-      pk
-      |> Enum.with_index(1)
-      |> Enum.reduce({[], []}, fn {col, i}, {ws, ps} ->
-        {["#{q(col)} = $#{i}" | ws], [Map.get(row, col) | ps]}
-      end)
-
-    sql =
-      "SELECT EXISTS(SELECT 1 FROM #{qrel(relation)} WHERE #{Enum.join(Enum.reverse(where), " AND ")})"
-
-    case Postgrex.query(tx, sql, Enum.reverse(params)) do
-      {:ok, %Postgrex.Result{rows: [[exists]]}} -> exists
-      _ -> false
-    end
-  end
+  defp put_existed?(tx, relation, {:put, row, pk}), do: row_exists?(tx, relation, pk, row)
 
   # Pre-existence check for a POST upsert: true only when EVERY row's conflict
   # key already exists (so nothing is inserted and the status is 200).
   defp put_existed?(_tx, _relation, {:upsert, [], _rows}), do: false
 
   defp put_existed?(tx, relation, {:upsert, conflict_cols, rows}) do
-    Enum.all?(rows, fn row ->
-      {where, params} =
-        conflict_cols
-        |> Enum.with_index(1)
-        |> Enum.reduce({[], []}, fn {col, i}, {ws, ps} ->
-          {["#{q(col)} = $#{i}" | ws], [Map.get(row, col) | ps]}
-        end)
-
-      sql =
-        "SELECT EXISTS(SELECT 1 FROM #{qrel(relation)} WHERE " <>
-          "#{Enum.join(Enum.reverse(where), " AND ")})"
-
-      case Postgrex.query(tx, sql, Enum.reverse(params)) do
-        {:ok, %Postgrex.Result{rows: [[exists]]}} -> exists
-        _ -> false
-      end
-    end)
+    Enum.all?(rows, &row_exists?(tx, relation, conflict_cols, &1))
   end
 
   defp put_existed?(_tx, _relation, _mutation), do: false
+
+  # SELECT EXISTS over a `col = $n` predicate per key column, bound from `row`.
+  defp row_exists?(tx, relation, cols, row) do
+    {where, params} =
+      cols
+      |> Enum.with_index(1)
+      |> Enum.map_reduce([], fn {col, i}, params ->
+        {"#{q(col)} = $#{i}", [Map.get(row, col) | params]}
+      end)
+
+    sql = "SELECT EXISTS(SELECT 1 FROM #{qrel(relation)} WHERE #{Enum.join(where, " AND ")})"
+
+    case Postgrex.query(tx, sql, Enum.reverse(params)) do
+      {:ok, %Postgrex.Result{rows: [[exists]]}} -> exists
+      _ -> false
+    end
+  end
 
   # Normalize the mutation tag to its base kind.
   defp mutation_kind({:put, _row, _pk}), do: :put
@@ -363,32 +365,21 @@ defmodule Bier.Mutation do
   # ---- response shaping ----------------------------------------------------
 
   # return=representation: emit the (shaped) rows as a body.
-  defp respond(
-         conn,
-         body,
-         count,
-         meta,
-         existed,
-         relation,
-         plan,
-         media,
-         %{return: :representation} = pref,
-         mutation,
-         ok_status,
-         guc
-       ) do
-    kind = mutation_kind(mutation)
-    columns = ActionController.csv_columns(plan, relation)
+  defp respond(conn, %Write{pref: %{return: :representation} = pref} = write, outcome) do
+    %{body: body, count: count, meta: meta, existed: existed, guc: guc} = outcome
+    kind = mutation_kind(write.mutation)
+    columns = ActionController.csv_columns(write.plan, write.relation)
 
-    case Render.render(media, body, columns: columns) do
+    case Render.render(write.media, body, columns: columns) do
       {:ok, payload} ->
         status =
-          Bier.Guc.status(guc, representation_status(kind, count, existed, ok_status, pref))
+          Bier.Guc.status(guc, representation_status(kind, count, existed, write.ok_status, pref))
 
         conn
+        |> Bier.Guc.put_headers(guc)
         |> put_pref_applied(pref)
-        |> put_resp_header("content-type", MediaType.content_type(media))
-        |> maybe_location(kind, relation, plan, meta, guc)
+        |> put_resp_header("content-type", MediaType.content_type(write.media))
+        |> maybe_location(kind, write.relation, write.plan, meta, guc)
         |> put_content_range(kind, count, pref)
         |> put_resp_header("content-length", Integer.to_string(:erlang.iolist_size(payload)))
         |> send_resp(status, payload)
@@ -399,52 +390,30 @@ defmodule Bier.Mutation do
   end
 
   # return=headers-only: empty body, but Location header pointing at the row.
-  defp respond(
-         conn,
-         _body,
-         count,
-         meta,
-         existed,
-         relation,
-         _plan,
-         _media,
-         %{return: :headers_only} = pref,
-         mutation,
-         ok_status,
-         guc
-       ) do
-    kind = mutation_kind(mutation)
-    status = Bier.Guc.status(guc, empty_status(kind, count, existed, ok_status, pref))
+  defp respond(conn, %Write{pref: %{return: :headers_only} = pref} = write, outcome) do
+    %{count: count, meta: meta, existed: existed, guc: guc} = outcome
+    kind = mutation_kind(write.mutation)
+    status = Bier.Guc.status(guc, empty_status(kind, count, existed, write.ok_status, pref))
 
     conn
+    |> Bier.Guc.put_headers(guc)
     |> put_pref_applied(pref)
-    |> force_location(kind, relation, meta, guc)
+    |> force_location(kind, write.relation, meta, guc)
     |> put_content_range(kind, count, pref)
     |> put_resp_header("content-length", "0")
     |> send_resp(status, "")
   end
 
   # return=minimal / no token: empty body.
-  defp respond(
-         conn,
-         _body,
-         count,
-         meta,
-         existed,
-         relation,
-         plan,
-         _media,
-         pref,
-         mutation,
-         ok_status,
-         guc
-       ) do
-    kind = mutation_kind(mutation)
-    status = Bier.Guc.status(guc, empty_status(kind, count, existed, ok_status, pref))
+  defp respond(conn, %Write{pref: pref} = write, outcome) do
+    %{count: count, meta: meta, existed: existed, guc: guc} = outcome
+    kind = mutation_kind(write.mutation)
+    status = Bier.Guc.status(guc, empty_status(kind, count, existed, write.ok_status, pref))
 
     conn
+    |> Bier.Guc.put_headers(guc)
     |> put_pref_applied(pref)
-    |> maybe_location(kind, relation, plan, meta, guc)
+    |> maybe_location(kind, write.relation, write.plan, meta, guc)
     |> put_content_range(kind, count, pref)
     |> put_content_length_for_empty(status)
     |> send_resp(status, "")
@@ -516,23 +485,21 @@ defmodule Bier.Mutation do
   # Location regardless of select (headers-only): from the mutated row's PK. A
   # trigger-supplied response.headers Location (already on `conn`) wins.
   defp force_location(conn, kind, relation, meta, guc) when kind in [:insert, :put] do
-    cond do
-      guc_location?(guc) ->
-        conn
+    if guc_location?(guc) do
+      conn
+    else
+      case pk_values(meta) do
+        nil ->
+          conn
 
-      true ->
-        case pk_values(meta) do
-          nil ->
-            conn
+        values ->
+          query =
+            Enum.map_join(relation.primary_key, "&", fn col ->
+              "#{col}=eq.#{Map.get(values, col)}"
+            end)
 
-          values ->
-            query =
-              relation.primary_key
-              |> Enum.map(fn col -> "#{col}=eq.#{Map.get(values, col)}" end)
-              |> Enum.join("&")
-
-            put_resp_header(conn, "location", "/#{relation.name}?#{query}")
-        end
+          put_resp_header(conn, "location", "/#{relation.name}?#{query}")
+      end
     end
   end
 
@@ -590,80 +557,59 @@ defmodule Bier.Mutation do
 
   # ---- preferences ---------------------------------------------------------
 
+  # Each recognized `Prefer` token, keyed by the internal value it parses to.
+  # The same tables drive both parsing (token -> value) and the
+  # `Preference-Applied` echo (value -> token).
+  @handling_tokens [strict: "handling=strict", lenient: "handling=lenient"]
+  @resolution_tokens [
+    merge: "resolution=merge-duplicates",
+    ignore: "resolution=ignore-duplicates"
+  ]
+  @missing_tokens [default: "missing=default", null: "missing=null"]
+  @count_tokens [exact: "count=exact", planned: "count=planned", estimated: "count=estimated"]
+  @return_tokens [
+    representation: "return=representation",
+    headers_only: "return=headers-only",
+    minimal: "return=minimal"
+  ]
+
   # Parse `Prefer` into the response-affecting bits plus the ordered list of
   # honored tokens to echo via Preference-Applied. `relation` is needed to decide
   # whether an upsert resolution is honored (only when the table has a PK).
   defp preferences(conn, relation, plan) do
     raw = conn |> get_req_header("prefer") |> Enum.flat_map(&split_prefer/1)
 
-    return =
-      cond do
-        "return=representation" in raw -> :representation
-        "return=headers-only" in raw -> :headers_only
-        "return=minimal" in raw -> :minimal
-        true -> :none
-      end
-
-    resolution =
-      cond do
-        "resolution=merge-duplicates" in raw -> :merge
-        "resolution=ignore-duplicates" in raw -> :ignore
-        true -> nil
-      end
-
     # A table with no PK (and no explicit `?on_conflict=`) silently ignores the
     # resolution preference — there is no conflict target to upsert on.
     has_conflict_target? =
       relation.primary_key != [] or is_list(plan[:on_conflict])
 
-    resolution = if has_conflict_target?, do: resolution, else: nil
+    resolution =
+      if has_conflict_target?, do: parse_pref(raw, @resolution_tokens)
 
-    count =
-      cond do
-        "count=exact" in raw -> :exact
-        "count=planned" in raw -> :planned
-        "count=estimated" in raw -> :estimated
-        true -> nil
-      end
-
-    handling =
-      cond do
-        "handling=strict" in raw -> :strict
-        "handling=lenient" in raw -> :lenient
-        true -> nil
-      end
-
-    missing =
-      cond do
-        "missing=default" in raw -> :default
-        "missing=null" in raw -> :null
-        true -> nil
-      end
-
-    max_affected = parse_max_affected(raw)
-
-    %{
-      return: return,
+    pref = %{
+      return: parse_pref(raw, @return_tokens) || :none,
       resolution: resolution,
-      count: count,
-      handling: handling,
-      missing: missing,
-      max_affected: max_affected,
-      applied: applied_tokens(raw, return, resolution, count, handling, missing, max_affected)
+      count: parse_pref(raw, @count_tokens),
+      handling: parse_pref(raw, @handling_tokens),
+      missing: parse_pref(raw, @missing_tokens),
+      max_affected: parse_max_affected(raw)
     }
+
+    Map.put(pref, :applied, applied_tokens(pref))
+  end
+
+  defp parse_pref(raw, tokens) do
+    Enum.find_value(tokens, fn {value, token} -> if token in raw, do: value end)
   end
 
   defp parse_max_affected(raw) do
     Enum.find_value(raw, fn token ->
-      case token do
-        "max-affected=" <> n ->
-          case Integer.parse(n) do
-            {v, ""} -> v
-            _ -> nil
-          end
-
-        _ ->
-          nil
+      with "max-affected=" <> n <- token,
+           {v, ""} <- Integer.parse(n) do
+        v
+      else
+        _ -> nil
       end
     end)
   end
@@ -671,39 +617,20 @@ defmodule Bier.Mutation do
   # Build the Preference-Applied token list in PostgREST's canonical order:
   # handling, resolution, missing, return, count, max-affected. max-affected is
   # echoed only with handling=strict (lenient drops it).
-  defp applied_tokens(_raw, return, resolution, count, handling, missing, max_affected) do
+  defp applied_tokens(pref) do
     [
-      handling_token(handling),
-      resolution_token(resolution),
-      missing_token(missing),
-      return_token(return),
-      count_token(count),
-      max_affected_token(handling, max_affected)
+      applied_token(@handling_tokens, pref.handling),
+      applied_token(@resolution_tokens, pref.resolution),
+      applied_token(@missing_tokens, pref.missing),
+      applied_token(@return_tokens, pref.return),
+      applied_token(@count_tokens, pref.count),
+      max_affected_token(pref.handling, pref.max_affected)
     ]
     |> Enum.reject(&is_nil/1)
   end
 
-  defp handling_token(:strict), do: "handling=strict"
-  defp handling_token(:lenient), do: "handling=lenient"
-  defp handling_token(_), do: nil
-
-  defp resolution_token(:merge), do: "resolution=merge-duplicates"
-  defp resolution_token(:ignore), do: "resolution=ignore-duplicates"
-  defp resolution_token(_), do: nil
-
-  defp missing_token(:default), do: "missing=default"
-  defp missing_token(:null), do: "missing=null"
-  defp missing_token(_), do: nil
-
-  defp return_token(:representation), do: "return=representation"
-  defp return_token(:headers_only), do: "return=headers-only"
-  defp return_token(:minimal), do: "return=minimal"
-  defp return_token(_), do: nil
-
-  defp count_token(:exact), do: "count=exact"
-  defp count_token(:planned), do: "count=planned"
-  defp count_token(:estimated), do: "count=estimated"
-  defp count_token(_), do: nil
+  defp applied_token(_tokens, nil), do: nil
+  defp applied_token(tokens, value), do: Keyword.get(tokens, value)
 
   defp max_affected_token(:strict, n) when is_integer(n), do: "max-affected=#{n}"
   defp max_affected_token(_handling, _n), do: nil
@@ -722,11 +649,11 @@ defmodule Bier.Mutation do
   # keys are not validated for uniformity (extra/missing keys are ignored).
   defp parse_body(conn, plan) do
     raw = conn.assigns[:bier_raw_body] || ""
-    has_columns? = is_list(plan[:columns])
 
-    cond do
-      csv_content?(conn) -> parse_csv(raw)
-      true -> parse_json_body(raw, has_columns?)
+    if csv_content?(conn) do
+      parse_csv(raw)
+    else
+      parse_json_body(raw, is_list(plan[:columns]))
     end
   end
 
@@ -747,32 +674,27 @@ defmodule Bier.Mutation do
       |> String.split("\n")
 
     case lines do
-      [header | data] ->
-        columns = split_csv_line(header)
-        width = length(columns)
-
-        rows =
-          Enum.map(data, fn line ->
-            fields = split_csv_line(line)
-            {length(fields), fields}
-          end)
-
-        if Enum.all?(rows, fn {n, _} -> n == width end) do
-          parsed =
-            Enum.map(rows, fn {_n, fields} ->
-              columns
-              |> Enum.zip(fields)
-              |> Map.new(fn {c, v} -> {c, csv_value(v)} end)
-            end)
-
-          {:ok, parsed}
-        else
-          {:error, :ragged_csv}
-        end
-
-      [] ->
-        {:error, :ragged_csv}
+      [header | data] -> csv_rows(split_csv_line(header), Enum.map(data, &split_csv_line/1))
+      [] -> {:error, :ragged_csv}
     end
+  end
+
+  # Zip each data line against the header columns; every line must have exactly
+  # as many fields as the header (PGRST102 otherwise).
+  defp csv_rows(columns, lines) do
+    width = length(columns)
+
+    if Enum.all?(lines, &(length(&1) == width)) do
+      {:ok, Enum.map(lines, &csv_row(columns, &1))}
+    else
+      {:error, :ragged_csv}
+    end
+  end
+
+  defp csv_row(columns, fields) do
+    columns
+    |> Enum.zip(fields)
+    |> Map.new(fn {c, v} -> {c, csv_value(v)} end)
   end
 
   defp csv_value("NULL"), do: nil
@@ -906,19 +828,21 @@ defmodule Bier.Mutation do
     end)
   end
 
-  defp extract_expr(col, type, relation) do
+  # The expression pulling `col` out of the jsonb source `src` (the per-row
+  # element `_e` on INSERT/upsert, the bound payload on UPDATE).
+  defp extract_expr(col, type, relation, src \\ "_e") do
     case QueryExecutor.write_rep_fn(relation, col) do
       # A DOMAIN with a `json AS <domain>` cast parses the raw JSON body value
       # through its cast function (cases 1811-1813); a plain `::<domain>` cast
       # would strip the domain to its base type and bypass the parser.
       {schema, name} ->
-        "#{q(schema)}.#{q(name)}((_e -> #{pg_literal(col)})::json)"
+        "#{q(schema)}.#{q(name)}((#{src} -> #{pg_literal(col)})::json)"
 
       nil ->
         if json_type?(type) do
-          "(_e -> #{pg_literal(col)})"
+          "(#{src} -> #{pg_literal(col)})"
         else
-          "(_e ->> #{pg_literal(col)})::#{type_cast(type)}"
+          "(#{src} ->> #{pg_literal(col)})::#{type_cast(type)}"
         end
     end
   end
@@ -955,12 +879,16 @@ defmodule Bier.Mutation do
 
   defp conflict_columns(relation, _plan), do: relation.primary_key
 
-  # SET col = EXCLUDED.col for every inserted column not in the conflict target.
+  # SET col = EXCLUDED.col for every inserted column not in the conflict target
+  # (or for the target columns themselves when nothing else was inserted).
   defp update_set_excluded(columns, target_cols) do
-    case Enum.reject(columns, &(&1 in target_cols)) do
-      [] -> Enum.map_join(target_cols, ", ", fn c -> "#{q(c)} = EXCLUDED.#{q(c)}" end)
-      cols -> Enum.map_join(cols, ", ", fn c -> "#{q(c)} = EXCLUDED.#{q(c)}" end)
+    columns
+    |> Enum.reject(&(&1 in target_cols))
+    |> case do
+      [] -> target_cols
+      cols -> cols
     end
+    |> Enum.map_join(", ", fn c -> "#{q(c)} = EXCLUDED.#{q(c)}" end)
   end
 
   # SET col = <typed value> list for UPDATE; single-object body extracted from
@@ -971,24 +899,10 @@ defmodule Bier.Mutation do
     parts =
       Enum.map_join(columns, ", ", fn col ->
         coltype = column_type(relation, col)
-        "#{q(col)} = #{extract_expr_from(col, coltype, "$1::text::jsonb", relation)}"
+        "#{q(col)} = #{extract_expr(col, coltype, relation, "$1::text::jsonb")}"
       end)
 
     {parts, [payload]}
-  end
-
-  defp extract_expr_from(col, type, src, relation) do
-    case QueryExecutor.write_rep_fn(relation, col) do
-      {schema, name} ->
-        "#{q(schema)}.#{q(name)}((#{src} -> #{pg_literal(col)})::json)"
-
-      nil ->
-        if json_type?(type) do
-          "(#{src} -> #{pg_literal(col)})"
-        else
-          "(#{src} ->> #{pg_literal(col)})::#{type_cast(type)}"
-        end
-    end
   end
 
   # WHERE built from the request's column filters, appended after `params`.
