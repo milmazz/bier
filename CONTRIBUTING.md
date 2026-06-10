@@ -43,11 +43,11 @@ behavior, with each case citing its upstream source. It is **ground truth**:
 
 ## Generated code
 
-`lib/bier/query_parser.ex` and `lib/bier/query_parser/nimble.ex` are
-**generated** from their `*.ex.exs` templates. Edit the template, run
+`lib/bier/query_parser.ex` is **generated** from its
+`lib/bier/query_parser.ex.exs` template. Edit the template, run
 `mix gen.parsers`, and commit both the template and the regenerated `.ex`.
-Never edit the generated `.ex` files directly. Credo analyzes the templates
-(the files you edit) but skips the generated output.
+Never edit the generated `.ex` directly. Credo analyzes the template
+(the file you edit) but skips the generated output.
 
 ## Before you push
 

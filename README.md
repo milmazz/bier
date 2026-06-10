@@ -204,11 +204,11 @@ error envelope.
 
 ### The query parser
 
-`Bier.QueryParser` and `Bier.QueryParser.Nimble` are **generated**,
-dependency-free modules built from `*.ex.exs` templates via `mix gen.parsers`
-(which runs `mix nimble_parsec.compile`). `nimble_parsec` is a dev-only
-dependency — the shipped code does not depend on it at runtime. Edit the
-`.ex.exs` templates and regenerate; never edit the generated `.ex` directly.
+`Bier.QueryParser` is a **generated**, dependency-free module built from its
+`lib/bier/query_parser.ex.exs` template via `mix gen.parsers` (which runs
+`mix nimble_parsec.compile`). `nimble_parsec` is a dev/test-only dependency —
+the shipped code does not depend on it at runtime. Edit the `.ex.exs` template
+and regenerate; never edit the generated `.ex` directly.
 
 ## Conformance
 
