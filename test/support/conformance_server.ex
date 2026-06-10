@@ -33,7 +33,7 @@ defmodule Bier.ConformanceServer do
   # case to a faithful variant could change its result. (openapi-mode/db-root-spec
   # behavior lands separately.) 1467 verifies an RS256 token against an asymmetric
   # public JWK as jwt-secret (issue #23).
-  @variant_case_ids [1467, 1491, 1493, 1678, 1682, 1703, 1758, 1763]
+  @variant_case_ids [1467, 1491, 1493, 1654, 1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764]
 
   def url_for(%Bier.ConformanceCase{id: id}) when id in @variant_case_ids,
     do: :persistent_term.get({__MODULE__, :variant, id})
@@ -47,10 +47,29 @@ defmodule Bier.ConformanceServer do
     |> Enum.filter(&(&1.id in @variant_case_ids))
     |> Enum.each(fn %{id: id, config: config} ->
       name = Module.concat(__MODULE__, "Variant#{id}")
-      base = start_instance(name, Keyword.merge(base_opts(), translate(config)))
+
+      opts =
+        base_opts()
+        # Each variant serves a single low-traffic case, so a small pool keeps
+        # the combined connection count of all instances under Postgres'
+        # max_connections (base_opts uses pool_size 10).
+        |> Keyword.merge(pool_size: 2)
+        |> Keyword.merge(translate(config))
+        |> Keyword.merge(variant_extra_opts(id))
+
+      base = start_instance(name, opts)
       :persistent_term.put({__MODULE__, :variant, id}, base)
     end)
   end
+
+  # Case 1654 asserts the default title/description when the exposed schema has
+  # no COMMENT; expose a comment-less schema so the shared "test" schema (which
+  # has a comment needed by case 1656) is not affected.
+  defp variant_extra_opts(1654), do: [db_schemas: ["openapi_no_comment"]]
+  # Case 1764 asserts the no-JWT-secret 500 path (PGRST300); its instance must
+  # run without a secret even though base_opts configures one.
+  defp variant_extra_opts(1764), do: [jwt_secret: nil]
+  defp variant_extra_opts(_id), do: []
 
   defp start_instance(name, opts) do
     port = Bier.TestPorts.free_port()
@@ -72,9 +91,12 @@ defmodule Bier.ConformanceServer do
   # placeholders (e.g. the asymmetric JWK) which resolve to their real value.
   # Special case: `db-schemas` in YAML may be a plain scalar string (e.g. "test")
   # when only one schema is listed; wrap it in a list so NimbleOptions accepts it.
+  # `log-level` is an enum atom in the config schema, so its YAML scalar (e.g.
+  # "error") is converted from string to atom.
   defp translate(config) do
     Enum.map(config, fn
       {"db-schemas", v} when is_binary(v) -> {:db_schemas, [v]}
+      {"log-level", v} when is_binary(v) -> {:log_level, String.to_atom(v)}
       {k, v} -> {k |> String.replace("-", "_") |> String.to_atom(), resolve(v)}
     end)
   end

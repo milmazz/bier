@@ -268,6 +268,15 @@ defmodule Bier do
         instead of the generated spec.
         """
       ],
+      openapi_security_active: [
+        type: :boolean,
+        default: env(:openapi_security_active, false),
+        doc: """
+        When `true`, the root OpenAPI document includes a top-level `security`
+        requirement and a `JWT` apiKey `securityDefinitions` entry (PostgREST
+        openapi-security-active). Defaults to `false`.
+        """
+      ],
       admin_server_port: [
         type: {:or, [:pos_integer, nil]},
         default: env(:admin_server_port, nil),

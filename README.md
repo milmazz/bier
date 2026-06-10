@@ -96,6 +96,7 @@ defaults are sourced from application env, so you can also set them under
 | `server_trace_header` | `nil` | Request header (e.g. `X-Request-Id`) echoed on the response. |
 | `log_level` | `:error` | Access-log verbosity. |
 | `openapi_mode` | `"follow-privileges"` | How the root OpenAPI document is served. |
+| `openapi_security_active` | `false` | Advertise JWT security definitions in the OpenAPI document. |
 
 See `Bier.schema/0` for the complete, documented list.
 
