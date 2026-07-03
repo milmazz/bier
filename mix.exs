@@ -13,6 +13,7 @@ defmodule Bier.MixProject do
       test_coverage: [tool: ExCoveralls],
       aliases: aliases(),
       escript: escript(),
+      releases: releases(),
       deps: deps()
     ]
   end
@@ -43,6 +44,18 @@ defmodule Bier.MixProject do
 
   defp escript do
     [main_module: Bier.CLI, app: nil]
+  end
+
+  # Standalone-server release: `MIX_ENV=prod mix release` builds a self-contained
+  # `bier` release whose `bin/bier start` boots one instance from `PGRST_*` env
+  # (see `Bier.Application` + `BIER_STANDALONE`). Used by the Dockerfile.
+  defp releases do
+    [
+      bier: [
+        include_executables_for: [:unix],
+        applications: [bier: :permanent]
+      ]
+    ]
   end
 
   defp aliases do

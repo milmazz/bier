@@ -109,6 +109,64 @@ default, which requires Elixir 1.18+). Override it with:
 config :bier, :json_library, Jason
 ```
 
+## Running standalone
+
+Bier is primarily a library you embed (see [Usage](#usage)), but it can also run
+as a **standalone server** — no host application required — configured entirely
+from PostgREST-compatible `PGRST_*` environment variables. This is a config-level
+drop-in for PostgREST for the settings Bier implements.
+
+### Docker
+
+```sh
+docker build -t bier .
+
+docker run --rm -p 3000:3000 \
+  -e PGRST_DB_URI="postgresql://authenticator:secret@db:5432/app" \
+  -e PGRST_DB_SCHEMAS="api" \
+  -e PGRST_DB_ANON_ROLE="web_anon" \
+  bier
+```
+
+The image runs `bin/bier start`, which boots one instance bound to
+`PGRST_SERVER_PORT` (default `3000`). A fatal config problem (e.g. a JWT secret
+shorter than 32 characters) is printed to stderr and aborts startup.
+
+### Release
+
+`MIX_ENV=prod mix release` builds a self-contained release under
+`_build/prod/rel/bier`:
+
+```sh
+MIX_ENV=prod mix release
+
+BIER_STANDALONE=1 \
+PGRST_DB_URI="postgresql://authenticator:secret@localhost:5432/app" \
+PGRST_DB_SCHEMAS="api" \
+PGRST_DB_ANON_ROLE="web_anon" \
+_build/prod/rel/bier/bin/bier start
+```
+
+`BIER_STANDALONE=1` is what tells `Bier.Application` to boot an instance from the
+environment; it is baked into the Docker image. Without it (the default), the
+application starts only its registry, so embedding Bier in a host app is
+unaffected.
+
+### Inspecting configuration
+
+The `bier` escript (`mix escript.build`) resolves and prints the effective
+config without starting a server — useful for debugging a deployment's env:
+
+```sh
+PGRST_DB_SCHEMAS=api ./bier --dump-config
+./bier --help
+```
+
+Supported `PGRST_*` keys mirror the [Configuration](#configuration) table
+(`PGRST_DB_URI`, `PGRST_DB_SCHEMAS`, `PGRST_SERVER_PORT`, `PGRST_JWT_SECRET`,
+`PGRST_LOG_LEVEL`, …) plus their deprecated PostgREST aliases. Keys Bier does not
+implement are intentionally not accepted rather than silently echoed.
+
 ## Architecture
 
 There are two supervisors with different jobs. `Bier.Application` (the OTP `mod:`)
