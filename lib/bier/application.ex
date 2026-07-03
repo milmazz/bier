@@ -5,6 +5,8 @@ defmodule Bier.Application do
 
   use Application
 
+  alias Bier.CLI.Config
+
   @impl true
   def start(_type, _args) do
     children = [Bier.Registry | standalone_children(System.get_env())]
@@ -41,8 +43,8 @@ defmodule Bier.Application do
   @doc false
   def standalone_spec(env) do
     if env["BIER_STANDALONE"] in ["1", "true"] do
-      case Bier.CLI.Config.load(env, nil, %{}) do
-        {:ok, resolved} -> {:ok, {Bier, Bier.CLI.Config.to_start_opts(resolved)}}
+      case Config.load(env, nil, %{}) do
+        {:ok, resolved} -> {:ok, {Bier, Config.to_start_opts(resolved)}}
         {:error, _message} = err -> err
       end
     else
