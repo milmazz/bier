@@ -10,7 +10,8 @@ defmodule Bier.CLI do
   is the escript wrapper that supplies real IO and `System.halt/1`.
   """
 
-  alias Bier.CLI.{Config, ConfigFile}
+  alias Bier.CLI.Config
+  alias Bier.CLI.ConfigFile
 
   @type result :: %{stdout: iodata(), stderr: iodata(), exit: non_neg_integer()}
 
