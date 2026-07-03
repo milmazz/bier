@@ -16,6 +16,7 @@ defmodule Bier.CustomMedia do
 
   alias Bier.MediaType
   alias Bier.Negotiation
+  alias Bier.QueryExecutor, as: QE
 
   @doc """
   Try to satisfy a relation GET via a custom media handler aggregate keyed on
@@ -42,33 +43,17 @@ defmodule Bier.CustomMedia do
   applies to the function's result. Returns a `Plug.Conn` or `:no_handler`.
   """
   def maybe_rpc(conn, config, fn_def) do
-    cond do
-      media_domain?(fn_def.ret_type) ->
-        run_media_fn(conn, config, fn_def)
-
-      true ->
-        run_rpc_aggregate(conn, config, fn_def)
+    if media_domain?(fn_def.ret_type) do
+      run_media_fn(conn, config, fn_def)
+    else
+      run_rpc_aggregate(conn, config, fn_def)
     end
   end
 
   # ---- relation aggregate (e.g. ov_json override) -------------------------
 
   defp run_relation_aggregate(conn, config, relation, handler) do
-    pool = Bier.Registry.via(config.name, Postgrex)
-    rel = ~s|"#{relation.schema}"."#{relation.name}"|
-    agg = ~s|"#{handler.agg_schema}"."#{handler.agg_name}"|
-    sql = "SELECT #{agg}(__r)::text FROM #{rel} __r"
-
-    case Postgrex.query(pool, sql, []) do
-      {:ok, %Postgrex.Result{rows: [[value]]}} ->
-        send_custom(conn, handler.media_type, value)
-
-      {:ok, %Postgrex.Result{rows: []}} ->
-        send_custom(conn, handler.media_type, "")
-
-      {:error, _} = err ->
-        err
-    end
+    run_aggregate(conn, config, handler, QE.qrel(relation), & &1)
   end
 
   # ---- function returning a media-type domain (Any handler) ---------------
@@ -78,10 +63,9 @@ defmodule Bier.CustomMedia do
     # matches that Accept (or */*).
     if any_or_matches?(conn, fn_def.ret_type) do
       pool = Bier.Registry.via(config.name, Postgrex)
-      call = ~s|"#{fn_def.schema}"."#{fn_def.name}"()|
       # The `*/*` domain is over bytea; selecting the value as bytea yields the
       # raw bytes (Postgrex returns them as a binary).
-      sql = "SELECT #{call}::bytea"
+      sql = "SELECT #{qfn_call(fn_def)}::bytea"
 
       case Postgrex.query(pool, sql, []) do
         {:ok, %Postgrex.Result{rows: [[value]]}} ->
@@ -113,26 +97,34 @@ defmodule Bier.CustomMedia do
         :no_handler
 
       handler ->
-        pool = Bier.Registry.via(config.name, Postgrex)
-        call = ~s|"#{fn_def.schema}"."#{fn_def.name}"()|
-        agg = ~s|"#{handler.agg_schema}"."#{handler.agg_name}"|
-        sql = "SELECT #{agg}(__r)::text FROM #{call} __r"
-
-        case Postgrex.query(pool, sql, []) do
-          # The anyelement aggregate path prepends a 0x01 SOH control byte to the
-          # serialized output, mirroring PostgREST's "-- TODO SOH" behavior
-          # (CustomMediaSpec, case 1636).
-          {:ok, %Postgrex.Result{rows: [[value]]}} ->
-            send_custom(conn, handler.media_type, soh(value))
-
-          {:ok, %Postgrex.Result{rows: []}} ->
-            send_custom(conn, handler.media_type, soh(""))
-
-          {:error, _} = err ->
-            err
-        end
+        # The anyelement aggregate path prepends a 0x01 SOH control byte to the
+        # serialized output, mirroring PostgREST's "-- TODO SOH" behavior
+        # (CustomMediaSpec, case 1636).
+        run_aggregate(conn, config, handler, qfn_call(fn_def), &soh/1)
     end
   end
+
+  # Run the handler aggregate over `source` (a relation or a function call) and
+  # send its serialized output, decorated by `transform`, as the response body.
+  defp run_aggregate(conn, config, handler, source, transform) do
+    pool = Bier.Registry.via(config.name, Postgrex)
+    agg = "#{QE.quote_ident(handler.agg_schema)}.#{QE.quote_ident(handler.agg_name)}"
+    sql = "SELECT #{agg}(__r)::text FROM #{source} __r"
+
+    case Postgrex.query(pool, sql, []) do
+      {:ok, %Postgrex.Result{rows: [[value]]}} ->
+        send_custom(conn, handler.media_type, transform.(value))
+
+      {:ok, %Postgrex.Result{rows: []}} ->
+        send_custom(conn, handler.media_type, transform.(""))
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp qfn_call(fn_def),
+    do: "#{QE.quote_ident(fn_def.schema)}.#{QE.quote_ident(fn_def.name)}()"
 
   defp soh(value) when is_binary(value), do: <<0x01>> <> value
   defp soh(nil), do: <<0x01>>

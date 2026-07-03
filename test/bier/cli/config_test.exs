@@ -102,6 +102,21 @@ defmodule Bier.CLI.ConfigTest do
       assert resolved["db-schemas"] == ["aliased_schema"]
     end
 
+    test "resolves alias-derived env vars (PGRST_DB_SCHEMA, PostgREST optWithAlias)" do
+      assert {:ok, resolved} = Config.load(%{"PGRST_DB_SCHEMA" => "api"}, nil, %{})
+      assert resolved["db-schemas"] == ["api"]
+
+      assert {:ok, resolved} = Config.load(%{"PGRST_MAX_ROWS" => "50"}, nil, %{})
+      assert resolved["db-max-rows"] == 50
+    end
+
+    test "a canonical file key still beats an alias env var" do
+      env = %{"PGRST_DB_SCHEMA" => "from_alias_env"}
+      file = %{"db-schemas" => "from_canonical_file"}
+      assert {:ok, resolved} = Config.load(env, file, %{})
+      assert resolved["db-schemas"] == ["from_canonical_file"]
+    end
+
     test "wrong type for an optional int falls back to its default :unset (case 1721)" do
       assert {:ok, resolved} = Config.load(%{}, %{"db-max-rows" => true}, %{})
       assert resolved["db-max-rows"] == :unset
@@ -198,6 +213,40 @@ defmodule Bier.CLI.ConfigTest do
       {:ok, resolved} = Config.load(%{"PGRST_DB_TX_END" => "commit-allow-override"}, nil, %{})
       opts = Config.to_start_opts(resolved)
       assert opts[:db_tx_end] == :commit
+    end
+
+    test "parses a libpq keyword/value conninfo db-uri" do
+      uri = "host=db.example.com port=5433 dbname=shop user=alice password=secret"
+      {:ok, resolved} = Config.load(%{"PGRST_DB_URI" => uri}, nil, %{})
+      opts = Config.to_start_opts(resolved)
+
+      assert opts[:hostname] == "db.example.com"
+      assert opts[:port] == 5433
+      assert opts[:database] == "shop"
+      assert opts[:username] == "alice"
+      assert opts[:password] == "secret"
+    end
+
+    test "maps sslmode=require/verify-* to ssl: true, in both db-uri forms" do
+      {:ok, resolved} =
+        Config.load(%{"PGRST_DB_URI" => "postgresql://h/db?sslmode=require"}, nil, %{})
+
+      assert Config.to_start_opts(resolved)[:ssl] == true
+
+      {:ok, resolved} =
+        Config.load(%{"PGRST_DB_URI" => "host=h dbname=db sslmode=verify-full"}, nil, %{})
+
+      assert Config.to_start_opts(resolved)[:ssl] == true
+
+      {:ok, resolved} =
+        Config.load(%{"PGRST_DB_URI" => "postgresql://h/db?sslmode=disable"}, nil, %{})
+
+      refute Keyword.has_key?(Config.to_start_opts(resolved), :ssl)
+    end
+
+    test "maps openapi-security-active to Bier.start_link/1 options" do
+      {:ok, resolved} = Config.load(%{"PGRST_OPENAPI_SECURITY_ACTIVE" => "true"}, nil, %{})
+      assert Config.to_start_opts(resolved)[:openapi_security_active] == true
     end
 
     test "produced options validate via Bier.Config.new!/2" do

@@ -13,7 +13,7 @@ Code.require_file("corpus.exs", __DIR__)
 Code.require_file("regex_ref.exs", __DIR__)
 
 alias Bier.QueryParser, as: QP
-alias Bier.QueryParser.Nimble, as: N
+alias Bier.QueryParser, as: N
 alias Bench.RegexRef
 
 defmodule Parity do

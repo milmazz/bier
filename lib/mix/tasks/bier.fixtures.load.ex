@@ -67,11 +67,9 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
 
   defp ensure_roles(psql, cfg) do
     sql =
-      @roles
-      |> Enum.map(fn role ->
+      Enum.map_join(@roles, "\n", fn role ->
         "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '#{role}') THEN CREATE ROLE #{role}; END IF; END $$;"
       end)
-      |> Enum.join("\n")
 
     run_psql!(psql, cfg, "postgres", sql)
   end
@@ -575,15 +573,8 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
   # Build `CREATE FUNCTION <area>.<fn>(<args>) RETURNS SETOF <area>.<ret> ...`
   # delegating to `test.<fn>(<arg names>)`.
   defp mirror_setof_fn_ddl(schema, %{name: name, args: args, ret_relation: ret}) do
-    arg_decls =
-      args
-      |> Enum.map(fn {n, t} -> ~s("#{n}" #{t}) end)
-      |> Enum.join(", ")
-
-    call_args =
-      args
-      |> Enum.map(fn {n, _t} -> ~s("#{n}") end)
-      |> Enum.join(", ")
+    arg_decls = Enum.map_join(args, ", ", fn {n, t} -> ~s("#{n}" #{t}) end)
+    call_args = Enum.map_join(args, ", ", fn {n, _t} -> ~s("#{n}") end)
 
     dollar = "$bier$"
     body = ~s| SELECT * FROM "test"."#{name}"(#{call_args}) |

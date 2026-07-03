@@ -30,9 +30,13 @@ defmodule Bier.ConformanceServer do
   # Cases whose `config:` is mutually exclusive with the shared instance's, so
   # they need a dedicated instance. Most config cases are ALREADY satisfied by
   # `base_opts/0` and stay on the shared instance — routing a currently-passing
-  # case to a faithful variant could change its result. (1467 RS256 is deferred,
-  # issue #23; openapi-mode/db-root-spec behavior lands separately.)
-  @variant_case_ids [1491, 1493, 1678, 1682, 1703, 1758, 1763]
+  # case to a faithful variant could change its result. (openapi-mode/db-root-spec
+  # behavior lands separately.) 1467 verifies an RS256 token against an asymmetric
+  # public JWK as jwt-secret (issue #23). 1468–1473 set `jwt-aud: youraudience`,
+  # which conflicts with the shared instance's jwt_aud: nil (issue #41); 1474
+  # (`jwt-aud: null`) matches the shared config and stays there.
+  @variant_case_ids [1467, 1468, 1469, 1470, 1471, 1472, 1473] ++
+                      [1491, 1493, 1654, 1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764]
 
   def url_for(%Bier.ConformanceCase{id: id}) when id in @variant_case_ids,
     do: :persistent_term.get({__MODULE__, :variant, id})
@@ -46,10 +50,29 @@ defmodule Bier.ConformanceServer do
     |> Enum.filter(&(&1.id in @variant_case_ids))
     |> Enum.each(fn %{id: id, config: config} ->
       name = Module.concat(__MODULE__, "Variant#{id}")
-      base = start_instance(name, Keyword.merge(base_opts(), translate(config)))
+
+      opts =
+        base_opts()
+        # Each variant serves a single low-traffic case, so a small pool keeps
+        # the combined connection count of all instances under Postgres'
+        # max_connections (base_opts uses pool_size 10).
+        |> Keyword.merge(pool_size: 2)
+        |> Keyword.merge(translate(config))
+        |> Keyword.merge(variant_extra_opts(id))
+
+      base = start_instance(name, opts)
       :persistent_term.put({__MODULE__, :variant, id}, base)
     end)
   end
+
+  # Case 1654 asserts the default title/description when the exposed schema has
+  # no COMMENT; expose a comment-less schema so the shared "test" schema (which
+  # has a comment needed by case 1656) is not affected.
+  defp variant_extra_opts(1654), do: [db_schemas: ["openapi_no_comment"]]
+  # Case 1764 asserts the no-JWT-secret 500 path (PGRST300); its instance must
+  # run without a secret even though base_opts configures one.
+  defp variant_extra_opts(1764), do: [jwt_secret: nil]
+  defp variant_extra_opts(_id), do: []
 
   defp start_instance(name, opts) do
     port = Bier.TestPorts.free_port()
@@ -58,17 +81,31 @@ defmodule Bier.ConformanceServer do
     "http://127.0.0.1:#{port}"
   end
 
+  # The asymmetric RS256 *public* JWK PostgREST's test suite verifies against
+  # (`testCfgAsymJWK` in test/spec/SpecHelper.hs). The spec case carries the
+  # symbolic value `asymmetric_jwk_public_key`; the real key lives here in the
+  # harness so the case file stays declarative. The matching private key is
+  # upstream-only — we only ever verify.
+  @asymmetric_jwk_public_key ~s({"alg":"RS256","e":"AQAB","key_ops":["verify"],"kty":"RSA","n":"0etQ2Tg187jb04MWfpuogYGV75IFrQQBxQaGH75eq_FpbkyoLcEpRUEWSbECP2eeFya2yZ9vIO5ScD-lPmovePk4Aa4SzZ8jdjhmAbNykleRPCxMg0481kz6PQhnHRUv3nF5WP479CnObJKqTVdEagVL66oxnX9VhZG9IZA7k0Th5PfKQwrKGyUeTGczpOjaPqbxlunP73j9AfnAt4XCS8epa-n3WGz1j-wfpr_ys57Aq-zBCfqP67UYzNpeI1AoXsJhD9xSDOzvJgFRvc3vm2wjAW4LEMwi48rCplamOpZToIHEPIaPzpveYQwDnB1HFTR1ove9bpKJsHmi-e2uzQ","use":"sig"})
+
   # Translate a PostgREST per-case `config:` map into `Bier.start_link/1` opts:
   # `kebab-case` keys become the matching snake_case atoms; values pass through
-  # as parsed from YAML (`null` -> nil, `false`, `""`, strings).
+  # as parsed from YAML (`null` -> nil, `false`, `""`, strings), except symbolic
+  # placeholders (e.g. the asymmetric JWK) which resolve to their real value.
   # Special case: `db-schemas` in YAML may be a plain scalar string (e.g. "test")
   # when only one schema is listed; wrap it in a list so NimbleOptions accepts it.
+  # `log-level` is an enum atom in the config schema, so its YAML scalar (e.g.
+  # "error") is converted from string to atom.
   defp translate(config) do
     Enum.map(config, fn
       {"db-schemas", v} when is_binary(v) -> {:db_schemas, [v]}
-      {k, v} -> {k |> String.replace("-", "_") |> String.to_atom(), v}
+      {"log-level", v} when is_binary(v) -> {:log_level, String.to_atom(v)}
+      {k, v} -> {k |> String.replace("-", "_") |> String.to_atom(), resolve(v)}
     end)
   end
+
+  defp resolve("asymmetric_jwk_public_key"), do: @asymmetric_jwk_public_key
+  defp resolve(value), do: value
 
   @doc """
   Base `Bier.start_link/1` options for the conformance suite.

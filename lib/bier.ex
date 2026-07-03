@@ -99,6 +99,14 @@ defmodule Bier do
         default: env(:password, nil),
         doc: "Postgres password."
       ],
+      ssl: [
+        type: :boolean,
+        default: env(:ssl, false),
+        doc: """
+        Whether the Postgrex pool connects over TLS (what PostgREST's `db-uri`
+        selects via `sslmode=require`/`verify-*`). Defaults to `false`.
+        """
+      ],
       pool_size: [
         type: :pos_integer,
         default: env(:pool_size, 10),
@@ -268,6 +276,15 @@ defmodule Bier do
         instead of the generated spec.
         """
       ],
+      openapi_security_active: [
+        type: :boolean,
+        default: env(:openapi_security_active, false),
+        doc: """
+        When `true`, the root OpenAPI document includes a top-level `security`
+        requirement and a `JWT` apiKey `securityDefinitions` entry (PostgREST
+        openapi-security-active). Defaults to `false`.
+        """
+      ],
       admin_server_port: [
         type: {:or, [:pos_integer, nil]},
         default: env(:admin_server_port, nil),
@@ -359,6 +376,7 @@ defmodule Bier do
       database: conf.database,
       username: conf.username,
       password: conf.password,
+      ssl: conf.ssl,
       pool_size: conf.pool_size,
       # PostgREST renders timestamptz in UTC by default; pin the session timezone
       # so timestamptz output (and DOMAIN representations built on it) is stable

@@ -57,17 +57,29 @@ defmodule Bier.QueryExecutor do
     timezone = Keyword.get(opts, :timezone)
     auth = Keyword.get(opts, :auth)
 
-    with {:ok, sql, params} <- build(relation, plan, relations) do
-      case query_read(conn, sql, params, timezone, auth) do
-        {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
-          resolve_count(conn, relation, plan, relations, count_mode, opts, body, exact_count || 0)
+    with {:ok, sql, params} <-
+           Bier.ServerTiming.measure(:plan, fn -> build(relation, plan, relations) end) do
+      Bier.ServerTiming.measure(:transaction, fn ->
+        case query_read(conn, sql, params, timezone, auth) do
+          {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
+            resolve_count(
+              conn,
+              relation,
+              plan,
+              relations,
+              count_mode,
+              opts,
+              body,
+              exact_count || 0
+            )
 
-        {:ok, %Postgrex.Result{rows: []}} ->
-          {:ok, %{body: "[]", count: 0}}
+          {:ok, %Postgrex.Result{rows: []}} ->
+            {:ok, %{body: "[]", count: 0}}
 
-        {:error, _} = err ->
-          err
-      end
+          {:error, _} = err ->
+            err
+        end
+      end)
     end
   end
 
@@ -85,13 +97,7 @@ defmodule Bier.QueryExecutor do
     result =
       Postgrex.transaction(pool, fn tx ->
         Bier.Auth.with_context(tx, context, config, fn tx ->
-          if timezone do
-            Postgrex.query!(
-              tx,
-              "SET LOCAL TIME ZONE '#{String.replace(timezone, "'", "''")}'",
-              []
-            )
-          end
+          set_local_timezone(tx, timezone)
 
           case Postgrex.query(tx, sql, params) do
             {:ok, result} -> result
@@ -107,16 +113,11 @@ defmodule Bier.QueryExecutor do
     end
   end
 
-  # `Prefer: timezone=<name>` shifts timestamptz rendering. The name is validated
-  # against pg_timezone_names before we get here, so a `SET LOCAL TIME ZONE`
-  # inside a one-shot transaction is safe; the literal is single-quote escaped.
   defp query_with_timezone(conn, sql, params, nil), do: Postgrex.query(conn, sql, params)
 
   defp query_with_timezone(conn, sql, params, timezone) do
-    tz_sql = "SET LOCAL TIME ZONE '" <> String.replace(timezone, "'", "''") <> "'"
-
     Postgrex.transaction(conn, fn tx ->
-      Postgrex.query!(tx, tz_sql, [])
+      set_local_timezone(tx, timezone)
 
       case Postgrex.query(tx, sql, params) do
         {:ok, result} -> result
@@ -125,9 +126,18 @@ defmodule Bier.QueryExecutor do
     end)
     |> case do
       {:ok, result} -> {:ok, result}
-      {:error, %Postgrex.Error{} = err} -> {:error, err}
       {:error, other} -> {:error, other}
     end
+  end
+
+  # `Prefer: timezone=<name>` shifts timestamptz rendering. The name is validated
+  # against pg_timezone_names before we get here, so a `SET LOCAL TIME ZONE`
+  # inside the request transaction is safe; the literal is single-quote escaped.
+  defp set_local_timezone(_tx, nil), do: :ok
+
+  defp set_local_timezone(tx, timezone) do
+    Postgrex.query!(tx, "SET LOCAL TIME ZONE '#{String.replace(timezone, "'", "''")}'", [])
+    :ok
   end
 
   defp resolve_count(_conn, _rel, _plan, _rels, :none, _opts, body, exact) do
@@ -254,21 +264,25 @@ defmodule Bier.QueryExecutor do
     relations = Keyword.get(opts, :relations, %{})
 
     try do
-      case build_function(fn_def, ret_relation, args, plan, relations) do
+      case Bier.ServerTiming.measure(:plan, fn ->
+             build_function(fn_def, ret_relation, args, plan, relations)
+           end) do
         {:ok, sql, params} ->
-          case Postgrex.query(conn, sql, params) do
-            {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
-              # planned/estimated counts are not needed by the RPC pagination
-              # cases; exact reuses the window count, which (with a non-empty
-              # window) is the full count. Empty RPC windows are not exercised.
-              {:ok, %{body: body, count: count_for(count_mode, exact_count || 0)}}
+          Bier.ServerTiming.measure(:transaction, fn ->
+            case Postgrex.query(conn, sql, params) do
+              {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
+                # planned/estimated counts are not needed by the RPC pagination
+                # cases; exact reuses the window count, which (with a non-empty
+                # window) is the full count. Empty RPC windows are not exercised.
+                {:ok, %{body: body, count: count_for(count_mode, exact_count || 0)}}
 
-            {:ok, %Postgrex.Result{rows: []}} ->
-              {:ok, %{body: "[]", count: 0}}
+              {:ok, %Postgrex.Result{rows: []}} ->
+                {:ok, %{body: "[]", count: 0}}
 
-            {:error, _} = err ->
-              err
-          end
+              {:error, _} = err ->
+                err
+            end
+          end)
 
         {:error, _} = err ->
           err
@@ -450,7 +464,7 @@ defmodule Bier.QueryExecutor do
   # `<rel>=is.null`) must target a resource embedded in the `select` parameter.
   # A filter whose path head names no top-level embed is a 400 PGRST108.
   defp validate_embed_filters(%{embed_filters: ef, select: select}) when map_size(ef) > 0 do
-    names = embed_select_names(select)
+    names = embed_filter_names(select)
 
     Enum.reduce_while(ef, :ok, fn {[head | _], _nodes}, :ok ->
       if MapSet.member?(names, head),
@@ -460,18 +474,6 @@ defmodule Bier.QueryExecutor do
   end
 
   defp validate_embed_filters(_plan), do: :ok
-
-  # The set of names an embed filter may target: each top-level embed node's
-  # alias and its target relation name.
-  defp embed_select_names(select) do
-    select
-    |> Enum.flat_map(fn
-      %{kind: :embed} = e -> [e.alias, e.target]
-      _ -> []
-    end)
-    |> Enum.reject(&is_nil/1)
-    |> MapSet.new()
-  end
 
   # The select tree needs the row-object builder when it references embeds,
   # aggregates, spread, computed columns, or mixes `*` with explicit fields.
@@ -616,6 +618,8 @@ defmodule Bier.QueryExecutor do
     end)
   end
 
+  # The set of names an embed filter (or embed null-filter) may target: each
+  # top-level embed node's alias and its target relation name.
   defp embed_filter_names(select) do
     select
     |> Enum.flat_map(fn
@@ -650,19 +654,12 @@ defmodule Bier.QueryExecutor do
   end
 
   defp build_select(fields, relation, state) do
-    sql =
-      fields
-      |> Enum.map(&render_select_field(&1, relation))
-      |> Enum.join(", ")
-
-    {sql, state}
+    {Enum.map_join(fields, ", ", &render_select_field(&1, relation)), state}
   end
 
-  def render_select_field(field, relation \\ nil)
+  defp render_select_field(%{kind: :star}, _relation), do: "*"
 
-  def render_select_field(%{kind: :star}, _relation), do: "*"
-
-  def render_select_field(%{column: col, alias: al, cast: cast, json_path: path}, relation) do
+  defp render_select_field(%{column: col, alias: al, cast: cast, json_path: path}, relation) do
     expr = column_expr(col, path)
     # The read representation is applied first; an explicit `::cast` (case 1805)
     # then operates on the already-formatted JSON value.
@@ -879,33 +876,15 @@ defmodule Bier.QueryExecutor do
 
   defp build_order(terms) do
     " ORDER BY " <>
-      (terms
-       |> Enum.map(fn t ->
-         expr = column_expr(t.column, t.json_path)
-         dir = if t.dir == :desc, do: " DESC", else: " ASC"
-         nulls = order_nulls(t.dir, t.nulls)
-         expr <> dir <> nulls
-       end)
-       |> Enum.join(", "))
+      Enum.map_join(terms, ", ", fn t ->
+        dir = if t.dir == :desc, do: " DESC", else: " ASC"
+        column_expr(t.column, t.json_path) <> dir <> order_nulls(t.nulls)
+      end)
   end
 
-  def build_order_aliased([], _al), do: ""
-
-  def build_order_aliased(terms, al) do
-    " ORDER BY " <>
-      (terms
-       |> Enum.map(fn t ->
-         expr = column_expr_aliased(t.column, t.json_path, al)
-         dir = if t.dir == :desc, do: " DESC", else: " ASC"
-         nulls = order_nulls(t.dir, t.nulls)
-         expr <> dir <> nulls
-       end)
-       |> Enum.join(", "))
-  end
-
-  defp order_nulls(_dir, :first), do: " NULLS FIRST"
-  defp order_nulls(_dir, :last), do: " NULLS LAST"
-  defp order_nulls(_dir, :default), do: ""
+  defp order_nulls(:first), do: " NULLS FIRST"
+  defp order_nulls(:last), do: " NULLS LAST"
+  defp order_nulls(:default), do: ""
 
   # ---- limit / offset ------------------------------------------------------
 
@@ -1063,9 +1042,7 @@ defmodule Bier.QueryExecutor do
 
   defp pg_text_array(values) do
     inner =
-      values
-      |> Enum.map(fn v -> "\"" <> String.replace(v, "\"", "\\\"") <> "\"" end)
-      |> Enum.join(",")
+      Enum.map_join(values, ",", fn v -> "\"" <> String.replace(v, "\"", "\\\"") <> "\"" end)
 
     "{" <> inner <> "}"
   end
@@ -1090,13 +1067,6 @@ defmodule Bier.QueryExecutor do
 
   def pg_literal(str) do
     "'" <> String.replace(str, "'", "''") <> "'"
-  end
-
-  def coltype_for(rel, col) do
-    case Enum.find(rel.columns, &(&1.name == col)) do
-      %{type: type} -> type
-      _ -> :text
-    end
   end
 
   # ---- data representations ------------------------------------------------

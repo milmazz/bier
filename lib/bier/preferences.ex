@@ -43,20 +43,18 @@ defmodule Bier.Preferences do
 
     invalid = invalid_tokens(tokens, timezone, pool)
 
-    cond do
-      handling == :strict and invalid != [] ->
-        {:error, {:invalid_prefs, "Invalid preferences: " <> Enum.join(invalid, ", ")}}
+    if handling == :strict and invalid != [] do
+      {:error, {:invalid_prefs, "Invalid preferences: " <> Enum.join(invalid, ", ")}}
+    else
+      # A valid timezone is applied (and echoed); an invalid one under lenient
+      # handling is dropped.
+      applied_tz = if timezone && valid_timezone?(timezone, pool), do: timezone, else: nil
 
-      true ->
-        # A valid timezone is applied (and echoed); an invalid one under lenient
-        # handling is dropped.
-        applied_tz = if timezone && valid_timezone?(timezone, pool), do: timezone, else: nil
-
-        {:ok,
-         %{
-           timezone: applied_tz,
-           applied: applied_tokens(handling, applied_tz)
-         }}
+      {:ok,
+       %{
+         timezone: applied_tz,
+         applied: applied_tokens(handling, applied_tz)
+       }}
     end
   end
 

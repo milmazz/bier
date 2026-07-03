@@ -91,6 +91,34 @@ defmodule Bier.Pagination do
   end
 
   @doc """
+  Apply the `Range` header and the `db-max-rows` cap to a parsed plan.
+
+  The `Range` header window overrides the `limit`/`offset` query parameters
+  when present; `max_rows` (PostgREST `db-max-rows`, `nil` for uncapped) then
+  bounds the effective limit. Returns `{:ok, plan}` or
+  `{:error, :range_offside}` for an inverted range.
+  """
+  @spec apply_window(map(), Plug.Conn.t(), pos_integer() | nil) ::
+          {:ok, map()} | {:error, :range_offside}
+  def apply_window(plan, conn, max_rows) do
+    with {:ok, window} <- range_window(conn) do
+      plan =
+        case window do
+          nil -> plan
+          {offset, limit} -> %{plan | offset: offset, limit: limit}
+        end
+
+      {:ok, apply_max_rows(plan, max_rows)}
+    end
+  end
+
+  defp apply_max_rows(plan, nil), do: plan
+  defp apply_max_rows(%{limit: nil} = plan, max_rows), do: %{plan | limit: max_rows}
+
+  defp apply_max_rows(%{limit: limit} = plan, max_rows),
+    do: %{plan | limit: min(limit, max_rows)}
+
+  @doc """
   Render the `Content-Range` header value.
 
     * `offset` — the effective offset (lower bound) of the window.

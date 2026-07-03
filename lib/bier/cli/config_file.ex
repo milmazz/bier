@@ -1,10 +1,11 @@
 defmodule Bier.CLI.ConfigFile do
   @moduledoc """
   Parses the PostgREST-compatible config-file subset into a
-  `%{kebab_key => raw_value}` map: `key = value` lines, `#` comments, blank
-  lines, double-quoted strings (with `\\"` escapes), bare integers, and bare
-  `true`/`false`. Raw values are returned untyped; `Bier.CLI.Config` coerces
-  them per the target key.
+  `%{kebab_key => raw_value}` map: `key = value` lines, `#` comments (whole
+  lines or trailing a value, as configurator-pg allows), blank lines,
+  double-quoted strings (with `\\"` escapes), bare integers, and bare
+  `true`/`false`. A `#` inside a quoted string is literal. Raw values are
+  returned untyped; `Bier.CLI.Config` coerces them per the target key.
   """
 
   @doc "Read and parse a config file. A missing file is a fatal error."
@@ -35,34 +36,65 @@ defmodule Bier.CLI.ConfigFile do
   end
 
   defp parse_line(line) do
-    case String.split(line, "=", parts: 2) do
-      [raw_key, raw_value] ->
-        {:ok, {String.trim(raw_key), parse_value(String.trim(raw_value))}}
-
-      _ ->
-        {:error, "malformed config line: #{inspect(line)}"}
+    with [raw_key, raw_value] <- String.split(line, "=", parts: 2),
+         {:ok, value} <- parse_value(String.trim(raw_value)) do
+      {:ok, {String.trim(raw_key), value}}
+    else
+      [_no_equals] -> {:error, "malformed config line: #{inspect(line)}"}
+      {:error, reason} -> {:error, "#{reason}: #{inspect(line)}"}
     end
   end
 
-  # A double-quoted string: strip the surrounding quotes and unescape \" → ".
-  # The guard requires a non-empty suffix that ends with a closing quote, so
-  # `""` parses to "" and an unterminated `"foo` falls through to the
-  # bare-string clause below.
-  defp parse_value(<<?", inner::binary>>)
-       when byte_size(inner) >= 1 and
-              binary_part(inner, byte_size(inner) - 1, 1) == "\"" do
-    inner
-    |> binary_part(0, byte_size(inner) - 1)
-    |> String.replace(~S(\"), ~S("))
+  # A double-quoted string: everything up to the closing quote, honoring \"
+  # escapes. After the closing quote only whitespace or a trailing `# comment`
+  # may follow — anything else (including a missing closing quote) is a
+  # malformed line, as in PostgREST's configurator, rather than a silently
+  # mangled value.
+  defp parse_value(<<?", rest::binary>>) do
+    with {:ok, inner, trailing} <- take_quoted(rest, []),
+         :ok <- comment_or_blank(trailing) do
+      {:ok, inner}
+    end
   end
 
-  defp parse_value("true"), do: true
-  defp parse_value("false"), do: false
-
+  # A bare (unquoted) value ends at the first `#`, which starts an end-of-line
+  # comment; PostgREST-style files quote any string value that needs a literal
+  # `#`.
   defp parse_value(value) do
-    case Integer.parse(value) do
-      {int, ""} -> int
-      _ -> value
+    bare = value |> String.split("#", parts: 2) |> hd() |> String.trim()
+
+    case bare do
+      "true" ->
+        {:ok, true}
+
+      "false" ->
+        {:ok, false}
+
+      _ ->
+        case Integer.parse(bare) do
+          {int, ""} -> {:ok, int}
+          _ -> {:ok, bare}
+        end
+    end
+  end
+
+  defp take_quoted(<<?\\, ?", rest::binary>>, acc), do: take_quoted(rest, [?" | acc])
+
+  defp take_quoted(<<?", rest::binary>>, acc),
+    do: {:ok, acc |> Enum.reverse() |> List.to_string(), rest}
+
+  defp take_quoted(<<char::utf8, rest::binary>>, acc), do: take_quoted(rest, [char | acc])
+
+  # Not valid UTF-8: keep the raw byte rather than crash on unusual input.
+  defp take_quoted(<<byte, rest::binary>>, acc), do: take_quoted(rest, [byte | acc])
+
+  defp take_quoted(<<>>, _acc), do: {:error, "unterminated quoted value"}
+
+  defp comment_or_blank(trailing) do
+    case String.trim_leading(trailing) do
+      "" -> :ok
+      "#" <> _comment -> :ok
+      _other -> {:error, "unexpected characters after quoted value"}
     end
   end
 end

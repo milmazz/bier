@@ -1,5 +1,11 @@
 # QueryParser backend benchmark: regex/string vs `nimble_parsec`
 
+> **Historical note (2026-06):** `Bier.QueryParser.Nimble` has since been
+> merged into `Bier.QueryParser`; the leaf-grammar functions referenced below
+> now live there (same names and semantics). Module/file references in this
+> report describe the layout at the time of the benchmark.
+
+
 Performance exploration for `Bier.QueryParser`'s **request-pipeline leaf
 grammars**. An alternative `nimble_parsec` implementation
 (`Bier.QueryParser.Nimble`) was built to be **drop-in behavior-identical** with

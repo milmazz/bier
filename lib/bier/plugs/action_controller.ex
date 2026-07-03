@@ -57,16 +57,12 @@ defmodule Bier.Plugs.ActionController do
         dispatch_options(conn, config, relations)
 
       ["rpc", fn_name] ->
-        case resolve_profile(conn, config) do
-          {:ok, schema, content_profile} ->
-            with {:ok, conn} <- maybe_auth(conn, config, schema) do
-              conn = maybe_content_profile(conn, content_profile)
-              conn = assign(conn, :bier_target, {schema, fn_name})
-              Bier.Rpc.dispatch(conn, config, {:ok, schema}, fn_name)
-            end
-
-          {:error, _} = err ->
-            err
+        with {:ok, schema, content_profile} <- resolve_profile(conn, config),
+             {:ok, conn} <- maybe_auth(conn, config, schema) do
+          conn
+          |> maybe_content_profile(content_profile)
+          |> assign(:bier_target, {schema, fn_name})
+          |> Bier.Rpc.dispatch(config, schema, fn_name)
         end
 
       _ ->
@@ -82,7 +78,7 @@ defmodule Bier.Plugs.ActionController do
   @doc false
   def maybe_auth(conn, config, schema) do
     if Bier.Auth.applicable?(schema) do
-      case Bier.Auth.resolve(conn, config) do
+      case Bier.ServerTiming.measure(:jwt, fn -> Bier.Auth.resolve(conn, config) end) do
         {:ok, context} -> {:ok, assign(conn, :bier_auth, context)}
         {:error, _} = err -> err
       end
@@ -94,26 +90,17 @@ defmodule Bier.Plugs.ActionController do
   # ---- root (`/`) ----------------------------------------------------------
 
   # The root path serves the OpenAPI document for `application/openapi+json` /
-  # `application/json` / `*/*`. The root document endpoint does not run the auth
-  # pipeline (it carries no schema/relation to gate), so a request presenting an
-  # `Authorization` bearer token cannot be authenticated here and yields a 500
-  # (mirrors PostgREST's JWT-failure path; this is the single line logged at
-  # log-level=error, case 1764). A token-free request renders the document.
+  # `application/json` / `*/*`. The root now authenticates the request (resolving
+  # the role from a bearer token, else the anon role) so the generated document
+  # is filtered by that role's privileges. A token present with no jwt-secret
+  # configured yields a 500 (PGRST300, the single line logged at log-level=error,
+  # case 1764); an invalid token with a secret yields a 401.
   defp dispatch_root(conn, config) do
-    cond do
-      bearer_present?(conn) ->
-        {:error, :jwt_unconfigured}
-
-      conn.method in ["GET", "HEAD"] ->
-        render_root(conn, config)
-
-      true ->
-        {:error, :method_not_allowed}
+    if conn.method in ["GET", "HEAD"] do
+      render_root(conn, config)
+    else
+      {:error, :method_not_allowed}
     end
-  end
-
-  defp bearer_present?(conn) do
-    not is_nil(Bier.Auth.bearer_token(conn))
   end
 
   defp render_root(conn, config) do
@@ -131,8 +118,19 @@ defmodule Bier.Plugs.ActionController do
             root_spec_body(conn, config)
 
           true ->
-            root_doc_body(conn, Bier.json_library().encode!(root_openapi_doc()))
+            generated_root_doc(conn, config)
         end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp generated_root_doc(conn, config) do
+    case Bier.Auth.resolve(conn, config) do
+      {:ok, context} ->
+        doc = build_openapi_document(config, context.role)
+        root_doc_body(conn, Bier.json_library().encode!(doc))
 
       {:error, _} = err ->
         err
@@ -159,21 +157,96 @@ defmodule Bier.Plugs.ActionController do
     fun =
       "#{Bier.QueryExecutor.quote_ident(schema)}.#{Bier.QueryExecutor.quote_ident(config.db_root_spec)}"
 
-    case Postgrex.query(Registry.via(config.name, Postgrex), "SELECT (#{fun}())::text", []) do
+    Bier.ServerTiming.measure(:transaction, fn ->
+      Postgrex.query(Registry.via(config.name, Postgrex), "SELECT (#{fun}())::text", [])
+    end)
+    |> case do
       {:ok, %Postgrex.Result{rows: [[body]]}} -> root_doc_body(conn, body)
       {:error, _} = err -> err
     end
   end
 
-  # Minimal OpenAPI 2.0 envelope. The full document (paths/definitions from
-  # introspection) is built by the openapi slice; observability only needs a
-  # 200 with a valid swagger doc at the root.
-  defp root_openapi_doc do
-    %{
-      "swagger" => "2.0",
-      "info" => %{"title" => "Bier API", "version" => "14.12"},
-      "paths" => %{}
-    }
+  # Builds the Swagger 2.0 document for the instance's default exposed schema,
+  # honoring openapi-mode (follow-privileges filters by the request role's
+  # privileges; ignore-privileges includes everything). Relations, functions,
+  # and the schema comment come from the boot-time :persistent_term snapshot —
+  # the same cache the request pipeline routes against — so the document never
+  # advertises a relation the instance cannot serve. Only `privileges/3` runs
+  # per request, because it depends on the request role.
+  defp build_openapi_document(config, role) do
+    schema = hd(config.db_schemas)
+
+    relations =
+      {Bier, :relations, config.name}
+      |> :persistent_term.get(%{})
+      |> Map.values()
+      |> Enum.filter(&(&1.schema == schema))
+
+    functions =
+      {Bier, :functions, config.name}
+      |> :persistent_term.get(%{})
+      |> Map.filter(fn {{s, _name}, _overloads} -> s == schema end)
+
+    {relations, functions} = filter_by_mode(config, role, schema, relations, functions)
+
+    Bier.OpenAPI.build(%{
+      relations: relations,
+      functions: function_inputs(functions),
+      schema_comment: :persistent_term.get({Bier, :schema_comment, config.name}, nil),
+      security_active?: config.openapi_security_active,
+      docs_version: "v14"
+    })
+  end
+
+  defp filter_by_mode(config, role, schema, relations, functions) do
+    case config.openapi_mode do
+      "ignore-privileges" ->
+        {relations, functions}
+
+      _follow_privileges ->
+        pg = Registry.via(config.name, Postgrex)
+        privs = Bier.Introspection.privileges(pg, [schema], role)
+
+        rels =
+          for r <- relations,
+              %{select?: true} = grants <- [privs.relations[{r.schema, r.name}]] do
+            %{r | methods: granted_methods(r, grants)}
+          end
+
+        fns =
+          functions
+          |> Enum.filter(fn {{s, n}, _overloads} ->
+            match?(%{execute?: true}, privs.functions[{s, n}])
+          end)
+          |> Map.new()
+
+        {rels, fns}
+    end
+  end
+
+  # follow-privileges trims a table's advertised write methods to what the
+  # role is granted (PostgREST OpenApiSpec). Views stay GET-only (kind default).
+  defp granted_methods(%{kind: :table}, grants) do
+    [:get] ++
+      for {method, granted?} <- [
+            post: grants.insert?,
+            patch: grants.update?,
+            delete: grants.delete?
+          ],
+          granted?,
+          do: method
+  end
+
+  defp granted_methods(_view, _grants), do: nil
+
+  # Flatten the introspection functions map (keyed by {schema,name} => [overloads])
+  # into the builder's function-input list.
+  defp function_inputs(functions) do
+    functions
+    |> Enum.flat_map(fn {_key, overloads} -> overloads end)
+    |> Enum.map(fn ov ->
+      %{name: ov.name, comment: ov.comment, volatility: ov.volatility, in_params: ov.args}
+    end)
   end
 
   # OPTIONS on a relation: PostgREST answers 200 with an empty body and an
@@ -332,7 +405,9 @@ defmodule Bier.Plugs.ActionController do
            ) do
       conn
       |> put_preference_applied(prefs.applied)
-      |> render(body, count, plan, count_mode, media, csv_columns(plan, relation))
+      |> Response.render(body, count, plan, count_mode, media,
+        columns: csv_columns(plan, relation)
+      )
     end
   end
 
@@ -359,16 +434,8 @@ defmodule Bier.Plugs.ActionController do
   # cases whose default schema is v1.
   @profile_aliases ~w(headers multi)
 
-  @doc false
-  def resolve_schema(conn, config) do
-    case resolve_profile(conn, config) do
-      {:ok, schema, _content_profile} -> {:ok, schema}
-      {:error, _} = err -> err
-    end
-  end
-
   # Resolve the target schema for relation/RPC lookup AND the schema name to echo
-  # in `Content-Profile`. Returns `{:ok, resolve_schema, content_profile}` where
+  # in `Content-Profile`. Returns `{:ok, schema, content_profile}` where
   # `content_profile` is nil when no profile should be echoed.
   @doc false
   def resolve_profile(conn, config) do
@@ -389,19 +456,7 @@ defmodule Bier.Plugs.ActionController do
       # relations live in that area's own schema (e.g. `headers`) but the echoed
       # Content-Profile names the logical default (e.g. `v1`).
       is_nil(profile) or profile in @profile_aliases ->
-        echo = config.db_profile_default
-        # An alias label that is itself an exposed schema (e.g. `headers`, whose
-        # mirror schema physically holds the relations) resolves to that schema.
-        # A pure label like `multi` is not a real schema — its data lives in the
-        # default profile schema (e.g. `v1`), so resolve there.
-        resolved =
-          cond do
-            is_nil(profile) -> default
-            profile in config.db_schemas -> profile
-            true -> config.db_profile_default || default
-          end
-
-        {:ok, resolved, echo}
+        {:ok, default_profile_schema(profile, config, default), config.db_profile_default}
 
       # An explicit, exposed schema: resolve there and echo it verbatim.
       profile in config.db_schemas ->
@@ -410,6 +465,16 @@ defmodule Bier.Plugs.ActionController do
       true ->
         {:error, {:invalid_schema, profile, exposed_profiles(config)}}
     end
+  end
+
+  # An alias label that is itself an exposed schema (e.g. `headers`, whose
+  # mirror schema physically holds the relations) resolves to that schema.
+  # A pure label like `multi` is not a real schema — its data lives in the
+  # default profile schema (e.g. `v1`), so resolve there.
+  defp default_profile_schema(nil, _config, default), do: default
+
+  defp default_profile_schema(profile, config, default) do
+    if profile in config.db_schemas, do: profile, else: config.db_profile_default || default
   end
 
   defp request_profile(conn) do
@@ -466,18 +531,11 @@ defmodule Bier.Plugs.ActionController do
 
   @doc false
   def parse(conn, config) do
-    with {:ok, plan} <- QueryParser.parse_request(conn.query_string),
-         {:ok, plan} <- apply_range_header(conn, plan) do
-      {:ok, apply_max_rows(plan, config)}
-    end
-  end
-
-  defp apply_range_header(conn, plan) do
-    case Pagination.range_window(conn) do
-      {:ok, nil} -> {:ok, plan}
-      {:ok, {offset, limit}} -> {:ok, %{plan | offset: offset, limit: limit}}
-      {:error, :range_offside} -> {:error, :range_offside}
-    end
+    Bier.ServerTiming.measure(:parse, fn ->
+      with {:ok, plan} <- QueryParser.parse_request(conn.query_string) do
+        Pagination.apply_window(plan, conn, config.db_max_rows)
+      end
+    end)
   end
 
   # Resolve the effective config for a relation read. PostgREST has a single
@@ -493,14 +551,6 @@ defmodule Bier.Plugs.ActionController do
   end
 
   defp effective_config(config, _relation), do: config
-
-  defp apply_max_rows(plan, %{db_max_rows: nil}), do: plan
-
-  defp apply_max_rows(%{limit: nil} = plan, %{db_max_rows: max}),
-    do: %{plan | limit: max}
-
-  defp apply_max_rows(%{limit: limit} = plan, %{db_max_rows: max}),
-    do: %{plan | limit: min(limit, max)}
 
   # The available producers for a relation/RPC result set. Plan is gated on
   # db-plan-enabled. octet-stream and geo+json are not generally available
@@ -527,12 +577,6 @@ defmodule Bier.Plugs.ActionController do
       %{alias: al, column: col, json_path: jp} -> [QueryExecutor.json_output_name(al || col, jp)]
       _ -> []
     end)
-  end
-
-  # ---- render --------------------------------------------------------------
-
-  defp render(conn, body, count, plan, count_mode, media, columns) do
-    Response.render(conn, body, count, plan, count_mode, media, columns: columns)
   end
 
   defp header(conn, name) do

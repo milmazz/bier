@@ -72,22 +72,20 @@ defmodule Bier.Auth do
     # an authenticated role.
     anonymous? = token_anonymous? or is_nil(role)
 
-    cond do
+    if is_nil(resolved_role) do
       # Anonymous request with anon role disabled -> PGRST302 (401).
-      is_nil(resolved_role) ->
-        {:error, {:jwt, :anon_disabled}}
-
-      true ->
-        {:ok,
-         %{
-           role: resolved_role,
-           anonymous?: anonymous?,
-           claims_json: claims_json,
-           method: conn.method,
-           path: conn.request_path,
-           headers_json: headers_json(conn),
-           cookies_json: cookies_json(conn)
-         }}
+      {:error, {:jwt, :anon_disabled}}
+    else
+      {:ok,
+       %{
+         role: resolved_role,
+         anonymous?: anonymous?,
+         claims_json: claims_json,
+         method: conn.method,
+         path: conn.request_path,
+         headers_json: headers_json(conn),
+         cookies_json: cookies_json(conn)
+       }}
     end
   end
 
@@ -181,18 +179,12 @@ defmodule Bier.Auth do
 
   @doc "Extract the bearer token (scheme-insensitive) from Authorization, or nil."
   def bearer_token(conn) do
-    case Plug.Conn.get_req_header(conn, "authorization") do
-      [value | _] ->
-        case String.split(value, " ", parts: 2) do
-          [scheme, token] ->
-            if String.downcase(scheme) == "bearer", do: token, else: nil
-
-          _ ->
-            nil
-        end
-
-      [] ->
-        nil
+    with [value | _] <- Plug.Conn.get_req_header(conn, "authorization"),
+         [scheme, token] <- String.split(value, " ", parts: 2),
+         "bearer" <- String.downcase(scheme) do
+      token
+    else
+      _ -> nil
     end
   end
 

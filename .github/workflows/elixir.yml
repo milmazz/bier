@@ -65,10 +65,10 @@ jobs:
       run: mix deps.unlock --check-unused
     - name: Check formatting
       run: mix format --check-formatted
-    - name: Audit Hex dependencies
-      run: mix hex.audit
     - name: Compile (warnings as errors)
       run: mix compile --warnings-as-errors
+    - name: Lint (credo)
+      run: mix credo --strict
     - name: Build docs (warnings as errors)
       run: mix docs --warnings-as-errors
     - name: Run tests (conformance regression ratchet)
@@ -102,3 +102,8 @@ jobs:
         if [ "$fails" -lt "$BASELINE_FAILURES" ]; then
           echo "::notice::$fails < baseline $BASELINE_FAILURES — lower BASELINE_FAILURES to lock in the gain"
         fi
+    # Last so that newly published advisories against locked deps (which need
+    # a `mix deps.update` to clear) still fail the job without also hiding
+    # the compile/lint/docs/test results for the change under review.
+    - name: Audit Hex dependencies
+      run: mix hex.audit
