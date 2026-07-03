@@ -90,26 +90,17 @@ defmodule Bier.Plugs.ActionController do
   # ---- root (`/`) ----------------------------------------------------------
 
   # The root path serves the OpenAPI document for `application/openapi+json` /
-  # `application/json` / `*/*`. The root document endpoint does not run the auth
-  # pipeline (it carries no schema/relation to gate), so a request presenting an
-  # `Authorization` bearer token cannot be authenticated here and yields a 500
-  # (mirrors PostgREST's JWT-failure path; this is the single line logged at
-  # log-level=error, case 1764). A token-free request renders the document.
+  # `application/json` / `*/*`. The root now authenticates the request (resolving
+  # the role from a bearer token, else the anon role) so the generated document
+  # is filtered by that role's privileges. A token present with no jwt-secret
+  # configured yields a 500 (PGRST300, the single line logged at log-level=error,
+  # case 1764); an invalid token with a secret yields a 401.
   defp dispatch_root(conn, config) do
-    cond do
-      bearer_present?(conn) ->
-        {:error, :jwt_unconfigured}
-
-      conn.method in ["GET", "HEAD"] ->
-        render_root(conn, config)
-
-      true ->
-        {:error, :method_not_allowed}
+    if conn.method in ["GET", "HEAD"] do
+      render_root(conn, config)
+    else
+      {:error, :method_not_allowed}
     end
-  end
-
-  defp bearer_present?(conn) do
-    not is_nil(Bier.Auth.bearer_token(conn))
   end
 
   defp render_root(conn, config) do
@@ -127,8 +118,19 @@ defmodule Bier.Plugs.ActionController do
             root_spec_body(conn, config)
 
           true ->
-            root_doc_body(conn, Bier.json_library().encode!(root_openapi_doc()))
+            generated_root_doc(conn, config)
         end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp generated_root_doc(conn, config) do
+    case Bier.Auth.resolve(conn, config) do
+      {:ok, context} ->
+        doc = build_openapi_document(config, context.role)
+        root_doc_body(conn, Bier.json_library().encode!(doc))
 
       {:error, _} = err ->
         err
@@ -164,15 +166,87 @@ defmodule Bier.Plugs.ActionController do
     end
   end
 
-  # Minimal OpenAPI 2.0 envelope. The full document (paths/definitions from
-  # introspection) is built by the openapi slice; observability only needs a
-  # 200 with a valid swagger doc at the root.
-  defp root_openapi_doc do
-    %{
-      "swagger" => "2.0",
-      "info" => %{"title" => "Bier API", "version" => "14.12"},
-      "paths" => %{}
-    }
+  # Builds the Swagger 2.0 document for the instance's default exposed schema,
+  # honoring openapi-mode (follow-privileges filters by the request role's
+  # privileges; ignore-privileges includes everything). Relations, functions,
+  # and the schema comment come from the boot-time :persistent_term snapshot —
+  # the same cache the request pipeline routes against — so the document never
+  # advertises a relation the instance cannot serve. Only `privileges/3` runs
+  # per request, because it depends on the request role.
+  defp build_openapi_document(config, role) do
+    schema = hd(config.db_schemas)
+
+    relations =
+      {Bier, :relations, config.name}
+      |> :persistent_term.get(%{})
+      |> Map.values()
+      |> Enum.filter(&(&1.schema == schema))
+
+    functions =
+      {Bier, :functions, config.name}
+      |> :persistent_term.get(%{})
+      |> Map.filter(fn {{s, _name}, _overloads} -> s == schema end)
+
+    {relations, functions} = filter_by_mode(config, role, schema, relations, functions)
+
+    Bier.OpenAPI.build(%{
+      relations: relations,
+      functions: function_inputs(functions),
+      schema_comment: :persistent_term.get({Bier, :schema_comment, config.name}, nil),
+      security_active?: config.openapi_security_active,
+      docs_version: "v14"
+    })
+  end
+
+  defp filter_by_mode(config, role, schema, relations, functions) do
+    case config.openapi_mode do
+      "ignore-privileges" ->
+        {relations, functions}
+
+      _follow_privileges ->
+        pg = Registry.via(config.name, Postgrex)
+        privs = Bier.Introspection.privileges(pg, [schema], role)
+
+        rels =
+          for r <- relations,
+              %{select?: true} = grants <- [privs.relations[{r.schema, r.name}]] do
+            %{r | methods: granted_methods(r, grants)}
+          end
+
+        fns =
+          functions
+          |> Enum.filter(fn {{s, n}, _overloads} ->
+            match?(%{execute?: true}, privs.functions[{s, n}])
+          end)
+          |> Map.new()
+
+        {rels, fns}
+    end
+  end
+
+  # follow-privileges trims a table's advertised write methods to what the
+  # role is granted (PostgREST OpenApiSpec). Views stay GET-only (kind default).
+  defp granted_methods(%{kind: :table}, grants) do
+    [:get] ++
+      for {method, granted?} <- [
+            post: grants.insert?,
+            patch: grants.update?,
+            delete: grants.delete?
+          ],
+          granted?,
+          do: method
+  end
+
+  defp granted_methods(_view, _grants), do: nil
+
+  # Flatten the introspection functions map (keyed by {schema,name} => [overloads])
+  # into the builder's function-input list.
+  defp function_inputs(functions) do
+    functions
+    |> Enum.flat_map(fn {_key, overloads} -> overloads end)
+    |> Enum.map(fn ov ->
+      %{name: ov.name, comment: ov.comment, volatility: ov.volatility, in_params: ov.args}
+    end)
   end
 
   # OPTIONS on a relation: PostgREST answers 200 with an empty body and an

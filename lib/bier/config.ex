@@ -45,6 +45,7 @@ defmodule Bier.Config do
           server_trace_header: String.t() | nil,
           log_level: :crit | :error | :warn | :info | :debug,
           openapi_mode: String.t(),
+          openapi_security_active: boolean(),
           db_root_spec: String.t() | nil,
           admin_server_port: pos_integer() | nil
         }
@@ -69,6 +70,7 @@ defmodule Bier.Config do
     :admin_server_port,
     name: Bier,
     openapi_mode: "follow-privileges",
+    openapi_security_active: false,
     pool_size: 10,
     db_schemas: ["public"],
     db_extra_search_path: ["public"],
