@@ -22,6 +22,9 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 bier-*.tar
 
+# Ignore the escript binary (built via "mix escript.build").
+/bier
+
 # Temporary files, for example, from tests.
 /tmp/
 

@@ -25,6 +25,7 @@ defmodule Bier.Config do
           database: String.t(),
           username: String.t() | nil,
           password: String.t() | nil,
+          ssl: boolean(),
           pool_size: pos_integer(),
           db_schemas: [String.t(), ...],
           db_profile_default: String.t() | nil,
@@ -69,6 +70,7 @@ defmodule Bier.Config do
     :db_root_spec,
     :admin_server_port,
     name: Bier,
+    ssl: false,
     openapi_mode: "follow-privileges",
     openapi_security_active: false,
     pool_size: 10,
@@ -93,21 +95,75 @@ defmodule Bier.Config do
   def new!(opts, schema) do
     conf = NimbleOptions.validate!(opts, schema)
 
-    validate_admin_server_port!(conf)
+    raise_if_error!(
+      validate_admin_server_port(conf[:admin_server_port], get_in(conf, [:router, :port]))
+    )
+
+    raise_if_error!(validate_jwt_secret(conf[:jwt_secret]))
+    raise_if_error!(validate_jwt_aud(conf[:jwt_aud]))
 
     struct!(__MODULE__, conf)
   end
 
-  # PostgREST rejects an admin-server-port equal to server-port at startup
-  # (test_cli.py:test_server_port_and_admin_port_same_value; conformance case
-  # 1717). NimbleOptions validates fields independently, so this cross-field
-  # check lives here.
-  defp validate_admin_server_port!(conf) do
-    admin_port = conf[:admin_server_port]
-    server_port = get_in(conf, [:router, :port])
+  @doc """
+  A symmetric (text) JWT secret must be at least 32 bytes long — PostgREST
+  counts the secret's octets (`BS.length` in Config.hs), not characters, so
+  Bier does too. `nil` (no secret configured) is allowed. Mirrors PostgREST
+  conformance case 1708.
+  """
+  @spec validate_jwt_secret(String.t() | nil) :: :ok | {:error, String.t()}
+  def validate_jwt_secret(nil), do: :ok
 
-    if not is_nil(admin_port) and admin_port == server_port do
-      raise ArgumentError, "admin-server-port cannot be the same as server-port"
+  def validate_jwt_secret(secret) when is_binary(secret) do
+    if byte_size(secret) >= 32 do
+      :ok
+    else
+      {:error, "The JWT secret must be at least 32 characters long."}
     end
   end
+
+  @doc """
+  `jwt-aud` may be any plain string, but a value containing ':' must parse as a
+  valid absolute URI. Mirrors PostgREST conformance case 1709.
+  """
+  @spec validate_jwt_aud(String.t() | nil) :: :ok | {:error, String.t()}
+  def validate_jwt_aud(nil), do: :ok
+
+  def validate_jwt_aud(aud) when is_binary(aud) do
+    if not String.contains?(aud, ":") or valid_uri?(aud) do
+      :ok
+    else
+      {:error, "jwt-aud should be a string or a valid URI"}
+    end
+  end
+
+  # Mirrors PostgREST's `isURI` (Network.URI): any absolute RFC 3986 URI is
+  # valid, including opaque URIs / URNs (scheme, no authority) like
+  # "urn:example:audience". A host is NOT required.
+  defp valid_uri?(value) do
+    case URI.new(value) do
+      {:ok, %URI{scheme: scheme}} when is_binary(scheme) and scheme != "" -> true
+      _ -> false
+    end
+  end
+
+  @doc """
+  `admin-server-port` must differ from the main server port. Mirrors PostgREST
+  (test_cli.py:test_server_port_and_admin_port_same_value; conformance case
+  1717). NimbleOptions validates fields independently, so this cross-field
+  check lives here, shared by `new!/2` and the CLI. Either port may be `nil`
+  when not configured.
+  """
+  @spec validate_admin_server_port(pos_integer() | nil, pos_integer() | nil) ::
+          :ok | {:error, String.t()}
+  def validate_admin_server_port(admin_port, server_port) do
+    if not is_nil(admin_port) and admin_port == server_port do
+      {:error, "admin-server-port cannot be the same as server-port"}
+    else
+      :ok
+    end
+  end
+
+  defp raise_if_error!(:ok), do: :ok
+  defp raise_if_error!({:error, message}), do: raise(ArgumentError, message)
 end

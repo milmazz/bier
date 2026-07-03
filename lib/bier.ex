@@ -99,6 +99,14 @@ defmodule Bier do
         default: env(:password, nil),
         doc: "Postgres password."
       ],
+      ssl: [
+        type: :boolean,
+        default: env(:ssl, false),
+        doc: """
+        Whether the Postgrex pool connects over TLS (what PostgREST's `db-uri`
+        selects via `sslmode=require`/`verify-*`). Defaults to `false`.
+        """
+      ],
       pool_size: [
         type: :pos_integer,
         default: env(:pool_size, 10),
@@ -368,6 +376,7 @@ defmodule Bier do
       database: conf.database,
       username: conf.username,
       password: conf.password,
+      ssl: conf.ssl,
       pool_size: conf.pool_size,
       # PostgREST renders timestamptz in UTC by default; pin the session timezone
       # so timestamptz output (and DOMAIN representations built on it) is stable
