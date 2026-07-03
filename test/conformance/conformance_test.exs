@@ -3,12 +3,12 @@ defmodule Bier.ConformanceTest do
   One ExUnit test per spec conformance case. Fully-evaluable HTTP cases run
   against the shared Bier instance and currently FAIL (lib/ returns canned
   responses). Cases the current harness cannot evaluate are tagged :pending and
-  excluded (see pending_reason): :jwt (needs JWT signing), :status_text (req
-  does not expose the HTTP reason phrase). CLI cases now run directly via
-  `Bier.CliCase` except those deferred as :cli_parity (full-table dump /
-  --example flag, cases 1705 and 1727), :unmodeled_key (config keys Bier does
-  not yet implement), or :db_config (DB role-settings source). These are
-  tracked for a follow-up, like the schema_cache deferral in spec/COVERAGE.md.
+  excluded (see pending_reason): :status_text (req does not expose the HTTP
+  reason phrase). CLI cases now run directly via `Bier.CliCase` except those
+  deferred as :cli_parity (full-table dump / --example flag, cases 1705 and
+  1727), :unmodeled_key (config keys Bier does not yet implement), or
+  :db_config (DB role-settings source). These are tracked for a follow-up,
+  like the schema_cache deferral in spec/COVERAGE.md.
   """
   use Bier.HttpCase, async: true
 
@@ -36,9 +36,6 @@ defmodule Bier.ConformanceTest do
       cond do
         c.kind == :cli ->
           Map.get(@cli_deferred, c.id)
-
-        Map.has_key?(c.request, "jwt") ->
-          :jwt
 
         Map.has_key?(c.expect, "status_text") ->
           :status_text

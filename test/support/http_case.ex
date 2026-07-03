@@ -14,6 +14,14 @@ defmodule Bier.HttpCase do
     end
   end
 
+  # Symbolic `request.jwt.sign_with` values -> {JWS alg, signing key}. The real
+  # secret lives here in the harness so the case files stay declarative, like
+  # the asymmetric JWK in `Bier.ConformanceServer`. `hs256_test_secret` is
+  # PostgREST's testCfg default secret (matches base_opts' jwt_secret).
+  @signing_secrets %{
+    "hs256_test_secret" => {"HS256", "reallyreallyreallyreallyverysafe"}
+  }
+
   @http_methods %{
     "GET" => :get,
     "POST" => :post,
@@ -50,7 +58,7 @@ defmodule Bier.HttpCase do
   end
 
   defp build_headers(req, schema) do
-    base = Map.get(req, "headers", %{})
+    base = req |> Map.get("headers", %{}) |> put_bearer(Map.get(req, "jwt"))
     # "public"/nil is the default schema. "test" is the conformance suite's own
     # schema name; Bier does not yet support Accept-Profile schema routing, so
     # suppress the header to avoid spurious 400s. Revisit "test" once schema
@@ -60,6 +68,24 @@ defmodule Bier.HttpCase do
     else
       Map.put_new(base, "Accept-Profile", schema)
     end
+  end
+
+  # Mint and sign a bearer token from a case's `request.jwt` block (issue #41).
+  # The payload is signed as-is — several cases deliberately carry invalid claim
+  # types (e.g. a string `exp`) that the *server* must reject, so the harness
+  # must not validate or coerce them.
+  defp put_bearer(headers, nil), do: headers
+
+  defp put_bearer(headers, %{"sign_with" => key, "payload" => payload}) do
+    {alg, secret} = Map.fetch!(@signing_secrets, key)
+
+    {_meta, token} =
+      secret
+      |> JOSE.JWK.from_oct()
+      |> JOSE.JWT.sign(%{"alg" => alg}, payload)
+      |> JOSE.JWS.compact()
+
+    Map.put_new(headers, "Authorization", "Bearer " <> token)
   end
 
   # Characters that are invalid in an HTTP request target (RFC 3986/7230) and so
