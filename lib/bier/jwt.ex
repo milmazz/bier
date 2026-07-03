@@ -14,8 +14,9 @@ defmodule Bier.JWT do
     * not exactly 3 dot-separated parts             -> `{:parts, n}` (PGRST301, 401)
     * bad base64 / JSON / signature                 -> `:jwt_invalid` (PGRST301, 401)
     * `exp` in the past                             -> `:expired` (PGRST303, 401)
-    * `nbf`/`iat`/`exp`/`aud` of the wrong JSON type -> `:jwt_invalid` (PGRST301)
-    * audience mismatch (when `jwt-aud` configured)  -> `:jwt_invalid` (PGRST301)
+    * non-numeric `exp`/`nbf`/`iat`                  -> `{:claim_not_number, claim}` (PGRST303)
+    * `aud` not a string / array of strings          -> `:aud_not_string` (PGRST303)
+    * audience mismatch (when `jwt-aud` configured)  -> `:not_in_audience` (PGRST303)
 
   Signatures are verified through `:jose`. The configured secret selects the key:
   a JWK (a JSON object with `kty`, or a JWK Set) verifies asymmetric algorithms
@@ -140,27 +141,41 @@ defmodule Bier.JWT do
   defp check_numeric(claims, key) do
     case Map.fetch(claims, key) do
       {:ok, v} when is_number(v) -> :ok
-      {:ok, _} -> {:error, :jwt_invalid}
+      {:ok, _} -> {:error, {:claim_not_number, key}}
       :error -> :ok
     end
   end
 
-  # When `jwt-aud` is configured, the token's `aud` must contain it. `aud` may be
-  # a string or an array of strings; any other shape (or a non-matching value) is
-  # invalid. An absent/empty `aud` with a configured audience is rejected; an
+  # A present `aud` must be a string or an array of strings — even when no
+  # `jwt-aud` is configured (PostgREST type-checks the claim unconditionally).
+  # Membership is only enforced when `jwt-aud` is configured: the token's `aud`
+  # must contain it. An absent `aud` with a configured audience is rejected; an
   # empty-array `aud` is treated as "no audience" and ignored.
-  defp validate_audience(_claims, nil), do: :ok
-  defp validate_audience(_claims, ""), do: :ok
-
   defp validate_audience(claims, expected) do
-    case Map.get(claims, "aud") do
-      nil -> {:error, :jwt_invalid}
-      [] -> :ok
-      aud when is_binary(aud) -> if aud == expected, do: :ok, else: {:error, :jwt_invalid}
-      aud when is_list(aud) -> if expected in aud, do: :ok, else: {:error, :jwt_invalid}
-      _ -> {:error, :jwt_invalid}
+    aud = Map.get(claims, "aud")
+
+    with :ok <- check_aud_type(aud) do
+      check_aud_membership(aud, expected)
     end
   end
+
+  defp check_aud_type(aud) when is_nil(aud) or is_binary(aud), do: :ok
+
+  defp check_aud_type(aud) when is_list(aud) do
+    if Enum.all?(aud, &is_binary/1), do: :ok, else: {:error, :aud_not_string}
+  end
+
+  defp check_aud_type(_aud), do: {:error, :aud_not_string}
+
+  defp check_aud_membership(_aud, expected) when is_nil(expected) or expected == "", do: :ok
+  defp check_aud_membership(nil, _expected), do: {:error, :jwt_invalid}
+  defp check_aud_membership([], _expected), do: :ok
+
+  defp check_aud_membership(aud, expected) when is_binary(aud),
+    do: if(aud == expected, do: :ok, else: {:error, :not_in_audience})
+
+  defp check_aud_membership(aud, expected) when is_list(aud),
+    do: if(expected in aud, do: :ok, else: {:error, :not_in_audience})
 
   defp role_claim(%{"role" => role}) when is_binary(role) and role != "", do: role
   defp role_claim(_), do: nil

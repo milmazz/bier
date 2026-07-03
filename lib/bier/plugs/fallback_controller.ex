@@ -273,6 +273,21 @@ defmodule Bier.Plugs.FallbackController do
     jwt_error(conn, "PGRST303", "JWT expired")
   end
 
+  # Non-numeric exp/nbf/iat claim -> 401 PGRST303.
+  def call(conn, {:error, {:jwt, {:claim_not_number, claim}}}) do
+    jwt_error(conn, "PGRST303", "The JWT '#{claim}' claim must be a number")
+  end
+
+  # `aud` claim of the wrong JSON type -> 401 PGRST303.
+  def call(conn, {:error, {:jwt, :aud_not_string}}) do
+    jwt_error(conn, "PGRST303", "The JWT 'aud' claim must be a string or an array of strings")
+  end
+
+  # Configured jwt-aud not matched by the token's `aud` -> 401 PGRST303.
+  def call(conn, {:error, {:jwt, :not_in_audience}}) do
+    jwt_error(conn, "PGRST303", "JWT not in audience")
+  end
+
   # Any other JWT failure (bad signature/json/claims/audience) -> 401 PGRST301.
   def call(conn, {:error, {:jwt, _reason}}) do
     jwt_error(conn, "PGRST301", "JWSError JWSInvalidSignature")

@@ -32,8 +32,11 @@ defmodule Bier.ConformanceServer do
   # `base_opts/0` and stay on the shared instance — routing a currently-passing
   # case to a faithful variant could change its result. (openapi-mode/db-root-spec
   # behavior lands separately.) 1467 verifies an RS256 token against an asymmetric
-  # public JWK as jwt-secret (issue #23).
-  @variant_case_ids [1467, 1491, 1493, 1654, 1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764]
+  # public JWK as jwt-secret (issue #23). 1468–1473 set `jwt-aud: youraudience`,
+  # which conflicts with the shared instance's jwt_aud: nil (issue #41); 1474
+  # (`jwt-aud: null`) matches the shared config and stays there.
+  @variant_case_ids [1467, 1468, 1469, 1470, 1471, 1472, 1473] ++
+                      [1491, 1493, 1654, 1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764]
 
   def url_for(%Bier.ConformanceCase{id: id}) when id in @variant_case_ids,
     do: :persistent_term.get({__MODULE__, :variant, id})
