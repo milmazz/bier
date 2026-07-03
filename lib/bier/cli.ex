@@ -25,8 +25,18 @@ defmodule Bier.CLI do
   @spec run([String.t()], keyword()) :: result() | {:boot, map()}
   def run(argv, opts \\ []) do
     env = Keyword.get(opts, :env, %{})
-    {command, file_path} = parse_argv(argv)
 
+    # version/help print unconditionally — PostgREST answers them from the
+    # option parser before any config is read, so a broken PGRST_* var or a
+    # missing config file must not mask them.
+    case parse_argv(argv) do
+      {:version, _file_path} -> ok(version_line())
+      {:help, _file_path} -> ok(usage())
+      {command, file_path} -> load_and_dispatch(command, file_path, env)
+    end
+  end
+
+  defp load_and_dispatch(command, file_path, env) do
     with {:ok, file} <- read_file(file_path),
          {:ok, resolved} <- Config.load(env, file, %{}) do
       dispatch(command, resolved)
@@ -35,8 +45,6 @@ defmodule Bier.CLI do
     end
   end
 
-  defp dispatch(:version, _resolved), do: ok(version_line())
-  defp dispatch(:help, _resolved), do: ok(usage())
   defp dispatch(:dump_config, resolved), do: ok(Config.dump(resolved))
   defp dispatch(:run, resolved), do: {:boot, resolved}
 

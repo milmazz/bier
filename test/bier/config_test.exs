@@ -11,6 +11,23 @@ defmodule Bier.ConfigTest do
       assert Bier.Config.validate_jwt_secret("short_secret") ==
                {:error, "The JWT secret must be at least 32 characters long."}
     end
+
+    test "counts bytes like PostgREST (BS.length), not graphemes" do
+      # 16 × "é" is 16 graphemes but 32 UTF-8 bytes — PostgREST accepts it.
+      assert Bier.Config.validate_jwt_secret(String.duplicate("é", 16)) == :ok
+    end
+  end
+
+  describe "validate_admin_server_port/2" do
+    test "nil admin port or differing ports are ok" do
+      assert Bier.Config.validate_admin_server_port(nil, 3000) == :ok
+      assert Bier.Config.validate_admin_server_port(3001, 3000) == :ok
+    end
+
+    test "equal ports are rejected with PostgREST's message" do
+      assert Bier.Config.validate_admin_server_port(3000, 3000) ==
+               {:error, "admin-server-port cannot be the same as server-port"}
+    end
   end
 
   describe "validate_jwt_aud/1" do

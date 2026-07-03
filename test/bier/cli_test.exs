@@ -32,6 +32,16 @@ defmodule Bier.CLITest do
     assert IO.iodata_to_binary(result.stdout) =~ ~r/bier \S/
   end
 
+  test "--version and --help print even when the config would be fatal" do
+    result = CLI.run(["--version"], env: %{"PGRST_JWT_SECRET" => "short_secret"})
+    assert result.exit == 0
+    assert IO.iodata_to_binary(result.stdout) =~ ~r/bier \S/
+
+    result = CLI.run(["does_not_exist.conf", "--help"], env: %{})
+    assert result.exit == 0
+    assert IO.iodata_to_binary(result.stdout) =~ "Usage"
+  end
+
   test "--help prints usage and exits 0" do
     result = CLI.run(["--help"], env: %{})
     assert result.exit == 0

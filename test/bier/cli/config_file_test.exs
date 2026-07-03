@@ -52,4 +52,29 @@ defmodule Bier.CLI.ConfigFileTest do
     assert {:error, message} = ConfigFile.parse("not-a-valid-line")
     assert message =~ "malformed config line"
   end
+
+  test "an end-of-line comment after a quoted value is ignored" do
+    assert ConfigFile.parse(~s(db-anon-role = "web_anon" # the public role)) ==
+             {:ok, %{"db-anon-role" => "web_anon"}}
+  end
+
+  test "an end-of-line comment after a bare value is ignored" do
+    assert ConfigFile.parse("server-port = 3000 # main port") ==
+             {:ok, %{"server-port" => 3000}}
+  end
+
+  test "a '#' inside a quoted value is literal" do
+    assert ConfigFile.parse(~s(jwt-secret = "sec#ret-sec#ret-sec#ret-sec#ret!")) ==
+             {:ok, %{"jwt-secret" => "sec#ret-sec#ret-sec#ret-sec#ret!"}}
+  end
+
+  test "trailing garbage after a quoted value is a malformed-line error" do
+    assert {:error, message} = ConfigFile.parse(~s(db-anon-role = "web_anon" oops))
+    assert message =~ "unexpected characters after quoted value"
+  end
+
+  test "an unterminated quoted value is a malformed-line error" do
+    assert {:error, message} = ConfigFile.parse(~s(db-anon-role = "web_anon))
+    assert message =~ "unterminated quoted value"
+  end
 end

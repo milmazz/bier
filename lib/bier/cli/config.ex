@@ -89,6 +89,13 @@ defmodule Bier.CLI.Config do
       aliases: []
     },
     %{
+      key: "openapi-security-active",
+      env: "PGRST_OPENAPI_SECURITY_ACTIVE",
+      kind: :bool,
+      default: false,
+      aliases: []
+    },
+    %{
       key: "log-level",
       env: "PGRST_LOG_LEVEL",
       kind: {:enum_atom, :log_level},
@@ -290,24 +297,35 @@ defmodule Bier.CLI.Config do
     end
   end
 
-  # Precedence: flags > env > file. Aliases are consulted for file keys only
-  # (PostgREST aliases are file/env spellings; flags use canonical keys).
+  # Precedence: flags > env > file, with PostgREST's alias semantics: each
+  # spelling — canonical first, then deprecated aliases — is a complete source
+  # that consults its own PGRST_* env var and then its file key. So
+  # PGRST_DB_SCHEMA works like PostgREST's, and a canonical file key still
+  # beats an alias env var (Config.hs optWithAlias wraps full parser arms).
+  # Flags use canonical keys only.
   defp raw_source(entry, env, file, flags) do
+    if present?(entry, Map.get(flags, entry.key)) do
+      {:present, Map.fetch!(flags, entry.key)}
+    else
+      Enum.find_value([entry.key | entry.aliases], :absent, fn key ->
+        spelling_source(entry, key, env, file)
+      end)
+    end
+  end
+
+  defp spelling_source(entry, key, env, file) do
+    env_var = env_var(key)
+
     cond do
-      present?(entry, Map.get(flags, entry.key)) -> {:present, Map.fetch!(flags, entry.key)}
-      present?(entry, Map.get(env, entry.env)) -> {:present, Map.fetch!(env, entry.env)}
-      true -> file_source(entry, file)
+      present?(entry, Map.get(env, env_var)) -> {:present, Map.fetch!(env, env_var)}
+      present?(entry, Map.get(file, key)) -> {:present, Map.fetch!(file, key)}
+      true -> nil
     end
   end
 
-  defp file_source(entry, file) do
-    keys = [entry.key | entry.aliases]
-
-    case Enum.find(keys, fn k -> present?(entry, Map.get(file, k)) end) do
-      nil -> :absent
-      key -> {:present, Map.fetch!(file, key)}
-    end
-  end
+  # PostgREST derives every env var name from its key spelling: "PGRST_" plus
+  # the uppercased key with dashes as underscores (Config.hs dashToUnderscore).
+  defp env_var(key), do: "PGRST_" <> (key |> String.replace("-", "_") |> String.upcase())
 
   # nil/missing is absent. An empty string is absent for every kind EXCEPT
   # :csv_emptyable, where "" is a meaningful value (the empty list) — PostgREST's
@@ -334,17 +352,18 @@ defmodule Bier.CLI.Config do
     end
   end
 
-  # admin-server-port must differ from server-port (case 1717). server-port has
-  # a default, so it is always an integer; admin-server-port may be :unset.
+  # server-port has a default, so it is always an integer; admin-server-port
+  # may be :unset. The rule itself (case 1717) lives in Bier.Config so the CLI
+  # and Bier.start_link/1 reject identically.
   defp validate_admin_port(resolved) do
-    case {Map.get(resolved, "admin-server-port"), Map.get(resolved, "server-port")} do
-      {port, port} when is_integer(port) ->
-        {:error, "admin-server-port cannot be the same as server-port"}
-
-      _ ->
-        :ok
-    end
+    Bier.Config.validate_admin_server_port(
+      unset_to_nil(Map.get(resolved, "admin-server-port")),
+      Map.get(resolved, "server-port")
+    )
   end
+
+  defp unset_to_nil(:unset), do: nil
+  defp unset_to_nil(value), do: value
 
   @doc """
   Translate a resolved config map into a keyword list for `Bier.start_link/1`.
@@ -366,6 +385,7 @@ defmodule Bier.CLI.Config do
         jwt_secret: resolved["jwt-secret"],
         jwt_aud: resolved["jwt-aud"],
         openapi_mode: resolved["openapi-mode"],
+        openapi_security_active: resolved["openapi-security-active"],
         log_level: resolved["log-level"],
         server_cors_allowed_origins: resolved["server-cors-allowed-origins"],
         db_plan_enabled: resolved["db-plan-enabled"],
@@ -385,17 +405,68 @@ defmodule Bier.CLI.Config do
   defp bier_tx_end(v) when v in [:commit, :"commit-allow-override"], do: :commit
   defp bier_tx_end(v) when v in [:rollback, :"rollback-allow-override"], do: :rollback
 
-  # Parse a libpq URI into Bier's discrete connection fields. An empty
-  # "postgresql://" carries no fields, so Bier's defaults apply.
+  # Parse db-uri into Bier's discrete connection fields. Both libpq forms are
+  # accepted: a URI ("postgresql://...") and a keyword/value conninfo string
+  # ("host=... dbname=..."). An empty "postgresql://" carries no fields, so
+  # Bier's defaults apply.
   defp db_uri_opts(uri) when uri in [nil, "", "postgresql://", "postgres://"], do: []
 
   defp db_uri_opts(uri) do
-    %URI{host: host, port: port, path: path, userinfo: userinfo} = URI.parse(uri)
+    if String.contains?(uri, "://"), do: uri_opts(uri), else: conninfo_opts(uri)
+  end
+
+  defp uri_opts(uri) do
+    %URI{host: host, port: port, path: path, userinfo: userinfo, query: query} = URI.parse(uri)
     {user, pass} = split_userinfo(userinfo)
     database = path |> to_string() |> String.trim_leading("/") |> decode()
 
     [hostname: host, port: port, database: database, username: user, password: pass]
     |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
+    |> Kernel.++(query_opts(query))
+  end
+
+  # Of the libpq URI query parameters only sslmode maps onto an option Bier
+  # exposes; the others have no Postgrex counterpart here and are ignored.
+  defp query_opts(nil), do: []
+  defp query_opts(query), do: query |> URI.decode_query() |> Map.get("sslmode") |> sslmode_opts()
+
+  # libpq's require/verify-* modes all encrypt the connection (certificate
+  # verification beyond Postgrex's ssl defaults is not modeled); disable never
+  # encrypts, and allow/prefer settle on plain TCP — the only non-retrying
+  # behavior Postgrex offers.
+  defp sslmode_opts(mode) when mode in ["require", "verify-ca", "verify-full"], do: [ssl: true]
+  defp sslmode_opts(_mode), do: []
+
+  # A libpq keyword/value conninfo string: whitespace-separated key=value
+  # pairs. Single quotes around a value are stripped; libpq's full quoting
+  # (spaces inside quotes, \' escapes) is not modeled. Only keys Bier maps
+  # onto Postgrex options are consulted.
+  defp conninfo_opts(conninfo) do
+    pairs =
+      for kv <- String.split(conninfo),
+          [k, v] <- [String.split(kv, "=", parts: 2)],
+          into: %{} do
+        {k, String.trim(v, "'")}
+      end
+
+    [
+      hostname: pairs["host"] || pairs["hostaddr"],
+      port: conninfo_port(pairs["port"]),
+      database: pairs["dbname"],
+      username: pairs["user"],
+      password: pairs["password"]
+    ]
+    |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
+    |> Kernel.++(sslmode_opts(pairs["sslmode"]))
+  end
+
+  defp conninfo_port(nil), do: nil
+
+  defp conninfo_port(value) do
+    case Integer.parse(value) do
+      {int, ""} -> int
+      _ -> nil
+    end
   end
 
   # URI.parse/1 leaves percent-encoding intact, but Postgrex expects decoded
