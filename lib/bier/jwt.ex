@@ -17,8 +17,12 @@ defmodule Bier.JWT do
     * `nbf`/`iat`/`exp`/`aud` of the wrong JSON type -> `:jwt_invalid` (PGRST301)
     * audience mismatch (when `jwt-aud` configured)  -> `:jwt_invalid` (PGRST301)
 
-  Only HS256/HS384/HS512 (symmetric) are supported; an asymmetric (RS*/ES*)
-  token cannot be verified with a symmetric secret and is rejected.
+  Signatures are verified through `:jose`. The configured secret selects the key:
+  a JWK (a JSON object with `kty`, or a JWK Set) verifies asymmetric algorithms
+  (RS*/ES*/PS*/EdDSA); any other secret is an HMAC `oct` key (HS256/384/512).
+  Routing on the secret — not just the token's `alg` — keeps a public JWK from
+  ever being used as an HMAC key (an algorithm-confusion attempt is rejected), and
+  the fixed per-key-type allowlist also rejects `alg: none`.
 
   Returns `{:ok, %{role: role | nil, claims: map, claims_json: raw_json}}` where
   `claims_json` is the exact decoded payload JSON segment (re-encoded canonically)
@@ -58,10 +62,9 @@ defmodule Bier.JWT do
     parts = String.split(token, ".")
 
     case parts do
-      [header_b64, payload_b64, sig_b64] ->
+      [header_b64, payload_b64, _sig_b64] ->
         with {:ok, header} <- decode_segment(header_b64),
-             {:ok, alg} <- algorithm(header),
-             :ok <- verify_signature(alg, header_b64, payload_b64, sig_b64, secret),
+             :ok <- verify_signature(header, token, secret),
              {:ok, payload_raw} <- decode_segment_raw(payload_b64),
              {:ok, claims} <- decode_json(payload_raw),
              :ok <- validate_temporal(claims),
@@ -81,29 +84,38 @@ defmodule Bier.JWT do
 
   # ---- signature ----------------------------------------------------------
 
-  defp algorithm(%{"alg" => alg}) when is_binary(alg) do
-    case alg do
-      "HS256" -> {:ok, :sha256}
-      "HS384" -> {:ok, :sha384}
-      "HS512" -> {:ok, :sha512}
-      # Asymmetric / unsupported algorithms cannot be verified with a symmetric
-      # secret; PostgREST rejects them as invalid tokens.
+  @hmac_algs ~w(HS256 HS384 HS512)
+  @asymmetric_algs ~w(RS256 RS384 RS512 ES256 ES384 ES512 PS256 PS384 PS512 EdDSA)
+
+  # Verify the signature with `:jose`, routing on the SECRET rather than only the
+  # token's `alg`: a JWK-shaped secret (a public key) is verified asymmetrically,
+  # any other secret as an HMAC `oct` key. Each key type carries a fixed algorithm
+  # allowlist, so a token whose `alg` doesn't match the key type — `alg: none`, or
+  # an HS256 token presented against a public JWK (algorithm confusion) — is
+  # rejected. `JOSE.JWS.verify_strict/3` compares HMACs in constant time, and a
+  # malformed-key raise is caught here as an invalid token.
+  defp verify_signature(%{"alg" => alg}, token, secret) when is_binary(alg) do
+    {jwk, allowed} = key_and_algs(secret)
+
+    case JOSE.JWS.verify_strict(jwk, allowed, token) do
+      {true, _payload, _jws} -> :ok
       _ -> {:error, :jwt_invalid}
     end
+  rescue
+    _ -> {:error, :jwt_invalid}
   end
 
-  defp algorithm(_), do: {:error, :jwt_invalid}
+  defp verify_signature(_header, _token, _secret), do: {:error, :jwt_invalid}
 
-  defp verify_signature(digest, header_b64, payload_b64, sig_b64, secret) do
-    signing_input = header_b64 <> "." <> payload_b64
-    expected = :crypto.mac(:hmac, digest, secret, signing_input)
-
-    case base64url_decode(sig_b64) do
-      {:ok, actual} ->
-        if secure_compare(expected, actual), do: :ok, else: {:error, :jwt_invalid}
-
-      :error ->
-        {:error, :jwt_invalid}
+  # Build the verification key + its algorithm allowlist from the configured
+  # secret. A JWK (a JSON object with `kty`, or the first key of a JWK Set) is an
+  # asymmetric key; anything else is an HMAC `oct` key. Pinning the allowlist to
+  # the key type is what stops the two families from crossing.
+  defp key_and_algs(secret) do
+    case Bier.json_library().decode(secret) do
+      {:ok, %{"keys" => [key | _]}} when is_map(key) -> {JOSE.JWK.from_map(key), @asymmetric_algs}
+      {:ok, %{"kty" => _} = map} -> {JOSE.JWK.from_map(map), @asymmetric_algs}
+      _ -> {JOSE.JWK.from_oct(secret), @hmac_algs}
     end
   end
 
@@ -178,10 +190,4 @@ defmodule Bier.JWT do
   defp base64url_decode(value) do
     Base.url_decode64(value, padding: false)
   end
-
-  defp secure_compare(a, b) when byte_size(a) == byte_size(b) do
-    :crypto.hash_equals(a, b)
-  end
-
-  defp secure_compare(_a, _b), do: false
 end

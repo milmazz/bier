@@ -21,7 +21,8 @@ mix test              # loads the fixture DB, then runs the full suite
 mix test test/path/to/file_test.exs:LINE   # single test by file:line
 mix test --only area:<area>                # one conformance area (e.g. area:operators)
 mix format            # uses .formatter.exs
-mix gen.parsers       # regenerate the parser modules from their *.ex.exs templates
+mix gen.parsers       # regenerate the parser module from its *.ex.exs template
+mix precommit         # run every CI gate (format/audit/compile/credo/docs/test)
 ```
 
 `mix test` is aliased to `["bier.fixtures.load", "test"]` (`mix.exs`), so it
@@ -29,17 +30,21 @@ drops+recreates a local `bier_test` PostgreSQL database and loads
 `spec/conformance/fixtures.sql` before running. A reachable local Postgres is
 required; see `docs/CONFORMANCE_IMPL.md` for the wiring.
 
-CI runs these gates before `mix test`, so run them locally before pushing to avoid red builds:
+Run every CI gate locally before pushing with one command:
 
 ```sh
-mix deps.unlock --check-unused
-mix format --check-formatted
-mix hex.audit
-mix compile --warnings-as-errors
-mix docs --warnings-as-errors
+mix precommit
 ```
 
-No credo or dialyzer step is configured.
+It is an alias chaining, in order: `deps.unlock --check-unused`,
+`format --check-formatted`, `hex.audit`, `compile --warnings-as-errors`,
+`credo --strict`, `docs --warnings-as-errors`, `test`. CI runs the same steps
+individually (NOT the alias) so each gate reports separately — keep
+`.github/workflows/elixir.yml` that way.
+
+Credo is configured in `.credo.exs` (strict mode). The generated
+`query_parser.ex` is excluded, but its `query_parser.ex.exs` template IS
+analyzed. No dialyzer step is configured.
 
 ## Architecture
 
@@ -82,7 +87,7 @@ Any non-`Plug.Conn` return value falls through to `Bier.Plugs.FallbackController
 
 ### The query parser (generated)
 
-`lib/bier/query_parser.ex` and `lib/bier/query_parser/nimble.ex` are **generated**, dependency-free modules built from `*.ex.exs` templates via `mix gen.parsers` (which runs `mix nimble_parsec.compile`). `nimble_parsec` is a `:dev`-only dep (`runtime: false`); the shipped code does not depend on it. Edit the `.ex.exs` template, run `mix gen.parsers`, and commit both the template and the regenerated `.ex` (the `.ex` is what `mix compile` reads — never edit it directly).
+`lib/bier/query_parser.ex` is a **generated**, dependency-free module built from its `lib/bier/query_parser.ex.exs` template via `mix gen.parsers` (which runs `mix nimble_parsec.compile`). `nimble_parsec` is a dev/test-only dep (`runtime: false`); the shipped code does not depend on it. Edit the `.ex.exs` template, run `mix gen.parsers`, and commit both the template and the regenerated `.ex` (the `.ex` is what `mix compile` reads — never edit it directly).
 
 ### Pluggable JSON
 

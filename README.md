@@ -96,6 +96,7 @@ defaults are sourced from application env, so you can also set them under
 | `server_trace_header` | `nil` | Request header (e.g. `X-Request-Id`) echoed on the response. |
 | `log_level` | `:error` | Access-log verbosity. |
 | `openapi_mode` | `"follow-privileges"` | How the root OpenAPI document is served. |
+| `openapi_security_active` | `false` | Advertise JWT security definitions in the OpenAPI document. |
 
 See `Bier.schema/0` for the complete, documented list.
 
@@ -204,11 +205,11 @@ error envelope.
 
 ### The query parser
 
-`Bier.QueryParser` and `Bier.QueryParser.Nimble` are **generated**,
-dependency-free modules built from `*.ex.exs` templates via `mix gen.parsers`
-(which runs `mix nimble_parsec.compile`). `nimble_parsec` is a dev-only
-dependency — the shipped code does not depend on it at runtime. Edit the
-`.ex.exs` templates and regenerate; never edit the generated `.ex` directly.
+`Bier.QueryParser` is a **generated**, dependency-free module built from its
+`lib/bier/query_parser.ex.exs` template via `mix gen.parsers` (which runs
+`mix nimble_parsec.compile`). `nimble_parsec` is a dev/test-only dependency —
+the shipped code does not depend on it at runtime. Edit the `.ex.exs` template
+and regenerate; never edit the generated `.ex` directly.
 
 ## Conformance
 
@@ -234,18 +235,21 @@ mix format
 mix gen.parsers     # regenerate the parser modules after editing a *.ex.exs template
 ```
 
-CI gates (run these before pushing):
+Run every CI gate before pushing with:
 
 ```sh
-mix deps.unlock --check-unused
-mix format --check-formatted
-mix hex.audit
-mix compile --warnings-as-errors
-mix docs --warnings-as-errors
+mix precommit
 ```
 
+which chains, in order: `mix deps.unlock --check-unused`,
+`mix format --check-formatted`, `mix hex.audit`,
+`mix compile --warnings-as-errors`, `mix credo --strict`,
+`mix docs --warnings-as-errors`, and `mix test`. (CI runs the same steps
+individually so each gate reports separately.)
+
 The test suite loads `spec/conformance/fixtures.sql` into a local `bier_test`
-database; see `docs/CONFORMANCE_IMPL.md` for the database wiring.
+database; see `docs/CONFORMANCE_IMPL.md` for the database wiring, and
+[CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
 
 ## Why "Bier"?
 

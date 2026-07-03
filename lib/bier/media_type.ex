@@ -24,58 +24,41 @@ defmodule Bier.MediaType do
   """
   def decode(token) when is_binary(token) do
     {base, params} = split_params(token)
-    base = String.downcase(String.trim(base))
-
-    case base do
-      "application/json" ->
-        %__MODULE__{symbol: :json, mime: "application/json"}
-
-      "application/geo+json" ->
-        %__MODULE__{symbol: :geojson, mime: "application/geo+json"}
-
-      "text/csv" ->
-        %__MODULE__{symbol: :csv, mime: "text/csv"}
-
-      "text/plain" ->
-        %__MODULE__{symbol: :text, mime: "text/plain"}
-
-      "text/tab-separated-values" ->
-        %__MODULE__{symbol: :tsv, mime: "text/tab-separated-values"}
-
-      "application/octet-stream" ->
-        %__MODULE__{symbol: :octet, mime: "application/octet-stream"}
-
-      "application/openapi+json" ->
-        %__MODULE__{symbol: :openapi, mime: "application/openapi+json"}
-
-      "*/*" ->
-        %__MODULE__{symbol: :any, mime: "*/*"}
-
-      "application/vnd.pgrst.object" ->
-        singular(params)
-
-      "application/vnd.pgrst.object+json" ->
-        singular(params)
-
-      "application/vnd.pgrst.array" ->
-        array(params)
-
-      "application/vnd.pgrst.array+json" ->
-        array(params)
-
-      "application/vnd.pgrst.plan" ->
-        plan(:text, params)
-
-      "application/vnd.pgrst.plan+text" ->
-        plan(:text, params)
-
-      "application/vnd.pgrst.plan+json" ->
-        plan(:json, params)
-
-      other ->
-        %__MODULE__{symbol: :other, mime: other, params: params}
-    end
+    decode_base(String.downcase(String.trim(base)), params)
   end
+
+  defp decode_base("application/json", _params),
+    do: %__MODULE__{symbol: :json, mime: "application/json"}
+
+  defp decode_base("application/geo+json", _params),
+    do: %__MODULE__{symbol: :geojson, mime: "application/geo+json"}
+
+  defp decode_base("text/csv", _params), do: %__MODULE__{symbol: :csv, mime: "text/csv"}
+
+  defp decode_base("text/plain", _params), do: %__MODULE__{symbol: :text, mime: "text/plain"}
+
+  defp decode_base("text/tab-separated-values", _params),
+    do: %__MODULE__{symbol: :tsv, mime: "text/tab-separated-values"}
+
+  defp decode_base("application/octet-stream", _params),
+    do: %__MODULE__{symbol: :octet, mime: "application/octet-stream"}
+
+  defp decode_base("application/openapi+json", _params),
+    do: %__MODULE__{symbol: :openapi, mime: "application/openapi+json"}
+
+  defp decode_base("*/*", _params), do: %__MODULE__{symbol: :any, mime: "*/*"}
+
+  defp decode_base("application/vnd.pgrst.object", params), do: singular(params)
+  defp decode_base("application/vnd.pgrst.object+json", params), do: singular(params)
+
+  defp decode_base("application/vnd.pgrst.array", params), do: array(params)
+  defp decode_base("application/vnd.pgrst.array+json", params), do: array(params)
+
+  defp decode_base("application/vnd.pgrst.plan", params), do: plan(:text, params)
+  defp decode_base("application/vnd.pgrst.plan+text", params), do: plan(:text, params)
+  defp decode_base("application/vnd.pgrst.plan+json", params), do: plan(:json, params)
+
+  defp decode_base(other, params), do: %__MODULE__{symbol: :other, mime: other, params: params}
 
   defp singular(params) do
     strip? = Map.get(params, "nulls") == "stripped"
@@ -125,23 +108,21 @@ defmodule Bier.MediaType do
 
   # Split "type/subtype; a=b; c=d" -> {"type/subtype", %{"a"=>"b","c"=>"d"}}.
   defp split_params(token) do
-    case String.split(token, ";") do
-      [base] ->
-        {base, %{}}
+    [base | rest] = String.split(token, ";")
 
-      [base | rest] ->
-        params =
-          rest
-          |> Enum.map(&String.trim/1)
-          |> Enum.reject(&(&1 == ""))
-          |> Map.new(fn part ->
-            case String.split(part, "=", parts: 2) do
-              [k, v] -> {String.downcase(String.trim(k)), String.trim(v)}
-              [k] -> {String.downcase(String.trim(k)), ""}
-            end
-          end)
+    params =
+      rest
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Map.new(&param_pair/1)
 
-        {base, params}
+    {base, params}
+  end
+
+  defp param_pair(part) do
+    case String.split(part, "=", parts: 2) do
+      [k, v] -> {String.downcase(String.trim(k)), String.trim(v)}
+      [k] -> {String.downcase(String.trim(k)), ""}
     end
   end
 
@@ -157,8 +138,7 @@ defmodule Bier.MediaType do
     header
     |> String.split(",")
     |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.reject(&q_zero?/1)
+    |> Enum.reject(&(&1 == "" or q_zero?(&1)))
     |> Enum.map(&decode/1)
   end
 

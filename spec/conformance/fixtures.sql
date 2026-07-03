@@ -158,6 +158,7 @@ CREATE SCHEMA IF NOT EXISTS v1;                       -- url_grammar / headers
 CREATE SCHEMA IF NOT EXISTS v2;                       -- url_grammar / headers
 CREATE SCHEMA IF NOT EXISTS "تست";                    -- url_grammar (unicode)
 CREATE SCHEMA IF NOT EXISTS "SPECIAL ""@/\#~_-";      -- headers (special-named)
+CREATE SCHEMA IF NOT EXISTS openapi_no_comment;       -- openapi.sql (case 1654: default title, no schema COMMENT)
 
 -- Reachable: test first, then public for shared casts/extensions.
 SET search_path = test, public;
@@ -1617,6 +1618,7 @@ INSERT INTO observability.projects (id, name) VALUES (1, 'Windows 7'), (2, 'Wind
 GRANT USAGE ON SCHEMA test, public, jwt, postgrest TO postgrest_test_anonymous;
 GRANT USAGE ON SCHEMA test TO postgrest_test_author;
 GRANT USAGE ON SCHEMA test TO postgrest_test_default_role;
+GRANT USAGE ON SCHEMA openapi_no_comment TO postgrest_test_anonymous, postgrest_test_author, postgrest_test_default_role;
 
 -- anonymous reads (auth.sql / config.sql)
 GRANT SELECT ON TABLE test.items TO postgrest_test_anonymous;
