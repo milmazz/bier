@@ -28,17 +28,23 @@ defmodule Bier.SchemaCache do
         }
 
   @doc """
-  Runs the full DB introspection for `schemas` against `conn` and returns the
-  resulting snapshot (without storing it — see `put/2`).
+  Runs the full DB introspection for `schemas` against `conn`, atomically
+  swaps the snapshot for `name` (see `put/2`), and returns it.
 
   Wrapped in the `[:bier, :schema_cache, :load, *]` telemetry span with
-  metadata `%{instance: name, schemas: schemas}`; a failing introspection
-  raises and surfaces as the span's `:exception` event.
+  metadata `%{instance: name, schemas: schemas}`; the `put/2` swap runs
+  *inside* the span, before the `:stop` event fires, so a caller
+  synchronizing on that event (e.g. `Bier.SchemaCacheListener`, or a test
+  using `:telemetry_test`) is guaranteed the new snapshot is already visible
+  by the time it observes `:stop`. A failing introspection raises and
+  surfaces as the span's `:exception` event — nothing is swapped in that
+  case, since `put/2` only runs after `introspect/2` succeeds.
   """
   @spec load!(Bier.name(), term(), [String.t(), ...]) :: t()
   def load!(name, conn, schemas) do
     Bier.Telemetry.schema_cache_load(%{instance: name, schemas: schemas}, fn ->
       cache = introspect(conn, schemas)
+      put(name, cache)
       {cache, %{relation_count: map_size(cache.relations)}}
     end)
   end
@@ -91,7 +97,7 @@ defmodule Bier.SchemaCache do
   on any failure the previous snapshot stays in place and `{:error, reason}`
   is returned. An unregistered `name` returns `{:error, :unknown_instance}`.
 
-  Unlike `load!/3`, the `put/2` swap runs *inside* the
+  Delegates to `load!/3`, which swaps the snapshot inside the
   `[:bier, :schema_cache, :load, *]` telemetry span, before the `:stop` event
   fires — so a caller synchronizing on that event (e.g.
   `Bier.SchemaCacheListener`, or a test using `:telemetry_test`) is guaranteed
@@ -107,11 +113,7 @@ defmodule Bier.SchemaCache do
         config = Registry.config(name)
         conn = Registry.via(name, Postgrex)
 
-        Bier.Telemetry.schema_cache_load(%{instance: name, schemas: config.db_schemas}, fn ->
-          cache = introspect(conn, config.db_schemas)
-          put(name, cache)
-          {cache, %{relation_count: map_size(cache.relations)}}
-        end)
+        load!(name, conn, config.db_schemas)
 
         :ok
     end

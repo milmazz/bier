@@ -63,6 +63,7 @@ defmodule Bier.SchemaCacheTest do
 
     test "runs the DB introspection inside the telemetry span and returns a populated snapshot" do
       name = unique_name()
+      on_exit(fn -> :persistent_term.erase({Bier, :schema_cache, name}) end)
       base = Bier.ConformanceServer.base_opts()
 
       {:ok, pool} =
