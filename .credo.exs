@@ -26,7 +26,12 @@
           # `pgErrorStatus` SQLSTATE table (Error.hs); one flat lookup is the
           # most reviewable shape for it, so the file is excluded.
           {Credo.Check.Refactor.CyclomaticComplexity,
-           [files: %{excluded: ["lib/bier/pg_error.ex"]}]}
+           [files: %{excluded: ["lib/bier/pg_error.ex"]}]},
+          # `Bier.Config` intentionally mirrors every key in `Bier.schema/0`
+          # (33 fields as of the schema-cache-reload feature, up from 31) —
+          # it is a flat options struct, not a design smell, and grows by one
+          # field each time a new `Bier.start_link/1` option ships.
+          {Credo.Check.Warning.StructFieldAmount, [max_fields: 40]}
         ],
         disabled: [
           # In-code TODOs are tracked as GitHub issues; a comment referencing
