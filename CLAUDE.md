@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Bier is an alpha Elixir library that serves a RESTful API generated on-the-fly from PostgreSQL DB introspection — heavily inspired by PostgREST. The README is the source of truth for the design intent and includes the two key sequence diagrams (boot flow and request flow).
 
-The pipeline is real, not stubbed: `Bier.Introspection` queries `pg_catalog`; `Bier.Plugs.ActionController` resolves the target and runs the read/mutation/RPC path; `Bier.QueryParser` (a generated, dependency-free parser) and `Bier.QueryExecutor` build and run one parameterized JSON query; `Bier.Auth` does HS256 JWT verification + role/GUC setup. Development is driven by a frozen conformance suite derived from PostgREST v14.12 (see `docs/CONFORMANCE_IMPL.md` and `spec/`). Known feature gaps (observability/telemetry, schema-cache reload, admin/health endpoints, asymmetric JWT) are tracked as GitHub issues.
+The pipeline is real, not stubbed: `Bier.Introspection` queries `pg_catalog`; `Bier.Plugs.ActionController` resolves the target and runs the read/mutation/RPC path; `Bier.QueryParser` (a generated, dependency-free parser) and `Bier.QueryExecutor` build and run one parameterized JSON query; `Bier.Auth` does HS256 JWT verification + role/GUC setup. Development is driven by a frozen conformance suite derived from PostgREST v14.12 (see `docs/CONFORMANCE_IMPL.md` and `spec/`). Known feature gaps (observability/telemetry, admin/health endpoints, asymmetric JWT) are tracked as GitHub issues.
 
 ## Toolchain
 
@@ -65,7 +65,7 @@ Implication: do not put per-instance state in `Bier.Application`. Anything tied 
 
 `Bier.start_link/1` → validates opts via `Bier.Config.new!/2` (NimbleOptions schema in `Bier.schema/0`, `lib/bier.ex`; defaults sourced from application env) → the `Bier` supervisor starts three children in order: a per-instance **`Postgrex` pool** (registered via `Bier.Registry.via(name, Postgrex)`), a per-instance **`DynamicSupervisor`**, then **`Bier.HttpServerStarter`**. The pool and DynamicSupervisor must come first: `HttpServerStarter.init/1` uses the pool for introspection, and its `handle_continue(:start_webserver, …)` starts Bandit *as a child of the DynamicSupervisor*.
 
-`HttpServerStarter.init/1` runs real introspection — `Bier.Introspection.run/functions/media_handlers(pool, db_schemas)` — and stashes the results in **`:persistent_term`** keyed by `{Bier, :relations | :functions | :media_handlers, name}` (read on every request). It then calls `Bier.RouterBuilder.build/2` and starts Bandit with `http_options: [compress: false]` (PostgREST never compresses and always emits `Content-Length`; Bandit otherwise strips it).
+`HttpServerStarter.init/1` runs real introspection via `Bier.SchemaCache.load!/3`, which loads and atomically swaps the snapshot (one `%Bier.SchemaCache{}` struct) in **`:persistent_term`** keyed by `{Bier, :schema_cache, name}` (read on every request through the `Bier.SchemaCache` accessors). A `Bier.SchemaCacheListener` child (gated by `db_channel_enabled`, default true) LISTENs on `db_channel` and atomically re-swaps the snapshot on `NOTIFY … 'reload schema'`; `Bier.reload_schema_cache/1` does the same programmatically. It then calls `Bier.RouterBuilder.build/2` and starts Bandit with `http_options: [compress: false]` (PostgREST never compresses and always emits `Content-Length`; Bandit otherwise strips it).
 
 ### Dynamic router generation
 
