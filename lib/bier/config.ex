@@ -154,10 +154,11 @@ defmodule Bier.Config do
 
   @doc """
   `db-channel` must be a non-empty channel name of at most 63 bytes (the
-  Postgres identifier limit). `Postgrex.Notifications.listen/3` enforces the
-  same bound at runtime by raising — validating at boot turns a would-be
-  listener crash-loop into a fast `ArgumentError`. Library-enforced (PostgREST
-  does not validate this key), like the admin-port collision rule.
+  Postgres identifier limit) and must not contain a null byte.
+  `Postgrex.Notifications.listen/3` enforces both the length bound and the
+  null-byte restriction at runtime by raising — validating at boot turns a
+  would-be listener crash-loop into a fast `ArgumentError`. Library-enforced
+  (PostgREST does not validate this key), like the admin-port collision rule.
   """
   @spec validate_db_channel(String.t() | nil) :: :ok | {:error, String.t()}
   def validate_db_channel(nil), do: :ok
@@ -166,6 +167,7 @@ defmodule Bier.Config do
     cond do
       channel == "" -> {:error, "db-channel cannot be empty"}
       byte_size(channel) > 63 -> {:error, "db-channel cannot exceed 63 bytes"}
+      String.contains?(channel, <<0>>) -> {:error, "db-channel cannot contain null bytes"}
       true -> :ok
     end
   end

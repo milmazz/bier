@@ -30,8 +30,10 @@ defmodule Bier.SchemaCacheListener do
 
   Notifications sent while disconnected are lost, so after every
   *re*-connect the listener reloads unconditionally to catch up (PostgREST
-  does the same). The very first connect skips that reload — the boot
-  introspection has just run.
+  does the same). Only a clean first *attempt* skips that reload — the boot
+  introspection has just run. A first connect that only succeeds after a
+  retry reloads like any other reconnect, since NOTIFYs could have fired
+  during the failed attempts in between.
 
   A failed reload keeps the previous snapshot: `Bier.SchemaCache.reload/1`
   only swaps after a fully successful introspection.
@@ -97,15 +99,34 @@ defmodule Bier.SchemaCacheListener do
 
     case Postgrex.Notifications.start_link(opts) do
       {:ok, pid} ->
-        {:ok, _ref} = Postgrex.Notifications.listen(pid, conf.db_channel)
+        case safe_listen(pid, conf.db_channel) do
+          {:ok, _ref} ->
+            # Notifications sent while we were down are lost — after a
+            # REconnect (including a first connect that only succeeded on
+            # retry), reload unconditionally to catch up. Only a clean
+            # first-attempt connect skips it: the boot introspection just ran.
+            if state.connected_before? or state.backoff != @initial_backoff do
+              reload(conf.name)
+            end
 
-        # Notifications sent while we were down are lost — after a REconnect,
-        # reload unconditionally to catch up. On the very first connect the
-        # boot introspection just ran, so skip it.
-        if state.connected_before?, do: reload(conf.name)
+            {:noreply,
+             %{state | notifications: pid, backoff: @initial_backoff, connected_before?: true}}
 
-        {:noreply,
-         %{state | notifications: pid, backoff: @initial_backoff, connected_before?: true}}
+          other ->
+            Logger.warning(
+              "Bier schema-cache listener for #{inspect(conf.name)} could not " <>
+                "LISTEN on #{inspect(conf.db_channel)} (retrying in " <>
+                "#{state.backoff}ms): #{inspect(other)}"
+            )
+
+            # Not a real subscription (an async connect not up yet, or the
+            # fresh connection died in the window before the LISTEN) — drop
+            # it and retry. We stay linked and do NOT touch
+            # `state.notifications`: a late `:EXIT` from this pid still
+            # lands on the catch-all clause below and is ignored.
+            stop_connection(pid)
+            {:noreply, schedule_reconnect(state)}
+        end
 
       {:error, reason} ->
         Logger.warning(
@@ -116,6 +137,21 @@ defmodule Bier.SchemaCacheListener do
         {:noreply, schedule_reconnect(state)}
     end
   end
+
+  # `listen/3` returns `{:ok, ref}` once subscribed, or `{:eventually, ref}`
+  # when the connection isn't actually up yet — not a real subscription
+  # either. It can also raise if the fresh connection died in the window
+  # between `start_link/1` returning and this call; caught here so a lost
+  # race becomes a retry instead of crashing the listener.
+  defp safe_listen(pid, channel) do
+    Postgrex.Notifications.listen(pid, channel)
+  catch
+    :exit, reason -> {:exit, reason}
+  end
+
+  # `Process.exit/2` is a no-op if the pid is already dead, so this is safe
+  # to call unconditionally in the failure branch above.
+  defp stop_connection(pid), do: Process.exit(pid, :kill)
 
   defp schedule_reconnect(state) do
     Process.send_after(self(), :connect, state.backoff)

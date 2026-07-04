@@ -36,9 +36,20 @@ defmodule Bier.DbChannelConfigTest do
                {:error, "db-channel cannot exceed 63 bytes"}
     end
 
+    test "a null byte is rejected (Postgrex.Notifications.listen/3 would raise)" do
+      assert Bier.Config.validate_db_channel(<<0>>) ==
+               {:error, "db-channel cannot contain null bytes"}
+    end
+
     test "new!/2 enforces it" do
       assert_raise ArgumentError, ~r/db-channel cannot be empty/, fn ->
         Bier.Config.new!([db_channel: ""], Bier.schema())
+      end
+    end
+
+    test "new!/2 enforces the null-byte rejection" do
+      assert_raise ArgumentError, ~r/db-channel cannot contain null bytes/, fn ->
+        Bier.Config.new!([db_channel: <<0>>], Bier.schema())
       end
     end
   end
