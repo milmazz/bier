@@ -27,11 +27,12 @@
           # most reviewable shape for it, so the file is excluded.
           {Credo.Check.Refactor.CyclomaticComplexity,
            [files: %{excluded: ["lib/bier/pg_error.ex"]}]},
-          # `Bier.Config` intentionally mirrors every key in `Bier.schema/0`
-          # (33 fields as of the schema-cache-reload feature, up from 31) —
-          # it is a flat options struct, not a design smell, and grows by one
-          # field each time a new `Bier.start_link/1` option ships.
-          {Credo.Check.Warning.StructFieldAmount, [max_fields: 40]}
+          # `Bier.Config` mirrors PostgREST's full option surface in
+          # `Bier.schema/0` (33 fields today). The VM map-representation
+          # concern (structs >= 32 fields) doesn't apply: Config is created
+          # once per instance at boot, never per request.
+          {Credo.Check.Warning.StructFieldAmount,
+           [max_fields: 35, files: %{included: ["lib/bier/config.ex"]}]}
         ],
         disabled: [
           # In-code TODOs are tracked as GitHub issues; a comment referencing
