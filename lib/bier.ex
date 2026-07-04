@@ -212,6 +212,27 @@ defmodule Bier do
         Applied only for auth-schema requests in the conformance build.
         """
       ],
+      db_channel: [
+        type: :string,
+        default: env(:db_channel, "pgrst"),
+        doc: """
+        Postgres notification channel the schema-cache listener subscribes to
+        (PostgREST db-channel). `NOTIFY <channel>, 'reload schema'` re-runs
+        the DB introspection and atomically swaps the instance's schema
+        cache; see `db_channel_enabled`.
+        """
+      ],
+      db_channel_enabled: [
+        type: :boolean,
+        default: env(:db_channel_enabled, true),
+        doc: """
+        Whether the instance opens a dedicated LISTEN connection on
+        `db_channel` and reloads its schema cache on NOTIFY (PostgREST
+        db-channel-enabled). Enabled by default, matching PostgREST;
+        disabling it saves one database connection per instance.
+        `Bier.reload_schema_cache/1` works either way.
+        """
+      ],
       jwt_secret: [
         type: {:or, [:string, nil]},
         default: env(:jwt_secret, nil),
