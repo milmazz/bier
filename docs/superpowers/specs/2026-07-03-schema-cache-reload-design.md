@@ -120,7 +120,8 @@ reload can read new relations but old functions. One term makes the swap
 atomic — a reader sees the old snapshot or the new one, never a mix.
 `:persistent_term.put/2` on an existing key triggers a global GC pass, which
 is acceptable at reload frequency (DDL changes) and is documented on the
-module.
+module. The entry is not erased when an instance stops — matching the
+previous per-key behavior; a restarted instance simply overwrites it.
 
 All ten existing read sites (`ActionController` ×3, `Rpc` ×2, `Mutation`,
 `Plan`, `CustomMedia`, `Health`, plus the OpenAPI builder) route through the
@@ -225,19 +226,29 @@ credentials).
   `db_channel`/`db_channel_enabled` validation; CLI mapping.
 - **Integration** (`test/bier/schema_cache_listener_test.exs`): boot a
   dedicated instance with a **unique channel name** (never `"pgrst"` — the
-  shared conformance instance now listens there by default), `CREATE TABLE` +
-  `GRANT SELECT`, assert 404, `NOTIFY <channel>, 'reload schema'`, await the
+  shared conformance instance now listens there by default), **await the
+  listener's LISTEN subscription** (it is established asynchronously in a
+  `handle_continue` after boot, so a NOTIFY fired too early races the
+  subscription and is lost — poll the listener state via `:sys.get_state/1`
+  until connected), `CREATE TABLE` + `GRANT SELECT`, assert 404,
+  `NOTIFY <channel>, 'reload schema'`, await the
   `[:bier, :schema_cache, :load, :stop]` telemetry event via
-  `:telemetry_test.attach_event_handlers/2` (deterministic — no sleeps for the
-  positive path), assert 200. Plus: `'reload config'` logged no-op, unknown
-  payload ignored, `db_channel_enabled: false` starts no listener, public-API
-  reload, soft coalescing bound.
+  `:telemetry_test.attach_event_handlers/2` (deterministic once subscribed —
+  no sleeps for the positive path), assert 200. Plus: `'reload config'`
+  logged no-op, unknown payload ignored, `db_channel_enabled: false` starts
+  no listener, public-API reload, soft coalescing bound.
 - **Failure-keeps-cache** is structural (the swap is written only after
   `load!/3` returns) and its rescue branch is exercised by the
   unknown-instance test; no deterministic in-suite fault-injection point
   exists without mocking, and the design accepts that.
 - **Regression net:** the untouched 532-case frozen conformance suite must
-  stay green after the read-site migration.
+  show **no new failures** after the read-site migration. The baseline is not
+  zero: geojson cases 1616/1617/1618 fail everywhere (locally and on every CI
+  matrix leg) because their `test.shops` fixture needs the PostGIS extension
+  and is deliberately commented out; CI gates on that failure baseline
+  (`BASELINE_FAILURES` in `.github/workflows/elixir.yml`), so only an
+  *increase* in failures is a regression. The `mix precommit` alias therefore
+  cannot pass end-to-end — run its gates individually.
 - `test/bier/health_test.exs` (pre-existing) writes the **old**
   `{Bier, :relations, name}` key and asserts `refute ready?` in both tests;
   after the migration that write is inert and both tests still pass unchanged

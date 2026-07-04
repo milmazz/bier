@@ -12,8 +12,8 @@
 
 - **Frozen ground truth — never edit:** `test/support/**`, `test/conformance/**`, `spec/**`, `docs/CONFORMANCE_IMPL.md`. All new tests go in **new files** under `test/bier/` (precedent: `test/bier/admin_server_test.exs`). `test/bier/health_test.exs` writes the old `{Bier, :relations, name}` key but only asserts `refute ready?` — it keeps passing untouched; do not edit it.
 - **Do not edit** `lib/bier/query_parser.ex` (generated) — not touched by this plan anyway.
-- `mix test` requires a reachable local PostgreSQL: it is aliased to `["bier.fixtures.load", "test"]` and drops/recreates the `bier_test` DB first. The full suite is the regression net — 0 failures expected after every task.
-- Run `mix format` before every commit. The final gate is `mix precommit` (chains `deps.unlock --check-unused`, `format --check-formatted`, `hex.audit`, `compile --warnings-as-errors`, `credo --strict`, `docs --warnings-as-errors`, `test`). `hex.audit` needs network access to hex.pm; if it fails offline, run every other gate individually and note it — CI runs them all.
+- `mix test` requires a reachable local PostgreSQL: it is aliased to `["bier.fixtures.load", "test"]` and drops/recreates the `bier_test` DB first. The full suite is the regression net — **no new failures** after every task. **The baseline is NOT zero:** `681 tests, 3 failures` — geojson conformance cases 1616/1617/1618 need a PostGIS `test.shops` table whose fixture block is deliberately commented out (`spec/conformance/fixtures/content_negotiation.sql`), and CI has the same 3 failures on every PG matrix leg (its workflow gates on `BASELINE_FAILURES` in `.github/workflows/elixir.yml`, red only if failures *increase*). Any 4th failure is a real regression.
+- Run `mix format` before every commit. The final gate is the `mix precommit` chain (`deps.unlock --check-unused`, `format --check-formatted`, `hex.audit`, `compile --warnings-as-errors`, `credo --strict`, `docs --warnings-as-errors`, `test`) — but the alias itself **cannot pass**: its `test` step exits non-zero at the 3-failure baseline. Run the gates individually (Task 7 Step 4) and treat exactly 3 test failures as pass. `hex.audit` needs network access to hex.pm; if it fails offline, note it — CI runs them all.
 - Config defaults (owner decisions, verbatim): `db_channel` default `"pgrst"`; `db_channel_enabled` default **`true`**; `'reload config'` payload is a **logged no-op**.
 - All instance-scoped processes register through `Bier.Registry.via/3`. Per-instance state never goes in `Bier.Application`.
 - Integration tests must use a **unique NOTIFY channel per instance** (never `"pgrst"`): the shared conformance instance listens on `"pgrst"` by default after this change.
@@ -130,6 +130,9 @@ defmodule Bier.SchemaCache do
   `:persistent_term.put/2` triggers a global GC pass when an existing key is
   replaced, so the snapshot must only be swapped at boot / reload frequency
   (DDL changes), never per request. Reads are effectively free.
+
+  The entry is not erased when an instance stops — mirroring the previous
+  per-key behavior; a restarted instance simply overwrites it.
   """
 
   defstruct relations: %{}, functions: %{}, media_handlers: [], schema_comment: nil
@@ -416,7 +419,7 @@ Expected: **no output** — after this task, `lib/bier/schema_cache.ex` is the o
 - [ ] **Step 7: Run the full suite as the regression net**
 
 Run: `mix test`
-Expected: `0 failures` (the frozen 532-case conformance suite plus all unit tests; `test/bier/health_test.exs` still passes — its old-key write is now inert and both its tests assert the negative).
+Expected: **only the 3 pre-existing geojson/PostGIS failures** (cases 1616/1617/1618 — see Global Constraints), i.e. `685 tests, 3 failures`-shaped output with no new failure. `test/bier/health_test.exs` still passes — its old-key write is now inert and both its tests assert the negative.
 
 - [ ] **Step 8: Commit**
 
@@ -906,11 +909,37 @@ defmodule Bier.SchemaCacheListenerTest do
     ref
   end
 
+  # The listener subscribes in a handle_continue after its init returns, so a
+  # NOTIFY fired immediately after boot can race the LISTEN and be lost
+  # forever (notifications are not queued server-side). Poll the listener's
+  # state until the subscription is up; only then is a NOTIFY guaranteed to
+  # be delivered. (`:sys.get_state/1` blocks while the continue runs, so one
+  # probe usually suffices.)
+  defp await_listener_connected(name) do
+    pid = Bier.Registry.whereis(name, Bier.SchemaCacheListener)
+    assert is_pid(pid), "no schema-cache listener registered for #{inspect(name)}"
+    await_subscription(pid, 200)
+  end
+
+  defp await_subscription(pid, attempts) do
+    cond do
+      :sys.get_state(pid).notifications != nil ->
+        :ok
+
+      attempts > 0 ->
+        Process.sleep(25)
+        await_subscription(pid, attempts - 1)
+
+      true ->
+        flunk("listener never established its LISTEN subscription")
+    end
+  end
+
   test "NOTIFY 'reload schema' makes a table created after boot servable" do
     channel = unique_channel()
     %{name: name, port: port} = start_instance(db_channel: channel)
 
-    assert is_pid(Bier.Registry.whereis(name, Bier.SchemaCacheListener))
+    await_listener_connected(name)
 
     pool = Bier.Registry.via(name, Postgrex)
     table = "notify_probe_#{System.unique_integer([:positive])}"
@@ -938,6 +967,7 @@ defmodule Bier.SchemaCacheListenerTest do
   test "an empty payload also reloads (PostgREST: empty = schema + config)" do
     channel = unique_channel()
     %{name: name} = start_instance(db_channel: channel)
+    await_listener_connected(name)
 
     ref = attach_load_stop()
     notify(name, channel, "")
@@ -947,6 +977,7 @@ defmodule Bier.SchemaCacheListenerTest do
   test "'reload config' is a logged no-op and does not reload" do
     channel = unique_channel()
     %{name: name} = start_instance(db_channel: channel)
+    await_listener_connected(name)
 
     ref = attach_load_stop()
 
@@ -962,6 +993,7 @@ defmodule Bier.SchemaCacheListenerTest do
   test "an unknown payload is ignored" do
     channel = unique_channel()
     %{name: name} = start_instance(db_channel: channel)
+    await_listener_connected(name)
 
     ref = attach_load_stop()
     notify(name, channel, "reload everything!!")
@@ -977,6 +1009,7 @@ defmodule Bier.SchemaCacheListenerTest do
   test "a NOTIFY burst is coalesced into few reloads" do
     channel = unique_channel()
     %{name: name} = start_instance(db_channel: channel)
+    await_listener_connected(name)
 
     ref = attach_load_stop()
 
@@ -1007,12 +1040,12 @@ end
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `mix test test/bier/schema_cache_listener_test.exs`
-Expected: `6 tests, 4 failures` — the `is_pid(nil)` assertion, both
-`assert_receive` reloads, and the `'reload config'` log assertion fail (no
-listener exists yet). Two tests pass vacuously at this stage: the
-`db_channel_enabled: false` test (no listener is the not-yet-implemented
-default) and the unknown-payload test (its `refute_receive` holds trivially);
-they gain their meaning once the listener exists.
+Expected: `6 tests, 5 failures` — every test that calls
+`await_listener_connected/1` fails fast on its `is_pid` assertion (no
+listener exists yet, so `Bier.Registry.whereis/2` returns `nil`). Only the
+`db_channel_enabled: false` test passes vacuously at this stage (no listener
+is the not-yet-implemented default); it gains its meaning once the listener
+exists.
 
 - [ ] **Step 3: Write the listener**
 
@@ -1243,10 +1276,11 @@ Run: `mix test test/bier/schema_cache_listener_test.exs`
 Expected: `6 tests, 0 failures`
 
 Run: `mix test`
-Expected: `0 failures`. Note: the shared conformance instance and its ~18
-variants each now open one extra LISTEN connection (~19 total on top of ~46
-pooled) — still well inside Postgres' default `max_connections = 100`. If the
-suite ever hits connection exhaustion, that budget is the first suspect.
+Expected: **only the 3 pre-existing geojson/PostGIS failures** (see Global
+Constraints) — no new failure. Note: the shared conformance instance and its
+~18 variants each now open one extra LISTEN connection (~19 total on top of
+~46 pooled) — still well inside Postgres' default `max_connections = 100`. If
+the suite ever hits connection exhaustion, that budget is the first suspect.
 
 - [ ] **Step 7: Commit**
 
@@ -1351,11 +1385,25 @@ known-gaps parenthetical (same mechanical edit as the README's line 284).
 
 - [ ] **Step 4: Run every gate**
 
-Run: `mix precommit`
-Expected: all gates pass, `mix test` reports `0 failures`. (`mix hex.audit`
-needs network access to hex.pm; if it fails offline, run
-`mix deps.unlock --check-unused && mix format --check-formatted && mix compile --warnings-as-errors && mix credo --strict && mix docs --warnings-as-errors && mix test`
-and note the skip in the PR — CI runs the full set.)
+Do **not** use the `mix precommit` alias — its `test` step exits non-zero at
+the pre-existing 3-failure baseline (see Global Constraints), so the alias
+can never pass. Run the gates individually:
+
+```bash
+mix deps.unlock --check-unused && \
+  mix format --check-formatted && \
+  mix hex.audit && \
+  mix compile --warnings-as-errors && \
+  mix credo --strict && \
+  mix docs --warnings-as-errors && \
+  mix test
+```
+
+Expected: every gate up to `mix test` passes; `mix test` reports **exactly the
+3 pre-existing geojson/PostGIS failures** (cases 1616/1617/1618) and nothing
+else — that matches CI, which gates on the failure baseline, not on zero.
+(`mix hex.audit` needs network access to hex.pm; if it fails offline, note the
+skip in the PR — CI runs the full set.)
 
 - [ ] **Step 5: Commit**
 
@@ -1369,6 +1417,6 @@ git commit -m "docs(#29): document schema-cache reload"
 ## Verification sweep (after all tasks)
 
 - [ ] `grep -rn "{Bier, :relations\|{Bier, :functions\|{Bier, :media_handlers\|{Bier, :schema_comment" lib/` → no output (only the frozen `test/bier/health_test.exs` may still mention the old key — it passes untouched).
-- [ ] `mix test` → 0 failures.
+- [ ] `mix test` → exactly the 3 pre-existing geojson/PostGIS failures (cases 1616/1617/1618), no new failure.
 - [ ] Manual smoke (optional, needs a scratch DB): `iex -S mix`, start an instance, `CREATE TABLE`, `psql -c "NOTIFY pgrst, 'reload schema'"`, `curl` the new table.
 - [ ] Spec coverage: every Goal in `docs/superpowers/specs/2026-07-03-schema-cache-reload-design.md` maps to a task — Goal 1 → Tasks 1/2/6, Goal 2 → Tasks 4/5, Goal 3 → Task 3, Goal 4 → Task 3 (structural: swap-after-load) + listener error branch, Goal 5 → Task 6 (backoff, never crashes on DB failure).
