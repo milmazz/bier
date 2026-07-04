@@ -38,15 +38,18 @@ defmodule Bier.SchemaCache do
   @spec load!(Bier.name(), term(), [String.t(), ...]) :: t()
   def load!(name, conn, schemas) do
     Bier.Telemetry.schema_cache_load(%{instance: name, schemas: schemas}, fn ->
-      cache = %__MODULE__{
-        relations: Bier.Introspection.run(conn, schemas),
-        functions: Bier.Introspection.functions(conn, schemas),
-        media_handlers: Bier.Introspection.media_handlers(conn, schemas),
-        schema_comment: Bier.Introspection.schema_comment(conn, hd(schemas))
-      }
-
+      cache = introspect(conn, schemas)
       {cache, %{relation_count: map_size(cache.relations)}}
     end)
+  end
+
+  defp introspect(conn, schemas) do
+    %__MODULE__{
+      relations: Bier.Introspection.run(conn, schemas),
+      functions: Bier.Introspection.functions(conn, schemas),
+      media_handlers: Bier.Introspection.media_handlers(conn, schemas),
+      schema_comment: Bier.Introspection.schema_comment(conn, hd(schemas))
+    }
   end
 
   @doc "Atomically swaps the snapshot for instance `name`."
@@ -87,6 +90,12 @@ defmodule Bier.SchemaCache do
   is running. The swap happens only after a fully successful introspection:
   on any failure the previous snapshot stays in place and `{:error, reason}`
   is returned. An unregistered `name` returns `{:error, :unknown_instance}`.
+
+  Unlike `load!/3`, the `put/2` swap runs *inside* the
+  `[:bier, :schema_cache, :load, *]` telemetry span, before the `:stop` event
+  fires — so a caller synchronizing on that event (e.g.
+  `Bier.SchemaCacheListener`, or a test using `:telemetry_test`) is guaranteed
+  the new snapshot is already visible by the time it observes `:stop`.
   """
   @spec reload(Bier.name()) :: :ok | {:error, term()}
   def reload(name) do
@@ -96,7 +105,14 @@ defmodule Bier.SchemaCache do
 
       _pid ->
         config = Registry.config(name)
-        put(name, load!(name, Registry.via(name, Postgrex), config.db_schemas))
+        conn = Registry.via(name, Postgrex)
+
+        Bier.Telemetry.schema_cache_load(%{instance: name, schemas: config.db_schemas}, fn ->
+          cache = introspect(conn, config.db_schemas)
+          put(name, cache)
+          {cache, %{relation_count: map_size(cache.relations)}}
+        end)
+
         :ok
     end
   rescue

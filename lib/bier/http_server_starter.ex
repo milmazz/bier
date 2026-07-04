@@ -44,9 +44,4 @@ defmodule Bier.HttpServerStarter do
 
     {:noreply, state}
   end
-
-  # TODO: Check if it's possible to subscribe to all the changes in the
-  # database, and capture those events via `Postgrex.Notifications`, that way
-  # you can insert here a `handle_info/2` to update the db structure and also
-  # re-build? the Router?
 end

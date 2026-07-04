@@ -361,10 +361,20 @@ defmodule Bier do
         {DynamicSupervisor,
          strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
         {Bier.HttpServerStarter, conf}
-      ] ++ admin_children(conf)
+      ] ++ listener_children(conf) ++ admin_children(conf)
 
     Supervisor.init(children, strategy: :one_for_one)
   end
+
+  # When `db_channel_enabled` (the default, matching PostgREST), run the
+  # LISTEN/NOTIFY schema-cache listener. Started after HttpServerStarter so
+  # the boot introspection has already populated the cache by the time the
+  # listener first connects — its catch-up reload only applies to REconnects.
+  # The listener owns its DB connection and retries with internal backoff, so
+  # a database outage never builds restart pressure on this supervisor.
+  defp listener_children(%Bier.Config{db_channel_enabled: false}), do: []
+
+  defp listener_children(%Bier.Config{} = conf), do: [{Bier.SchemaCacheListener, conf}]
 
   # When `admin_server_port` is set, run a second Bandit listener serving the
   # admin health endpoints (separate from the catch-all API router). Started
