@@ -16,6 +16,8 @@ defmodule Bier.SchemaCache do
   per-key behavior; a restarted instance simply overwrites it.
   """
 
+  alias Bier.Registry
+
   defstruct relations: %{}, functions: %{}, media_handlers: [], schema_comment: nil
 
   @type t :: %__MODULE__{
@@ -74,6 +76,34 @@ defmodule Bier.SchemaCache do
   @doc "Whether a non-empty snapshot has been loaded for `name`."
   @spec loaded?(Bier.name()) :: boolean()
   def loaded?(name), do: map_size(relations(name)) > 0
+
+  @doc """
+  Re-runs the database introspection for the **running** instance `name` and
+  atomically swaps its snapshot — the programmatic equivalent of PostgREST's
+  `NOTIFY pgrst, 'reload schema'`.
+
+  Resolves the instance's config and connection pool from `Bier.Registry`, so
+  it works whether or not the LISTEN/NOTIFY listener (`db_channel_enabled`)
+  is running. The swap happens only after a fully successful introspection:
+  on any failure the previous snapshot stays in place and `{:error, reason}`
+  is returned. An unregistered `name` returns `{:error, :unknown_instance}`.
+  """
+  @spec reload(Bier.name()) :: :ok | {:error, term()}
+  def reload(name) do
+    case Registry.whereis(name) do
+      nil ->
+        {:error, :unknown_instance}
+
+      _pid ->
+        config = Registry.config(name)
+        put(name, load!(name, Registry.via(name, Postgrex), config.db_schemas))
+        :ok
+    end
+  rescue
+    exception -> {:error, exception}
+  catch
+    :exit, reason -> {:error, reason}
+  end
 
   defp key(name), do: {Bier, :schema_cache, name}
 end

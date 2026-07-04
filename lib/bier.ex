@@ -399,4 +399,17 @@ defmodule Bier do
   def json_library do
     Application.get_env(:bier, :json_library, JSON)
   end
+
+  @doc """
+  Re-runs the database introspection for the running instance `name` and
+  atomically swaps its schema cache — the programmatic equivalent of
+  PostgREST's `NOTIFY pgrst, 'reload schema'` (or SIGUSR1).
+
+  Works whether or not the instance's LISTEN/NOTIFY listener is enabled
+  (`db_channel_enabled`). Returns `{:error, :unknown_instance}` when no
+  instance is registered under `name`; an introspection failure leaves the
+  previous cache serving and is returned as `{:error, reason}`.
+  """
+  @spec reload_schema_cache(name()) :: :ok | {:error, term()}
+  defdelegate reload_schema_cache(name), to: Bier.SchemaCache, as: :reload
 end
