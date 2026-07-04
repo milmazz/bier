@@ -179,5 +179,5 @@ defmodule Bier.CustomMedia do
   defp octet(nil), do: ""
   defp octet(value), do: to_string(value)
 
-  defp handlers(name), do: :persistent_term.get({Bier, :media_handlers, name}, [])
+  defp handlers(name), do: Bier.SchemaCache.media_handlers(name)
 end

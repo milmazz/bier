@@ -20,7 +20,7 @@ defmodule Bier.Health do
   end
 
   defp schema_cache_populated?(name) do
-    map_size(:persistent_term.get({Bier, :relations, name}, %{})) > 0
+    Bier.SchemaCache.loaded?(name)
   end
 
   defp database_responsive?(name) do

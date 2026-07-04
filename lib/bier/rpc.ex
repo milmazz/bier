@@ -42,7 +42,7 @@ defmodule Bier.Rpc do
   @doc "Resolve and run an RPC in the (already resolved) profile `schema`."
   def dispatch(conn, config, schema, fn_name) do
     with :ok <- check_method(conn) do
-      functions = :persistent_term.get({Bier, :functions, config.name}, %{})
+      functions = Bier.SchemaCache.functions(config.name)
       overloads = Map.get(functions, {schema, fn_name}, [])
 
       with {:ok, supplied} <- supplied_args(conn) do
@@ -268,7 +268,7 @@ defmodule Bier.Rpc do
   # SETOF <exposed relation> -> table-valued source: select/filter/limit shaping
   # and Content-Range, via the existing read pipeline.
   defp run(conn, config, %{ret_kind: :setof_rel} = fn_def, args) do
-    relations = :persistent_term.get({Bier, :relations, config.name}, %{})
+    relations = Bier.SchemaCache.relations(config.name)
 
     case Map.fetch(relations, {fn_def.ret_schema, fn_def.ret_relation}) do
       {:ok, ret_rel} ->

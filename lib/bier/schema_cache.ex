@@ -25,6 +25,28 @@ defmodule Bier.SchemaCache do
           schema_comment: String.t() | nil
         }
 
+  @doc """
+  Runs the full DB introspection for `schemas` against `conn` and returns the
+  resulting snapshot (without storing it — see `put/2`).
+
+  Wrapped in the `[:bier, :schema_cache, :load, *]` telemetry span with
+  metadata `%{instance: name, schemas: schemas}`; a failing introspection
+  raises and surfaces as the span's `:exception` event.
+  """
+  @spec load!(Bier.name(), term(), [String.t(), ...]) :: t()
+  def load!(name, conn, schemas) do
+    Bier.Telemetry.schema_cache_load(%{instance: name, schemas: schemas}, fn ->
+      cache = %__MODULE__{
+        relations: Bier.Introspection.run(conn, schemas),
+        functions: Bier.Introspection.functions(conn, schemas),
+        media_handlers: Bier.Introspection.media_handlers(conn, schemas),
+        schema_comment: Bier.Introspection.schema_comment(conn, hd(schemas))
+      }
+
+      {cache, %{relation_count: map_size(cache.relations)}}
+    end)
+  end
+
   @doc "Atomically swaps the snapshot for instance `name`."
   @spec put(Bier.name(), t()) :: :ok
   def put(name, %__MODULE__{} = cache), do: :persistent_term.put(key(name), cache)

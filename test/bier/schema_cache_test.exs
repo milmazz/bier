@@ -57,4 +57,40 @@ defmodule Bier.SchemaCacheTest do
       refute SchemaCache.loaded?(name)
     end
   end
+
+  describe "load!/3" do
+    @describetag :integration
+
+    test "runs the DB introspection inside the telemetry span and returns a populated snapshot" do
+      name = unique_name()
+      base = Bier.ConformanceServer.base_opts()
+
+      {:ok, pool} =
+        [
+          hostname: base[:hostname],
+          port: base[:port],
+          database: base[:database],
+          username: base[:username],
+          password: base[:password],
+          pool_size: 1
+        ]
+        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+        |> Postgrex.start_link()
+
+      ref = :telemetry_test.attach_event_handlers(self(), [[:bier, :schema_cache, :load, :stop]])
+      on_exit(fn -> :telemetry.detach(ref) end)
+
+      cache = SchemaCache.load!(name, pool, ["test"])
+
+      assert %SchemaCache{} = cache
+      assert map_size(cache.relations) > 0
+      # The fixture "test" schema carries a COMMENT (conformance case 1656).
+      assert is_binary(cache.schema_comment)
+
+      assert_receive {[:bier, :schema_cache, :load, :stop], ^ref, %{duration: _},
+                      %{instance: ^name, schemas: ["test"], relation_count: count}}
+
+      assert count == map_size(cache.relations)
+    end
+  end
 end
