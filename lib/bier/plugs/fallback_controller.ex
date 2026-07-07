@@ -424,6 +424,10 @@ defmodule Bier.Plugs.FallbackController do
         error(conn, status, body, headers: headers)
 
       nil ->
+        # No SQLSTATE means the client/connection failed, not the query — log
+        # PostgREST's PGRST001 envelope (the pool reconnects on its own).
+        Bier.ErrorLogger.database_client_error(conn.assigns[:supervisor_name], err)
+
         error(conn, 500, %{
           code: "PGRST",
           message: Exception.message(err),
@@ -431,6 +435,28 @@ defmodule Bier.Plugs.FallbackController do
           hint: nil
         })
     end
+  end
+
+  # ---- pool/connection errors (PGRST001-class) ------------------------------
+  # A `DBConnection.ConnectionError` surfacing here is a database-client
+  # failure (lost connection, checkout dropped from the pool queue, …). The
+  # response is the same opaque 500 the catch-all renders; out-of-band, the
+  # PGRST001 envelope is logged and a queue timeout increments the
+  # `[:bier, :pool, :checkout_timeout]` telemetry counter (see Bier.Telemetry).
+  def call(conn, {:error, %DBConnection.ConnectionError{} = err}) do
+    instance = conn.assigns[:supervisor_name]
+    Bier.ErrorLogger.database_client_error(instance, err)
+
+    if err.reason == :queue_timeout do
+      Bier.Telemetry.pool_checkout_timeout(%{instance: instance})
+    end
+
+    error(conn, 500, %{
+      code: "PGRST",
+      message: "Internal Server Error",
+      details: nil,
+      hint: nil
+    })
   end
 
   # ---- catch-all -----------------------------------------------------------
