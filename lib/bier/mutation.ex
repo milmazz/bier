@@ -291,31 +291,36 @@ defmodule Bier.Mutation do
   defp safe_tables(%{db_safe_update_tables: tables}) when is_list(tables), do: tables
   defp safe_tables(_config), do: []
 
-  # Pre-existence check for PUT: SELECT EXISTS over the PK predicate.
-  defp put_existed?(tx, relation, {:put, row, pk}), do: row_exists?(tx, relation, pk, row)
+  # Pre-existence check for PUT: the single-row case of the upsert check.
+  defp put_existed?(tx, relation, {:put, row, pk}), do: all_rows_exist?(tx, relation, pk, [row])
 
   # Pre-existence check for a POST upsert: true only when EVERY row's conflict
   # key already exists (so nothing is inserted and the status is 200).
   defp put_existed?(_tx, _relation, {:upsert, [], _rows}), do: false
 
   defp put_existed?(tx, relation, {:upsert, conflict_cols, rows}) do
-    Enum.all?(rows, &row_exists?(tx, relation, conflict_cols, &1))
+    all_rows_exist?(tx, relation, conflict_cols, rows)
   end
 
   defp put_existed?(_tx, _relation, _mutation), do: false
 
-  # SELECT EXISTS over a `col = $n` predicate per key column, bound from `row`.
-  defp row_exists?(tx, relation, cols, row) do
-    {where, params} =
-      cols
-      |> Enum.with_index(1)
-      |> Enum.map_reduce([], fn {col, i}, params ->
-        {"#{q(col)} = $#{i}", [Map.get(row, col) | params]}
+  # One round-trip regardless of payload size: expand the payload rows through
+  # the same bound-jsonb + typed-extraction path the INSERT uses (so key values
+  # coerce exactly as they will on insert) and AND a correlated EXISTS per row.
+  # The table gets an explicit alias so `_p._e` can never resolve to it.
+  defp all_rows_exist?(tx, relation, cols, rows) do
+    predicate =
+      Enum.map_join(cols, " AND ", fn col ->
+        coltype = column_type(relation, col)
+        "_t.#{q(col)} = #{extract_expr(col, coltype, relation, "_p._e")}"
       end)
 
-    sql = "SELECT EXISTS(SELECT 1 FROM #{qrel(relation)} WHERE #{Enum.join(where, " AND ")})"
+    sql =
+      "SELECT COALESCE(bool_and(EXISTS(" <>
+        "SELECT 1 FROM #{qrel(relation)} AS _t WHERE #{predicate}" <>
+        ")), false) FROM jsonb_array_elements($1::text::jsonb) AS _p(_e)"
 
-    case Postgrex.query(tx, sql, Enum.reverse(params)) do
+    case Postgrex.query(tx, sql, [Bier.json_library().encode!(rows)]) do
       {:ok, %Postgrex.Result{rows: [[exists]]}} -> exists
       _ -> false
     end
