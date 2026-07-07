@@ -299,6 +299,9 @@ path, and lets any non-`Plug.Conn` return value fall through to
 `SQLSTATE`s to HTTP statuses and PostgREST's `{code, message, details, hint}`
 error envelope.
 
+Every request runs as one parameterized SQL statement; the injection-safety
+model (what is bound vs. escaped, and why) is in [docs/injection_safety.md](docs/injection_safety.md).
+
 ### The query parser
 
 `Bier.QueryParser` is a **generated**, dependency-free module built from its
