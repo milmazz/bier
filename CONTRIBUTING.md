@@ -16,8 +16,11 @@ mix deps.get
 ```
 
 A local PostgreSQL (15+) reachable at `localhost:5432` is required for the
-test suite. Connection parameters come from the standard `PG*` environment
-variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`).
+test suite, with the PostGIS extension available (`mix bier.fixtures.load`
+runs `CREATE EXTENSION IF NOT EXISTS postgis` for the geo+json conformance
+cases; CI uses the `postgis/postgis` images). Connection parameters come from
+the standard `PG*` environment variables (`PGHOST`, `PGPORT`, `PGUSER`,
+`PGPASSWORD`).
 
 ## Running the suite
 

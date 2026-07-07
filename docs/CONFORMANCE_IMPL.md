@@ -70,8 +70,11 @@ before writing code. It encodes findings that are expensive to re-derive.
 ## 2. Database wiring (the keystone)
 
 ### 2.1 Target DB & fixtures
-- Local Postgres (running on `localhost:5432`, PostgreSQL 17). DB name:
-  **`bier_test`**. Connecting user: the local superuser (`milmazz`); roles
+- Local Postgres (running on `localhost:5432`, PostgreSQL 17) with the PostGIS
+  extension available — `mix bier.fixtures.load` runs
+  `CREATE EXTENSION IF NOT EXISTS postgis` and creates `test.shops` for the
+  geo+json cases (1616-1618). DB name: **`bier_test`**. Connecting user: the
+  local superuser (`milmazz`); roles
   `postgrest_test_anonymous|default_role|author` already exist cluster-wide and
   are also (idempotently) created by the fixtures.
 - `spec/conformance/fixtures.sql` is the **consolidated** fixture: it merges all

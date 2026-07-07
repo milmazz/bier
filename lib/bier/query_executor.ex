@@ -34,7 +34,10 @@ defmodule Bier.QueryExecutor do
               embed_offsets: %{},
               # When set, the FROM source for the top-level query (e.g. a mutation
               # CTE name) instead of the relation's qualified name.
-              from_override: nil
+              from_override: nil,
+              # Output aggregation: :json (a JSON array) or :geojson (a GeoJSON
+              # FeatureCollection built with ST_AsGeoJSON).
+              format: :json
   end
 
   @doc """
@@ -46,6 +49,8 @@ defmodule Bier.QueryExecutor do
       Controls how the total row count (for `Content-Range`) is computed.
     * `:max_rows` — server `db-max-rows`; used by `:estimated` to decide when to
       fall back to an exact count.
+    * `:format` — `:json` (default) or `:geojson` (aggregate the rows into a
+      GeoJSON FeatureCollection via `ST_AsGeoJSON`; requires postgis).
 
   Returns `{:ok, %{body: json_string, count: non_neg_integer}}` or
   `{:error, %Postgrex.Error{}}`.
@@ -56,9 +61,10 @@ defmodule Bier.QueryExecutor do
     count_mode = Keyword.get(opts, :count_mode, :none)
     timezone = Keyword.get(opts, :timezone)
     auth = Keyword.get(opts, :auth)
+    format = Keyword.get(opts, :format, :json)
 
     with {:ok, sql, params} <-
-           Bier.ServerTiming.measure(:plan, fn -> build(relation, plan, relations) end) do
+           Bier.ServerTiming.measure(:plan, fn -> build(relation, plan, relations, format) end) do
       Bier.ServerTiming.measure(:transaction, fn ->
         case query_read(conn, sql, params, timezone, auth) do
           {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
@@ -434,16 +440,17 @@ defmodule Bier.QueryExecutor do
   end
 
   @doc false
-  def build(relation, plan, relations \\ %{})
+  def build(relation, plan, relations \\ %{}, format \\ :json)
 
-  def build(%Relation{} = relation, plan, relations) do
+  def build(%Relation{} = relation, plan, relations, format) do
     state = %State{
       relation: relation,
       relations: relations,
       alias_name: relation.name,
       embed_orders: plan[:embed_orders] || %{},
       embed_limits: plan[:embed_limits] || %{},
-      embed_offsets: plan[:embed_offsets] || %{}
+      embed_offsets: plan[:embed_offsets] || %{},
+      format: format
     }
 
     try do
@@ -537,16 +544,33 @@ defmodule Bier.QueryExecutor do
       "SELECT #{select_sql} FROM #{from_source(relation, state)}" <> where_sql <> order_sql
 
     paged =
-      "SELECT to_json(_bier_cols) AS _bier_row, count(*) OVER() AS _bier_full_count " <>
+      "SELECT #{row_json(state.format)} AS _bier_row, count(*) OVER() AS _bier_full_count " <>
         "FROM (#{cols}) _bier_cols" <> limit_sql
 
     sql =
-      "SELECT coalesce(json_agg(_postgrest_t._bier_row), '[]')::text AS body, " <>
+      "SELECT #{aggregate_body(state.format)} AS body, " <>
         "coalesce(max(_postgrest_t._bier_full_count), 0) AS full_count " <>
         "FROM (#{paged}) _postgrest_t"
 
     {:ok, sql, Enum.reverse(state.params)}
   end
+
+  # GeoJSON (Accept: application/geo+json) renders each row with PostGIS's
+  # `ST_AsGeoJSON(record)` — the geometry column becomes the Feature's geometry
+  # and the remaining columns its properties — and the aggregate is wrapped in a
+  # FeatureCollection, mirroring PostgREST's asGeoJsonF. A relation without a
+  # geometry column raises SQLSTATE 22023 "geometry column is missing" (400).
+  # Only this flat path supports it: the advanced path pre-collapses each row
+  # into a JSON object, which ST_AsGeoJSON cannot consume.
+  defp row_json(:geojson), do: "ST_AsGeoJSON(_bier_cols)::json"
+  defp row_json(_format), do: "to_json(_bier_cols)"
+
+  defp aggregate_body(:geojson) do
+    "json_build_object('type', 'FeatureCollection', 'features', " <>
+      "coalesce(json_agg(_postgrest_t._bier_row), '[]'))::text"
+  end
+
+  defp aggregate_body(_format), do: "coalesce(json_agg(_postgrest_t._bier_row), '[]')::text"
 
   # ---- advanced (embed/aggregate/spread) path ------------------------------
 

@@ -53,6 +53,7 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
     ensure_roles(psql, cfg)
     recreate_database(psql, cfg)
     load_fixtures(psql, cfg, fixtures)
+    load_postgis_fixtures(psql, cfg)
     seed_corrections(psql, cfg)
     mirror_area_schemas(cfg)
     load_rpc_schema(psql, cfg)
@@ -91,6 +92,32 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
     if status != 0 do
       Mix.raise("psql failed loading fixtures (exit #{status}):\n#{out}")
     end
+  end
+
+  # The PostGIS-dependent objects (GeoJSON cases 1616-1618) are kept commented
+  # in the frozen `content_negotiation.sql`/`fixtures.sql` because postgis may
+  # be unavailable where the fixtures are loaded standalone. The loader owns the
+  # dependency instead: it requires postgis (CI uses the postgis/postgis images;
+  # local runs need the extension available, see CONTRIBUTING.md) and creates
+  # the `test.shops` table from the fragment's commented block verbatim. This
+  # runs before `mirror_area_schemas`, so shops is mirrored like any other
+  # `test` relation.
+  defp load_postgis_fixtures(psql, cfg) do
+    sql = """
+    CREATE EXTENSION IF NOT EXISTS postgis;
+    CREATE TABLE test.shops (
+        id        int primary key,
+        address   text,
+        shop_geom geometry(POINT, 4326)
+    );
+    INSERT INTO test.shops (id, address, shop_geom) VALUES
+      (1, '1369 Cambridge St',     'SRID=4326;POINT(-71.10044 42.373695)'),
+      (2, '757 Massachusetts Ave', 'SRID=4326;POINT(-71.10543 42.366432)'),
+      (3, '605 W Kendall St',      'SRID=4326;POINT(-71.081924 42.36437)');
+    GRANT SELECT ON TABLE test.shops TO postgrest_test_anonymous;
+    """
+
+    run_psql!(psql, cfg, cfg[:database], sql)
   end
 
   # Post-load seed corrections that align the consolidated fixtures with values

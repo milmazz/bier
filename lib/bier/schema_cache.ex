@@ -18,13 +18,18 @@ defmodule Bier.SchemaCache do
 
   alias Bier.Registry
 
-  defstruct relations: %{}, functions: %{}, media_handlers: [], schema_comment: nil
+  defstruct relations: %{},
+            functions: %{},
+            media_handlers: [],
+            schema_comment: nil,
+            postgis: false
 
   @type t :: %__MODULE__{
           relations: map(),
           functions: map(),
           media_handlers: list(),
-          schema_comment: String.t() | nil
+          schema_comment: String.t() | nil,
+          postgis: boolean()
         }
 
   @doc """
@@ -54,7 +59,8 @@ defmodule Bier.SchemaCache do
       relations: Bier.Introspection.run(conn, schemas),
       functions: Bier.Introspection.functions(conn, schemas),
       media_handlers: Bier.Introspection.media_handlers(conn, schemas),
-      schema_comment: Bier.Introspection.schema_comment(conn, hd(schemas))
+      schema_comment: Bier.Introspection.schema_comment(conn, hd(schemas)),
+      postgis: Bier.Introspection.postgis?(conn)
     }
   end
 
@@ -81,6 +87,10 @@ defmodule Bier.SchemaCache do
   @doc "The default schema's COMMENT, used by the OpenAPI document."
   @spec schema_comment(Bier.name()) :: String.t() | nil
   def schema_comment(name), do: get(name).schema_comment
+
+  @doc "Whether the postgis extension is installed (gates the geo+json producer)."
+  @spec postgis?(Bier.name()) :: boolean()
+  def postgis?(name), do: get(name).postgis
 
   @doc "Whether a non-empty snapshot has been loaded for `name`."
   @spec loaded?(Bier.name()) :: boolean()
