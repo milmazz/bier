@@ -334,7 +334,33 @@ defmodule Bier do
   def start_link(opts) do
     conf = Bier.Config.new!(opts, schema())
 
+    check_router_module_collision!(conf.name)
+
     Supervisor.start_link(__MODULE__, conf, name: Registry.via(conf.name, nil, conf))
+  end
+
+  # Two distinct instance names can concat to the same generated router module
+  # (`Module.concat(A.B, Router)` and `Module.concat(:"A.B", Router)` both
+  # yield `A.B.Router`), so a second instance would silently redefine the
+  # first's router on every rebuild. Keyed on the LIVE instances registered in
+  # `Bier.Registry` — not on the module already being defined — because after a
+  # stop/restart of the same named instance the module legitimately still
+  # exists and the boot must succeed.
+  defp check_router_module_collision!(name) do
+    router = Module.concat(name, Router)
+
+    Registry.instance_names()
+    |> Enum.find(&(&1 != name and Module.concat(&1, Router) == router))
+    |> case do
+      nil ->
+        :ok
+
+      other ->
+        raise ArgumentError,
+              "cannot start Bier instance #{inspect(name)}: its generated router module " <>
+                "#{inspect(router)} collides with the one owned by the running instance " <>
+                "#{inspect(other)} — pass a distinct :name"
+    end
   end
 
   @spec child_spec(Keyword.t()) :: Supervisor.child_spec()
