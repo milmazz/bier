@@ -97,17 +97,35 @@ defmodule Bier.Config do
   """
   @spec new!(Keyword.t(), Keyword.t()) :: t() | no_return()
   def new!(opts, schema) do
-    conf = NimbleOptions.validate!(opts, schema)
+    case new(opts, schema) do
+      {:ok, conf} -> conf
+      {:error, message} -> raise ArgumentError, message
+    end
+  end
 
-    raise_if_error!(
-      validate_admin_server_port(conf[:admin_server_port], get_in(conf, [:router, :port]))
-    )
+  @doc """
+  Non-raising variant of `new!/2`: validates the given options against the
+  schema plus the semantic validators and returns `{:ok, config}` or
+  `{:error, message}`. The standalone/CLI boot path uses this to turn a bad
+  config into a clean fatal message instead of a raised exception.
+  """
+  @spec new(Keyword.t(), Keyword.t()) :: {:ok, t()} | {:error, String.t()}
+  def new(opts, schema) do
+    with {:ok, conf} <- validate_schema(opts, schema),
+         :ok <-
+           validate_admin_server_port(conf[:admin_server_port], get_in(conf, [:router, :port])),
+         :ok <- validate_jwt_secret(conf[:jwt_secret]),
+         :ok <- validate_jwt_aud(conf[:jwt_aud]),
+         :ok <- validate_db_channel(conf[:db_channel]) do
+      {:ok, struct!(__MODULE__, conf)}
+    end
+  end
 
-    raise_if_error!(validate_jwt_secret(conf[:jwt_secret]))
-    raise_if_error!(validate_jwt_aud(conf[:jwt_aud]))
-    raise_if_error!(validate_db_channel(conf[:db_channel]))
-
-    struct!(__MODULE__, conf)
+  defp validate_schema(opts, schema) do
+    case NimbleOptions.validate(opts, schema) do
+      {:ok, conf} -> {:ok, conf}
+      {:error, %NimbleOptions.ValidationError{} = error} -> {:error, Exception.message(error)}
+    end
   end
 
   @doc """
@@ -188,7 +206,4 @@ defmodule Bier.Config do
       :ok
     end
   end
-
-  defp raise_if_error!(:ok), do: :ok
-  defp raise_if_error!({:error, message}), do: raise(ArgumentError, message)
 end

@@ -415,6 +415,29 @@ defmodule Bier.CLI.Config do
     direct ++ [router: router] ++ db_uri_opts(resolved["db-uri"])
   end
 
+  @doc """
+  Like `to_start_opts/1`, but additionally runs the options through
+  `Bier.Config.new/2` (Bier's full boot-time schema + semantic validators),
+  returning `{:error, message}` instead of letting `Bier.start_link/1` raise.
+
+  The parse layer deliberately accepts values Bier's schema rejects — e.g.
+  `db-max-rows = 0` or a non-positive `server-port` (`:pos_integer` means ≥ 1)
+  — because `--dump-config` must print whatever was parsed (conformance-pinned).
+  Boot paths call this instead of `to_start_opts/1` so those values become a
+  clean fatal message rather than a raised `MatchError`/`ArgumentError`.
+  """
+  @spec validated_start_opts(map()) :: {:ok, keyword()} | {:error, String.t()}
+  def validated_start_opts(resolved) do
+    opts = to_start_opts(resolved)
+
+    case Bier.Config.new(opts, Bier.schema()) do
+      {:ok, _conf} -> {:ok, opts}
+      # NimbleOptions union-type errors span several lines; CLI fatals are
+      # reported as one stderr line, so collapse the message's whitespace.
+      {:error, message} -> {:error, String.replace(message, ~r/\s+/, " ")}
+    end
+  end
+
   # Bier's runtime supports only :commit / :rollback. PostgREST's
   # *-allow-override variants (per-request Prefer override) collapse to their
   # base mode — the closest behavior Bier currently offers.
