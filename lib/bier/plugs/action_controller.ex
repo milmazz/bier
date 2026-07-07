@@ -360,7 +360,7 @@ defmodule Bier.Plugs.ActionController do
 
     case Bier.CustomMedia.maybe_relation(conn, config, relation) do
       :no_handler ->
-        with {:ok, media} <- Negotiation.resolve(conn, relation_producers(config)) do
+        with {:ok, media} <- Negotiation.resolve(conn, read_producers(config)) do
           handle_get(conn, config, relation, media)
         end
 
@@ -398,7 +398,8 @@ defmodule Bier.Plugs.ActionController do
              count_mode: count_mode,
              max_rows: config.db_max_rows,
              timezone: prefs.timezone,
-             auth: auth_setup(conn, config)
+             auth: auth_setup(conn, config),
+             format: format(media)
            ) do
       conn
       |> put_preference_applied(prefs.applied)
@@ -407,6 +408,12 @@ defmodule Bier.Plugs.ActionController do
       )
     end
   end
+
+  # The executor's output format for the negotiated media type: geo+json rows
+  # are aggregated in SQL (ST_AsGeoJSON, see Bier.QueryExecutor); everything
+  # else consumes the plain JSON array.
+  defp format(%MediaType{symbol: :geojson}), do: :geojson
+  defp format(_media), do: :json
 
   # The auth-context tuple `{context, config}` threaded into the execution layer,
   # or nil when the request schema does not require role-switching/GUCs.
@@ -556,6 +563,19 @@ defmodule Bier.Plugs.ActionController do
   def relation_producers(config) do
     base = [:json, :csv, :singular, :array_strip]
     if config.db_plan_enabled, do: base ++ [:plan], else: base
+  end
+
+  # Relation reads additionally offer `application/geo+json` when the postgis
+  # extension is installed (its rendering needs ST_AsGeoJSON). The producer is
+  # offered regardless of the relation's columns; a relation without a geometry
+  # column fails at execution with 22023 "geometry column is missing" (case
+  # 1618), mirroring PostgREST.
+  defp read_producers(config) do
+    producers = relation_producers(config)
+
+    if Bier.SchemaCache.postgis?(config.name),
+      do: producers ++ [:geojson],
+      else: producers
   end
 
   # CSV column order: explicit select fields, else the relation's columns.

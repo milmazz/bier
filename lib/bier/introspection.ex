@@ -435,6 +435,23 @@ defmodule Bier.Introspection do
     %{relations: relations, functions: functions}
   end
 
+  @doc """
+  Whether the `postgis` extension is installed in the database.
+
+  Gates the built-in `application/geo+json` producer: its rendering relies on
+  PostGIS's `ST_AsGeoJSON`, so without the extension the media type is not
+  offered (a geo+json Accept then yields 406 PGRST107).
+  """
+  @spec postgis?(conn :: term()) :: boolean()
+  def postgis?(conn) do
+    sql = "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'postgis')"
+
+    case Postgrex.query!(conn, sql, []).rows do
+      [[installed]] -> installed
+      _ -> false
+    end
+  end
+
   @doc "Returns the COMMENT on `schema`, or nil."
   @spec schema_comment(conn :: term(), schema :: String.t()) :: String.t() | nil
   def schema_comment(conn, schema) do
