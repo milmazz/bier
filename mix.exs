@@ -2,6 +2,7 @@ defmodule Bier.MixProject do
   use Mix.Project
 
   @version "0.1.1-dev"
+  @source_url "https://github.com/milmazz/bier"
 
   def project do
     [
@@ -14,7 +15,13 @@ defmodule Bier.MixProject do
       aliases: aliases(),
       escript: escript(),
       releases: releases(),
-      deps: deps()
+      deps: deps(),
+      description:
+        "A RESTful API generated on the fly from PostgreSQL introspection — " <>
+          "a PostgREST-inspired Elixir library.",
+      package: package(),
+      source_url: @source_url,
+      docs: docs()
     ]
   end
 
@@ -41,6 +48,36 @@ defmodule Bier.MixProject do
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
+
+  # Hex package metadata. `files` is a whitelist, so the conformance `spec/`
+  # tree, tests, benchmarks, and the Dockerfile stay out of the tarball.
+  defp package do
+    [
+      licenses: ["Apache-2.0"],
+      links: %{
+        "GitHub" => @source_url,
+        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
+      },
+      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
+      # `mix bier.fixtures.load` is the dev-only conformance-fixture loader; it
+      # requires the excluded spec/ tree and would surface in host apps' `mix help`.
+      exclude_patterns: [~r"^lib/mix/"]
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      extras: ["README.md", "CHANGELOG.md", "CONTRIBUTING.md"],
+      source_ref: "main",
+      # The README mentions these for architecture context, but they are
+      # `@moduledoc false` internals — don't autolink (and don't warn).
+      skip_code_autolink_to: ["Bier.Application", "Bier.schema/0"],
+      # CONTRIBUTING.md points at docs/CONFORMANCE_IMPL.md, a repo-internal
+      # contract deliberately kept out of the published docs.
+      skip_undefined_reference_warnings_on: ["CONTRIBUTING.md"]
+    ]
+  end
 
   defp escript do
     [main_module: Bier.CLI, app: nil]
