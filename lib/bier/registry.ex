@@ -32,6 +32,23 @@ defmodule Bier.Registry do
   end
 
   @doc """
+  Returns the names of the Bier instances currently registered (live
+  supervisors)
+
+  Instance supervisors register under the bare (atom) name; instance-scoped
+  processes under `{name, role}` tuples — only the bare names are returned.
+
+  ## Examples
+
+      Bier.Registry.instance_names()
+      #=> [Bier]
+  """
+  @spec instance_names() :: [Bier.name()]
+  def instance_names do
+    Registry.select(__MODULE__, [{{:"$1", :_, :_}, [{:is_atom, :"$1"}], [:"$1"]}])
+  end
+
+  @doc """
   Returns the process identifier (pid) of a supervised Bier process
 
   If the given process can't be found, the returned value is `nil`.
