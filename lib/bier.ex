@@ -353,6 +353,9 @@ defmodule Bier do
         # instance name. Started before HttpServerStarter, which needs it for the
         # boot-time DB introspection.
         Supervisor.child_spec({Postgrex, postgrex_opts(conf)}, id: {name, Postgrex}),
+        # Samples the pool above on an interval and emits the
+        # `[:bier, :pool, :status]` telemetry gauges (see Bier.Telemetry).
+        {Bier.PoolMonitor, conf},
         # The DynamicSupervisor must start BEFORE HttpServerStarter: the latter's
         # `handle_continue(:start_webserver, …)` starts Bandit *as a child of this
         # DynamicSupervisor*, so it has to already be alive — otherwise that

@@ -58,13 +58,34 @@ defmodule Bier.Telemetry do
     * `:exception` carries the standard `:kind`, `:reason`, `:stacktrace`
       alongside `:instance` and `:schemas`.
 
+  ### `[:bier, :pool, :status]`
+
+  A periodic gauge sample of the instance's Postgrex connection pool, emitted
+  by `Bier.PoolMonitor` (once at startup, then every 5 seconds). Mirrors
+  PostgREST's `pgrst_db_pool_max` / `pgrst_db_pool_available` /
+  `pgrst_db_pool_waiting` Prometheus gauges.
+
+    * Measurements: `:max` (the configured `pool_size`), `:available`
+      (connections ready for checkout), `:waiting` (callers queued for a
+      checkout).
+    * Metadata: `:instance`.
+
+  ### `[:bier, :pool, :checkout_timeout]`
+
+  Emitted by `Bier.Plugs.FallbackController` when a request fails because its
+  pool checkout was dropped from the queue after timing out (a
+  `DBConnection.ConnectionError` with reason `:queue_timeout`). The counter
+  counterpart of the `:status` gauges — mirrors PostgREST's
+  `pgrst_db_pool_timeouts_total`.
+
+    * Measurements: `:count` (always `1`).
+    * Metadata: `:instance`.
+
   ## Not yet emitted
 
-  Two further families from #26 depend on infrastructure Bier does not have yet
-  and are tracked as a follow-up:
+  One further family from #26 depends on infrastructure Bier does not have yet
+  and is tracked as a follow-up (#36):
 
-    * `[:bier, :pool, …]` — Postgrex/DBConnection pool gauges (no clean public
-      API to poll pool size/queue today).
     * `[:bier, :jwt_cache, …]` — Bier verifies every JWT directly; there is no
       verification cache to instrument.
   """
@@ -72,6 +93,8 @@ defmodule Bier.Telemetry do
   @request_start [:bier, :request, :start]
   @request_stop [:bier, :request, :stop]
   @schema_cache_load [:bier, :schema_cache, :load]
+  @pool_status [:bier, :pool, :status]
+  @pool_checkout_timeout [:bier, :pool, :checkout_timeout]
 
   @doc """
   Emit `[:bier, :request, :start]` and return the monotonic start time to hand
@@ -119,5 +142,23 @@ defmodule Bier.Telemetry do
       {result, stop_metadata} = fun.()
       {result, metadata |> Map.put(:status, :ok) |> Map.merge(stop_metadata)}
     end)
+  end
+
+  @doc """
+  Emit `[:bier, :pool, :status]` with the sampled pool gauges (`:max`,
+  `:available`, `:waiting`). Called by `Bier.PoolMonitor`.
+  """
+  @spec pool_status(map(), map()) :: :ok
+  def pool_status(measurements, metadata) do
+    :telemetry.execute(@pool_status, measurements, metadata)
+  end
+
+  @doc """
+  Emit `[:bier, :pool, :checkout_timeout]` for one request dropped from the
+  pool's checkout queue. Called by `Bier.Plugs.FallbackController`.
+  """
+  @spec pool_checkout_timeout(map()) :: :ok
+  def pool_checkout_timeout(metadata) do
+    :telemetry.execute(@pool_checkout_timeout, %{count: 1}, metadata)
   end
 end

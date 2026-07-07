@@ -127,6 +127,10 @@ defmodule Bier.MixProject do
       {:benchee, "~> 1.3", only: :dev},
       # Static analysis (`mix credo --strict`, a CI gate). See .credo.exs.
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      # Already pulled in by postgrex; declared explicitly because
+      # Bier.PoolMonitor calls DBConnection.get_connection_metrics/1 (added in
+      # db_connection 2.7) directly.
+      {:db_connection, "~> 2.7"},
       # :test as well so the `docs` step of `mix precommit` (which runs in the
       # :test env) can build the docs.
       {:ex_doc, "~> 0.40", only: [:dev, :test], runtime: false},
