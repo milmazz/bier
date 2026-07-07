@@ -6,9 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## v0.1.0 (unreleased)
 
-Nothing has been published to Hex yet. Current state of the library:
+_Release date: TBD — fill in when tagging `v0.1.0`._
+
+First public release. Current state of the library:
 
 - RESTful API generated at boot from PostgreSQL introspection (`pg_catalog`),
   heavily inspired by [PostgREST](https://postgrest.org) and driven by a
