@@ -193,7 +193,7 @@ defmodule Bier.Mutation do
   # rows for Content-Range and the Location header, even for minimal responses.
   defp run(conn, %Write{} = write, sql, params) do
     pool = Bier.Registry.via(write.config.name, Postgrex)
-    relations = :persistent_term.get({Bier, :relations, write.config.name}, %{})
+    relations = Bier.SchemaCache.relations(write.config.name)
 
     {:ok, wrapped, wparams} =
       Bier.ServerTiming.measure(:plan, fn ->

@@ -26,7 +26,13 @@
           # `pgErrorStatus` SQLSTATE table (Error.hs); one flat lookup is the
           # most reviewable shape for it, so the file is excluded.
           {Credo.Check.Refactor.CyclomaticComplexity,
-           [files: %{excluded: ["lib/bier/pg_error.ex"]}]}
+           [files: %{excluded: ["lib/bier/pg_error.ex"]}]},
+          # `Bier.Config` mirrors PostgREST's full option surface in
+          # `Bier.schema/0` (33 fields today). The VM map-representation
+          # concern (structs >= 32 fields) doesn't apply: Config is created
+          # once per instance at boot, never per request.
+          {Credo.Check.Warning.StructFieldAmount,
+           [max_fields: 35, files: %{included: ["lib/bier/config.ex"]}]}
         ],
         disabled: [
           # In-code TODOs are tracked as GitHub issues; a comment referencing

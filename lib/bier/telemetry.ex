@@ -40,10 +40,17 @@ defmodule Bier.Telemetry do
 
   ### `[:bier, :schema_cache, :load, :start | :stop | :exception]`
 
-  A `:telemetry.span/3` around boot-time DB introspection
-  (`Bier.HttpServerStarter`). The `:stop` event marks a successful load; a
-  failing introspection emits `:exception` instead (the "fail" status, mirroring
-  PostgREST's `pgrst_schema_cache_loads_total{status="fail"}`).
+  A `:telemetry.span/3` around every schema-cache load — both boot-time DB
+  introspection (`Bier.HttpServerStarter`) and a later `Bier.SchemaCache.reload/1`
+  — since both funnel through `Bier.SchemaCache.load!/3`. The snapshot swap
+  (`Bier.SchemaCache.put/2`) happens *inside* the span, before the `:stop`
+  event fires, so a caller synchronizing on `:stop` (e.g.
+  `Bier.SchemaCacheListener`, or a test using `:telemetry_test`) is guaranteed
+  the new snapshot is already visible by the time it observes `:stop`. The
+  `:stop` event marks a successful load; a failing introspection emits
+  `:exception` instead (the "fail" status, mirroring PostgREST's
+  `pgrst_schema_cache_loads_total{status="fail"}`) and leaves the previous
+  snapshot in place.
 
     * `:start` metadata: `:instance`, `:schemas`.
     * `:stop` measurements: `:duration`; metadata: `:instance`, `:schemas`,

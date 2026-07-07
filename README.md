@@ -109,6 +109,40 @@ default, which requires Elixir 1.18+). Override it with:
 config :bier, :json_library, Jason
 ```
 
+### Schema-cache reload
+
+Bier introspects the database at boot and serves from that snapshot. After a
+DDL change (new table, column, FK), reload the cache without restarting —
+exactly like PostgREST:
+
+```sql
+NOTIFY pgrst, 'reload schema';
+```
+
+Every instance listens on the `db_channel` channel (default `"pgrst"`) with a
+dedicated connection; set `db_channel_enabled: false` to opt out and save the
+connection. From Elixir, `Bier.reload_schema_cache(MyApp.Bier)` does the same
+on demand (PostgREST's SIGUSR1 equivalent). A failed reload keeps the
+previous snapshot serving. `'reload config'` is accepted and logged, but a
+no-op: the host application owns Bier's configuration.
+
+To reload automatically on every DDL change, install PostgREST's event
+trigger:
+
+```sql
+CREATE OR REPLACE FUNCTION public.pgrst_watch() RETURNS event_trigger
+  LANGUAGE plpgsql
+  AS $$
+BEGIN
+  NOTIFY pgrst, 'reload schema';
+END;
+$$;
+
+CREATE EVENT TRIGGER pgrst_watch
+  ON ddl_command_end
+  EXECUTE PROCEDURE public.pgrst_watch();
+```
+
 ## Running standalone
 
 Bier is primarily a library you embed (see [Usage](#usage)), but it can also run
@@ -212,6 +246,10 @@ forwarded to `Bier.Plugs.ActionController`. Because the router is regenerated on
 every boot it is not checked in, and grepping for routes will not find them — edit
 the quoted block in `RouterBuilder` instead.
 
+After `HttpServerStarter`, the supervisor also starts `Bier.SchemaCacheListener`
+(unless `db_channel_enabled: false`), which LISTENs on `db_channel` and swaps
+the `Bier.SchemaCache` snapshot on `NOTIFY … 'reload schema'`.
+
 ### Request flow
 
 ```mermaid
@@ -281,7 +319,7 @@ Roughly 400 of the ~475 active cases pass today; most of the remainder are bound
 by the frozen test harness or the local environment rather than by Bier itself.
 The `spec/` tree (behavior models + `COVERAGE.md`) and `docs/CONFORMANCE_IMPL.md`
 document the model and the build. Known feature gaps are tracked as GitHub issues
-(observability/telemetry, schema-cache reload, admin/health endpoints, …).
+(observability/telemetry, admin/health endpoints, …).
 
 ## Development
 

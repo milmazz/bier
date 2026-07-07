@@ -212,6 +212,27 @@ defmodule Bier do
         Applied only for auth-schema requests in the conformance build.
         """
       ],
+      db_channel: [
+        type: :string,
+        default: env(:db_channel, "pgrst"),
+        doc: """
+        Postgres notification channel the schema-cache listener subscribes to
+        (PostgREST db-channel). `NOTIFY <channel>, 'reload schema'` re-runs
+        the DB introspection and atomically swaps the instance's schema
+        cache; see `db_channel_enabled`.
+        """
+      ],
+      db_channel_enabled: [
+        type: :boolean,
+        default: env(:db_channel_enabled, true),
+        doc: """
+        Whether the instance opens a dedicated LISTEN connection on
+        `db_channel` and reloads its schema cache on NOTIFY (PostgREST
+        db-channel-enabled). Enabled by default, matching PostgREST;
+        disabling it saves one database connection per instance.
+        `Bier.reload_schema_cache/1` works either way.
+        """
+      ],
       jwt_secret: [
         type: {:or, [:string, nil]},
         default: env(:jwt_secret, nil),
@@ -340,10 +361,20 @@ defmodule Bier do
         {DynamicSupervisor,
          strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
         {Bier.HttpServerStarter, conf}
-      ] ++ admin_children(conf)
+      ] ++ listener_children(conf) ++ admin_children(conf)
 
     Supervisor.init(children, strategy: :one_for_one)
   end
+
+  # When `db_channel_enabled` (the default, matching PostgREST), run the
+  # LISTEN/NOTIFY schema-cache listener. Started after HttpServerStarter so
+  # the boot introspection has already populated the cache by the time the
+  # listener first connects — its catch-up reload only applies to REconnects.
+  # The listener owns its DB connection and retries with internal backoff, so
+  # a database outage never builds restart pressure on this supervisor.
+  defp listener_children(%Bier.Config{db_channel_enabled: false}), do: []
+
+  defp listener_children(%Bier.Config{} = conf), do: [{Bier.SchemaCacheListener, conf}]
 
   # When `admin_server_port` is set, run a second Bandit listener serving the
   # admin health endpoints (separate from the catch-all API router). Started
@@ -399,4 +430,17 @@ defmodule Bier do
   def json_library do
     Application.get_env(:bier, :json_library, JSON)
   end
+
+  @doc """
+  Re-runs the database introspection for the running instance `name` and
+  atomically swaps its schema cache — the programmatic equivalent of
+  PostgREST's `NOTIFY pgrst, 'reload schema'` (or SIGUSR1).
+
+  Works whether or not the instance's LISTEN/NOTIFY listener is enabled
+  (`db_channel_enabled`). Returns `{:error, :unknown_instance}` when no
+  instance is registered under `name`; an introspection failure leaves the
+  previous cache serving and is returned as `{:error, reason}`.
+  """
+  @spec reload_schema_cache(name()) :: :ok | {:error, term()}
+  defdelegate reload_schema_cache(name), to: Bier.SchemaCache, as: :reload
 end

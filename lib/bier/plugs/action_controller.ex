@@ -38,7 +38,7 @@ defmodule Bier.Plugs.ActionController do
   def call(conn, _opts) do
     name = conn.assigns.supervisor_name
     config = Registry.config(name)
-    relations = :persistent_term.get({Bier, :relations, name}, %{})
+    relations = Bier.SchemaCache.relations(name)
 
     case dispatch(conn, config, relations) do
       %Plug.Conn{} = conn -> conn
@@ -169,30 +169,27 @@ defmodule Bier.Plugs.ActionController do
   # Builds the Swagger 2.0 document for the instance's default exposed schema,
   # honoring openapi-mode (follow-privileges filters by the request role's
   # privileges; ignore-privileges includes everything). Relations, functions,
-  # and the schema comment come from the boot-time :persistent_term snapshot —
+  # and the schema comment come from the Bier.SchemaCache snapshot —
   # the same cache the request pipeline routes against — so the document never
   # advertises a relation the instance cannot serve. Only `privileges/3` runs
   # per request, because it depends on the request role.
   defp build_openapi_document(config, role) do
     schema = hd(config.db_schemas)
+    cache = Bier.SchemaCache.get(config.name)
 
     relations =
-      {Bier, :relations, config.name}
-      |> :persistent_term.get(%{})
+      cache.relations
       |> Map.values()
       |> Enum.filter(&(&1.schema == schema))
 
-    functions =
-      {Bier, :functions, config.name}
-      |> :persistent_term.get(%{})
-      |> Map.filter(fn {{s, _name}, _overloads} -> s == schema end)
+    functions = Map.filter(cache.functions, fn {{s, _name}, _overloads} -> s == schema end)
 
     {relations, functions} = filter_by_mode(config, role, schema, relations, functions)
 
     Bier.OpenAPI.build(%{
       relations: relations,
       functions: function_inputs(functions),
-      schema_comment: :persistent_term.get({Bier, :schema_comment, config.name}, nil),
+      schema_comment: cache.schema_comment,
       security_active?: config.openapi_security_active,
       docs_version: "v14"
     })
@@ -390,7 +387,7 @@ defmodule Bier.Plugs.ActionController do
 
   defp handle_get(conn, config, relation, media) do
     pool = Bier.Registry.via(config.name, Postgrex)
-    relations = :persistent_term.get({Bier, :relations, config.name}, %{})
+    relations = Bier.SchemaCache.relations(config.name)
     count_mode = Pagination.count_mode(conn)
     config = effective_config(config, relation)
 

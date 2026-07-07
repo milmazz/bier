@@ -39,6 +39,8 @@ defmodule Bier.Config do
           db_tx_end: :commit | :rollback,
           db_safe_update_tables: [String.t()],
           db_pre_request: String.t() | nil,
+          db_channel: String.t(),
+          db_channel_enabled: boolean(),
           jwt_secret: String.t() | nil,
           jwt_aud: String.t() | nil,
           server_cors_allowed_origins: String.t() | nil,
@@ -81,6 +83,8 @@ defmodule Bier.Config do
     db_plan_enabled: false,
     db_tx_end: :commit,
     db_safe_update_tables: [],
+    db_channel: "pgrst",
+    db_channel_enabled: true,
     server_timing_enabled: false,
     log_level: :error
   ]
@@ -101,6 +105,7 @@ defmodule Bier.Config do
 
     raise_if_error!(validate_jwt_secret(conf[:jwt_secret]))
     raise_if_error!(validate_jwt_aud(conf[:jwt_aud]))
+    raise_if_error!(validate_db_channel(conf[:db_channel]))
 
     struct!(__MODULE__, conf)
   end
@@ -144,6 +149,26 @@ defmodule Bier.Config do
     case URI.new(value) do
       {:ok, %URI{scheme: scheme}} when is_binary(scheme) and scheme != "" -> true
       _ -> false
+    end
+  end
+
+  @doc """
+  `db-channel` must be a non-empty channel name of at most 63 bytes (the
+  Postgres identifier limit) and must not contain a null byte.
+  `Postgrex.Notifications.listen/3` enforces both the length bound and the
+  null-byte restriction at runtime by raising — validating at boot turns a
+  would-be listener crash-loop into a fast `ArgumentError`. Library-enforced
+  (PostgREST does not validate this key), like the admin-port collision rule.
+  """
+  @spec validate_db_channel(String.t() | nil) :: :ok | {:error, String.t()}
+  def validate_db_channel(nil), do: :ok
+
+  def validate_db_channel(channel) when is_binary(channel) do
+    cond do
+      channel == "" -> {:error, "db-channel cannot be empty"}
+      byte_size(channel) > 63 -> {:error, "db-channel cannot exceed 63 bytes"}
+      String.contains?(channel, <<0>>) -> {:error, "db-channel cannot contain null bytes"}
+      true -> :ok
     end
   end
 

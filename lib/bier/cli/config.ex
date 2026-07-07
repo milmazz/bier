@@ -31,6 +31,20 @@ defmodule Bier.CLI.Config do
       aliases: []
     },
     %{
+      key: "db-channel",
+      env: "PGRST_DB_CHANNEL",
+      kind: :string,
+      default: "pgrst",
+      aliases: []
+    },
+    %{
+      key: "db-channel-enabled",
+      env: "PGRST_DB_CHANNEL_ENABLED",
+      kind: :bool,
+      default: true,
+      aliases: []
+    },
+    %{
       key: "db-extra-search-path",
       env: "PGRST_DB_EXTRA_SEARCH_PATH",
       kind: :csv_emptyable,
@@ -389,6 +403,8 @@ defmodule Bier.CLI.Config do
         log_level: resolved["log-level"],
         server_cors_allowed_origins: resolved["server-cors-allowed-origins"],
         db_plan_enabled: resolved["db-plan-enabled"],
+        db_channel: resolved["db-channel"],
+        db_channel_enabled: resolved["db-channel-enabled"],
         server_trace_header: resolved["server-trace-header"],
         server_timing_enabled: resolved["server-timing-enabled"]
       ]

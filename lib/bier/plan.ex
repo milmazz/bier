@@ -43,7 +43,7 @@ defmodule Bier.Plan do
   end
 
   defp relations(conn) do
-    :persistent_term.get({Bier, :relations, conn.assigns.supervisor_name}, %{})
+    Bier.SchemaCache.relations(conn.assigns.supervisor_name)
   end
 
   defp explain_opts(:json, media), do: "FORMAT JSON#{buffers(media)}"
