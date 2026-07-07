@@ -105,10 +105,19 @@ defmodule Bier.CLI do
     System.halt(code)
   end
 
+  # Bier's boot schema is stricter than the parse layer (which --dump-config
+  # pins), so the resolved config is validated here, at boot — a rejected value
+  # is fatal with the message on stderr, like the jwt-secret/admin-port fatals.
   defp boot(resolved) do
-    {:ok, _} = Application.ensure_all_started(:bier)
-    {:ok, _pid} = Bier.start_link(Config.to_start_opts(resolved))
-    Process.sleep(:infinity)
+    case Config.validated_start_opts(resolved) do
+      {:ok, opts} ->
+        {:ok, _} = Application.ensure_all_started(:bier)
+        {:ok, _pid} = Bier.start_link(opts)
+        Process.sleep(:infinity)
+
+      {:error, message} ->
+        emit("", [message, "\n"], 1)
+    end
   end
 
   defp ok(stdout), do: %{stdout: stdout, stderr: "", exit: 0}

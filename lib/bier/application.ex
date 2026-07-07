@@ -43,9 +43,12 @@ defmodule Bier.Application do
   @doc false
   def standalone_spec(env) do
     if env["BIER_STANDALONE"] in ["1", "true"] do
-      case Config.load(env, nil, %{}) do
-        {:ok, resolved} -> {:ok, {Bier, Config.to_start_opts(resolved)}}
-        {:error, _message} = err -> err
+      # validated_start_opts runs Bier's own boot schema so values the parse
+      # layer tolerates (e.g. db-max-rows=0) fail here with a message instead
+      # of crashing Bier.start_link/1 mid-supervision-tree.
+      with {:ok, resolved} <- Config.load(env, nil, %{}),
+           {:ok, opts} <- Config.validated_start_opts(resolved) do
+        {:ok, {Bier, opts}}
       end
     else
       :none
