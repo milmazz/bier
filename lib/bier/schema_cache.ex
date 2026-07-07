@@ -44,6 +44,11 @@ defmodule Bier.SchemaCache do
   by the time it observes `:stop`. A failing introspection raises and
   surfaces as the span's `:exception` event — nothing is swapped in that
   case, since `put/2` only runs after `introspect/2` succeeds.
+
+  A failing load also logs PostgREST's PGRST002 envelope
+  (`Bier.ErrorLogger.schema_cache_load_error/2`) before re-raising — this is
+  the one funnel every load goes through, so boot and reload failures are
+  logged exactly once.
   """
   @spec load!(Bier.name(), term(), [String.t(), ...]) :: t()
   def load!(name, conn, schemas) do
@@ -52,6 +57,15 @@ defmodule Bier.SchemaCache do
       put(name, cache)
       {cache, %{relation_count: map_size(cache.relations)}}
     end)
+  rescue
+    exception ->
+      Bier.ErrorLogger.schema_cache_load_error(name, exception)
+      reraise exception, __STACKTRACE__
+  catch
+    # e.g. a dead/unreachable pool exits the introspection queries.
+    :exit, reason ->
+      Bier.ErrorLogger.schema_cache_load_error(name, reason)
+      exit(reason)
   end
 
   defp introspect(conn, schemas) do

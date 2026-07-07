@@ -32,7 +32,13 @@
           # concern (structs >= 32 fields) doesn't apply: Config is created
           # once per instance at boot, never per request.
           {Credo.Check.Warning.StructFieldAmount,
-           [max_fields: 35, files: %{included: ["lib/bier/config.ex"]}]}
+           [max_fields: 35, files: %{included: ["lib/bier/config.ex"]}]},
+          # `Bier.ErrorLogger` tags its entries with `:bier_instance` /
+          # `:bier_error_code` metadata for host log pipelines. A library has
+          # no say in the host's `:logger` formatter config, so the "key not
+          # found in Logger config" heuristic cannot apply here.
+          {Credo.Check.Warning.MissedMetadataKeyInLoggerConfig,
+           [files: %{excluded: ["lib/bier/error_logger.ex"]}]}
         ],
         disabled: [
           # In-code TODOs are tracked as GitHub issues; a comment referencing
