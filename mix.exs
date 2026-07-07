@@ -68,7 +68,7 @@ defmodule Bier.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "CHANGELOG.md", "CONTRIBUTING.md"],
+      extras: ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "docs/injection_safety.md"],
       source_ref: "main",
       # The README mentions these for architecture context, but they are
       # `@moduledoc false` internals — don't autolink (and don't warn).
