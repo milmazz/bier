@@ -21,7 +21,17 @@ JSON, which is then rendered in the negotiated media type.
 
 ## Installation
 
-Not yet published to Hex. Add it as a git dependency:
+Add `bier` to your dependencies:
+
+```elixir
+def deps do
+  [
+    {:bier, "~> 0.1.0"}
+  ]
+end
+```
+
+To track unreleased work on `main`, use it as a git dependency instead:
 
 ```elixir
 def deps do
