@@ -565,11 +565,12 @@ defmodule Bier.Plugs.ActionController do
     if config.db_plan_enabled, do: base ++ [:plan], else: base
   end
 
-  # Relation reads additionally offer `application/geo+json` when the postgis
-  # extension is installed (its rendering needs ST_AsGeoJSON). The producer is
-  # offered regardless of the relation's columns; a relation without a geometry
-  # column fails at execution with 22023 "geometry column is missing" (case
-  # 1618), mirroring PostgREST.
+  # Relation reads (and, since #63, mutations) additionally offer
+  # `application/geo+json` when the postgis extension is installed (its
+  # rendering needs ST_AsGeoJSON). The producer is offered regardless of the
+  # relation's columns; a relation without a geometry column fails at
+  # execution with 22023 "geometry column is missing" (case 1618), mirroring
+  # PostgREST.
   defp read_producers(config) do
     producers = relation_producers(config)
 
