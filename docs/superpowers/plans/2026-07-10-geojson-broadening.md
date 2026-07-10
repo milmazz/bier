@@ -133,7 +133,7 @@ end
 - [ ] **Step 2: Run the new file to verify it fails on spacing**
 
 Run: `mix test test/bier/compact_json_test.exs`
-Expected: **all 11 tests FAIL** — advanced-path bodies contain json_build_object's `" : "` spacing, and the flat/simple-path test is missing the `, \n ` row separator. If any test fails for a different reason (parse error, SQL error), stop and fix the test, not `lib/`.
+Expected: **all 10 tests FAIL** — advanced-path bodies contain json_build_object's `" : "` spacing, and the flat/simple-path test is missing the `, \n ` row separator. If any test fails for a different reason (parse error, SQL error), stop and fix the test, not `lib/`.
 
 - [ ] **Step 3: Rewrite the row builder in `lib/bier/embed.ex`**
 
@@ -390,7 +390,7 @@ Do NOT try to strip or normalize `json_agg`'s whitespace anywhere — its native
 - [ ] **Step 6: Run the byte tests**
 
 Run: `mix test test/bier/compact_json_test.exs`
-Expected: **11 tests, 0 failures**.
+Expected: **10 tests, 0 failures**.
 
 - [ ] **Step 7: Run the full suite (conformance is the regression net)**
 
