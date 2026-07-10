@@ -39,14 +39,24 @@ if (STAGE !== 'ceiling') {
   THRESHOLDS['http_reqs{phase:measure}'] = ['count>=0'];
 }
 
-// Pre-allocate the full pool: mid-stage VU allocation adds latency noise
-// exactly when a server starts struggling.
+// VU pool: preallocate a working baseline, but allow a large burst ceiling.
+// A server that stalls (e.g. PostgREST's periodic GHC stop-the-world GC, seen
+// at 0.5-2s) makes the open-loop arrival stream queue; k6 must spin up VUs to
+// sustain the fixed rate and *measure* that queueing as tail latency. Capping
+// at the baseline instead sheds load (dropped_iterations) and voids the run,
+// discarding the exact number we want. VUS_MAX covers a ~3s stall at these
+// rates; preallocating all of them would waste ~16 GB, so k6 grows into the
+// ceiling on demand (a little allocation noise during a multi-100ms stall is
+// negligible against the stall itself).
+const VUS_BASELINE = 2000;
+const VUS_MAX = 8000;
+
 const ARRIVAL = {
   executor: 'constant-arrival-rate',
   rate: RATE,
   timeUnit: '1s',
-  preAllocatedVUs: 1000,
-  maxVUs: 1000,
+  preAllocatedVUs: VUS_BASELINE,
+  maxVUs: VUS_MAX,
 };
 
 export const options = {
@@ -69,8 +79,8 @@ export const options = {
             executor: 'ramping-arrival-rate',
             startRate: Math.max(1, Math.floor(RATE / 10)),
             timeUnit: '1s',
-            preAllocatedVUs: 1000,
-            maxVUs: 1000,
+            preAllocatedVUs: VUS_BASELINE,
+            maxVUs: VUS_MAX,
             stages: [{ target: RATE, duration: WARMUP }],
             tags: { phase: 'warmup' },
           },

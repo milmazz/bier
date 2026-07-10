@@ -22,19 +22,29 @@ SCENARIOS=(r1 r2 m1 m2)
 SMOKE=false
 # Latency-stage arrival rate as a fraction of the slower server's closed-loop
 # ceiling. Reads (r*) and writes (m*) get separate fractions: the closed-loop
-# ceiling over-predicts open-loop sustainable throughput far more for writes
-# (per-row INSERT/PATCH serialized through a pool of 10) than for reads, so a
-# fraction reads absorb cleanly drives PostgREST's write path past its knee — it
-# sheds load and the dropped-iterations guard vetoes the run. Smoke uses gentler
-# fractions: its 5s windows give a cold-started server no time to absorb a burst,
-# and smoke validates the pipeline, not the numbers. Override any via the env.
+# ceiling over-predicts open-loop sustainable throughput (during a GHC GC pause
+# a closed-loop VU pool simply waits — coordinated omission — while an open-loop
+# arrival stream keeps queueing; past the knee PostgREST queue-spirals into its
+# 10s pool-acquisition timeout and never recovers). Probed on this rig for r1:
+# 0.5-0.7 of the 60s closed-loop ceiling spiral 100% of the time; 0.4 sustains
+# with zero drops while still measuring the GC pauses as p90/p99 tail. Writes
+# (per-row INSERT/PATCH serialized through a pool of 10) knee even lower — 0.3.
+# Smoke uses gentler fractions: its 5s windows give a cold-started server no
+# time to absorb a burst, and smoke validates the pipeline, not the numbers.
+# Override any via the env.
+# WARMUP/DURATION/ROUNDS/VUS are env-overridable around the per-mode defaults,
+# e.g. `ROUNDS=1 bench/http/run.sh` for a single-round full run, or
+# `WARMUP=10s DURATION=60s bench/http/run.sh --smoke` for a long-window smoke.
 if [ "${1:-}" = "--smoke" ]; then
-  SMOKE=true; WARMUP=2s; DURATION=5s; ROUNDS=1; VUS=25
+  SMOKE=true
+  WARMUP="${WARMUP:-2s}"; DURATION="${DURATION:-5s}"
+  ROUNDS="${ROUNDS:-1}"; VUS="${VUS:-25}"
   RATE_FRACTION_READ="${RATE_FRACTION_READ:-0.4}"
   RATE_FRACTION_WRITE="${RATE_FRACTION_WRITE:-0.2}"
 else
-  WARMUP=10s; DURATION=60s; ROUNDS=3; VUS=100
-  RATE_FRACTION_READ="${RATE_FRACTION_READ:-0.7}"
+  WARMUP="${WARMUP:-10s}"; DURATION="${DURATION:-60s}"
+  ROUNDS="${ROUNDS:-3}"; VUS="${VUS:-100}"
+  RATE_FRACTION_READ="${RATE_FRACTION_READ:-0.4}"
   RATE_FRACTION_WRITE="${RATE_FRACTION_WRITE:-0.3}"
 fi
 
@@ -100,7 +110,20 @@ reset_events() {
 
 # ---------- server lifecycle ----------------------------------------------
 SERVER_PID=""
-cleanup() { [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true; }
+
+kill_port_listener() { # $1=port — force-kill any process still LISTENing on it
+  local pids
+  pids=$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null || true)
+  [ -n "$pids" ] && kill -9 $pids 2>/dev/null || true
+}
+
+cleanup() {
+  [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
+  # A killed launcher can orphan its child (mix -> BEAM) holding the port;
+  # sweep both ports so a crashed run never strands a stale listener.
+  kill_port_listener "$BIER_PORT"
+  kill_port_listener "$POSTGREST_PORT"
+}
 trap cleanup EXIT
 
 wait_up() { # $1=url
@@ -144,15 +167,49 @@ start_server() { # $1=bier|postgrest
 }
 
 stop_server() { # $1=bier|postgrest
-  kill "$SERVER_PID" 2>/dev/null || true
-  wait "$SERVER_PID" 2>/dev/null || true
-  SERVER_PID=""
   local port; port=$([ "$1" = bier ] && echo "$BIER_PORT" || echo "$POSTGREST_PORT")
+  if [ -n "$SERVER_PID" ]; then
+    kill "$SERVER_PID" 2>/dev/null || true
+    # Bounded graceful wait, then force. A lone SIGTERM + unbounded `wait`
+    # hangs the entire run if the server ignores the signal (observed:
+    # postgrest stuck for hours). Poll liveness for ~10s, then SIGKILL.
+    for _ in $(seq 1 20); do
+      kill -0 "$SERVER_PID" 2>/dev/null || break
+      sleep 0.5
+    done
+    kill -9 "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+    SERVER_PID=""
+  fi
+  # Reap an orphaned child (killed launcher) still holding the port.
+  kill_port_listener "$port"
   wait_down "$port" || die "$1 did not release port $port"
 }
 
 base_url() { # $1=bier|postgrest
   [ "$1" = bier ] && echo "http://127.0.0.1:$BIER_PORT" || echo "http://127.0.0.1:$POSTGREST_PORT"
+}
+
+# ---------- ephemeral-port guard -------------------------------------------
+# k6's arrival-rate executors round-robin iterations across the whole
+# preallocated VU pool, and each VU touched opens its own keep-alive
+# connection — a latency stage opens ~2x VUS_BASELINE connections regardless
+# of actual concurrency, and every one sits in client-side TIME_WAIT for
+# 2*MSL (30s on macOS) after the k6 process exits. Back-to-back short stages
+# accumulate that residue faster than it expires and exhaust the 16,384-port
+# ephemeral range (observed: EADDRNOTAVAIL dial failures at the 5th
+# consecutive smoke latency stage). Wait for the pool to drain before each
+# open-loop stage; residue expires in <=30s, so the wait is bounded.
+wait_ephemeral_ports() {
+  local tw=0
+  for _ in $(seq 1 90); do
+    tw=$(netstat -an -p tcp 2>/dev/null \
+      | grep -E "127\.0\.0\.1\.($BIER_PORT|$POSTGREST_PORT)[^0-9]" \
+      | grep -c TIME_WAIT || true)
+    [ "$tw" -lt 1000 ] && return 0
+    sleep 1
+  done
+  die "ephemeral-port pool did not drain ($tw TIME_WAIT sockets toward bench ports)"
 }
 
 # ---------- k6 wrapper ----------------------------------------------------
@@ -168,6 +225,7 @@ run_k6() { # $1=server $2=scenario $3=stage $4=rate $5=summary_file(or "-") $6=d
 measure() { # $1=server $2=scenario $3=stage $4=rate $5=summary_file
   reset_events
   if [ "$3" = latency ]; then
+    wait_ephemeral_ports
     # One continuous k6 run: warmup flows into the measured window with no
     # idle gap (a gap stalls PostgREST's GHC idle GC and collapses the next
     # window). Warmup insert counts are equal by construction: same shared
