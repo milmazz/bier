@@ -302,6 +302,17 @@ error envelope.
 Every request runs as one parameterized SQL statement; the injection-safety
 model (what is bound vs. escaped, and why) is in [docs/injection_safety.md](docs/injection_safety.md).
 
+### Content negotiation
+
+Responses are rendered in the client's negotiated media type: `application/json`
+(default), `text/csv`, and `application/geo+json`. `geo+json` is offered on
+relation reads, on mutations sent with `Prefer: return=representation`, and on
+`/rpc/*` calls, whenever the PostGIS extension is installed (a target relation
+without a geometry column errors with SQLSTATE `22023`, mirroring PostgREST).
+`ST_AsGeoJSON` is emitted unqualified and resolves via the session
+`search_path` (matching PostgREST) — a PostGIS installed outside the
+search path fails at execution.
+
 ### The query parser
 
 `Bier.QueryParser` is a **generated**, dependency-free module built from its

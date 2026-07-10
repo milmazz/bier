@@ -8,6 +8,14 @@ and this project adheres to
 
 ## Unreleased
 
+- `application/geo+json` broadened from relation reads to also cover
+  mutations (with `Prefer: return=representation`), `/rpc/*`, and embedded
+  reads, whenever the PostGIS extension is installed (#63).
+- **Behavior note:** response bodies are now byte-identical to PostgREST
+  v14.12, including its `, \n ` row separator between top-level JSON array
+  elements and jsonb-styled embed internals — this shifts `Content-Length` on
+  any multi-row response compared to earlier Bier versions (#31).
+
 Nothing has been published to Hex yet. Current state of the library:
 
 - RESTful API generated at boot from PostgreSQL introspection (`pg_catalog`),
