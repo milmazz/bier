@@ -120,4 +120,40 @@ defmodule Bier.GeojsonHttpTest do
     # (Live-verified against PostgREST 14.12 in the diff task.)
     assert resp.body == ~s({"type" : "FeatureCollection", "features" : []})
   end
+
+  test "RPC returning SETOF <relation> renders a FeatureCollection", %{base: base} do
+    resp = request!(base, :get, "/rpc/get_shops", [{"accept", "application/geo+json"}])
+
+    assert resp.status == 200
+    assert ["application/geo+json; charset=utf-8"] = resp.headers["content-type"]
+
+    decoded = decode!(resp.body)
+    assert decoded["type"] == "FeatureCollection"
+    assert length(decoded["features"]) == 3
+    assert %{"geometry" => %{"type" => "Point"}} = hd(decoded["features"])
+  end
+
+  test "RPC setof-relation with embeds renders embeds in properties", %{base: base} do
+    resp =
+      request!(
+        base,
+        :get,
+        "/rpc/get_shops?select=id,address,shop_geom,shop_bles(name)&shop_bles.order=id",
+        [{"accept", "application/geo+json"}]
+      )
+
+    assert resp.status == 200
+    decoded = decode!(resp.body)
+
+    assert %{"properties" => %{"id" => 1, "shop_bles" => [_, _]}} = hd(decoded["features"])
+  end
+
+  test "scalar-geometry RPC renders a single-Feature collection", %{base: base} do
+    resp = request!(base, :get, "/rpc/get_shop_geom?id=1", [{"accept", "application/geo+json"}])
+
+    assert resp.status == 200
+    decoded = decode!(resp.body)
+    assert decoded["type"] == "FeatureCollection"
+    assert [%{"type" => "Feature", "geometry" => %{"type" => "Point"}}] = decoded["features"]
+  end
 end

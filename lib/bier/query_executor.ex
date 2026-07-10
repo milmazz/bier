@@ -262,16 +262,20 @@ defmodule Bier.QueryExecutor do
   Only the flat read shape is supported (select / filters / order / limit /
   offset / count) — enough for the GET RPC pagination cases. The function's
   returned relation supplies the column set for `select` and column filters.
+
+  Options accept `:format` — `:json` (default) or `:geojson` (aggregate the
+  rows into a GeoJSON FeatureCollection via `ST_AsGeoJSON`), mirroring `run/5`.
   """
   @spec run_function(term(), map(), Relation.t(), [tuple()], map(), keyword()) ::
           {:ok, %{body: String.t(), count: non_neg_integer()}} | {:error, term()}
   def run_function(conn, fn_def, %Relation{} = ret_relation, args, plan, opts \\ []) do
     count_mode = Keyword.get(opts, :count_mode, :none)
     relations = Keyword.get(opts, :relations, %{})
+    format = Keyword.get(opts, :format, :json)
 
     try do
       case Bier.ServerTiming.measure(:plan, fn ->
-             build_function(fn_def, ret_relation, args, plan, relations)
+             build_function(fn_def, ret_relation, args, plan, relations, format)
            end) do
         {:ok, sql, params} ->
           Bier.ServerTiming.measure(:transaction, fn ->
@@ -303,7 +307,7 @@ defmodule Bier.QueryExecutor do
   defp count_for(:none, _exact), do: 0
   defp count_for(_mode, exact), do: exact
 
-  defp build_function(fn_def, ret_relation, args, plan, relations) do
+  defp build_function(fn_def, ret_relation, args, plan, relations, format) do
     # Bind the function arguments first so their params lead the parameter list;
     # the function call becomes the FROM source for the read builder.
     {arg_sql, arg_state} = build_function_args(args, %State{relation: ret_relation})
@@ -329,7 +333,8 @@ defmodule Bier.QueryExecutor do
       embed_offsets: plan[:embed_offsets] || %{},
       from_override: from,
       params: arg_state.params,
-      count: arg_state.count
+      count: arg_state.count,
+      format: format
     }
 
     with :ok <- validate_embed_filters(plan) do
