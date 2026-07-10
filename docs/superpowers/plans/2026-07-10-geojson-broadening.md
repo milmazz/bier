@@ -38,9 +38,12 @@ Create `test/bier/compact_json_test.exs`:
 
 ```elixir
 defmodule Bier.CompactJsonTest do
-  # Issue #31: the advanced path (embeds / aggregates / spread) must render
-  # PostgREST's compact wire bytes. json_build_object spaces `"k" : v` and a
-  # ::jsonb cast spaces `"k": v`, so these assert exact body strings.
+  # Issue #31: the read paths must render PostgREST v14.12's exact wire bytes,
+  # live-captured from the real binary (see the spec's §0 whitespace profile):
+  # compact row objects separated by `, \n ` (json_agg over a record), embed
+  # internals in jsonb style (`": "`, `", "`, keys jsonb-normalized), spread
+  # columns compact at the parent level. json_build_object's `"k" : v` and a
+  # bare ::jsonb cast both diverge, hence exact-string assertions.
   use ExUnit.Case, async: false
 
   setup_all do
@@ -58,35 +61,52 @@ defmodule Bier.CompactJsonTest do
     body
   end
 
-  test "to-one embed renders compact bytes", %{conn: conn, rels: rels} do
+  test "flat rows separate with comma-newline (simple path)", %{conn: conn, rels: rels} do
+    body = body!(conn, rels, "projects", "select=id,name&order=id&limit=2")
+    assert body == ~s([{"id":1,"name":"Windows 7"}, \n {"id":2,"name":"Windows 10"}])
+  end
+
+  test "to-one embed renders jsonb-style internals", %{conn: conn, rels: rels} do
     body = body!(conn, rels, "projects", "select=id,name,clients(name)&order=id&limit=2")
 
     assert body ==
-             ~s([{"id":1,"name":"Windows 7","clients":{"name":"Microsoft"}},) <>
-               ~s({"id":2,"name":"Windows 10","clients":{"name":"Microsoft"}}])
+             ~s([{"id":1,"name":"Windows 7","clients":{"name": "Microsoft"}}, \n ) <>
+               ~s({"id":2,"name":"Windows 10","clients":{"name": "Microsoft"}}])
   end
 
-  test "to-many embed renders compact bytes", %{conn: conn, rels: rels} do
+  test "embed keys are jsonb-normalized (order + spacing)", %{conn: conn, rels: rels} do
+    # Select order is name,id — jsonb re-sorts to id,name, exactly as PostgREST.
+    body = body!(conn, rels, "projects", "select=id,clients(name,id)&order=id&limit=1")
+    assert body == ~s([{"id":1,"clients":{"id": 1, "name": "Microsoft"}}])
+  end
+
+  test "to-many embed renders jsonb elements with comma-space", %{conn: conn, rels: rels} do
     body =
       body!(conn, rels, "projects", "select=name,tasks(name)&order=id&limit=1&tasks.order=id")
 
-    assert body == ~s([{"name":"Windows 7","tasks":[{"name":"Design w7"},{"name":"Code w7"}]}])
+    assert body ==
+             ~s([{"name":"Windows 7","tasks":[{"name": "Design w7"}, {"name": "Code w7"}]}])
   end
 
-  test "missing to-one embed renders null, compact", %{conn: conn, rels: rels} do
+  test "empty to-many embed renders []", %{conn: conn, rels: rels} do
+    body = body!(conn, rels, "projects", "select=id,tasks(name)&id=eq.5")
+    assert body == ~s([{"id":5,"tasks":[]}])
+  end
+
+  test "missing to-one embed renders null", %{conn: conn, rels: rels} do
     body = body!(conn, rels, "projects", "select=id,clients(name)&id=eq.5")
     assert body == ~s([{"id":5,"clients":null}])
   end
 
-  test "aggregate with implicit group-by renders compact bytes", %{conn: conn, rels: rels} do
+  test "aggregate with implicit group-by renders compact rows", %{conn: conn, rels: rels} do
     body = body!(conn, rels, "projects", "select=client_id,id.count()&order=client_id")
 
     assert body ==
-             ~s([{"client_id":1,"count":2},{"client_id":2,"count":2},) <>
+             ~s([{"client_id":1,"count":2}, \n {"client_id":2,"count":2}, \n ) <>
                ~s({"client_id":null,"count":1}])
   end
 
-  test "to-one spread renders compact bytes", %{conn: conn, rels: rels} do
+  test "to-one spread renders compact parent-level columns", %{conn: conn, rels: rels} do
     body = body!(conn, rels, "projects", "select=id,...clients(client_name:name)&order=id&limit=1")
     assert body == ~s([{"id":1,"client_name":"Microsoft"}])
   end
@@ -95,13 +115,25 @@ defmodule Bier.CompactJsonTest do
     body = body!(conn, rels, "projects", "select=id,...clients(client_name:name)&id=eq.5")
     assert body == ~s([{"id":5,"client_name":null}])
   end
+
+  test "to-many spread aggregates each column into an array", %{conn: conn, rels: rels} do
+    body =
+      body!(
+        conn,
+        rels,
+        "projects",
+        "select=id,...tasks(task_names:name)&order=id&limit=1&tasks.order=id"
+      )
+
+    assert body == ~s([{"id":1,"task_names":["Design w7", "Code w7"]}])
+  end
 end
 ```
 
 - [ ] **Step 2: Run the new file to verify it fails on spacing**
 
 Run: `mix test test/bier/compact_json_test.exs`
-Expected: **all 6 tests FAIL** — bodies contain `" : "` (json_build_object spacing). If any test fails for a different reason (parse error, SQL error), stop and fix the test, not `lib/`.
+Expected: **all 11 tests FAIL** — advanced-path bodies contain json_build_object's `" : "` spacing, and the flat/simple-path test is missing the `, \n ` row separator. If any test fails for a different reason (parse error, SQL error), stop and fix the test, not `lib/`.
 
 - [ ] **Step 3: Rewrite the row builder in `lib/bier/embed.ex`**
 
@@ -181,19 +213,23 @@ Replace the body from the child-object build down (keep the segment/filter/order
     if e.spread do
       spread_entry(kind, child_cols, child_select, from, lateral_sql, where_sql, order_sql, page_sql, state)
     else
+      # Embed internals go through jsonb (to_jsonb / json_agg(to_jsonb(…))):
+      # PostgREST renders embedded objects jsonb-style — `": "` spacing and
+      # jsonb key normalization — while parent rows stay compact. Live-verified
+      # against PostgREST 14.12 (spec §0).
       sub =
         case kind do
           :one ->
             inner =
               "SELECT #{child_select} FROM #{from}#{lateral_sql}#{where_sql}#{order_sql} LIMIT 1"
 
-            "(SELECT to_json(_bier_c) FROM (#{inner}) _bier_c)"
+            "(SELECT to_jsonb(_bier_c) FROM (#{inner}) _bier_c)"
 
           :many ->
             inner =
               "SELECT #{child_select} FROM #{from}#{lateral_sql}#{where_sql}#{order_sql}#{page_sql}"
 
-            "COALESCE((SELECT json_agg(_bier_c) FROM (#{inner}) _bier_c), '[]'::json)"
+            "COALESCE((SELECT json_agg(to_jsonb(_bier_c)) FROM (#{inner}) _bier_c), '[]'::json)"
         end
 
       {[{sub, out_name}], state}
@@ -310,11 +346,13 @@ Replace lines 572–625 with the three-layer shape (mirrors `build_simple`; the 
 
     {limit_sql, state} = build_limit(plan, state)
 
-    # Project the named select list (embeds as correlated json columns, spread
-    # via LATERAL) into a derived table and render each row with to_json /
-    # ST_AsGeoJSON — json_build_object would space `"k" : v` (issue #31) and
-    # cannot feed ST_AsGeoJSON (issue #63). Same shape as build_simple: order
-    # inside, count window + LIMIT/OFFSET one level up.
+    # Project the named select list (embeds as correlated jsonb columns, spread
+    # via LATERAL) into a derived table and thread the ROW RECORD through the
+    # paged layer — json_agg over a record renders PostgREST's exact bytes
+    # (compact rows, `, \n ` separators), and ST_AsGeoJSON consumes the same
+    # record (issue #63). json_build_object would space `"k" : v` (issue #31).
+    # Same shape as build_simple: order inside, count window + LIMIT/OFFSET one
+    # level up.
     {select_list, row_expr} =
       case cols do
         [] -> {"1 AS _bier_dummy", "'{}'::json"}
@@ -338,12 +376,21 @@ Replace lines 572–625 with the three-layer shape (mirrors `build_simple`; the 
   end
 ```
 
-Also update the now-stale comment on `row_json/1` (`lib/bier/query_executor.ex:553-561`): delete the final sentence ("Only this flat path supports it: the advanced path pre-collapses each row into a JSON object, which ST_AsGeoJSON cannot consume.") and replace with "Both the simple and advanced paths render through this expression; the advanced path's derived table carries embeds as json columns, which ST_AsGeoJSON places into `properties`."
+**Also change `row_json/1` itself** (`lib/bier/query_executor.ex:560-561`), which both paths share:
+
+```elixir
+  defp row_json(:geojson), do: "ST_AsGeoJSON(_bier_cols)::json"
+  defp row_json(_format), do: "_bier_cols"
+```
+
+The `:json` case projects the bare **record** (not `to_json(_bier_cols)`): the outer `json_agg` then renders each row compactly AND separates rows with `, \n ` exactly like PostgREST (which aggregates its derived table directly). This intentionally also fixes the **simple** path, which until now aggregated a pre-rendered json value and silently dropped PostgREST's newline separator on every multi-row response. Update the big comment above `build_simple`'s `cols` binding (`lib/bier/query_executor.ex:531-537`) accordingly, and replace the now-stale final sentence of the `row_json` comment ("Only this flat path supports it…") with "Both the simple and advanced paths render through this expression; the advanced path's derived table carries embeds as jsonb columns, which ST_AsGeoJSON places into `properties`."
+
+Do NOT try to strip or normalize `json_agg`'s whitespace anywhere — its native rendering IS PostgREST's wire format (PostgREST runs the same aggregate). In particular `aggregate_body/1` stays exactly as it is.
 
 - [ ] **Step 6: Run the byte tests**
 
 Run: `mix test test/bier/compact_json_test.exs`
-Expected: **6 tests, 0 failures**.
+Expected: **11 tests, 0 failures**.
 
 - [ ] **Step 7: Run the full suite (conformance is the regression net)**
 

@@ -34,6 +34,32 @@ Delivered as **one PR** closing both issues.
    embed/advanced reads matches a live PostgREST v14.12 side-by-side.
 4. No response is ever labeled `application/geo+json` with a non-GeoJSON body.
 
+## 0. PostgREST's exact whitespace profile (live-verified 2026-07-10)
+
+Byte captures from the local PostgREST 14.12 binary against the fixture DB
+corrected the original "fully compact" assumption. PostgREST's wire bytes are:
+
+| Shape | Bytes |
+|---|---|
+| Top-level array separator | `, \n ` (comma space newline space — `json_agg` over a record) |
+| Row object | compact (`{"id":1,"name":"Windows 7"}`) |
+| Embedded to-one object | jsonb-style: `{"id": 1, "name": "Microsoft"}` — space after `:` and `,`, **keys re-sorted by jsonb normalization** |
+| Embedded to-many array | jsonb-style elements, `, ` separator, `[]` when empty |
+| Missing to-one | `null` |
+| Spread columns | compact at parent level; to-many spread arrays `["a", "b"]` |
+
+Verified SQL mechanisms that reproduce this exactly:
+
+1. Project the whole **record** through the paged layer (`SELECT _bier_cols AS
+   _bier_row, count(*) OVER() … LIMIT`) and aggregate `json_agg(_bier_row)` —
+   record input gives the `, \n ` separator and compact row rendering, while
+   keeping the count window. This **also fixes the simple path**, which today
+   aggregates a pre-rendered json value and silently drops PostgREST's newline.
+2. To-one embeds render via `to_jsonb(row)`; to-many via
+   `json_agg(to_jsonb(row))` coalesced to `'[]'::json` — jsonb-style internals
+   and key normalization, exactly as PostgREST.
+3. Duplicate select aliases survive the whole-row rendering (`{"a":1,"a":2}`).
+
 ## 1. The SQL restructure (`Bier.Embed` + `Bier.QueryExecutor.build_advanced`)
 
 `Embed.build_row_object/6` becomes a **select-list builder** returning
