@@ -409,8 +409,11 @@ defmodule Bier.Rpc do
     |> send_resp(Bier.Guc.status(guc, 200), out)
   end
 
-  # A requested count on a scalar/composite result -> Content-Range 0-0/1.
-  defp maybe_scalar_content_range(conn, :none), do: conn
+  # A scalar/composite result is one row: PostgREST always emits a read-style
+  # Content-Range for it — `0-0/*` by default, `0-0/1` when a count preference
+  # supplies the total (live-verified against 14.12; frozen case 1403).
+  defp maybe_scalar_content_range(conn, :none),
+    do: put_resp_header(conn, "content-range", Pagination.content_range(0, 1, nil))
 
   defp maybe_scalar_content_range(conn, _count_mode),
     do: put_resp_header(conn, "content-range", Pagination.content_range(0, 1, 1))

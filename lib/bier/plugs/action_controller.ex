@@ -452,9 +452,12 @@ defmodule Bier.Plugs.ActionController do
       # No explicit profile, or an area-label alias: resolve in the default
       # schema. When a multi-schema default is configured (db_profile_default),
       # relations live in that area's own schema (e.g. `headers`) but the echoed
-      # Content-Profile names the logical default (e.g. `v1`).
+      # Content-Profile names the logical default (e.g. `v1`). Without that
+      # model, PostgREST's rule applies: the resolved schema is echoed whenever
+      # more than one schema is exposed (live-verified against 14.12).
       is_nil(profile) or profile in @profile_aliases ->
-        {:ok, default_profile_schema(profile, config, default), config.db_profile_default}
+        schema = default_profile_schema(profile, config, default)
+        {:ok, schema, config.db_profile_default || multi_schema_profile(schema, config)}
 
       # An explicit, exposed schema: resolve there and echo it verbatim.
       profile in config.db_schemas ->
@@ -488,15 +491,23 @@ defmodule Bier.Plugs.ActionController do
     end
   end
 
-  # Echo Content-Profile for an explicit profile only when multi-schema profile
-  # routing is configured (the MultipleSchemaSpec cases). Other areas do not
-  # assert Content-Profile, and PostgREST omits it when a single schema is
-  # exposed, so we only echo for the configured profile schemas.
+  # Echo Content-Profile for an explicit profile. When multi-schema profile
+  # routing is configured (the MultipleSchemaSpec cases), only the configured
+  # profile schemas are echoed — the conformance harness exposes every area
+  # schema on one instance, but most areas' frozen cases were captured from
+  # single-schema PostgREST configs that emit no Content-Profile. Without that
+  # model, PostgREST's rule applies: the resolved schema is echoed whenever
+  # more than one schema is exposed (live-verified against 14.12).
   defp content_profile_for(profile, %{db_profile_schemas: schemas}) when is_list(schemas) do
     if profile in schemas, do: profile, else: nil
   end
 
-  defp content_profile_for(_profile, _config), do: nil
+  defp content_profile_for(profile, config), do: multi_schema_profile(profile, config)
+
+  # PostgREST omits Content-Profile when a single schema is exposed and echoes
+  # the resolved schema when more than one is.
+  defp multi_schema_profile(schema, %{db_schemas: [_, _ | _]}), do: schema
+  defp multi_schema_profile(_schema, _config), do: nil
 
   defp exposed_profiles(%{db_profile_schemas: schemas}) when is_list(schemas), do: schemas
   defp exposed_profiles(_config), do: nil
