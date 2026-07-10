@@ -368,6 +368,10 @@ defmodule Bier.QueryExecutor do
   the source in a CTE named `pgrst_source` and renders `plan.select` (with
   embedding) over it.
 
+  `opts` accepts `:format` — `:json` (default) or `:geojson` (aggregate the
+  representation into a GeoJSON FeatureCollection via `ST_AsGeoJSON`), mirroring
+  `run/5`.
+
   The result is a single row `{body, count, meta}` where:
 
     * `body`  — the JSON-array representation shaped by `plan.select`,
@@ -375,7 +379,13 @@ defmodule Bier.QueryExecutor do
     * `meta`  — a JSON object `{"pk": <first row's PK cols>}` used to build the
       `Location` header.
   """
-  def build_representation(%Relation{} = relation, plan, relations, {source_sql, source_params}) do
+  def build_representation(
+        %Relation{} = relation,
+        plan,
+        relations,
+        {source_sql, source_params},
+        opts \\ []
+      ) do
     cte = "pgrst_source"
 
     state = %State{
@@ -387,7 +397,8 @@ defmodule Bier.QueryExecutor do
       embed_offsets: plan[:embed_offsets] || %{},
       from_override: cte,
       params: Enum.reverse(source_params),
-      count: length(source_params)
+      count: length(source_params),
+      format: Keyword.get(opts, :format, :json)
     }
 
     try do

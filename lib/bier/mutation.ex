@@ -197,7 +197,9 @@ defmodule Bier.Mutation do
 
     {:ok, wrapped, wparams} =
       Bier.ServerTiming.measure(:plan, fn ->
-        QueryExecutor.build_representation(write.relation, write.plan, relations, {sql, params})
+        QueryExecutor.build_representation(write.relation, write.plan, relations, {sql, params},
+          format: MediaType.executor_format(write.media)
+        )
       end)
 
     result =
@@ -346,8 +348,16 @@ defmodule Bier.Mutation do
     conn
     |> put_pref_applied(pref)
     |> put_resp_header("content-type", MediaType.content_type(media))
-    |> send_resp(status, "[]")
+    |> send_resp(status, empty_set_body(media))
   end
+
+  # PostgREST renders geo+json bodies in SQL via json_build_object, whose
+  # spaced output is part of the wire format; the empty-set short-circuit
+  # must emit the same bytes (verified against live PostgREST 14.12).
+  defp empty_set_body(%MediaType{symbol: :geojson}),
+    do: ~s({"type" : "FeatureCollection", "features" : []})
+
+  defp empty_set_body(_media), do: "[]"
 
   # Empty-object PATCH: no-op, 204, Content-Range */*, no body.
   defp respond_empty_update(conn, pref) do
@@ -944,8 +954,20 @@ defmodule Bier.Mutation do
   end
 
   # A column type validated for use in a `::cast`. Types come from introspection
-  # (`format_type`), so they are trusted, but we still constrain the charset.
-  defp type_cast(type), do: QueryExecutor.quote_type(type)
+  # (`format_type(atttypid, atttypmod)`), so they are trusted (never
+  # user-supplied), but we still constrain the charset defensively. Unlike
+  # `QueryExecutor.quote_type/1` — which guards the *user-controlled*
+  # `?select=col::type` cast (case 1805) and must reject `(`/`)`/`,` to stay
+  # injection-safe — introspected types legitimately carry typmod syntax
+  # (`numeric(10,2)`, `geometry(Point,4326)`), so those characters are allowed
+  # here.
+  defp type_cast(type) do
+    if Regex.match?(~r/^[A-Za-z0-9_ \[\]\".,()]+$/, type) do
+      type
+    else
+      throw({:bad_request, :bad_cast})
+    end
+  end
 
   defp qrel(relation), do: QueryExecutor.qrel(relation)
   defp q(ident), do: QueryExecutor.quote_ident(ident)

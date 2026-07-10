@@ -370,7 +370,7 @@ defmodule Bier.Plugs.ActionController do
   end
 
   defp handle(method, conn, config, relation) when method in ["POST", "PATCH", "PUT", "DELETE"] do
-    with {:ok, media} <- Negotiation.resolve(conn, relation_producers(config)) do
+    with {:ok, media} <- Negotiation.resolve(conn, read_producers(config)) do
       Mutation.handle(conn, config, relation, media)
     end
   end
@@ -399,7 +399,7 @@ defmodule Bier.Plugs.ActionController do
              max_rows: config.db_max_rows,
              timezone: prefs.timezone,
              auth: auth_setup(conn, config),
-             format: format(media)
+             format: MediaType.executor_format(media)
            ) do
       conn
       |> put_preference_applied(prefs.applied)
@@ -408,12 +408,6 @@ defmodule Bier.Plugs.ActionController do
       )
     end
   end
-
-  # The executor's output format for the negotiated media type: geo+json rows
-  # are aggregated in SQL (ST_AsGeoJSON, see Bier.QueryExecutor); everything
-  # else consumes the plain JSON array.
-  defp format(%MediaType{symbol: :geojson}), do: :geojson
-  defp format(_media), do: :json
 
   # The auth-context tuple `{context, config}` threaded into the execution layer,
   # or nil when the request schema does not require role-switching/GUCs.
@@ -571,7 +565,8 @@ defmodule Bier.Plugs.ActionController do
   # relation's columns; a relation without a geometry column fails at
   # execution with 22023 "geometry column is missing" (case 1618), mirroring
   # PostgREST.
-  defp read_producers(config) do
+  @doc false
+  def read_producers(config) do
     producers = relation_producers(config)
 
     if Bier.SchemaCache.postgis?(config.name),
