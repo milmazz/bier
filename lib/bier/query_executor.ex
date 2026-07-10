@@ -529,12 +529,14 @@ defmodule Bier.QueryExecutor do
     {limit_sql, state} = build_limit(plan, state)
 
     # `_bier_cols` projects ONLY the named select-list (filtered, ordered) — no
-    # count column. Rendering its row with `to_json` then yields compact JSON
-    # matching PostgREST's wire bytes; `json_build_object` would space `"k" : v`
-    # and `to_jsonb` would space `{"k": v}`. The full-count window is a SIBLING of
-    # the row (not embedded then removed with the jsonb `-` operator, which the
-    # earlier attempt tripped on), and runs over the unlimited filtered set so it
-    # is the exact total before LIMIT/OFFSET. See issue #17.
+    # count column. Its row RECORD is threaded bare through the paged layer, so
+    # the outer `json_agg` renders PostgREST's exact wire bytes: compact row
+    # objects separated by `, \n `; `json_build_object` would space `"k" : v`,
+    # `to_jsonb` would space `{"k": v}`, and pre-rendering with `to_json` would
+    # drop the newline separator. The full-count window is a SIBLING of the row
+    # (not embedded then removed with the jsonb `-` operator, which the earlier
+    # attempt tripped on), and runs over the unlimited filtered set so it is the
+    # exact total before LIMIT/OFFSET. See issues #17 and #31.
     cols =
       "SELECT #{select_sql} FROM #{from_source(relation, state)}" <> where_sql <> order_sql
 
@@ -555,10 +557,13 @@ defmodule Bier.QueryExecutor do
   # and the remaining columns its properties — and the aggregate is wrapped in a
   # FeatureCollection, mirroring PostgREST's asGeoJsonF. A relation without a
   # geometry column raises SQLSTATE 22023 "geometry column is missing" (400).
-  # Only this flat path supports it: the advanced path pre-collapses each row
-  # into a JSON object, which ST_AsGeoJSON cannot consume.
+  # Both the simple and advanced paths render through this expression; the
+  # advanced path's derived table carries embeds as jsonb columns, which
+  # ST_AsGeoJSON places into `properties`. The `:json` case projects the bare
+  # record so the outer `json_agg` renders it (compact rows, `, \n ` row
+  # separators — PostgREST aggregates its derived table the same way).
   defp row_json(:geojson), do: "ST_AsGeoJSON(_bier_cols)::json"
-  defp row_json(_format), do: "to_json(_bier_cols)"
+  defp row_json(_format), do: "_bier_cols"
 
   defp aggregate_body(:geojson) do
     "json_build_object('type', 'FeatureCollection', 'features', " <>
@@ -577,8 +582,8 @@ defmodule Bier.QueryExecutor do
     # that embedded resource (semi/anti-join), not a real column filter.
     {null_embed_filters, column_filters} = split_embed_null_filters(plan.filters, plan.select)
 
-    {row_expr, state} =
-      Embed.build_row_object(
+    {cols, laterals, state} =
+      Embed.build_row_select(
         plan.select,
         relation,
         al,
@@ -612,14 +617,31 @@ defmodule Bier.QueryExecutor do
 
     {limit_sql, state} = build_limit(plan, state)
 
+    # Project the named select list (embeds as correlated jsonb columns, spread
+    # via LATERAL) into a derived table and thread the ROW RECORD through the
+    # paged layer — json_agg over a record renders PostgREST's exact bytes
+    # (compact rows, `, \n ` separators), and ST_AsGeoJSON consumes the same
+    # record (issue #63). json_build_object would space `"k" : v` (issue #31).
+    # Same shape as build_simple: order inside, count window + LIMIT/OFFSET one
+    # level up.
+    {select_list, row_expr} =
+      case cols do
+        [] -> {"1 AS _bier_dummy", "'{}'::json"}
+        _ -> {Embed.render_cols(cols), row_json(state.format)}
+      end
+
     inner =
-      "SELECT #{row_expr} AS __row__, count(*) OVER() AS _bier_full_count FROM #{aliased_from}" <>
-        where_sql <> group_sql <> having <> order_sql <> limit_sql
+      "SELECT #{select_list} FROM #{aliased_from}#{Enum.join(laterals, "")}" <>
+        where_sql <> group_sql <> having <> order_sql
+
+    paged =
+      "SELECT #{row_expr} AS _bier_row, count(*) OVER() AS _bier_full_count " <>
+        "FROM (#{inner}) _bier_cols" <> limit_sql
 
     sql =
-      "SELECT coalesce(json_agg(_postgrest_t.__row__), '[]')::text AS body, " <>
+      "SELECT #{aggregate_body(state.format)} AS body, " <>
         "coalesce(max(_postgrest_t._bier_full_count), 0) AS full_count " <>
-        "FROM (#{inner}) _postgrest_t"
+        "FROM (#{paged}) _postgrest_t"
 
     {:ok, sql, Enum.reverse(state.params)}
   end
