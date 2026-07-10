@@ -31,7 +31,7 @@ def deps do
 end
 ```
 
-Requires Elixir `~> 1.18` (developed against Elixir 1.19 / OTP 28) and a
+Requires Elixir `~> 1.18` (developed against Elixir 1.20 / OTP 29) and a
 reachable PostgreSQL instance. Bier pulls in [Bandit][], [Plug][], [Postgrex][],
 and [NimbleOptions][] as runtime dependencies.
 

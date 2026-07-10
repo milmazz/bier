@@ -269,7 +269,7 @@ green, then run the **full** `mix test` to catch regressions, then `mix format`.
 ---
 
 ## 6. Gotchas discovered
-- `mise` pins Elixir 1.19.5 / OTP 28; `JSON` stdlib is the default encoder.
+- `mise` pins Elixir 1.20 / OTP 29; `JSON` stdlib is the default encoder.
 - The shell here is `fish`; `psql` lives at `/opt/homebrew/opt/libpq/bin/psql`.
 - Fixtures `GRANT` privileges to `postgrest_test_*` roles **on `test.*`**; if you
   add role-switching, mirror grants to area schemas or the anon role will get
