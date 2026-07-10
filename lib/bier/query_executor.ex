@@ -399,21 +399,16 @@ defmodule Bier.QueryExecutor do
             build_simple(relation, %{plan | filters: [], order: []}, state)
           end
 
-        case result do
-          {:ok, repr_sql, params} ->
-            meta = build_meta_select(relation)
+        {:ok, repr_sql, params} = result
+        meta = build_meta_select(relation)
 
-            sql =
-              "WITH #{cte} AS (#{source_sql}) " <>
-                "SELECT (SELECT body FROM (#{repr_sql}) _bier_repr) AS body, " <>
-                "(SELECT count(*) FROM #{cte}) AS count, " <>
-                "(#{meta}) AS meta"
+        sql =
+          "WITH #{cte} AS (#{source_sql}) " <>
+            "SELECT (SELECT body FROM (#{repr_sql}) _bier_repr) AS body, " <>
+            "(SELECT count(*) FROM #{cte}) AS count, " <>
+            "(#{meta}) AS meta"
 
-            {:ok, sql, params}
-
-          other ->
-            other
-        end
+        {:ok, sql, params}
       end
     catch
       {:embed_error, _} = err -> {:error, err}
