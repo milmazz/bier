@@ -15,6 +15,16 @@ and this project adheres to
   v14.12, including its `, \n ` row separator between top-level JSON array
   elements and jsonb-styled embed internals — this shifts `Content-Length` on
   any multi-row response compared to earlier Bier versions (#31).
+- **Breaking:** `Location` is no longer emitted on `POST`/`PUT` responses for
+  `Prefer: return=representation` or `return=minimal` — only
+  `return=headers-only` carries it now, matching PostgREST 14.12 (hosts that
+  read `Location` after a plain `POST` must switch to `return=headers-only`).
+- The empty-payload mutation short-circuit now carries a `Content-Range` of
+  `*/*` (`*/0` under `Prefer: count=exact`).
+- Scalar/composite RPC responses always carry `Content-Range` (`0-0/*`
+  without a count preference).
+- `Content-Profile` is echoed on success responses whenever more than one
+  schema is exposed and the profile-schema model is not configured.
 
 Nothing has been published to Hex yet. Current state of the library:
 

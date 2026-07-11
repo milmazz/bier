@@ -639,10 +639,15 @@ defmodule Bier.QueryExecutor do
     # (compact rows, `, \n ` separators), and ST_AsGeoJSON consumes the same
     # record (issue #63). json_build_object would space `"k" : v` (issue #31).
     # Same shape as build_simple: order inside, count window + LIMIT/OFFSET one
-    # level up.
+    # level up. An empty projection (`select=rel()`) has no columns to select
+    # from, so the derived table gets a dummy row: the plain-JSON shape renders
+    # it as `{}` directly, but geo+json must still route it through
+    # `row_json/1` so ST_AsGeoJSON sees the dummy record and raises 22023 (no
+    # geometry column), matching PostgREST instead of emitting a non-Feature.
     {select_list, row_expr} =
-      case cols do
-        [] -> {"1 AS _bier_dummy", "'{}'::json"}
+      case {cols, state.format} do
+        {[], :json} -> {"1 AS _bier_dummy", "'{}'::json"}
+        {[], _} -> {"1 AS _bier_dummy", row_json(state.format)}
         _ -> {Embed.render_cols(cols), row_json(state.format)}
       end
 

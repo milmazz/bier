@@ -375,14 +375,7 @@ defmodule Bier.Rpc do
   defp render_result(conn, %{ret_kind: kind} = _fn_def, body, media, guc)
        when kind in [:setof_record, :setof_scalar] do
     count_mode = Pagination.count_mode(conn)
-
-    # A count= preference combined with geo+json on a non-setof_rel RPC is out
-    # of conformance scope; the guard just prevents Response.row_count/1 from
-    # mis-decoding the FeatureCollection object as a (zero-length) row array.
-    count =
-      if count_mode == :none or media.symbol == :geojson,
-        do: 0,
-        else: Response.row_count(body)
+    count = if count_mode == :none, do: 0, else: Response.row_count(body)
 
     conn = Bier.Guc.put_headers(conn, guc)
     Response.render(conn, body, count, %{offset: 0}, count_mode, media, [])

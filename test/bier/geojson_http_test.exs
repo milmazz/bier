@@ -156,4 +156,23 @@ defmodule Bier.GeojsonHttpTest do
     assert decoded["type"] == "FeatureCollection"
     assert [%{"type" => "Feature", "geometry" => %{"type" => "Point"}}] = decoded["features"]
   end
+
+  test "empty-projection select with geo+json fails 400/22023", %{base: base} do
+    resp =
+      request!(base, :get, "/shops?select=shop_bles()", [{"accept", "application/geo+json"}])
+
+    assert resp.status == 400
+    assert %{"code" => "22023", "message" => "geometry column is missing"} = decode!(resp.body)
+  end
+
+  test "setof RPC with geo+json honors count=exact in Content-Range", %{base: base} do
+    resp =
+      request!(base, :get, "/rpc/get_shops", [
+        {"accept", "application/geo+json"},
+        {"prefer", "count=exact"}
+      ])
+
+    assert resp.status == 200
+    assert ["0-2/3"] = resp.headers["content-range"]
+  end
 end

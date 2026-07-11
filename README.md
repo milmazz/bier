@@ -329,11 +329,10 @@ ordering, pagination, representations, mutations, RPC, auth, errors, headers,
 content negotiation, OpenAPI, config, observability, and domain representations.
 PostgREST is the ground truth — each case cites the exact upstream source line.
 
-Roughly 400 of the ~475 active cases pass today; most of the remainder are bound
-by the frozen test harness or the local environment rather than by Bier itself.
-The `spec/` tree (behavior models + `COVERAGE.md`) and `docs/CONFORMANCE_IMPL.md`
-document the model and the build. Known feature gaps are tracked as GitHub issues
-(observability/telemetry, admin/health endpoints, …).
+The full suite passes today (0 failures; ~475 active of 532, the rest `:pending`
+and excluded). The `spec/` tree (behavior models + `COVERAGE.md`) and
+`docs/CONFORMANCE_IMPL.md` document the model and the build. Known feature gaps
+are tracked as GitHub issues (observability/telemetry, admin/health endpoints, …).
 
 ## Development
 
