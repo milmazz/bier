@@ -34,3 +34,6 @@ bier-*.tar
 # HTTP benchmark harness: downloaded postgrest binary and raw k6 results.
 /bench/http/bin/
 /bench/http/results/
+
+# Claude Code worktrees (session-managed, never committed)
+.claude/worktrees/
