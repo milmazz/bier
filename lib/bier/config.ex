@@ -9,6 +9,8 @@ defmodule Bier.Config do
   properly.
   """
 
+  alias Bier.JWT.RoleClaim
+
   @typedoc """
   Options given to `Bandit`
   """
@@ -42,7 +44,9 @@ defmodule Bier.Config do
           db_channel: String.t(),
           db_channel_enabled: boolean(),
           jwt_secret: String.t() | nil,
+          jwt_secret_is_base64: boolean(),
           jwt_aud: String.t() | nil,
+          jwt_role_claim_path: RoleClaim.path(),
           server_cors_allowed_origins: String.t() | nil,
           server_timing_enabled: boolean(),
           server_trace_header: String.t() | nil,
@@ -86,7 +90,9 @@ defmodule Bier.Config do
     db_channel: "pgrst",
     db_channel_enabled: true,
     server_timing_enabled: false,
-    log_level: :error
+    log_level: :error,
+    jwt_secret_is_base64: false,
+    jwt_role_claim_path: [{:key, "role"}]
   ]
 
   @doc """
@@ -116,8 +122,64 @@ defmodule Bier.Config do
            validate_admin_server_port(conf[:admin_server_port], get_in(conf, [:router, :port])),
          :ok <- validate_jwt_secret(conf[:jwt_secret]),
          :ok <- validate_jwt_aud(conf[:jwt_aud]),
-         :ok <- validate_db_channel(conf[:db_channel]) do
+         :ok <- validate_db_channel(conf[:db_channel]),
+         {:ok, conf} <- decode_jwt_secret(conf),
+         {:ok, conf} <- parse_jwt_role_claim_key(conf) do
       {:ok, struct!(__MODULE__, conf)}
+    end
+  end
+
+  # jwt-secret-is-base64: decode the configured secret before use, exactly like
+  # PostgREST's decodeSecret (Config.hs#L479-L488): URL-safe chars normalized
+  # (`-`->`+`, `_`->`/`, `.`->`=`), whitespace stripped, then a strict base64
+  # decode; failure is fatal (conformance case 1718). PostgREST checks the
+  # 32-byte minimum on the raw (pre-decode) text, hence decoding after
+  # validate_jwt_secret above.
+  defp decode_jwt_secret(conf) do
+    case {Keyword.get(conf, :jwt_secret_is_base64, false), conf[:jwt_secret]} do
+      {true, secret} when is_binary(secret) ->
+        case decode_base64_secret(secret) do
+          {:ok, decoded} -> {:ok, Keyword.put(conf, :jwt_secret, decoded)}
+          {:error, _} = err -> err
+        end
+
+      _other ->
+        {:ok, conf}
+    end
+  end
+
+  @doc """
+  Decode a base64 `jwt-secret` (jwt-secret-is-base64), accepting URL-safe
+  characters the way PostgREST does. Shared with the CLI so `--dump-config`
+  rejects an undecodable secret identically (case 1718).
+  """
+  @spec decode_base64_secret(String.t()) :: {:ok, binary()} | {:error, String.t()}
+  def decode_base64_secret(secret) do
+    normalized =
+      secret
+      |> String.replace(".", "=")
+      |> String.replace("-", "+")
+      |> String.replace("_", "/")
+      |> String.trim()
+
+    case Base.decode64(normalized) do
+      {:ok, decoded} -> {:ok, decoded}
+      :error -> {:error, "the jwt-secret is not valid base64"}
+    end
+  end
+
+  # jwt-role-claim-key: parse the JSPath once at boot and carry only the parsed
+  # path in the struct (per-request role extraction never re-parses; the raw
+  # text can be reconstructed with RoleClaim.dump/1). An invalid expression is
+  # fatal with PostgREST's message (conformance case 1711).
+  defp parse_jwt_role_claim_key(conf) do
+    case RoleClaim.parse(Keyword.get(conf, :jwt_role_claim_key, ".role")) do
+      {:ok, path} ->
+        {:ok,
+         conf |> Keyword.delete(:jwt_role_claim_key) |> Keyword.put(:jwt_role_claim_path, path)}
+
+      {:error, _} = err ->
+        err
     end
   end
 

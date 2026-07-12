@@ -247,6 +247,25 @@ defmodule Bier do
         `aud` claim is ignored.
         """
       ],
+      jwt_secret_is_base64: [
+        type: :boolean,
+        default: env(:jwt_secret_is_base64, false),
+        doc: """
+        When true, `jwt_secret` is base64-encoded and is decoded before use
+        (PostgREST jwt-secret-is-base64). URL-safe characters (`-`, `_`, and
+        `.` for padding) are accepted; a secret that fails to decode aborts
+        startup.
+        """
+      ],
+      jwt_role_claim_key: [
+        type: :string,
+        default: env(:jwt_role_claim_key, ".role"),
+        doc: """
+        JSPath to the database role inside the JWT claims (PostgREST
+        jwt-role-claim-key), e.g. `.role` (default) or `."https://example.com/roles"[0]`.
+        An expression that does not parse aborts startup.
+        """
+      ],
       server_cors_allowed_origins: [
         type: {:or, [:string, nil]},
         default: env(:server_cors_allowed_origins, nil),

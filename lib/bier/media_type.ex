@@ -168,6 +168,14 @@ defmodule Bier.MediaType do
   def content_type(%__MODULE__{mime: mime}), do: mime <> "; charset=utf-8"
 
   @doc """
+  The query-executor output format for a negotiated media type: `:geojson`
+  for `application/geo+json` (rows aggregated into a FeatureCollection via
+  ST_AsGeoJSON), `:json` for everything else.
+  """
+  def executor_format(%__MODULE__{symbol: :geojson}), do: :geojson
+  def executor_format(_media), do: :json
+
+  @doc """
   Negotiate the client's ordered `Accept` preferences against the producer's
   available media types (a list of symbols). Returns `{:ok, %MediaType{}}` for
   the first acceptable preference (client order wins), or `:not_acceptable`.

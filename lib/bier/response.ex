@@ -66,13 +66,21 @@ defmodule Bier.Response do
     |> send_resp(416, payload)
   end
 
-  @doc "Cheap row count without decoding when possible."
+  @doc """
+  Cheap row count without decoding when possible.
+
+  A geo+json body is a FeatureCollection object whose `features` array carries
+  one Feature per row; PostgREST computes `Content-Range` from the row window
+  regardless of the negotiated media type (live-verified against 14.12, e.g.
+  `0-2/*` on a geo+json read), so the Features are counted as rows.
+  """
   def row_count("[]"), do: 0
   def row_count("null"), do: 0
 
   def row_count(body) do
     case Bier.json_library().decode(body) do
       {:ok, list} when is_list(list) -> length(list)
+      {:ok, %{"type" => "FeatureCollection", "features" => features}} -> length(features)
       _ -> 0
     end
   end

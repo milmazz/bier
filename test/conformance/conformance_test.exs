@@ -21,11 +21,9 @@ defmodule Bier.ConformanceTest do
     1705 => :cli_parity,
     1727 => :cli_parity,
     1707 => :unmodeled_key,
-    1711 => :unmodeled_key,
     1714 => :unmodeled_key,
     1715 => :unmodeled_key,
     1716 => :unmodeled_key,
-    1718 => :unmodeled_key,
     1729 => :unmodeled_key,
     1724 => :db_config,
     1725 => :db_config

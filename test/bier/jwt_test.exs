@@ -43,6 +43,45 @@ defmodule Bier.JWTTest do
     end
   end
 
+  describe "jwt-role-claim-key (verify/4)" do
+    test "extracts the role from a custom nested path" do
+      {:ok, path} = Bier.JWT.RoleClaim.parse(".realm.roles[1]")
+      token = forge_hs256(%{"realm" => %{"roles" => ["writer", "admin"]}}, @hs_secret)
+      assert {:ok, %{role: "admin"}} = JWT.verify(token, @hs_secret, nil, path)
+    end
+
+    test "a token whose claims miss the custom path yields a nil role" do
+      {:ok, path} = Bier.JWT.RoleClaim.parse(".realm.roles[1]")
+      token = forge_hs256(%{"role" => "alice"}, @hs_secret)
+      assert {:ok, %{role: nil}} = JWT.verify(token, @hs_secret, nil, path)
+    end
+
+    test "verify/3 keeps the default .role path" do
+      token = forge_hs256(%{"role" => "alice"}, @hs_secret)
+      assert {:ok, %{role: "alice"}} = JWT.verify(token, @hs_secret, nil)
+    end
+  end
+
+  describe "jwt-secret-is-base64 (decoded secret end to end)" do
+    test "a token signed with the raw bytes verifies against the decoded secret" do
+      raw = :crypto.strong_rand_bytes(32)
+      encoded = Base.encode64(raw)
+
+      config =
+        Bier.Config.new!(
+          [jwt_secret: encoded, jwt_secret_is_base64: true],
+          Bier.schema()
+        )
+
+      assert config.jwt_secret == raw
+
+      token = forge_hs256(%{"role" => "alice"}, raw)
+      assert {:ok, %{role: "alice"}} = JWT.verify(token, config.jwt_secret, nil)
+      # The undecoded text must NOT verify it.
+      assert {:error, :jwt_invalid} = JWT.verify(token, encoded, nil)
+    end
+  end
+
   # Mint an HS256 token (header.payload.signature) signing with `key` as the HMAC
   # secret. Used only to construct test inputs.
   defp forge_hs256(claims, key) do

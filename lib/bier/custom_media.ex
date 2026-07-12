@@ -141,8 +141,8 @@ defmodule Bier.CustomMedia do
     handler.arg_type == "anyelement" and mime_matches?(handler.media_type, mt)
   end
 
-  defp mime_matches?(media_type, %MediaType{mime: mime}), do: media_type == mime
   defp mime_matches?(_media_type, %MediaType{symbol: :any}), do: false
+  defp mime_matches?(media_type, %MediaType{mime: mime}), do: media_type == mime
 
   defp media_domain?(type) when is_binary(type), do: String.contains?(type, "/")
   defp media_domain?(_), do: false

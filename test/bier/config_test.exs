@@ -58,4 +58,60 @@ defmodule Bier.ConfigTest do
       end
     end
   end
+
+  describe "decode_base64_secret/1 (jwt-secret-is-base64)" do
+    test "decodes standard and URL-safe base64 (PostgREST's char replacement)" do
+      raw = :crypto.strong_rand_bytes(32)
+      assert Bier.Config.decode_base64_secret(Base.encode64(raw)) == {:ok, raw}
+
+      # PostgREST replaces `-`->`+`, `_`->`/`, `.`->`=` before decoding.
+      url_safe = raw |> Base.url_encode64() |> String.replace("=", ".")
+      assert Bier.Config.decode_base64_secret(url_safe) == {:ok, raw}
+    end
+
+    test "surrounding whitespace is stripped" do
+      raw = :crypto.strong_rand_bytes(32)
+      assert Bier.Config.decode_base64_secret("  #{Base.encode64(raw)}\n") == {:ok, raw}
+    end
+
+    test "invalid base64 is rejected (case 1718)" do
+      assert {:error, "the jwt-secret is not valid base64"} =
+               Bier.Config.decode_base64_secret("no base-64!")
+    end
+
+    test "new!/2 stores the decoded secret; an undecodable one raises" do
+      raw = :crypto.strong_rand_bytes(32)
+
+      config =
+        Bier.Config.new!(
+          [jwt_secret: Base.encode64(raw), jwt_secret_is_base64: true],
+          Bier.schema()
+        )
+
+      assert config.jwt_secret == raw
+
+      assert_raise ArgumentError, ~r/not valid base64/, fn ->
+        Bier.Config.new!(
+          [jwt_secret: String.duplicate("no base-64!", 3), jwt_secret_is_base64: true],
+          Bier.schema()
+        )
+      end
+    end
+  end
+
+  describe "jwt_role_claim_key" do
+    test "parses into jwt_role_claim_path at boot (default .role)" do
+      config = Bier.Config.new!([], Bier.schema())
+      assert config.jwt_role_claim_path == [{:key, "role"}]
+
+      config = Bier.Config.new!([jwt_role_claim_key: ".realm.roles[0]"], Bier.schema())
+      assert config.jwt_role_claim_path == [{:key, "realm"}, {:key, "roles"}, {:idx, 0}]
+    end
+
+    test "an invalid JSPath raises with PostgREST's message (case 1711)" do
+      assert_raise ArgumentError, ~r/failed to parse role-claim-key value \(role\.other\)/, fn ->
+        Bier.Config.new!([jwt_role_claim_key: "role.other"], Bier.schema())
+      end
+    end
+  end
 end

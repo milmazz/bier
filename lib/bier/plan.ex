@@ -20,7 +20,13 @@ defmodule Bier.Plan do
 
     with {:ok, sql, params} <-
            Bier.ServerTiming.measure(:plan, fn ->
-             QueryExecutor.build(relation, plan, relations(conn))
+             QueryExecutor.build(
+               relation,
+               plan,
+               relations(conn),
+               :json,
+               Bier.Pagination.count_mode(conn)
+             )
            end) do
       explain_sql = "EXPLAIN (#{explain_opts(format, media)}) " <> sql
 

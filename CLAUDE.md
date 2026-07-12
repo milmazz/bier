@@ -10,7 +10,7 @@ The pipeline is real, not stubbed: `Bier.Introspection` queries `pg_catalog`; `B
 
 ## Toolchain
 
-Elixir/OTP versions are pinned in `mise.toml` (Elixir 1.19.5 / OTP 28) and matched in `.github/workflows/elixir.yml`. `mix.exs` declares the lower bound at `elixir: "~> 1.18"`.
+Elixir/OTP versions are pinned in `mise.toml` (Elixir 1.20 / OTP 29) and matched in `.github/workflows/elixir.yml`. `mix.exs` declares the lower bound at `elixir: "~> 1.18"`.
 
 ## Common commands
 

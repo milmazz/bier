@@ -31,7 +31,7 @@ def deps do
 end
 ```
 
-Requires Elixir `~> 1.18` (developed against Elixir 1.19 / OTP 28) and a
+Requires Elixir `~> 1.18` (developed against Elixir 1.20 / OTP 29) and a
 reachable PostgreSQL instance. Bier pulls in [Bandit][], [Plug][], [Postgrex][],
 and [NimbleOptions][] as runtime dependencies.
 
@@ -302,6 +302,17 @@ error envelope.
 Every request runs as one parameterized SQL statement; the injection-safety
 model (what is bound vs. escaped, and why) is in [docs/injection_safety.md](docs/injection_safety.md).
 
+### Content negotiation
+
+Responses are rendered in the client's negotiated media type: `application/json`
+(default), `text/csv`, and `application/geo+json`. `geo+json` is offered on
+relation reads, on mutations sent with `Prefer: return=representation`, and on
+`/rpc/*` calls, whenever the PostGIS extension is installed (a target relation
+without a geometry column errors with SQLSTATE `22023`, mirroring PostgREST).
+`ST_AsGeoJSON` is emitted unqualified and resolves via the session
+`search_path` (matching PostgREST) — a PostGIS installed outside the
+search path fails at execution.
+
 ### The query parser
 
 `Bier.QueryParser` is a **generated**, dependency-free module built from its
@@ -318,11 +329,10 @@ ordering, pagination, representations, mutations, RPC, auth, errors, headers,
 content negotiation, OpenAPI, config, observability, and domain representations.
 PostgREST is the ground truth — each case cites the exact upstream source line.
 
-Roughly 400 of the ~475 active cases pass today; most of the remainder are bound
-by the frozen test harness or the local environment rather than by Bier itself.
-The `spec/` tree (behavior models + `COVERAGE.md`) and `docs/CONFORMANCE_IMPL.md`
-document the model and the build. Known feature gaps are tracked as GitHub issues
-(observability/telemetry, admin/health endpoints, …).
+The full suite passes today (0 failures; ~475 active of 532, the rest `:pending`
+and excluded). The `spec/` tree (behavior models + `COVERAGE.md`) and
+`docs/CONFORMANCE_IMPL.md` document the model and the build. Known feature gaps
+are tracked as GitHub issues (observability/telemetry, admin/health endpoints, …).
 
 ## Development
 
