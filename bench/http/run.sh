@@ -27,10 +27,20 @@ SMOKE=false
 # arrival stream keeps queueing; past the knee PostgREST queue-spirals into its
 # 10s pool-acquisition timeout and never recovers). Probed on this rig for r1:
 # 0.5-0.7 of the 60s closed-loop ceiling spiral 100% of the time; 0.4 sustains
-# with zero drops while still measuring the GC pauses as p90/p99 tail. Writes
-# (per-row INSERT/PATCH serialized through a pool of 10) knee even lower — 0.3.
+# with zero drops while still measuring the GC pauses as p90/p99 tail — but
+# only when probed cold. Ceilings are measured in the first minutes of the
+# run; ~40 min of sustained load erodes effective capacity (thermal drift +
+# Postgres background work from the write scenarios), and a full 3-round run
+# at 0.4 of the cold ceiling spiraled PostgREST in round 3 (p99 74ms -> 556ms
+# -> 2.7s across rounds at the same rate). 0.3 keeps the late-run effective
+# fraction at/below the cold-probed 0.4 sustainable point. Writes (per-row
+# INSERT/PATCH serialized through a pool of 10) knee even lower — 0.3, which
+# showed no cross-round drift into the knee.
 # Smoke uses gentler fractions: its 5s windows give a cold-started server no
-# time to absorb a burst, and smoke validates the pipeline, not the numbers.
+# time to absorb a burst, its 5s closed-loop ceilings over-predict even more
+# than the 60s ones (less GC exposure), and smoke validates the pipeline, not
+# the numbers (observed: smoke reads at 0.4 on a warm rig drove PostgREST
+# into its 10s pool-acquisition timeout — mass 5xx).
 # Override any via the env.
 # WARMUP/DURATION/ROUNDS/VUS are env-overridable around the per-mode defaults,
 # e.g. `ROUNDS=1 bench/http/run.sh` for a single-round full run, or
@@ -39,12 +49,12 @@ if [ "${1:-}" = "--smoke" ]; then
   SMOKE=true
   WARMUP="${WARMUP:-2s}"; DURATION="${DURATION:-5s}"
   ROUNDS="${ROUNDS:-1}"; VUS="${VUS:-25}"
-  RATE_FRACTION_READ="${RATE_FRACTION_READ:-0.4}"
+  RATE_FRACTION_READ="${RATE_FRACTION_READ:-0.2}"
   RATE_FRACTION_WRITE="${RATE_FRACTION_WRITE:-0.2}"
 else
   WARMUP="${WARMUP:-10s}"; DURATION="${DURATION:-60s}"
   ROUNDS="${ROUNDS:-3}"; VUS="${VUS:-100}"
-  RATE_FRACTION_READ="${RATE_FRACTION_READ:-0.4}"
+  RATE_FRACTION_READ="${RATE_FRACTION_READ:-0.3}"
   RATE_FRACTION_WRITE="${RATE_FRACTION_WRITE:-0.3}"
 fi
 

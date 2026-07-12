@@ -104,27 +104,39 @@ function prng(n) {
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
+// k6's default `name` tag is the full URL, so scenarios that randomize an id
+// in the query string (r1: 100k ids, m2: 10k) mint one time series per metric
+// per distinct URL — >100k series in a 60s r1 stage, blowing k6's suggested
+// cap and inflating its memory/CPU on the same machine as the server under
+// test. Pin `name` to a URL template so each stage stays at one series.
+const NAMES = {
+  r1: { tags: { name: '/items?id=eq.{id}' } },
+  r2: { tags: { name: '/items?category=eq.{cat}&order=id.desc&limit=25' } },
+  m1: { tags: { name: '/events' } },
+  m2: { tags: { name: '/events?id=eq.{id}' } },
+};
+
 export default function () {
   const r = prng(__VU * 1000003 + __ITER);
   let res;
   if (SCENARIO === 'r1') {
     const id = 1 + Math.floor(r * ITEMS);
-    res = http.get(`${BASE}/items?id=eq.${id}`);
+    res = http.get(`${BASE}/items?id=eq.${id}`, NAMES.r1);
   } else if (SCENARIO === 'r2') {
     const cat = 'category-' + String(1 + Math.floor(r * CATEGORIES)).padStart(2, '0');
-    res = http.get(`${BASE}/items?category=eq.${cat}&order=id.desc&limit=25`);
+    res = http.get(`${BASE}/items?category=eq.${cat}&order=id.desc&limit=25`, NAMES.r2);
   } else if (SCENARIO === 'm1') {
     res = http.post(
       `${BASE}/events`,
       JSON.stringify({ payload: `bench-${__VU}-${__ITER}`, occurred_at: '2026-07-09T00:00:00Z' }),
-      { headers: Object.assign({ Prefer: 'return=minimal' }, JSON_HEADERS) }
+      Object.assign({ headers: Object.assign({ Prefer: 'return=minimal' }, JSON_HEADERS) }, NAMES.m1)
     );
   } else if (SCENARIO === 'm2') {
     const id = 1 + Math.floor(r * EVENTS);
     res = http.patch(
       `${BASE}/events?id=eq.${id}`,
       JSON.stringify({ payload: `patched-${__VU}-${__ITER}` }),
-      { headers: JSON_HEADERS }
+      Object.assign({ headers: JSON_HEADERS }, NAMES.m2)
     );
   } else {
     throw new Error(`unknown SCENARIO: ${SCENARIO}`);
