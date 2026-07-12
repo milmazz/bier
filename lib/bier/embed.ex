@@ -5,11 +5,12 @@ defmodule Bier.Embed do
   Given the parsed select tree, the source `Relation`, its SQL alias, and the
   full introspection map, this module produces:
 
-    * `build_row_object/6` — a single JSON expression (`json_build_object(...)`)
-      that the executor wraps in `json_agg`. Scalar fields, json-paths, casts,
-      aggregates, computed columns, embeds (many-to-one / one-to-many /
-      many-to-many / one-to-one / spread / computed relationships) are rendered
-      here as correlated sub-queries.
+    * `build_row_select/6` — the named select list (`{expr, out_name}` pairs)
+      for a derived table whose row record the executor aggregates with
+      `json_agg`. Scalar fields, json-paths, casts, aggregates, computed
+      columns, embeds (many-to-one / one-to-many / many-to-many / one-to-one /
+      spread / computed relationships) are rendered here as correlated
+      sub-queries or, for spread, pulled up through a `LEFT JOIN LATERAL`.
     * `inner_join_where/6` — the extra `WHERE` predicate that an `!inner` embed
       (or an embedded filter that implies inner) adds to the *source* query so
       rows whose embedding is empty are dropped.
@@ -26,36 +27,34 @@ defmodule Bier.Embed do
   alias Bier.QueryExecutor, as: QE
 
   @doc """
-  Build the JSON object expression for a single row of `relation` (aliased as
-  `al`), given the select `nodes`. `embed_filters` maps embed paths to filter
+  Build the named select list for a single row of `relation` (aliased as `al`),
+  given the select `nodes`. Returns `{cols, laterals, state}`: `cols` is a list
+  of `{expr, out_name}` pairs (rendered with `render_cols/1`), `laterals` is a
+  list of ` LEFT JOIN LATERAL (...) ON true` clauses contributed by spread
+  embeds. Aggregating the derived table's row record (instead of a
+  `json_build_object` scalar, which spaces `"k" : v`) matches PostgREST's
+  wire bytes — see issue #31. `embed_filters` maps embed paths to filter
   nodes. `qe` is the executor module (passed to avoid a compile cycle).
   """
-  def build_row_object(nodes, %Relation{} = relation, al, embed_filters, state, qe) do
-    {pairs_and_spreads, state} =
+  def build_row_select(nodes, %Relation{} = relation, al, embed_filters, state, qe) do
+    {entries, state} =
       Enum.flat_map_reduce(nodes, state, fn node, st ->
         build_node(node, relation, al, embed_filters, st, qe)
       end)
 
-    {plain, spreads} =
-      Enum.split_with(pairs_and_spreads, fn
-        {:spread, _} -> false
-        _ -> true
-      end)
+    Enum.reduce(entries, {[], [], state}, fn
+      {:spread_cols, spread_cols, lateral}, {cols, lats, st} ->
+        {cols ++ spread_cols, lats ++ [lateral], st}
 
-    obj = "json_build_object(" <> Enum.join(plain, ", ") <> ")"
+      {_expr, _name} = col, {cols, lats, st} ->
+        {cols ++ [col], lats, st}
+    end)
+  end
 
-    case spreads do
-      [] ->
-        {obj, state}
-
-      _ ->
-        merged =
-          Enum.reduce(spreads, obj <> "::jsonb", fn {:spread, expr}, acc ->
-            "(#{acc} || #{expr})"
-          end)
-
-        {"(#{merged})::json", state}
-    end
+  @doc false
+  # Render `{expr, out_name}` pairs as a SQL select list.
+  def render_cols(cols) do
+    Enum.map_join(cols, ", ", fn {expr, name} -> "#{expr} AS #{QE.quote_ident(name)}" end)
   end
 
   # ---- node dispatch -------------------------------------------------------
@@ -71,7 +70,7 @@ defmodule Bier.Embed do
   defp build_node(%{kind: :field} = f, relation, al, _ef, state, _qe) do
     name = f.alias || QE.json_output_name(f.column, f.json_path)
     expr = field_expr(f, relation, al)
-    {[json_pair(name, expr)], state}
+    {[{expr, name}], state}
   end
 
   defp build_node(%{kind: :agg} = a, _relation, al, _ef, state, _qe) do
@@ -83,7 +82,7 @@ defmodule Bier.Embed do
 
     inner = if a.cast, do: "#{inner}::#{QE.quote_type(a.cast)}", else: inner
     name = a.alias || a.fun
-    {[json_pair(name, inner)], state}
+    {[{inner, name}], state}
   end
 
   # An empty-projection embed (`rel()`) establishes the relationship for null
@@ -99,7 +98,7 @@ defmodule Bier.Embed do
 
   defp star_pairs(relation, al) do
     Enum.map(relation.columns, fn c ->
-      json_pair(c.name, star_col_expr(relation, al, c.name))
+      {star_col_expr(relation, al, c.name), c.name}
     end)
   end
 
@@ -160,8 +159,8 @@ defmodule Bier.Embed do
         embed_offsets: deeper_offsets
     }
 
-    {child_obj, state} =
-      build_row_object(e.select, target, child_alias, deeper_filters, child_scope, qe)
+    {child_cols, child_laterals, state} =
+      build_row_select(e.select, target, child_alias, deeper_filters, child_scope, qe)
 
     state = struct!(state, saved)
 
@@ -174,51 +173,78 @@ defmodule Bier.Embed do
     page_sql = paginate_sql(own_limit, own_offset)
 
     from = from_clause(target, child_alias, rel, src_alias)
+    lateral_sql = Enum.join(child_laterals, "")
+    child_select = child_select_list(child_cols)
 
-    sub =
-      case kind do
-        :one ->
-          inner = "SELECT #{child_obj} AS __c__ FROM #{from}#{where_sql}#{order_sql} LIMIT 1"
-          "(SELECT __c__ FROM (#{inner}) __sub__)"
-
-        :many ->
-          inner = "SELECT #{child_obj} AS __c__ FROM #{from}#{where_sql}#{order_sql}#{page_sql}"
-          "COALESCE((SELECT json_agg(__c__) FROM (#{inner}) __sub__), '[]'::json)"
-      end
+    inner_base = "SELECT #{child_select} FROM #{from}#{lateral_sql}#{where_sql}#{order_sql}"
 
     if e.spread do
-      {[{:spread, spread_expr(sub, kind, e.select, target)}], state}
+      spread_entry(kind, child_cols, inner_base, page_sql, state)
     else
-      {[json_pair(out_name, sub)], state}
+      # Embed internals go through jsonb (to_jsonb / json_agg(to_jsonb(…))):
+      # PostgREST renders embedded objects jsonb-style — `": "` spacing and
+      # jsonb key normalization — while parent rows stay compact. Live-verified
+      # against PostgREST 14.12 (spec §0). An all-empty child select (only
+      # empty embeds, e.g. `rel(sub())`) still renders `{}` rows, as
+      # json_build_object() did — the jsonb wrapper over the `_bier_empty_row`
+      # placeholder column would produce `{"_bier_empty_row": {}}`, so it is
+      # special-cased to a bare `'{}'::json`.
+      sub =
+        case {kind, child_cols} do
+          {:one, []} ->
+            inner = "SELECT 1 FROM #{from}#{where_sql}#{order_sql} LIMIT 1"
+            "(SELECT '{}'::json FROM (#{inner}) _bier_c)"
+
+          {:many, []} ->
+            inner = "SELECT 1 FROM #{from}#{where_sql}#{order_sql}#{page_sql}"
+            "COALESCE((SELECT json_agg('{}'::json) FROM (#{inner}) _bier_c), '[]'::json)"
+
+          {:one, _cols} ->
+            "(SELECT to_jsonb(_bier_c) FROM (#{inner_base} LIMIT 1) _bier_c)"
+
+          {:many, _cols} ->
+            "COALESCE((SELECT json_agg(to_jsonb(_bier_c)) " <>
+              "FROM (#{inner_base}#{page_sql}) _bier_c), '[]'::json)"
+        end
+
+      {[{sub, out_name}], state}
     end
   end
 
-  # Spread merges the embedded object's keys into the parent row. For a missing
-  # many-to-one parent the keys must still appear with null values (a LEFT JOIN
-  # in PostgREST), so coalesce to a template object of {key: null, ...}.
-  defp spread_expr(sub, :one, select, target) do
-    "COALESCE(#{sub}, #{null_template(select, target)})::jsonb"
-  end
+  # A child select that projects no columns (e.g. every node is an empty
+  # embed) still renders `{}` rows, as json_build_object() did.
+  defp child_select_list([]), do: "'{}'::json AS _bier_empty_row"
+  defp child_select_list(cols), do: render_cols(cols)
 
-  defp spread_expr(sub, :many, _select, _target) do
-    "COALESCE(#{sub}, '[]'::json)::jsonb"
-  end
+  # Spread merges the embedded resource's columns into the parent row.
+  # PostgREST implements this by pulling the child's columns up through a
+  # LEFT JOIN LATERAL, so a missing to-one row contributes NULL columns (the
+  # keys stay present, value null) with no COALESCE template needed. A to-many
+  # spread aggregates each child column into a JSON array under its key
+  # (PostgREST v12.1 semantics).
+  defp spread_entry(kind, child_cols, inner_base, page_sql, state) do
+    seq = state.embed_seq + 1
+    state = %{state | embed_seq: seq}
+    spr = QE.quote_ident("_bier_spr#{seq}")
 
-  # A json object with every output key of `select` mapped to null. Used to keep
-  # spread keys present when the parent row is missing.
-  defp null_template(select, target) do
-    pairs =
-      select
-      |> Enum.flat_map(fn
-        :star -> Enum.map(target.columns, & &1.name)
-        %{kind: :star} -> Enum.map(target.columns, & &1.name)
-        %{kind: :field} = f -> [f.alias || QE.json_output_name(f.column, f.json_path)]
-        %{kind: :agg} = a -> [a.alias || a.fun]
-        _ -> []
-      end)
-      |> Enum.map_join(", ", fn key -> "#{QE.pg_literal(key)}, null" end)
+    lateral =
+      case kind do
+        :one ->
+          " LEFT JOIN LATERAL (#{inner_base} LIMIT 1) #{spr} ON true"
 
-    "json_build_object(#{pairs})"
+        :many ->
+          aggs =
+            Enum.map_join(child_cols, ", ", fn {_expr, name} ->
+              q = QE.quote_ident(name)
+              "COALESCE(json_agg(_bier_s.#{q}), '[]'::json) AS #{q}"
+            end)
+
+          " LEFT JOIN LATERAL (SELECT #{aggs} FROM (#{inner_base}#{page_sql}) _bier_s) " <>
+            "#{spr} ON true"
+      end
+
+    cols = Enum.map(child_cols, fn {_expr, name} -> {"#{spr}.#{QE.quote_ident(name)}", name} end)
+    {[{:spread_cols, cols, lateral}], state}
   end
 
   defp from_clause(target, child_alias, %{via: nil, join_cond: jc}, _src) when jc != :computed do
@@ -781,8 +807,6 @@ defmodule Bier.Embed do
 
   defp embed_alias(name, nil), do: name
   defp embed_alias(_name, al), do: al
-
-  defp json_pair(key, expr), do: "#{QE.pg_literal(key)}, #{expr}"
 
   defp col_expr(al, col), do: "#{QE.quote_ident(al)}.#{QE.quote_ident(col)}"
 end

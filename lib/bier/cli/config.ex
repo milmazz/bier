@@ -9,6 +9,8 @@ defmodule Bier.CLI.Config do
   deferred.
   """
 
+  alias Bier.JWT.RoleClaim
+
   # kind:
   #   :string | :opt_string | :int | :opt_int | :bool
   #   :csv | :csv_emptyable
@@ -95,6 +97,20 @@ defmodule Bier.CLI.Config do
       aliases: []
     },
     %{key: "jwt-aud", env: "PGRST_JWT_AUD", kind: :opt_string, default: :unset, aliases: []},
+    %{
+      key: "jwt-secret-is-base64",
+      env: "PGRST_JWT_SECRET_IS_BASE64",
+      kind: :bool,
+      default: false,
+      aliases: ["secret-is-base64"]
+    },
+    %{
+      key: "jwt-role-claim-key",
+      env: "PGRST_JWT_ROLE_CLAIM_KEY",
+      kind: :string,
+      default: ".role",
+      aliases: ["role-claim-key"]
+    },
     %{
       key: "openapi-mode",
       env: "PGRST_OPENAPI_MODE",
@@ -354,8 +370,40 @@ defmodule Bier.CLI.Config do
   defp validate({:ok, resolved}) do
     with :ok <- run_validator(resolved, "jwt-secret", &Bier.Config.validate_jwt_secret/1),
          :ok <- run_validator(resolved, "jwt-aud", &Bier.Config.validate_jwt_aud/1),
+         :ok <- validate_secret_base64(resolved),
+         {:ok, resolved} <- canonicalize_role_claim_key(resolved),
          :ok <- validate_admin_port(resolved) do
       {:ok, resolved}
+    end
+  end
+
+  # jwt-secret-is-base64=true with an undecodable secret is fatal even for
+  # `--dump-config` (case 1718). The decoded value is discarded here — the dump
+  # prints the raw secret; the boot path decodes again inside Bier.Config.new/2.
+  defp validate_secret_base64(resolved) do
+    case {resolved["jwt-secret-is-base64"], resolved["jwt-secret"]} do
+      {true, secret} when is_binary(secret) ->
+        with {:ok, _decoded} <- Bier.Config.decode_base64_secret(secret), do: :ok
+
+      _other ->
+        :ok
+    end
+  end
+
+  # jwt-role-claim-key parses as a JSPath (invalid is fatal, case 1711) and is
+  # re-serialized in PostgREST's canonical quoted form so `--dump-config`
+  # prints e.g. `.aliased` as `."aliased"` (case 1707). Known exotic edge: a
+  # quoted key containing a literal backslash gains show-style doubling here,
+  # and since the grammar has no escape form, the boot path re-parsing this
+  # canonical string would read the doubled form; PostgREST never re-parses
+  # its own dump, so upstream has no defined behavior to mirror.
+  defp canonicalize_role_claim_key(resolved) do
+    case RoleClaim.parse(resolved["jwt-role-claim-key"]) do
+      {:ok, path} ->
+        {:ok, Map.put(resolved, "jwt-role-claim-key", RoleClaim.dump(path))}
+
+      {:error, _} = err ->
+        err
     end
   end
 
@@ -397,7 +445,9 @@ defmodule Bier.CLI.Config do
         db_root_spec: resolved["db-root-spec"],
         admin_server_port: resolved["admin-server-port"],
         jwt_secret: resolved["jwt-secret"],
+        jwt_secret_is_base64: resolved["jwt-secret-is-base64"],
         jwt_aud: resolved["jwt-aud"],
+        jwt_role_claim_key: resolved["jwt-role-claim-key"],
         openapi_mode: resolved["openapi-mode"],
         openapi_security_active: resolved["openapi-security-active"],
         log_level: resolved["log-level"],

@@ -370,7 +370,7 @@ defmodule Bier.Plugs.ActionController do
   end
 
   defp handle(method, conn, config, relation) when method in ["POST", "PATCH", "PUT", "DELETE"] do
-    with {:ok, media} <- Negotiation.resolve(conn, relation_producers(config)) do
+    with {:ok, media} <- Negotiation.resolve(conn, read_producers(config)) do
       Mutation.handle(conn, config, relation, media)
     end
   end
@@ -399,7 +399,7 @@ defmodule Bier.Plugs.ActionController do
              max_rows: config.db_max_rows,
              timezone: prefs.timezone,
              auth: auth_setup(conn, config),
-             format: format(media)
+             format: MediaType.executor_format(media)
            ) do
       conn
       |> put_preference_applied(prefs.applied)
@@ -408,12 +408,6 @@ defmodule Bier.Plugs.ActionController do
       )
     end
   end
-
-  # The executor's output format for the negotiated media type: geo+json rows
-  # are aggregated in SQL (ST_AsGeoJSON, see Bier.QueryExecutor); everything
-  # else consumes the plain JSON array.
-  defp format(%MediaType{symbol: :geojson}), do: :geojson
-  defp format(_media), do: :json
 
   # The auth-context tuple `{context, config}` threaded into the execution layer,
   # or nil when the request schema does not require role-switching/GUCs.
@@ -458,9 +452,12 @@ defmodule Bier.Plugs.ActionController do
       # No explicit profile, or an area-label alias: resolve in the default
       # schema. When a multi-schema default is configured (db_profile_default),
       # relations live in that area's own schema (e.g. `headers`) but the echoed
-      # Content-Profile names the logical default (e.g. `v1`).
+      # Content-Profile names the logical default (e.g. `v1`). Without that
+      # model, PostgREST's rule applies: the resolved schema is echoed whenever
+      # more than one schema is exposed (live-verified against 14.12).
       is_nil(profile) or profile in @profile_aliases ->
-        {:ok, default_profile_schema(profile, config, default), config.db_profile_default}
+        schema = default_profile_schema(profile, config, default)
+        {:ok, schema, config.db_profile_default || multi_schema_profile(schema, config)}
 
       # An explicit, exposed schema: resolve there and echo it verbatim.
       profile in config.db_schemas ->
@@ -494,15 +491,23 @@ defmodule Bier.Plugs.ActionController do
     end
   end
 
-  # Echo Content-Profile for an explicit profile only when multi-schema profile
-  # routing is configured (the MultipleSchemaSpec cases). Other areas do not
-  # assert Content-Profile, and PostgREST omits it when a single schema is
-  # exposed, so we only echo for the configured profile schemas.
+  # Echo Content-Profile for an explicit profile. When multi-schema profile
+  # routing is configured (the MultipleSchemaSpec cases), only the configured
+  # profile schemas are echoed — the conformance harness exposes every area
+  # schema on one instance, but most areas' frozen cases were captured from
+  # single-schema PostgREST configs that emit no Content-Profile. Without that
+  # model, PostgREST's rule applies: the resolved schema is echoed whenever
+  # more than one schema is exposed (live-verified against 14.12).
   defp content_profile_for(profile, %{db_profile_schemas: schemas}) when is_list(schemas) do
     if profile in schemas, do: profile, else: nil
   end
 
-  defp content_profile_for(_profile, _config), do: nil
+  defp content_profile_for(profile, config), do: multi_schema_profile(profile, config)
+
+  # PostgREST omits Content-Profile when a single schema is exposed and echoes
+  # the resolved schema when more than one is.
+  defp multi_schema_profile(schema, %{db_schemas: [_, _ | _]}), do: schema
+  defp multi_schema_profile(_schema, _config), do: nil
 
   defp exposed_profiles(%{db_profile_schemas: schemas}) when is_list(schemas), do: schemas
   defp exposed_profiles(_config), do: nil
@@ -565,12 +570,14 @@ defmodule Bier.Plugs.ActionController do
     if config.db_plan_enabled, do: base ++ [:plan], else: base
   end
 
-  # Relation reads additionally offer `application/geo+json` when the postgis
-  # extension is installed (its rendering needs ST_AsGeoJSON). The producer is
-  # offered regardless of the relation's columns; a relation without a geometry
-  # column fails at execution with 22023 "geometry column is missing" (case
-  # 1618), mirroring PostgREST.
-  defp read_producers(config) do
+  # Relation reads (and, since #63, mutations) additionally offer
+  # `application/geo+json` when the postgis extension is installed (its
+  # rendering needs ST_AsGeoJSON). The producer is offered regardless of the
+  # relation's columns; a relation without a geometry column fails at
+  # execution with 22023 "geometry column is missing" (case 1618), mirroring
+  # PostgREST.
+  @doc false
+  def read_producers(config) do
     producers = relation_producers(config)
 
     if Bier.SchemaCache.postgis?(config.name),

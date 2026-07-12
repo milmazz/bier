@@ -30,6 +30,10 @@ defmodule Bier.JWT do
   used to populate `request.jwt.claims`.
   """
 
+  alias Bier.JWT.RoleClaim
+
+  @default_role_claim_path [{:key, "role"}]
+
   @doc """
   Verify the bearer token from the `Authorization` header.
 
@@ -37,14 +41,20 @@ defmodule Bier.JWT do
     * a present token, no secret      -> `{:error, :no_secret}`
     * a present, valid token          -> `{:ok, %{role:, claims:, claims_json:}}`
     * a present, invalid token        -> `{:error, reason}`
+
+  `role_claim_path` is the parsed `jwt-role-claim-key` JSPath
+  (`Bier.JWT.RoleClaim`) locating the role inside the claims; it defaults to
+  PostgREST's `.role`.
   """
-  @spec verify(String.t() | nil, String.t() | nil, String.t() | nil) ::
+  @spec verify(String.t() | nil, String.t() | nil, String.t() | nil, RoleClaim.path()) ::
           {:ok, :anonymous}
           | {:ok, %{role: String.t() | nil, claims: map(), claims_json: String.t()}}
           | {:error, atom() | {atom(), term()}}
-  def verify(nil, _secret, _aud), do: {:ok, :anonymous}
+  def verify(token, secret, aud, role_claim_path \\ @default_role_claim_path)
 
-  def verify(token, secret, aud) when is_binary(token) do
+  def verify(nil, _secret, _aud, _role_claim_path), do: {:ok, :anonymous}
+
+  def verify(token, secret, aud, role_claim_path) when is_binary(token) do
     trimmed = String.trim(token)
 
     cond do
@@ -55,11 +65,11 @@ defmodule Bier.JWT do
         {:error, :no_secret}
 
       true ->
-        verify_token(trimmed, secret, aud)
+        verify_token(trimmed, secret, aud, role_claim_path)
     end
   end
 
-  defp verify_token(token, secret, aud) do
+  defp verify_token(token, secret, aud, role_claim_path) do
     parts = String.split(token, ".")
 
     case parts do
@@ -72,7 +82,7 @@ defmodule Bier.JWT do
              :ok <- validate_audience(claims, aud) do
           {:ok,
            %{
-             role: role_claim(claims),
+             role: RoleClaim.extract(claims, role_claim_path),
              claims: claims,
              claims_json: Bier.json_library().encode!(claims)
            }}
@@ -176,9 +186,6 @@ defmodule Bier.JWT do
 
   defp check_aud_membership(aud, expected) when is_list(aud),
     do: if(expected in aud, do: :ok, else: {:error, :not_in_audience})
-
-  defp role_claim(%{"role" => role}) when is_binary(role) and role != "", do: role
-  defp role_claim(_), do: nil
 
   # ---- decoding helpers ---------------------------------------------------
 

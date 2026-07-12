@@ -81,12 +81,12 @@ defmodule Bier.QueryExecutorCountTest do
     fn_def = %{schema: "test", name: "getallprojects"}
 
     assert {:ok, none_sql, _} =
-             Bier.QueryExecutor.build_function(fn_def, projects, [], plan, rels, :none)
+             Bier.QueryExecutor.build_function(fn_def, projects, [], plan, rels, :json, :none)
 
     refute none_sql =~ "OVER()"
 
     assert {:ok, exact_sql, _} =
-             Bier.QueryExecutor.build_function(fn_def, projects, [], plan, rels, :exact)
+             Bier.QueryExecutor.build_function(fn_def, projects, [], plan, rels, :json, :exact)
 
     assert exact_sql =~ "count(*) OVER() AS _bier_full_count"
   end
