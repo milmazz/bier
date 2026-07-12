@@ -75,4 +75,19 @@ defmodule Bier.QueryExecutorCountTest do
     assert page_count == 2
     assert full_count >= page_count
   end
+
+  test "RPC build honors the count mode", %{projects: projects, rels: rels} do
+    {:ok, plan} = Bier.QueryParser.parse_request("limit=5")
+    fn_def = %{schema: "test", name: "getallprojects"}
+
+    assert {:ok, none_sql, _} =
+             Bier.QueryExecutor.build_function(fn_def, projects, [], plan, rels, :none)
+
+    refute none_sql =~ "OVER()"
+
+    assert {:ok, exact_sql, _} =
+             Bier.QueryExecutor.build_function(fn_def, projects, [], plan, rels, :exact)
+
+    assert exact_sql =~ "count(*) OVER() AS _bier_full_count"
+  end
 end

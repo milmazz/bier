@@ -281,7 +281,7 @@ defmodule Bier.QueryExecutor do
 
     try do
       case Bier.ServerTiming.measure(:plan, fn ->
-             build_function(fn_def, ret_relation, args, plan, relations)
+             build_function(fn_def, ret_relation, args, plan, relations, count_mode)
            end) do
         {:ok, sql, params} ->
           Bier.ServerTiming.measure(:transaction, fn ->
@@ -313,7 +313,10 @@ defmodule Bier.QueryExecutor do
   defp count_for(:none, _exact), do: 0
   defp count_for(_mode, exact), do: exact
 
-  defp build_function(fn_def, ret_relation, args, plan, relations) do
+  @doc false
+  # RPC reads consume the window count for every non-:none mode (`count_for/2`
+  # returns it for :exact/:planned/:estimated alike), so gate on :none only.
+  def build_function(fn_def, ret_relation, args, plan, relations, count_mode \\ :none) do
     # Bind the function arguments first so their params lead the parameter list;
     # the function call becomes the FROM source for the read builder.
     {arg_sql, arg_state} = build_function_args(args, %State{relation: ret_relation})
@@ -339,7 +342,8 @@ defmodule Bier.QueryExecutor do
       embed_offsets: plan[:embed_offsets] || %{},
       from_override: from,
       params: arg_state.params,
-      count: arg_state.count
+      count: arg_state.count,
+      full_count?: count_mode != :none
     }
 
     with :ok <- validate_embed_filters(plan) do
