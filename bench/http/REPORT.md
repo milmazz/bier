@@ -16,47 +16,47 @@
 
 ## R1 — single row by PK
 
-Request: `GET /items?id=eq.<id>` — latency measured at a shared arrival rate of **1330 req/s**.
+Request: `GET /items?id=eq.<id>` — latency measured at a shared arrival rate of **1365 req/s**.
 
 | Metric | Bier | PostgREST | Bier / PostgREST |
 |---|---|---|---|
-| Max throughput (req/s) | 18543.92 | 4434.36 | 4.18x |
-| p50 latency (ms) | 0.58 (0.56–0.65) | 0.68 (0.68–0.68) | 0.86x (lower is better) |
-| p90 latency (ms) | 0.78 (0.76–0.81) | 0.84 (0.83–1.21) | 0.93x (lower is better) |
-| p99 latency (ms) | 3.87 (3.79–5.10) | 4.26 (4.18–829.81) | 0.91x (lower is better) |
+| Max throughput (req/s) | 18689.62 | 4551.32 | 4.11x |
+| p50 latency (ms) | 0.60 (0.53–0.60) | 0.62 (0.62–0.63) | 0.95x (lower is better) |
+| p90 latency (ms) | 0.81 (0.77–0.81) | 0.84 (0.83–1.37) | 0.97x (lower is better) |
+| p99 latency (ms) | 10.78 (10.06–13.49) | 10.06 (8.94–851.07) | 1.07x (lower is better) |
 
 ## R2 — filtered 25-row page
 
-Request: `GET /items?category=eq.<cat>&order=id.desc&limit=25` — latency measured at a shared arrival rate of **1067 req/s**.
+Request: `GET /items?category=eq.<cat>&order=id.desc&limit=25` — latency measured at a shared arrival rate of **1088 req/s**.
 
 | Metric | Bier | PostgREST | Bier / PostgREST |
 |---|---|---|---|
-| Max throughput (req/s) | 13698.48 | 3556.87 | 3.85x |
-| p50 latency (ms) | 1.14 (1.12–1.14) | 0.95 (0.95–0.96) | 1.19x (lower is better) |
-| p90 latency (ms) | 2.51 (2.35–2.69) | 1.55 (1.53–1.60) | 1.62x (lower is better) |
-| p99 latency (ms) | 14.67 (9.39–15.67) | 6.58 (6.39–8.77) | 2.23x (lower is better) |
+| Max throughput (req/s) | 13822.50 | 3628.72 | 3.81x |
+| p50 latency (ms) | 1.12 (1.10–1.14) | 0.90 (0.89–0.93) | 1.25x (lower is better) |
+| p90 latency (ms) | 2.51 (2.34–2.63) | 1.67 (1.52–2.48) | 1.50x (lower is better) |
+| p99 latency (ms) | 10.43 (10.28–12.86) | 14.96 (7.73–898.14) | 0.70x (lower is better) |
 
 ## M1 — insert
 
-Request: `POST /events` (`Prefer: return=minimal`) — latency measured at a shared arrival rate of **1133 req/s**.
+Request: `POST /events` (`Prefer: return=minimal`) — latency measured at a shared arrival rate of **1145 req/s**.
 
 | Metric | Bier | PostgREST | Bier / PostgREST |
 |---|---|---|---|
-| Max throughput (req/s) | 8561.27 | 3777.28 | 2.27x |
-| p50 latency (ms) | 0.59 (0.59–0.60) | 0.77 (0.77–0.78) | 0.77x (lower is better) |
-| p90 latency (ms) | 1.16 (1.15–1.19) | 1.00 (0.99–1.04) | 1.16x (lower is better) |
-| p99 latency (ms) | 2.33 (2.09–3.89) | 5.84 (4.68–68.31) | 0.40x (lower is better) |
+| Max throughput (req/s) | 8601.69 | 3817.58 | 2.25x |
+| p50 latency (ms) | 0.59 (0.59–0.59) | 0.75 (0.75–0.75) | 0.79x (lower is better) |
+| p90 latency (ms) | 1.16 (1.13–1.18) | 0.98 (0.98–1.10) | 1.19x (lower is better) |
+| p99 latency (ms) | 3.43 (2.04–5.22) | 4.54 (4.37–225.76) | 0.76x (lower is better) |
 
 ## M2 — update by PK
 
-Request: `PATCH /events?id=eq.<id>` — latency measured at a shared arrival rate of **1111 req/s**.
+Request: `PATCH /events?id=eq.<id>` — latency measured at a shared arrival rate of **1142 req/s**.
 
 | Metric | Bier | PostgREST | Bier / PostgREST |
 |---|---|---|---|
-| Max throughput (req/s) | 8533.25 | 3704.28 | 2.30x |
-| p50 latency (ms) | 0.61 (0.60–0.64) | 0.78 (0.78–0.79) | 0.78x (lower is better) |
-| p90 latency (ms) | 1.20 (1.17–1.44) | 1.01 (1.00–1.02) | 1.19x (lower is better) |
-| p99 latency (ms) | 6.45 (3.51–134.54) | 4.59 (4.28–5.56) | 1.41x (lower is better) |
+| Max throughput (req/s) | 8738.21 | 3807.46 | 2.30x |
+| p50 latency (ms) | 0.59 (0.59–0.59) | 0.77 (0.76–0.77) | 0.77x (lower is better) |
+| p90 latency (ms) | 1.15 (1.14–1.16) | 1.01 (0.99–1.02) | 1.13x (lower is better) |
+| p99 latency (ms) | 2.38 (2.36–3.47) | 6.22 (5.90–12.19) | 0.38x (lower is better) |
 
 ## Methodology
 

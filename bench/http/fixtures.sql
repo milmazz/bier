@@ -46,6 +46,14 @@ CREATE TABLE bench.events (
   occurred_at timestamptz NOT NULL
 );
 
+-- The ~80k updates per M2 window trip the autovacuum threshold every write
+-- stage; when the pass lands inside a measurement window it stalls the tail
+-- of whichever server is being measured (p99 5ms -> ~50ms, p50/p90 flat).
+-- TRUNCATE in reset_events() already restores identical table state before
+-- every window, so autovacuum adds nothing but nondeterminism here; run.sh
+-- ANALYZEs after each reset, which covers the stats autoanalyze would supply.
+ALTER TABLE bench.events SET (autovacuum_enabled = off);
+
 CREATE FUNCTION bench.reset_events() RETURNS void
 LANGUAGE sql AS $$
   TRUNCATE bench.events RESTART IDENTITY;
