@@ -90,4 +90,15 @@ defmodule Bier.QueryExecutorCountTest do
 
     assert exact_sql =~ "count(*) OVER() AS _bier_full_count"
   end
+
+  test "mutation representation never carries a window count", %{projects: projects, rels: rels} do
+    {:ok, plan} = Bier.QueryParser.parse_request("select=id,name")
+    source = {"INSERT INTO \"test\".\"projects\" (\"name\") VALUES ($1) RETURNING *", ["x"]}
+
+    assert {:ok, sql, _params} =
+             Bier.QueryExecutor.build_representation(projects, plan, rels, source)
+
+    refute sql =~ "OVER()"
+    assert sql =~ "(SELECT count(*) FROM pgrst_source) AS count"
+  end
 end

@@ -401,7 +401,10 @@ defmodule Bier.QueryExecutor do
       embed_offsets: plan[:embed_offsets] || %{},
       from_override: cte,
       params: Enum.reverse(source_params),
-      count: length(source_params)
+      count: length(source_params),
+      # Only `body` is selected out of the representation subquery; the mutated
+      # row count comes from the `(SELECT count(*) FROM pgrst_source)` sibling.
+      full_count?: false
     }
 
     try do
