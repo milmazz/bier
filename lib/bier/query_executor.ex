@@ -11,6 +11,9 @@ defmodule Bier.QueryExecutor do
       FROM ( SELECT <select-list> FROM <schema>.<relation>
              WHERE <filters> ORDER BY <order> LIMIT <l> OFFSET <o> ) _postgrest_t;
 
+  The window count (`count(*) OVER()`) is emitted only for `Prefer: count=exact|estimated`,
+  avoiding a WindowAgg materialization when not needed (`:none` and `:planned` modes).
+
   User-supplied values are always passed as bound parameters (`$1`, `$2`, …);
   identifiers (columns) are validated by the parser and quoted here.
   """
@@ -37,7 +40,12 @@ defmodule Bier.QueryExecutor do
               from_override: nil,
               # Output aggregation: :json (a JSON array) or :geojson (a GeoJSON
               # FeatureCollection built with ST_AsGeoJSON).
-              format: :json
+              format: :json,
+              # Whether the query must carry the full (pre-LIMIT) row count via
+              # `count(*) OVER()`. Only `Prefer: count=exact|estimated` consume
+              # it; emitting it unconditionally forces the whole filtered set
+              # through a WindowAgg before LIMIT, defeating top-N plans.
+              full_count?: true
   end
 
   @doc """
@@ -64,7 +72,9 @@ defmodule Bier.QueryExecutor do
     format = Keyword.get(opts, :format, :json)
 
     with {:ok, sql, params} <-
-           Bier.ServerTiming.measure(:plan, fn -> build(relation, plan, relations, format) end) do
+           Bier.ServerTiming.measure(:plan, fn ->
+             build(relation, plan, relations, format, count_mode)
+           end) do
       Bier.ServerTiming.measure(:transaction, fn ->
         case query_read(conn, sql, params, timezone, auth) do
           {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
@@ -275,7 +285,7 @@ defmodule Bier.QueryExecutor do
 
     try do
       case Bier.ServerTiming.measure(:plan, fn ->
-             build_function(fn_def, ret_relation, args, plan, relations, format)
+             build_function(fn_def, ret_relation, args, plan, relations, format, count_mode)
            end) do
         {:ok, sql, params} ->
           Bier.ServerTiming.measure(:transaction, fn ->
@@ -307,7 +317,10 @@ defmodule Bier.QueryExecutor do
   defp count_for(:none, _exact), do: 0
   defp count_for(_mode, exact), do: exact
 
-  defp build_function(fn_def, ret_relation, args, plan, relations, format) do
+  @doc false
+  # RPC reads consume the window count for every non-:none mode (`count_for/2`
+  # returns it for :exact/:planned/:estimated alike), so gate on :none only.
+  def build_function(fn_def, ret_relation, args, plan, relations, format, count_mode \\ :none) do
     # Bind the function arguments first so their params lead the parameter list;
     # the function call becomes the FROM source for the read builder.
     {arg_sql, arg_state} = build_function_args(args, %State{relation: ret_relation})
@@ -334,7 +347,8 @@ defmodule Bier.QueryExecutor do
       from_override: from,
       params: arg_state.params,
       count: arg_state.count,
-      format: format
+      format: format,
+      full_count?: count_mode != :none
     }
 
     with :ok <- validate_embed_filters(plan) do
@@ -403,7 +417,10 @@ defmodule Bier.QueryExecutor do
       from_override: cte,
       params: Enum.reverse(source_params),
       count: length(source_params),
-      format: Keyword.get(opts, :format, :json)
+      format: Keyword.get(opts, :format, :json),
+      # Only `body` is selected out of the representation subquery; the mutated
+      # row count comes from the `(SELECT count(*) FROM pgrst_source)` sibling.
+      full_count?: false
     }
 
     try do
@@ -451,9 +468,9 @@ defmodule Bier.QueryExecutor do
   end
 
   @doc false
-  def build(relation, plan, relations \\ %{}, format \\ :json)
+  def build(relation, plan, relations \\ %{}, format \\ :json, count_mode \\ :none)
 
-  def build(%Relation{} = relation, plan, relations, format) do
+  def build(%Relation{} = relation, plan, relations, format, count_mode) do
     state = %State{
       relation: relation,
       relations: relations,
@@ -461,7 +478,8 @@ defmodule Bier.QueryExecutor do
       embed_orders: plan[:embed_orders] || %{},
       embed_limits: plan[:embed_limits] || %{},
       embed_offsets: plan[:embed_offsets] || %{},
-      format: format
+      format: format,
+      full_count?: count_mode in [:exact, :estimated]
     }
 
     try do
@@ -557,12 +575,12 @@ defmodule Bier.QueryExecutor do
       "SELECT #{select_sql} FROM #{from_source(relation, state)}" <> where_sql <> order_sql
 
     paged =
-      "SELECT #{row_json(state.format)} AS _bier_row, count(*) OVER() AS _bier_full_count " <>
+      "SELECT #{row_json(state.format)} AS _bier_row#{window_count_col(state)} " <>
         "FROM (#{cols}) _bier_cols" <> limit_sql
 
     sql =
       "SELECT #{aggregate_body(state.format)} AS body, " <>
-        "coalesce(max(_postgrest_t._bier_full_count), 0) AS full_count " <>
+        "#{full_count_col(state)} " <>
         "FROM (#{paged}) _postgrest_t"
 
     {:ok, sql, Enum.reverse(state.params)}
@@ -587,6 +605,18 @@ defmodule Bier.QueryExecutor do
   end
 
   defp aggregate_body(_format), do: "coalesce(json_agg(_postgrest_t._bier_row), '[]')::text"
+
+  defp window_count_col(%State{full_count?: true}),
+    do: ", count(*) OVER() AS _bier_full_count"
+
+  defp window_count_col(%State{}), do: ""
+
+  # Without the window, `full_count` degrades to the page-row count — callers
+  # on the no-window modes ignore it (Response derives page rows from the body).
+  defp full_count_col(%State{full_count?: true}),
+    do: "coalesce(max(_postgrest_t._bier_full_count), 0) AS full_count"
+
+  defp full_count_col(%State{}), do: "count(*) AS full_count"
 
   # ---- advanced (embed/aggregate/spread) path ------------------------------
 
@@ -656,12 +686,12 @@ defmodule Bier.QueryExecutor do
         where_sql <> group_sql <> having <> order_sql
 
     paged =
-      "SELECT #{row_expr} AS _bier_row, count(*) OVER() AS _bier_full_count " <>
+      "SELECT #{row_expr} AS _bier_row#{window_count_col(state)} " <>
         "FROM (#{inner}) _bier_cols" <> limit_sql
 
     sql =
       "SELECT #{aggregate_body(state.format)} AS body, " <>
-        "coalesce(max(_postgrest_t._bier_full_count), 0) AS full_count " <>
+        "#{full_count_col(state)} " <>
         "FROM (#{paged}) _postgrest_t"
 
     {:ok, sql, Enum.reverse(state.params)}
