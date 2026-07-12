@@ -273,7 +273,7 @@ defmodule Bier.Rpc do
     case Map.fetch(relations, {fn_def.ret_schema, fn_def.ret_relation}) do
       {:ok, ret_rel} ->
         with {:ok, media} <-
-               Negotiation.resolve(conn, ActionController.relation_producers(config)),
+               Negotiation.resolve(conn, ActionController.read_producers(config)),
              {:ok, plan} <- parse_plan(conn, config, fn_def) do
           pool = Bier.Registry.via(config.name, Postgrex)
           count_mode = Pagination.count_mode(conn)
@@ -281,7 +281,8 @@ defmodule Bier.Rpc do
 
           case QueryExecutor.run_function(pool, fn_def, ret_rel, exec_args, plan,
                  count_mode: count_mode,
-                 relations: relations
+                 relations: relations,
+                 format: MediaType.executor_format(media)
                ) do
             {:ok, %{body: body, count: count}} ->
               columns = ActionController.csv_columns(plan, ret_rel)
@@ -302,7 +303,7 @@ defmodule Bier.Rpc do
   # A scalar RPC result can additionally be emitted as application/octet-stream
   # (cases 1622/1623), which is not a generally-available table producer.
   defp run(conn, config, fn_def, args) do
-    producers = ActionController.relation_producers(config) ++ [:octet]
+    producers = ActionController.read_producers(config) ++ [:octet]
 
     with {:ok, media} <- Negotiation.resolve(conn, producers) do
       pool = Bier.Registry.via(config.name, Postgrex)
@@ -330,6 +331,20 @@ defmodule Bier.Rpc do
   # JSON encoding (cases 1622/1623).
   defp result_sql(_fn_def, from, %MediaType{symbol: :octet}),
     do: "SELECT (#{from})::bytea"
+
+  # geo+json: aggregate the result rows into a FeatureCollection via
+  # ST_AsGeoJSON over the row record; a result without a geometry column
+  # raises 22023 at execution, mirroring PostgREST.
+  defp result_sql(fn_def, from, %MediaType{symbol: :geojson}) do
+    inner =
+      case fn_def.ret_kind do
+        kind when kind in [:setof_record, :composite] -> "SELECT * FROM #{from}"
+        _scalar -> "SELECT #{from} AS _v"
+      end
+
+    "SELECT json_build_object('type', 'FeatureCollection', 'features', " <>
+      "coalesce(json_agg(ST_AsGeoJSON(t)::json), '[]'))::text FROM (#{inner}) t"
+  end
 
   defp result_sql(fn_def, from, _media), do: result_sql(fn_def, from)
 
@@ -361,6 +376,7 @@ defmodule Bier.Rpc do
        when kind in [:setof_record, :setof_scalar] do
     count_mode = Pagination.count_mode(conn)
     count = if count_mode == :none, do: 0, else: Response.row_count(body)
+
     conn = Bier.Guc.put_headers(conn, guc)
     Response.render(conn, body, count, %{offset: 0}, count_mode, media, [])
   end
@@ -386,8 +402,11 @@ defmodule Bier.Rpc do
     |> send_resp(Bier.Guc.status(guc, 200), out)
   end
 
-  # A requested count on a scalar/composite result -> Content-Range 0-0/1.
-  defp maybe_scalar_content_range(conn, :none), do: conn
+  # A scalar/composite result is one row: PostgREST always emits a read-style
+  # Content-Range for it — `0-0/*` by default, `0-0/1` when a count preference
+  # supplies the total (live-verified against 14.12; frozen case 1403).
+  defp maybe_scalar_content_range(conn, :none),
+    do: put_resp_header(conn, "content-range", Pagination.content_range(0, 1, nil))
 
   defp maybe_scalar_content_range(conn, _count_mode),
     do: put_resp_header(conn, "content-range", Pagination.content_range(0, 1, 1))
