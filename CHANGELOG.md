@@ -25,6 +25,13 @@ and this project adheres to
   without a count preference).
 - `Content-Profile` is echoed on success responses whenever more than one
   schema is exposed and the profile-schema model is not configured.
+- Added `jwt_role_claim_key` (PostgREST `jwt-role-claim-key`, alias
+  `role-claim-key`): a JSPath selecting the database role inside the JWT
+  claims — nested keys, array indexes, and PostgREST's filter expressions are
+  supported; an invalid expression aborts startup (#49).
+- Added `jwt_secret_is_base64` (PostgREST `jwt-secret-is-base64`, alias
+  `secret-is-base64`): the JWT secret is base64-decoded before use (URL-safe
+  characters accepted); an undecodable secret aborts startup (#49).
 
 Nothing has been published to Hex yet. Current state of the library:
 

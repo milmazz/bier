@@ -53,7 +53,7 @@ defmodule Bier.Auth do
   def resolve(conn, config) do
     token = bearer_token(conn)
 
-    case JWT.verify(token, config.jwt_secret, config.jwt_aud) do
+    case JWT.verify(token, config.jwt_secret, config.jwt_aud, config.jwt_role_claim_path) do
       {:ok, :anonymous} ->
         build_context(conn, config, nil, anon_claims(config), true)
 
