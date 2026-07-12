@@ -197,7 +197,9 @@ defmodule Bier.Mutation do
 
     {:ok, wrapped, wparams} =
       Bier.ServerTiming.measure(:plan, fn ->
-        QueryExecutor.build_representation(write.relation, write.plan, relations, {sql, params})
+        QueryExecutor.build_representation(write.relation, write.plan, relations, {sql, params},
+          format: MediaType.executor_format(write.media)
+        )
       end)
 
     result =
@@ -341,13 +343,24 @@ defmodule Bier.Mutation do
 
   defp enforce_max_affected(_pref, _count), do: :ok
 
-  # Zero-row response without running SQL (empty payload).
+  # Zero-row response without running SQL (empty payload). PostgREST still
+  # emits the insert-style Content-Range (`*/*`, or `*/0` under count=exact) on
+  # this short-circuit — live-verified against 14.12.
   defp respond_empty_set(conn, media, pref, status) do
     conn
     |> put_pref_applied(pref)
     |> put_resp_header("content-type", MediaType.content_type(media))
-    |> send_resp(status, "[]")
+    |> put_resp_header("content-range", "*/#{total_part(pref, 0)}")
+    |> send_resp(status, empty_set_body(media))
   end
+
+  # PostgREST renders geo+json bodies in SQL via json_build_object, whose
+  # spaced output is part of the wire format; the empty-set short-circuit
+  # must emit the same bytes (verified against live PostgREST 14.12).
+  defp empty_set_body(%MediaType{symbol: :geojson}),
+    do: ~s({"type" : "FeatureCollection", "features" : []})
+
+  defp empty_set_body(_media), do: "[]"
 
   # Empty-object PATCH: no-op, 204, Content-Range */*, no body.
   defp respond_empty_update(conn, pref) do
@@ -369,9 +382,12 @@ defmodule Bier.Mutation do
 
   # ---- response shaping ----------------------------------------------------
 
-  # return=representation: emit the (shaped) rows as a body.
+  # return=representation: emit the (shaped) rows as a body. PostgREST emits
+  # the Location header ONLY for return=headers-only — a representation or
+  # minimal response never carries a computed Location, even when the PK is in
+  # the selected output (live-verified against 14.12; InsertSpec matchHeaderAbsent).
   defp respond(conn, %Write{pref: %{return: :representation} = pref} = write, outcome) do
-    %{body: body, count: count, meta: meta, existed: existed, guc: guc} = outcome
+    %{body: body, count: count, existed: existed, guc: guc} = outcome
     kind = mutation_kind(write.mutation)
     columns = ActionController.csv_columns(write.plan, write.relation)
 
@@ -384,7 +400,6 @@ defmodule Bier.Mutation do
         |> Bier.Guc.put_headers(guc)
         |> put_pref_applied(pref)
         |> put_resp_header("content-type", MediaType.content_type(write.media))
-        |> maybe_location(kind, write.relation, write.plan, meta, guc)
         |> put_content_range(kind, count, pref)
         |> put_resp_header("content-length", Integer.to_string(:erlang.iolist_size(payload)))
         |> send_resp(status, payload)
@@ -409,16 +424,16 @@ defmodule Bier.Mutation do
     |> send_resp(status, "")
   end
 
-  # return=minimal / no token: empty body.
+  # return=minimal / no token: empty body, and (like representation) no
+  # computed Location — PostgREST reserves it for return=headers-only.
   defp respond(conn, %Write{pref: pref} = write, outcome) do
-    %{count: count, meta: meta, existed: existed, guc: guc} = outcome
+    %{count: count, existed: existed, guc: guc} = outcome
     kind = mutation_kind(write.mutation)
     status = Bier.Guc.status(guc, empty_status(kind, count, existed, write.ok_status, pref))
 
     conn
     |> Bier.Guc.put_headers(guc)
     |> put_pref_applied(pref)
-    |> maybe_location(kind, write.relation, write.plan, meta, guc)
     |> put_content_range(kind, count, pref)
     |> put_content_length_for_empty(status)
     |> send_resp(status, "")
@@ -472,22 +487,7 @@ defmodule Bier.Mutation do
   defp total_part(%{count: :exact}, count), do: Integer.to_string(count)
   defp total_part(_pref, _count), do: "*"
 
-  # Location for representation/minimal responses: emitted only when the request
-  # can determine the full PK — i.e. the relation has a PK and every PK column is
-  # present in the selected output (PostgREST omits it otherwise). A
-  # response.headers GUC Location set by an INSTEAD OF trigger overrides the
-  # computed one, so we skip the computed Location when the GUC already set it.
-  defp maybe_location(conn, kind, relation, plan, meta, guc) when kind in [:insert, :put] do
-    cond do
-      guc_location?(guc) -> conn
-      pk_in_select?(relation, plan) -> force_location(conn, kind, relation, meta, guc)
-      true -> conn
-    end
-  end
-
-  defp maybe_location(conn, _kind, _relation, _plan, _meta, _guc), do: conn
-
-  # Location regardless of select (headers-only): from the mutated row's PK. A
+  # Location (headers-only responses only): from the mutated row's PK. A
   # trigger-supplied response.headers Location (already on `conn`) wins.
   defp force_location(conn, kind, relation, meta, guc) when kind in [:insert, :put] do
     if guc_location?(guc) do
@@ -516,24 +516,6 @@ defmodule Bier.Mutation do
   end
 
   defp guc_location?(_), do: false
-
-  # Every PK column is present in the selected output (or select is `*`).
-  defp pk_in_select?(%{primary_key: []}, _plan), do: false
-  defp pk_in_select?(_relation, %{select: [:star]}), do: true
-
-  defp pk_in_select?(relation, %{select: fields}) do
-    selected =
-      fields
-      |> Enum.flat_map(fn
-        %{kind: :star} -> Enum.map(relation.columns, & &1.name)
-        %{kind: :field, column: col, alias: al} -> [al || col]
-        %{column: col, alias: al} -> [al || col]
-        _ -> []
-      end)
-      |> MapSet.new()
-
-    Enum.all?(relation.primary_key, &MapSet.member?(selected, &1))
-  end
 
   defp pk_values(nil), do: nil
 
@@ -944,8 +926,20 @@ defmodule Bier.Mutation do
   end
 
   # A column type validated for use in a `::cast`. Types come from introspection
-  # (`format_type`), so they are trusted, but we still constrain the charset.
-  defp type_cast(type), do: QueryExecutor.quote_type(type)
+  # (`format_type(atttypid, atttypmod)`), so they are trusted (never
+  # user-supplied), but we still constrain the charset defensively. Unlike
+  # `QueryExecutor.quote_type/1` — which guards the *user-controlled*
+  # `?select=col::type` cast (case 1805) and must reject `(`/`)`/`,` to stay
+  # injection-safe — introspected types legitimately carry typmod syntax
+  # (`numeric(10,2)`, `geometry(Point,4326)`), so those characters are allowed
+  # here.
+  defp type_cast(type) do
+    if Regex.match?(~r/^[A-Za-z0-9_ \[\]\".,()]+$/, type) do
+      type
+    else
+      throw({:bad_request, :bad_cast})
+    end
+  end
 
   defp qrel(relation), do: QueryExecutor.qrel(relation)
   defp q(ident), do: QueryExecutor.quote_ident(ident)

@@ -46,4 +46,45 @@ defmodule Bier.GeojsonTest do
 
     assert message == "geometry column is missing"
   end
+
+  test "advanced path: embeds land in Feature properties", %{conn: conn} do
+    rels = Bier.Introspection.run(conn, ["geotest"])
+    shops = rels[{"geotest", "shops"}]
+
+    {:ok, plan} =
+      Bier.QueryParser.parse_request(
+        "select=id,address,shop_geom,shop_bles(name)&order=id&shop_bles.order=id"
+      )
+
+    assert {:ok, sql, params} = Bier.QueryExecutor.build(shops, plan, rels, :geojson)
+    %Postgrex.Result{rows: [[body, count]]} = Postgrex.query!(conn, sql, params)
+    assert count == 3
+
+    decoded = Bier.json_library().decode!(body)
+    assert decoded["type"] == "FeatureCollection"
+
+    [f1 | _] = decoded["features"]
+    assert f1["type"] == "Feature"
+    assert f1["geometry"]["type"] == "Point"
+
+    assert f1["properties"] == %{
+             "id" => 1,
+             "address" => "1369 Cambridge St",
+             "shop_bles" => [%{"name" => "battery"}, %{"name" => "car-key"}]
+           }
+  end
+
+  test "advanced path without a geometry column still raises 22023", %{conn: conn} do
+    rels = Bier.Introspection.run(conn, ["geotest"])
+    shops = rels[{"geotest", "shops"}]
+    # id + embed only: the projected record carries no geometry column.
+    {:ok, plan} = Bier.QueryParser.parse_request("select=id,shop_bles(name)")
+
+    assert {:ok, sql, params} = Bier.QueryExecutor.build(shops, plan, rels, :geojson)
+
+    assert {:error, %Postgrex.Error{postgres: %{pg_code: "22023", message: message}}} =
+             Postgrex.query(conn, sql, params)
+
+    assert message == "geometry column is missing"
+  end
 end
