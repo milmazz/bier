@@ -32,6 +32,15 @@ and this project adheres to
 - Added `jwt_secret_is_base64` (PostgREST `jwt-secret-is-base64`, alias
   `secret-is-base64`): the JWT secret is base64-decoded before use (URL-safe
   characters accepted); an undecodable secret aborts startup (#49).
+- **Perf:** reads no longer compute `count(*) OVER()` unless the request's
+  count mode consumes it (table reads: `Prefer: count=exact|estimated`; RPC:
+  any mode but `none`; mutations: never) — filtered pages with a `limit` get
+  their fast plan back instead of scanning the whole filtered set. The
+  `application/vnd.pgrst.plan` output now reflects the request's count mode
+  (#67).
+- Added an HTTP benchmark harness (`bench/http/`) that measures Bier against
+  PostgREST v14.12 head-to-head with k6 under matched configuration; results
+  and methodology in `bench/http/REPORT.md`.
 
 Nothing has been published to Hex yet. Current state of the library:
 
