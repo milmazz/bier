@@ -334,6 +334,28 @@ and excluded). The `spec/` tree (behavior models + `COVERAGE.md`) and
 `docs/CONFORMANCE_IMPL.md` document the model and the build. Known feature gaps
 are tracked as GitHub issues (observability/telemetry, admin/health endpoints, …).
 
+## Benchmarks
+
+`bench/http/` contains a k6 harness that benchmarks Bier against PostgREST
+v14.12 head-to-head: both servers run natively against the same local
+PostgreSQL under matched configuration (pool size, schema, anon role, no JWT,
+no compression, HTTP/1.1 keep-alive) across four scenarios — single-row read
+by primary key, filtered 25-row page, insert, and update by primary key.
+
+On our reference machine (Apple M1 Max, PostgreSQL 17), Bier sustains
+**2.3–4.1x PostgREST's max throughput** depending on the scenario, with
+comparable median latency (p50/p90 within ~25% of each other both ways) and a
+tighter tail: across the whole run Bier's worst per-round p99 was ~13 ms,
+while PostgREST shows occasional multi-hundred-millisecond rounds.
+
+Latency is measured open-loop (k6 `constant-arrival-rate`, immune to
+coordinated omission) at a shared arrival rate both servers sustain with zero
+dropped iterations, so the comparison is apples-to-apples. These numbers are
+a snapshot of one machine, not a universal claim — see
+[`bench/http/REPORT.md`](https://github.com/milmazz/bier/blob/main/bench/http/REPORT.md)
+for the full tables and environment, and `bench/http/run.sh` to reproduce
+them.
+
 ## Development
 
 ```sh
