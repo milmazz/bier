@@ -60,6 +60,14 @@ defmodule Bier.CLI.Config do
       default: :unset,
       aliases: ["max-rows"]
     },
+    %{key: "db-pool", env: "PGRST_DB_POOL", kind: :int, default: 10, aliases: []},
+    %{
+      key: "db-pool-max-idletime",
+      env: "PGRST_DB_POOL_MAX_IDLETIME",
+      kind: :int,
+      default: 30,
+      aliases: ["db-pool-timeout"]
+    },
     %{
       key: "db-tx-end",
       env: "PGRST_DB_TX_END",
@@ -82,6 +90,28 @@ defmodule Bier.CLI.Config do
       aliases: ["root-spec"]
     },
     %{key: "server-port", env: "PGRST_SERVER_PORT", kind: :int, default: 3000, aliases: []},
+    %{key: "server-host", env: "PGRST_SERVER_HOST", kind: :string, default: "!4", aliases: []},
+    %{
+      key: "server-unix-socket",
+      env: "PGRST_SERVER_UNIX_SOCKET",
+      kind: :opt_string,
+      default: :unset,
+      aliases: []
+    },
+    %{
+      key: "server-unix-socket-mode",
+      env: "PGRST_SERVER_UNIX_SOCKET_MODE",
+      kind: :string,
+      default: "660",
+      aliases: []
+    },
+    %{
+      key: "openapi-server-proxy-uri",
+      env: "PGRST_OPENAPI_SERVER_PROXY_URI",
+      kind: :opt_string,
+      default: :unset,
+      aliases: []
+    },
     %{
       key: "admin-server-port",
       env: "PGRST_ADMIN_SERVER_PORT",
@@ -309,7 +339,30 @@ defmodule Bier.CLI.Config do
         {:error, _} = err -> {:halt, err}
       end
     end)
+    |> put_app_settings(env, file)
     |> validate()
+  end
+
+  @app_settings_env_prefix "PGRST_APP_SETTINGS_"
+  @app_settings_key_prefix "app.settings."
+
+  # PostgREST folds PGRST_APP_SETTINGS_<NAME> env vars (name lowercased) over
+  # the file's app.settings.* entries, env winning per name (Config.hs
+  # parseAppSettings). Values are kept as text — they end up as GUC values.
+  defp put_app_settings({:error, _} = err, _env, _file), do: err
+
+  defp put_app_settings({:ok, resolved}, env, file) do
+    from_file =
+      for {@app_settings_key_prefix <> name, value} <- file, name != "", into: %{} do
+        {name, to_string(value)}
+      end
+
+    from_env =
+      for {@app_settings_env_prefix <> name, value} <- env, name != "", into: %{} do
+        {String.downcase(name), to_string(value)}
+      end
+
+    {:ok, Map.put(resolved, "app.settings", Map.merge(from_file, from_env))}
   end
 
   defp resolve(entry, env, file, flags) do
@@ -370,6 +423,10 @@ defmodule Bier.CLI.Config do
   defp validate({:ok, resolved}) do
     with :ok <- run_validator(resolved, "jwt-secret", &Bier.Config.validate_jwt_secret/1),
          :ok <- run_validator(resolved, "jwt-aud", &Bier.Config.validate_jwt_aud/1),
+         :ok <-
+           run_validator(resolved, "server-unix-socket-mode", &Bier.Config.validate_socket_mode/1),
+         :ok <-
+           run_validator(resolved, "openapi-server-proxy-uri", &Bier.Config.validate_proxy_uri/1),
          :ok <- validate_secret_base64(resolved),
          {:ok, resolved} <- canonicalize_role_claim_key(resolved),
          :ok <- validate_admin_port(resolved) do
@@ -440,6 +497,13 @@ defmodule Bier.CLI.Config do
         db_anon_role: resolved["db-anon-role"],
         db_extra_search_path: resolved["db-extra-search-path"],
         db_max_rows: resolved["db-max-rows"],
+        pool_size: resolved["db-pool"],
+        db_pool_max_idletime: resolved["db-pool-max-idletime"],
+        server_host: resolved["server-host"],
+        server_unix_socket: resolved["server-unix-socket"],
+        server_unix_socket_mode: resolved["server-unix-socket-mode"],
+        openapi_server_proxy_uri: resolved["openapi-server-proxy-uri"],
+        app_settings: Map.get(resolved, "app.settings", %{}),
         db_tx_end: bier_tx_end(resolved["db-tx-end"]),
         db_pre_request: resolved["db-pre-request"],
         db_root_spec: resolved["db-root-spec"],
@@ -575,15 +639,18 @@ defmodule Bier.CLI.Config do
 
   @doc """
   Render a resolved config map as PostgREST `--dump-config` text: one
-  `key = value` line per spec key, sorted by key for determinism (so the output
-  is reparse-stable).
+  `key = value` line per spec key plus one per `app.settings.<name>` entry,
+  sorted by key for determinism (so the output is reparse-stable).
   """
   @spec dump(map()) :: iodata()
   def dump(resolved) do
-    spec()
-    |> Enum.map(& &1.key)
+    {app_settings, keyed} = Map.pop(resolved, "app.settings", %{})
+
+    app_settings
+    |> Map.new(fn {name, value} -> {@app_settings_key_prefix <> name, value} end)
+    |> Map.merge(keyed)
     |> Enum.sort()
-    |> Enum.map(fn key -> [key, " = ", render(Map.fetch!(resolved, key)), "\n"] end)
+    |> Enum.map(fn {key, value} -> [key, " = ", render(value), "\n"] end)
   end
 
   defp render(:unset), do: ~s("")

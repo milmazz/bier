@@ -191,6 +191,7 @@ defmodule Bier.Plugs.ActionController do
       functions: function_inputs(functions),
       schema_comment: cache.schema_comment,
       security_active?: config.openapi_security_active,
+      proxy_uri: config.openapi_server_proxy_uri,
       docs_version: "v14"
     })
   end

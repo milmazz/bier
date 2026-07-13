@@ -41,6 +41,26 @@ and this project adheres to
 - Added an HTTP benchmark harness (`bench/http/`) that measures Bier against
   PostgREST v14.12 head-to-head with k6 under matched configuration; results
   and methodology in `bench/http/REPORT.md`.
+- Added `server_host` (PostgREST `server-host`): the listener bind address as
+  a Warp-style host preference (`!4` default, `!6`/`*6`, `*`, IP literals,
+  resolvable host names), honored by both the API and admin listeners (#49).
+- Added `server_unix_socket` / `server_unix_socket_mode` (PostgREST
+  `server-unix-socket(-mode)`): serve the API on a Unix domain socket instead
+  of a TCP port, applying the octal file mode (600–777) to the socket file;
+  an invalid mode aborts startup (#49).
+- Added `openapi_server_proxy_uri` (PostgREST `openapi-server-proxy-uri`):
+  the generated OpenAPI document advertises the proxy's scheme/host/port/path
+  as `schemes`/`host`/`basePath`; a malformed URI aborts startup (#49).
+- Added `app_settings` (PostgREST `app.settings.*`,
+  `PGRST_APP_SETTINGS_<NAME>`): arbitrary `app.settings.<name>` GUCs set
+  transaction-locally on requests running with the auth context (#49).
+- Added `db_pool_max_idletime` (PostgREST `db-pool-max-idletime`, alias
+  `db-pool-timeout`) mapping onto the connection pool's idle-interval knob,
+  and the CLI now models `db-pool` (pool size) (#49).
+- The CLI grew `--example`/`-e`, printing a loadable config template with
+  every implemented key at its default; `--dump-config` now covers the full
+  implemented key table (conformance cases 1705/1707/1714/1715/1716/1727/1729
+  are active) (#49).
 
 Nothing has been published to Hex yet. Current state of the library:
 

@@ -26,12 +26,13 @@ defmodule Bier.CLI do
   def run(argv, opts \\ []) do
     env = Keyword.get(opts, :env, %{})
 
-    # version/help print unconditionally — PostgREST answers them from the
-    # option parser before any config is read, so a broken PGRST_* var or a
+    # version/help/example print unconditionally — PostgREST answers them from
+    # the option parser before any config is read, so a broken PGRST_* var or a
     # missing config file must not mask them.
     case parse_argv(argv) do
       {:version, _file_path} -> ok(version_line())
       {:help, _file_path} -> ok(usage())
+      {:example, _file_path} -> ok(example_config())
       {command, file_path} -> load_and_dispatch(command, file_path, env)
     end
   end
@@ -61,6 +62,8 @@ defmodule Bier.CLI do
   end
 
   defp flag_command("--dump-config"), do: :dump_config
+  defp flag_command("--example"), do: :example
+  defp flag_command("-e"), do: :example
   defp flag_command("--version"), do: :version
   defp flag_command("-v"), do: :version
   defp flag_command("--help"), do: :help
@@ -81,9 +84,29 @@ defmodule Bier.CLI do
 
     Options:
       --dump-config   Print the loaded configuration and exit
+      -e, --example   Print an example configuration file and exit
       -v, --version   Print the version and exit
       -h, --help      Print this help and exit
     """
+  end
+
+  # PostgREST's --example prints a config-file template (Config.hs
+  # exampleConfigFile). Bier generates its template from the spec table via the
+  # default-resolved dump, so the example always shows every implemented key at
+  # its default and stays loadable as-is.
+  defp example_config do
+    {:ok, defaults} = Config.load(%{}, nil, %{})
+
+    [
+      """
+      ## Bier example configuration (PostgREST-compatible)
+      ## Every implemented key at its default value. Each key can also be set
+      ## through its PGRST_* environment variable (dashes become underscores),
+      ## e.g. server-port -> PGRST_SERVER_PORT.
+
+      """
+      | Config.dump(defaults)
+    ]
   end
 
   @doc """

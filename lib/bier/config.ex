@@ -29,6 +29,12 @@ defmodule Bier.Config do
           password: String.t() | nil,
           ssl: boolean(),
           pool_size: pos_integer(),
+          db_pool_max_idletime: pos_integer() | nil,
+          server_host: String.t(),
+          server_unix_socket: String.t() | nil,
+          server_unix_socket_mode: String.t(),
+          openapi_server_proxy_uri: String.t() | nil,
+          app_settings: %{optional(String.t()) => String.t()},
           db_schemas: [String.t(), ...],
           db_profile_default: String.t() | nil,
           db_profile_schemas: [String.t()] | nil,
@@ -75,7 +81,13 @@ defmodule Bier.Config do
     :server_trace_header,
     :db_root_spec,
     :admin_server_port,
+    :server_unix_socket,
+    :openapi_server_proxy_uri,
+    :db_pool_max_idletime,
     name: Bier,
+    server_host: "!4",
+    server_unix_socket_mode: "660",
+    app_settings: %{},
     ssl: false,
     openapi_mode: "follow-privileges",
     openapi_security_active: false,
@@ -123,6 +135,8 @@ defmodule Bier.Config do
          :ok <- validate_jwt_secret(conf[:jwt_secret]),
          :ok <- validate_jwt_aud(conf[:jwt_aud]),
          :ok <- validate_db_channel(conf[:db_channel]),
+         :ok <- validate_socket_mode(Keyword.get(conf, :server_unix_socket_mode, "660")),
+         :ok <- validate_proxy_uri(conf[:openapi_server_proxy_uri]),
          {:ok, conf} <- decode_jwt_secret(conf),
          {:ok, conf} <- parse_jwt_role_claim_key(conf) do
       {:ok, struct!(__MODULE__, conf)}
@@ -249,6 +263,76 @@ defmodule Bier.Config do
       byte_size(channel) > 63 -> {:error, "db-channel cannot exceed 63 bytes"}
       String.contains?(channel, <<0>>) -> {:error, "db-channel cannot contain null bytes"}
       true -> :ok
+    end
+  end
+
+  @doc """
+  Parse a `server-unix-socket-mode` value the way PostgREST does (Haskell's
+  `readOct`): the longest leading run of octal digits is the value — so `"599"`
+  reads as `5` (range error) while `"800"` has no octal prefix at all — and the
+  result must lie between `0o600` and `0o777`. Returns the integer file mode
+  for `File.chmod/2`. Mirrors conformance cases 1714/1715.
+  """
+  @spec parse_socket_mode(String.t()) :: {:ok, non_neg_integer()} | {:error, String.t()}
+  def parse_socket_mode(mode) when is_binary(mode) do
+    case Integer.parse(mode, 8) do
+      {value, _rest} when value >= 0o600 and value <= 0o777 ->
+        {:ok, value}
+
+      {_value, _rest} ->
+        {:error, "Invalid server-unix-socket-mode: needs to be between 600 and 777"}
+
+      :error ->
+        {:error, "Invalid server-unix-socket-mode: not an octal"}
+    end
+  end
+
+  @doc "Boolean-style wrapper over `parse_socket_mode/1` for the validation chain."
+  @spec validate_socket_mode(String.t()) :: :ok | {:error, String.t()}
+  def validate_socket_mode(mode) do
+    with {:ok, _value} <- parse_socket_mode(mode), do: :ok
+  end
+
+  @doc """
+  `openapi-server-proxy-uri` must be an absolute http(s) URI with a host —
+  PostgREST's `isMalformedProxyUri` check. `nil` (not configured) is allowed.
+  Mirrors conformance case 1716.
+  """
+  @spec validate_proxy_uri(String.t() | nil) :: :ok | {:error, String.t()}
+  def validate_proxy_uri(nil), do: :ok
+
+  def validate_proxy_uri(uri) when is_binary(uri) do
+    case URI.new(uri) do
+      {:ok, %URI{scheme: scheme, host: host}}
+      when scheme in ["http", "https"] and is_binary(host) and host != "" ->
+        :ok
+
+      _other ->
+        {:error, "Malformed proxy uri, a correct example: https://example.com:8443/basePath"}
+    end
+  end
+
+  @doc """
+  Translate a `server-host` value into a `:gen_tcp` bind address. PostgREST's
+  key is a Warp `HostPreference`: `"*"`/`"*4"`/`"!4"` bind any IPv4 interface
+  and `"*6"`/`"!6"` any IPv6 one (the IPv4-vs-IPv6 *preference* the `*` forms
+  express has no counterpart in a single bind call). Anything else is an IP
+  literal or a host name resolved at boot; an unresolvable name raises, which
+  surfaces as a boot failure.
+  """
+  @spec host_address(String.t()) :: :inet.socket_address()
+  def host_address(host) when host in ["*", "*4", "!4"], do: {0, 0, 0, 0}
+  def host_address(host) when host in ["*6", "!6"], do: {0, 0, 0, 0, 0, 0, 0, 0}
+
+  def host_address(host) when is_binary(host) do
+    chars = String.to_charlist(host)
+
+    with {:error, _} <- :inet.parse_address(chars),
+         {:error, _} <- :inet.getaddr(chars, :inet),
+         {:error, _} <- :inet.getaddr(chars, :inet6) do
+      raise ArgumentError, "server-host #{inspect(host)} is not a bindable address"
+    else
+      {:ok, address} -> address
     end
   end
 

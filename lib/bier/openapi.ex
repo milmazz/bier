@@ -14,7 +14,7 @@ defmodule Bier.OpenAPI do
   Builds the Swagger 2.0 document map from an introspection snapshot.
 
   Input keys: `:relations`, `:functions`, `:schema_comment`, `:security_active?`,
-  `:docs_version`.
+  `:docs_version`, and optionally `:proxy_uri` (openapi-server-proxy-uri).
   """
   def build(input) do
     {title, desc} = info(input.schema_comment)
@@ -32,7 +32,32 @@ defmodule Bier.OpenAPI do
       "parameters" => parameters(input)
     }
     |> with_security(input.security_active?)
+    |> with_proxy(input[:proxy_uri])
   end
+
+  # openapi-server-proxy-uri overrides where the document says the API lives:
+  # the URI's scheme/host/path become `schemes`, `host` and `basePath`. The
+  # port is appended only when it isn't the scheme default, and an empty path
+  # stays the root basePath. The URI was validated at boot (Bier.Config).
+  defp with_proxy(doc, nil), do: doc
+
+  defp with_proxy(doc, proxy_uri) do
+    uri = URI.parse(proxy_uri)
+
+    host =
+      if uri.port && uri.port != URI.default_port(uri.scheme),
+        do: "#{uri.host}:#{uri.port}",
+        else: uri.host
+
+    Map.merge(doc, %{
+      "schemes" => [uri.scheme],
+      "host" => host,
+      "basePath" => base_path(uri.path)
+    })
+  end
+
+  defp base_path(path) when path in [nil, ""], do: "/"
+  defp base_path(path), do: path
 
   defp info(nil), do: {@default_title, @default_description}
   defp info(comment), do: split_comment(comment)
