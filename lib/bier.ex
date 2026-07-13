@@ -110,7 +110,49 @@ defmodule Bier do
       pool_size: [
         type: :pos_integer,
         default: env(:pool_size, 10),
-        doc: "Size of the per-instance Postgrex connection pool."
+        doc: "Size of the per-instance Postgrex connection pool (PostgREST db-pool)."
+      ],
+      db_pool_max_idletime: [
+        type: {:or, [:pos_integer, nil]},
+        default: env(:db_pool_max_idletime, nil),
+        doc: """
+        Idle-connection maintenance interval in seconds (PostgREST
+        db-pool-max-idletime, deprecated alias db-pool-timeout). Mapped onto
+        DBConnection's `:idle_interval` — the knob governing what happens to
+        pool connections idle for this long (DBConnection pings them; PostgREST
+        closes them). When nil (the default) the driver default applies.
+        """
+      ],
+      server_host: [
+        type: :string,
+        default: env(:server_host, "!4"),
+        doc: """
+        Bind address for the HTTP listener(s) (PostgREST server-host, a Warp
+        `HostPreference`): `!4`/`*`/`*4` bind any IPv4 interface, `!6`/`*6` any
+        IPv6 one, anything else an IP literal or resolvable host name. The
+        default `!4` matches both PostgREST and Bier's previous
+        all-IPv4-interfaces behavior.
+        """
+      ],
+      server_unix_socket: [
+        type: {:or, [:string, nil]},
+        default: env(:server_unix_socket, nil),
+        doc: """
+        Path of a Unix domain socket to serve the API on instead of a TCP port
+        (PostgREST server-unix-socket). When set, `router[:port]` and
+        `server_host` are ignored for the main listener; a stale socket file at
+        the path is removed before binding.
+        """
+      ],
+      server_unix_socket_mode: [
+        type: :string,
+        default: env(:server_unix_socket_mode, "660"),
+        doc: """
+        Octal file mode applied to the Unix socket file after binding
+        (PostgREST server-unix-socket-mode). Must parse as octal between 600
+        and 777; validated at boot even when no socket path is configured,
+        matching PostgREST.
+        """
       ],
       db_schemas: [
         type: {:list, :string},
@@ -316,6 +358,26 @@ defmodule Bier do
         instead of the generated spec.
         """
       ],
+      openapi_server_proxy_uri: [
+        type: {:or, [:string, nil]},
+        default: env(:openapi_server_proxy_uri, nil),
+        doc: """
+        Public proxy URI the generated OpenAPI document advertises (PostgREST
+        openapi-server-proxy-uri): its scheme/host/port/path become the
+        document's `schemes`, `host` and `basePath`. Must be an absolute
+        http(s) URI; a malformed value aborts startup.
+        """
+      ],
+      app_settings: [
+        type: {:map, :string, :string},
+        default: env(:app_settings, %{}),
+        doc: """
+        Arbitrary `app.settings.<name>` GUCs set transaction-locally on each
+        request that runs with the auth context (PostgREST app.settings.*;
+        `PGRST_APP_SETTINGS_<NAME>` in the CLI). SQL reads them via
+        `current_setting('app.settings.<name>')`.
+        """
+      ],
       openapi_security_active: [
         type: :boolean,
         default: env(:openapi_security_active, false),
@@ -436,11 +498,16 @@ defmodule Bier do
   defp admin_children(%Bier.Config{name: name, admin_server_port: port} = conf) do
     [
       Supervisor.child_spec(
-        {Bandit,
-         scheme: conf.router[:scheme],
-         plug: {Bier.Plugs.AdminRouter, name: name},
-         port: port,
-         http_options: [compress: false]},
+        {
+          Bandit,
+          # The admin listener is TCP-only (as in PostgREST) but honors the
+          # shared server-host bind address.
+          scheme: conf.router[:scheme],
+          plug: {Bier.Plugs.AdminRouter, name: name},
+          ip: Bier.Config.host_address(conf.server_host),
+          port: port,
+          http_options: [compress: false]
+        },
         id: {name, :admin_server}
       )
     ]
@@ -457,6 +524,9 @@ defmodule Bier do
       password: conf.password,
       ssl: conf.ssl,
       pool_size: conf.pool_size,
+      # db-pool-max-idletime (seconds) -> DBConnection's idle-connection
+      # interval (milliseconds); nil defers to the driver default.
+      idle_interval: conf.db_pool_max_idletime && conf.db_pool_max_idletime * 1000,
       # PostgREST renders timestamptz in UTC by default; pin the session timezone
       # so timestamptz output (and DOMAIN representations built on it) is stable
       # and matches the reference DB regardless of the server's local TZ. A

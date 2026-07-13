@@ -652,7 +652,41 @@ defmodule Bier.OpenAPITest do
     end
   end
 
+  describe "build/1 proxy (openapi-server-proxy-uri)" do
+    test "absent proxy: no host/schemes, basePath stays /" do
+      doc = build_one_with_proxy(nil)
+      refute Map.has_key?(doc, "host")
+      refute Map.has_key?(doc, "schemes")
+      assert doc["basePath"] == "/"
+    end
+
+    test "proxy URI seeds schemes, host with explicit port, and basePath" do
+      doc = build_one_with_proxy("https://example.com:8443/basePath")
+      assert doc["schemes"] == ["https"]
+      assert doc["host"] == "example.com:8443"
+      assert doc["basePath"] == "/basePath"
+    end
+
+    test "scheme-default port is omitted and an empty path maps to /" do
+      doc = build_one_with_proxy("http://example.com")
+      assert doc["schemes"] == ["http"]
+      assert doc["host"] == "example.com"
+      assert doc["basePath"] == "/"
+    end
+  end
+
   # --- helpers ---
+  defp build_one_with_proxy(proxy_uri) do
+    Bier.OpenAPI.build(%{
+      relations: [],
+      functions: [],
+      schema_comment: nil,
+      security_active?: false,
+      proxy_uri: proxy_uri,
+      docs_version: "v14"
+    })
+  end
+
   defp p(name, type, variadic?, has_default?),
     do: %{name: name, type: type, variadic?: variadic?, has_default?: has_default?}
 

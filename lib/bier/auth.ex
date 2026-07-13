@@ -13,6 +13,8 @@ defmodule Bier.Auth do
     * `set_config('request.path', <path>, true)`;
     * `set_config('request.headers', <json of lowercased headers>, true)`;
     * `set_config('request.cookies', <json of cookie pairs>, true)`;
+    * one `set_config('app.settings.<name>', <value>, true)` per configured
+      `app_settings` entry (PostgREST app.settings.*);
     * the `db-pre-request` proc (if configured), which may itself `SET ROLE` or
       `RAISE` to abort the request.
 
@@ -124,8 +126,18 @@ defmodule Bier.Auth do
           {:ok, any()} | {:error, term()}
   def with_context(tx, context, config, fun) do
     apply_context(tx, context)
+    apply_app_settings(tx, config)
     run_pre_request(tx, config)
     fun.(tx)
+  end
+
+  # Configured app.settings.* values become transaction-local GUCs readable
+  # via current_setting('app.settings.<name>'), set in sorted order for
+  # determinism.
+  defp apply_app_settings(tx, %{app_settings: settings}) do
+    settings
+    |> Enum.sort()
+    |> Enum.each(fn {name, value} -> set_guc(tx, "app.settings." <> name, value) end)
   end
 
   # Apply the role + request GUCs on the transaction connection. SET LOCAL ROLE

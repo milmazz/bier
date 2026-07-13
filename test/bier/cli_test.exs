@@ -91,4 +91,96 @@ defmodule Bier.CLITest do
     assert {:boot, resolved} = CLI.run([], env: %{"PGRST_LOG_LEVEL" => "info"})
     assert resolved["log-level"] == :info
   end
+
+  test "--dump-config defaults include the server/pool keys (case 1705 shape)" do
+    result = CLI.run(["--dump-config"], env: %{})
+    assert result.exit == 0
+    stdout = IO.iodata_to_binary(result.stdout)
+    assert stdout =~ ~s(server-host = "!4")
+    assert stdout =~ ~s(server-unix-socket = "")
+    assert stdout =~ ~s(server-unix-socket-mode = "660")
+    assert stdout =~ ~s(openapi-server-proxy-uri = "")
+    assert stdout =~ ~s(db-pool = 10)
+    assert stdout =~ ~s(db-pool-max-idletime = 30)
+  end
+
+  test "an invalid server-unix-socket-mode is fatal (cases 1714/1715 shapes)" do
+    result = CLI.run(["--dump-config"], env: %{"PGRST_SERVER_UNIX_SOCKET_MODE" => "800"})
+    assert result.exit != 0
+    assert IO.iodata_to_binary(result.stderr) =~ "Invalid server-unix-socket-mode: not an octal"
+
+    result = CLI.run(["--dump-config"], env: %{"PGRST_SERVER_UNIX_SOCKET_MODE" => "599"})
+    assert result.exit != 0
+
+    assert IO.iodata_to_binary(result.stderr) =~
+             "Invalid server-unix-socket-mode: needs to be between 600 and 777"
+  end
+
+  test "a malformed openapi-server-proxy-uri is fatal, a valid one dumps (case 1716 shape)" do
+    env = %{"PGRST_OPENAPI_SERVER_PROXY_URI" => "htp:/@@localhorst.invalid"}
+    result = CLI.run(["--dump-config"], env: env)
+    assert result.exit != 0
+
+    assert IO.iodata_to_binary(result.stderr) =~
+             "Malformed proxy uri, a correct example: https://example.com:8443/basePath"
+
+    env = %{"PGRST_OPENAPI_SERVER_PROXY_URI" => "https://example.com:8443/basePath"}
+    result = CLI.run(["--dump-config"], env: env)
+    assert result.exit == 0
+
+    assert IO.iodata_to_binary(result.stdout) =~
+             ~s(openapi-server-proxy-uri = "https://example.com:8443/basePath")
+  end
+
+  test "PGRST_APP_SETTINGS_* env vars dump as app.settings.* and env beats file (case 1729)" do
+    path = write_tmp_config(~s(app.settings.from_file = "file"\napp.settings.both = "file"\n))
+
+    env = %{"PGRST_APP_SETTINGS_FOO" => "bar", "PGRST_APP_SETTINGS_BOTH" => "env"}
+    result = CLI.run([path, "--dump-config"], env: env)
+    assert result.exit == 0
+    stdout = IO.iodata_to_binary(result.stdout)
+    assert stdout =~ ~s(app.settings.foo = "bar")
+    assert stdout =~ ~s(app.settings.from_file = "file")
+    assert stdout =~ ~s(app.settings.both = "env")
+  end
+
+  test "db-pool-timeout aliases db-pool-max-idletime (case 1707 shape)" do
+    path = write_tmp_config("db-pool-timeout = 5\n")
+
+    result = CLI.run([path, "--dump-config"], env: %{})
+    assert result.exit == 0
+    assert IO.iodata_to_binary(result.stdout) =~ "db-pool-max-idletime = 5"
+  end
+
+  test "--example prints a loadable config template (case 1727 shape)" do
+    result = CLI.run(["--example"], env: %{})
+    assert result.exit == 0
+    stdout = IO.iodata_to_binary(result.stdout)
+    assert stdout =~ ~s(db-uri = "postgresql://")
+    assert stdout =~ ~s(db-schemas = "public")
+    assert stdout =~ ~s(db-channel = "pgrst")
+    assert stdout =~ "server-port = 3000"
+    assert stdout =~ ~s(log-level = "error")
+
+    # `-e` is the short form, and it answers before config loading like
+    # --version/--help.
+    assert CLI.run(["-e"], env: %{"PGRST_JWT_SECRET" => "short_secret"}).exit == 0
+
+    # The template is itself a loadable config file.
+    path = write_tmp_config(stdout)
+    reload = CLI.run([path, "--dump-config"], env: %{})
+    assert reload.exit == 0
+  end
+
+  defp write_tmp_config(contents) do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "bier_cli_test_#{System.unique_integer([:positive])}.conf"
+      )
+
+    File.write!(path, contents)
+    on_exit(fn -> File.rm(path) end)
+    path
+  end
 end

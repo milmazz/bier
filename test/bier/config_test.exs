@@ -114,4 +114,82 @@ defmodule Bier.ConfigTest do
       end
     end
   end
+
+  describe "parse_socket_mode/1" do
+    test "valid octal modes in range parse to the integer file mode" do
+      assert Bier.Config.parse_socket_mode("660") == {:ok, 0o660}
+      assert Bier.Config.parse_socket_mode("600") == {:ok, 0o600}
+      assert Bier.Config.parse_socket_mode("777") == {:ok, 0o777}
+    end
+
+    test "no leading octal digit is 'not an octal' (case 1714)" do
+      assert Bier.Config.parse_socket_mode("800") ==
+               {:error, "Invalid server-unix-socket-mode: not an octal"}
+
+      assert Bier.Config.parse_socket_mode("mode") ==
+               {:error, "Invalid server-unix-socket-mode: not an octal"}
+    end
+
+    test "reads the longest octal prefix like Haskell readOct (case 1715)" do
+      # "599" parses as 5 (the 9s are not octal digits), which is out of range.
+      assert Bier.Config.parse_socket_mode("599") ==
+               {:error, "Invalid server-unix-socket-mode: needs to be between 600 and 777"}
+
+      assert Bier.Config.parse_socket_mode("577") ==
+               {:error, "Invalid server-unix-socket-mode: needs to be between 600 and 777"}
+    end
+
+    test "an invalid mode rejects the boot config even without a socket path" do
+      assert_raise ArgumentError, ~r/not an octal/, fn ->
+        Bier.Config.new!([server_unix_socket_mode: "abc"], Bier.schema())
+      end
+    end
+  end
+
+  describe "validate_proxy_uri/1" do
+    test "nil and absolute http(s) URIs are ok" do
+      assert Bier.Config.validate_proxy_uri(nil) == :ok
+      assert Bier.Config.validate_proxy_uri("https://example.com:8443/basePath") == :ok
+      assert Bier.Config.validate_proxy_uri("http://example.com") == :ok
+    end
+
+    test "malformed or non-http URIs are rejected with PostgREST's message (case 1716)" do
+      message = "Malformed proxy uri, a correct example: https://example.com:8443/basePath"
+      assert Bier.Config.validate_proxy_uri("htp:/@@localhorst.invalid") == {:error, message}
+      assert Bier.Config.validate_proxy_uri("ftp://example.com") == {:error, message}
+      assert Bier.Config.validate_proxy_uri("https://") == {:error, message}
+      assert Bier.Config.validate_proxy_uri("not a uri") == {:error, message}
+    end
+  end
+
+  describe "host_address/1" do
+    test "maps the Warp HostPreference special forms" do
+      assert Bier.Config.host_address("!4") == {0, 0, 0, 0}
+      assert Bier.Config.host_address("*") == {0, 0, 0, 0}
+      assert Bier.Config.host_address("*4") == {0, 0, 0, 0}
+      assert Bier.Config.host_address("!6") == {0, 0, 0, 0, 0, 0, 0, 0}
+      assert Bier.Config.host_address("*6") == {0, 0, 0, 0, 0, 0, 0, 0}
+    end
+
+    test "parses IP literals and resolves host names" do
+      assert Bier.Config.host_address("127.0.0.1") == {127, 0, 0, 1}
+      assert Bier.Config.host_address("::1") == {0, 0, 0, 0, 0, 0, 0, 1}
+      assert Bier.Config.host_address("localhost") == {127, 0, 0, 1}
+    end
+
+    test "an unresolvable name raises" do
+      assert_raise ArgumentError, ~r/not a bindable address/, fn ->
+        Bier.Config.host_address("definitely-not-a-real-host.invalid")
+      end
+    end
+  end
+
+  describe "app_settings" do
+    test "defaults to an empty map and accepts string pairs" do
+      assert Bier.Config.new!([], Bier.schema()).app_settings == %{}
+
+      config = Bier.Config.new!([app_settings: %{"foo" => "bar"}], Bier.schema())
+      assert config.app_settings == %{"foo" => "bar"}
+    end
+  end
 end

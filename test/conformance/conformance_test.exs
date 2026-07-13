@@ -18,13 +18,6 @@ defmodule Bier.ConformanceTest do
   # pending reason instead of a façade. See
   # docs/superpowers/specs/2026-06-07-cli-implementation-design.md.
   @cli_deferred %{
-    1705 => :cli_parity,
-    1727 => :cli_parity,
-    1707 => :unmodeled_key,
-    1714 => :unmodeled_key,
-    1715 => :unmodeled_key,
-    1716 => :unmodeled_key,
-    1729 => :unmodeled_key,
     1724 => :db_config,
     1725 => :db_config
   }
