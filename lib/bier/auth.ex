@@ -20,10 +20,10 @@ defmodule Bier.Auth do
 
   SQL functions then read these via `current_setting('request.…')`.
 
-  Bier applies this context only for requests resolving to the `auth` schema (the
-  only area whose cases depend on role-switching/GUCs); every other area keeps
-  running as the connecting superuser with no GUCs, avoiding a privilege
-  regression on the shared fixture DB. `applicable?/2` encodes that gate.
+  Bier applies this context whenever auth is configured for the instance
+  (`jwt_secret` or `db_anon_role`), for every exposed schema — matching
+  PostgREST. When neither is set, requests run as the connecting role with no
+  role switch or GUCs. `applicable?/1` encodes that gate.
   """
 
   alias Bier.JWT
@@ -39,11 +39,13 @@ defmodule Bier.Auth do
         }
 
   @doc """
-  True when the resolved request schema requires the auth context (role switch +
-  request GUCs + pre-request hook). Only the `auth` profile uses it.
+  True when the per-request auth context (role switch + request GUCs +
+  pre-request hook) should be applied — i.e. when auth is configured
+  (`jwt_secret` or `db_anon_role`). Mirrors PostgREST, where the authenticator
+  connects and every request assumes a role whenever auth is set up.
   """
-  @spec applicable?(String.t() | nil) :: boolean()
-  def applicable?(schema), do: schema == "auth"
+  @spec applicable?(Bier.Config.t()) :: boolean()
+  def applicable?(config), do: config.jwt_secret != nil or config.db_anon_role != nil
 
   @doc """
   Resolve the auth context for a request, verifying the JWT.

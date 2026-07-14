@@ -76,8 +76,8 @@ defmodule Bier.Plugs.ActionController do
   # its query inside a `SET LOCAL ROLE` + request.* GUC transaction. A JWT
   # verification failure short-circuits with the PostgREST error envelope.
   @doc false
-  def maybe_auth(conn, config, schema) do
-    if Bier.Auth.applicable?(schema) do
+  def maybe_auth(conn, config, _schema) do
+    if Bier.Auth.applicable?(config) do
       case Bier.ServerTiming.measure(:jwt, fn -> Bier.Auth.resolve(conn, config) end) do
         {:ok, context} -> {:ok, assign(conn, :bier_auth, context)}
         {:error, _} = err -> err
@@ -127,13 +127,18 @@ defmodule Bier.Plugs.ActionController do
   end
 
   defp generated_root_doc(conn, config) do
-    case Bier.Auth.resolve(conn, config) do
-      {:ok, context} ->
-        doc = build_openapi_document(config, context.role)
-        root_doc_body(conn, Bier.json_library().encode!(doc))
+    if Bier.Auth.applicable?(config) do
+      case Bier.Auth.resolve(conn, config) do
+        {:ok, context} ->
+          doc = build_openapi_document(config, context.role)
+          root_doc_body(conn, Bier.json_library().encode!(doc))
 
-      {:error, _} = err ->
-        err
+        {:error, _} = err ->
+          err
+      end
+    else
+      doc = build_openapi_document(config, nil)
+      root_doc_body(conn, Bier.json_library().encode!(doc))
     end
   end
 
@@ -199,6 +204,9 @@ defmodule Bier.Plugs.ActionController do
   defp filter_by_mode(config, role, schema, relations, functions) do
     case config.openapi_mode do
       "ignore-privileges" ->
+        {relations, functions}
+
+      _follow_privileges when is_nil(role) ->
         {relations, functions}
 
       _follow_privileges ->
