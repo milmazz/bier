@@ -58,7 +58,7 @@ defmodule Bier.Plugs.ActionController do
 
       ["rpc", fn_name] ->
         with {:ok, schema, content_profile} <- resolve_profile(conn, config),
-             {:ok, conn} <- maybe_auth(conn, config, schema) do
+             {:ok, conn} <- maybe_auth(conn, config) do
           conn
           |> maybe_content_profile(content_profile)
           |> assign(:bier_target, {schema, fn_name})
@@ -70,13 +70,13 @@ defmodule Bier.Plugs.ActionController do
     end
   end
 
-  # Resolve the per-request auth context (JWT verify + role + request GUCs) for
-  # schemas that require it (the auth area). Stashes the context in
+  # Resolve the per-request auth context (JWT verify + role + request GUCs) when
+  # auth is configured for the instance. Stashes the context in
   # `conn.assigns.bier_auth` so the execution layer (reads/mutations/rpc) runs
   # its query inside a `SET LOCAL ROLE` + request.* GUC transaction. A JWT
   # verification failure short-circuits with the PostgREST error envelope.
   @doc false
-  def maybe_auth(conn, config, _schema) do
+  def maybe_auth(conn, config) do
     if Bier.Auth.applicable?(config) do
       case Bier.ServerTiming.measure(:jwt, fn -> Bier.Auth.resolve(conn, config) end) do
         {:ok, context} -> {:ok, assign(conn, :bier_auth, context)}
@@ -282,7 +282,7 @@ defmodule Bier.Plugs.ActionController do
 
   defp dispatch_relation(conn, config, relations) do
     with {:ok, schema, content_profile} <- resolve_profile(conn, config),
-         {:ok, conn} <- maybe_auth(conn, config, schema),
+         {:ok, conn} <- maybe_auth(conn, config),
          conn = maybe_content_profile(conn, content_profile),
          :ok <- reject_openapi_media(conn),
          {:ok, relation} <- resolve_relation(conn, schema, relations) do
