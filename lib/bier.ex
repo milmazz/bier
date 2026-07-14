@@ -308,6 +308,17 @@ defmodule Bier do
         An expression that does not parse aborts startup.
         """
       ],
+      jwt_cache_max_entries: [
+        type: :integer,
+        default: env(:jwt_cache_max_entries, 1000),
+        doc: """
+        Maximum number of JWT verification results cached per instance
+        (PostgREST jwt-cache-max-entries). Signature verification and claims
+        decoding are cached; temporal (`exp`/`nbf`) and audience validation
+        still run on every request, so a cached token expires on time. A
+        value of 0 or less disables the cache.
+        """
+      ],
       server_cors_allowed_origins: [
         type: {:or, [:string, nil]},
         default: env(:server_cors_allowed_origins, nil),
