@@ -182,6 +182,12 @@ A horizontal filter is `<column>=<operator>.<value>`. `gte` is greater-than-
 or-equal; the full operator table is in the
 [API reference](../guides/api-reference.md#horizontal-filtering).
 
+> `abv` (`numeric(4,2)`) can't be filtered yet — Bier 400s when filtering on
+> (or casting to) a parameterized type like `numeric(p,s)`, a known
+> limitation tracked in
+> [milmazz/bier#71](https://github.com/milmazz/bier/issues/71). This example
+> filters on `ibu` (a plain `int`) instead.
+
 ```bash
 curl "http://localhost:4040/beers?ibu=gte.40&select=name,ibu"
 ```

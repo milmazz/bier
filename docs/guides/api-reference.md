@@ -99,27 +99,28 @@ curl "http://localhost:4040/beers?select=count()"
 ```
 
 ```bash
-curl "http://localhost:4040/beers?select=style_id,avg_abv:abv.avg()::numeric(4,2)&order=style_id.asc"
+curl "http://localhost:4040/beers?select=style_id,beer_count:count(),max_ibu:ibu.max()&order=style_id.asc"
 ```
 
 ```json
 [
-  {"style_id": 1, "avg_abv": 6.80},
-  {"style_id": 2, "avg_abv": 7.50},
-  {"style_id": 3, "avg_abv": 4.80},
-  {"style_id": 4, "avg_abv": 5.90},
-  {"style_id": 5, "avg_abv": 7.35}
+  {"style_id": 1, "beer_count": 1, "max_ibu": 65},
+  {"style_id": 2, "beer_count": 1, "max_ibu": 55},
+  {"style_id": 3, "beer_count": 1, "max_ibu": 30},
+  {"style_id": 4, "beer_count": 1, "max_ibu": 25},
+  {"style_id": 5, "beer_count": 2, "max_ibu": 70}
 ]
 ```
 
 This is every group, since the query is unfiltered and the brewery schema's 6
 beers span all 5 styles (`order=` is added for a deterministic group order —
-Postgres's own `GROUP BY` order is otherwise unspecified). The explicit
-`::numeric(4,2)` cast matters: `avg(numeric)` does **not** truncate to the
-source column's scale, so the same query without a cast returns a
-wide-scale value for every group, e.g. `"avg_abv": 7.3500000000000000` for
-`style_id: 5` — Bier applies no rounding of its own
-(`Bier.Embed.build_node/6` for `:agg` nodes).
+Postgres's own `GROUP BY` order is otherwise unspecified). `count()` and
+`max()` are aliased (`beer_count`, `max_ibu`) and combined in the same
+`select` alongside the plain `style_id` field driving the `GROUP BY`.
+`avg()`/`sum()` on `beers.abv` work the same way — but casting the result to
+a parameterized type such as `::numeric(4,2)` currently 400s (see the note
+under [Horizontal filtering](#horizontal-filtering)), so the aggregate
+example here sticks to `ibu`, whose plain `int` result needs no cast.
 
 > **Note:** PostgREST gates aggregate functions behind the `db-aggregates-enabled`
 > config option (default off, 400 `PGRST123` when disabled). Bier does not
@@ -136,8 +137,18 @@ Multiple filters (and filters combined with `select`/`order`/pagination
 params) are implicitly ANDed together.
 
 ```bash
-curl "http://localhost:4040/beers?abv=gte.6"
+curl "http://localhost:4040/beers?ibu=gte.60"
 ```
+
+> **Known limitation:** filtering on, or casting (`::type(...)`) to, a
+> PostgreSQL type that carries a modifier — `numeric(p,s)`, `varchar(n)`,
+> `char(n)` — currently 400s with `PGRST100`. In the brewery schema this
+> affects `beers.abv` (`numeric(4,2)`) and `breweries.latitude`/`longitude`
+> (`numeric(9,6)`): e.g. `?abv=gte.6` or `?select=abv::numeric(4,2)` both
+> fail. Selecting or ordering by these columns is unaffected — only filters
+> and parameterized casts trigger it. Tracked as
+> [milmazz/bier#71](https://github.com/milmazz/bier/issues/71); the examples
+> below use `ibu`/`style_id` instead.
 
 ### Operators
 
@@ -145,8 +156,8 @@ curl "http://localhost:4040/beers?abv=gte.6"
 |---|---|---|
 | `eq` | equals | `id=eq.1` |
 | `neq` | not equal | `style_id=neq.5` |
-| `gt` | greater than | `abv=gt.7` |
-| `gte` | greater than or equal | `abv=gte.6` |
+| `gt` | greater than | `ibu=gt.50` |
+| `gte` | greater than or equal | `ibu=gte.40` |
 | `lt` | less than | `ibu=lt.30` |
 | `lte` | less than or equal | `ibu=lte.30` |
 | `like` | SQL `LIKE`, `*` is the wildcard (rewritten to `%`) | `name=like.*IPA` |
@@ -204,8 +215,8 @@ group, and nest arbitrarily. A value containing `(`, `)`, or `,` must be
 double-quoted.
 
 ```bash
-curl "http://localhost:4040/beers?or=(abv.gte.8,ibu.gte.65)"
-curl "http://localhost:4040/beers?and=(or(style_id.eq.1,style_id.eq.5),abv.gte.6)"
+curl "http://localhost:4040/beers?or=(ibu.gte.65,style_id.eq.2)"
+curl "http://localhost:4040/beers?and=(or(style_id.eq.1,style_id.eq.5),ibu.gte.40)"
 curl "http://localhost:4040/beers?not.or=(style_id.eq.1,style_id.eq.2)"
 curl 'http://localhost:4040/styles?or=(description.eq."Dark, roasted, full-bodied",name.eq."Hazy IPA")'
 ```
@@ -227,21 +238,21 @@ embedded array — parent rows without a match are kept with an empty array (or
 `null`) for that key:
 
 ```bash
-curl "http://localhost:4040/breweries?select=name,beers(name,abv)&beers.abv=gte.7"
+curl "http://localhost:4040/breweries?select=name,beers(name,abv)&beers.name=like.*IPA*"
 ```
 
 With `!inner` (see [Resource embedding](#resource-embedding)), the same
 filter also drops parent rows whose embedding becomes empty:
 
 ```bash
-curl "http://localhost:4040/breweries?select=name,beers!inner(name,abv)&beers.abv=gte.7"
+curl "http://localhost:4040/breweries?select=name,beers!inner(name,abv)&beers.name=like.*IPA*"
 ```
 
 Filtering an embed path that is not present in `select` is a 400 with code
 `PGRST108`:
 
 ```bash
-curl "http://localhost:4040/breweries?select=name&beers.abv=gte.7"
+curl "http://localhost:4040/breweries?select=name&beers.name=like.*IPA*"
 ```
 
 ```json
