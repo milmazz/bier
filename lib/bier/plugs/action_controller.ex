@@ -58,7 +58,7 @@ defmodule Bier.Plugs.ActionController do
 
       ["rpc", fn_name] ->
         with {:ok, schema, content_profile} <- resolve_profile(conn, config),
-             {:ok, conn} <- maybe_auth(conn, config, schema) do
+             {:ok, conn} <- maybe_auth(conn, config) do
           conn
           |> maybe_content_profile(content_profile)
           |> assign(:bier_target, {schema, fn_name})
@@ -70,14 +70,14 @@ defmodule Bier.Plugs.ActionController do
     end
   end
 
-  # Resolve the per-request auth context (JWT verify + role + request GUCs) for
-  # schemas that require it (the auth area). Stashes the context in
+  # Resolve the per-request auth context (JWT verify + role + request GUCs) when
+  # auth is configured for the instance. Stashes the context in
   # `conn.assigns.bier_auth` so the execution layer (reads/mutations/rpc) runs
   # its query inside a `SET LOCAL ROLE` + request.* GUC transaction. A JWT
   # verification failure short-circuits with the PostgREST error envelope.
   @doc false
-  def maybe_auth(conn, config, schema) do
-    if Bier.Auth.applicable?(schema) do
+  def maybe_auth(conn, config) do
+    if Bier.Auth.applicable?(config) do
       case Bier.ServerTiming.measure(:jwt, fn -> Bier.Auth.resolve(conn, config) end) do
         {:ok, context} -> {:ok, assign(conn, :bier_auth, context)}
         {:error, _} = err -> err
@@ -90,11 +90,13 @@ defmodule Bier.Plugs.ActionController do
   # ---- root (`/`) ----------------------------------------------------------
 
   # The root path serves the OpenAPI document for `application/openapi+json` /
-  # `application/json` / `*/*`. The root now authenticates the request (resolving
-  # the role from a bearer token, else the anon role) so the generated document
-  # is filtered by that role's privileges. A token present with no jwt-secret
-  # configured yields a 500 (PGRST300, the single line logged at log-level=error,
-  # case 1764); an invalid token with a secret yields a 401.
+  # `application/json` / `*/*`. When auth is configured the root authenticates
+  # the request (resolving the role from a bearer token, else the anon role) so
+  # the generated document is filtered by that role's privileges; when auth is
+  # not configured the full document is served unfiltered (role = nil). A token
+  # present with no jwt-secret configured yields a 500 (PGRST300, the single line
+  # logged at log-level=error, case 1764); an invalid token with a secret yields
+  # a 401.
   defp dispatch_root(conn, config) do
     if conn.method in ["GET", "HEAD"] do
       render_root(conn, config)
@@ -127,13 +129,20 @@ defmodule Bier.Plugs.ActionController do
   end
 
   defp generated_root_doc(conn, config) do
-    case Bier.Auth.resolve(conn, config) do
-      {:ok, context} ->
-        doc = build_openapi_document(config, context.role)
-        root_doc_body(conn, Bier.json_library().encode!(doc))
+    with {:ok, role} <- root_doc_role(conn, config) do
+      doc = build_openapi_document(config, role)
+      root_doc_body(conn, Bier.json_library().encode!(doc))
+    end
+  end
 
-      {:error, _} = err ->
-        err
+  # The document is filtered by the request's role when auth is configured
+  # (a JWT verification failure short-circuits with the error envelope);
+  # otherwise there is no role to filter by, so `nil` yields the full document.
+  defp root_doc_role(conn, config) do
+    if Bier.Auth.applicable?(config) do
+      with {:ok, context} <- Bier.Auth.resolve(conn, config), do: {:ok, context.role}
+    else
+      {:ok, nil}
     end
   end
 
@@ -199,6 +208,9 @@ defmodule Bier.Plugs.ActionController do
   defp filter_by_mode(config, role, schema, relations, functions) do
     case config.openapi_mode do
       "ignore-privileges" ->
+        {relations, functions}
+
+      _follow_privileges when is_nil(role) ->
         {relations, functions}
 
       _follow_privileges ->
@@ -272,7 +284,7 @@ defmodule Bier.Plugs.ActionController do
 
   defp dispatch_relation(conn, config, relations) do
     with {:ok, schema, content_profile} <- resolve_profile(conn, config),
-         {:ok, conn} <- maybe_auth(conn, config, schema),
+         {:ok, conn} <- maybe_auth(conn, config),
          conn = maybe_content_profile(conn, content_profile),
          :ok <- reject_openapi_media(conn),
          {:ok, relation} <- resolve_relation(conn, schema, relations) do

@@ -1,3 +1,137 @@
+# PR 1 — PostgREST-faithful auth gate — Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Make Bier's per-request auth context (role switch, `request.*` GUCs, `db-pre-request`) activate whenever auth is configured — for all exposed schemas — exactly like PostgREST, instead of only for a schema literally named `auth`.
+
+**Architecture:** Replace `Bier.Auth.applicable?/1`'s hardcoded `schema == "auth"` with a check on whether auth is configured (`jwt_secret`/`db_anon_role` present). The shared conformance fixture DB (superuser connection, roles ungranted) can't tolerate role-switching in the bulk areas, so the compromise moves entirely into the test harness: split the single shared instance into a no-auth `bulk` instance and an auth-configured `auth` instance, and route each case to the right one.
+
+**Tech Stack:** Elixir, Plug, Postgrex, ExUnit. Conformance suite driven by `spec/conformance/cases/*.yaml`.
+
+## Global Constraints
+
+- Elixir `~> 1.18`; toolchain pinned Elixir 1.20 / OTP 29 (`mise.toml`).
+- **Never edit `spec/**`** (frozen ground truth: cases, assertions, `fixtures.sql`). This PR edits only `lib/**` and `test/support/conformance_server.ex`, plus one new additive unit-test file.
+- **Do not edit existing `test/bier/*` files** — they are frozen. `base_opts/0` must remain callable and keep them green.
+- Acceptance gate: full `mix test` green (`mix test` = `bier.fixtures.load` + `test`; needs a local Postgres). Also `mix format --check-formatted`, `mix credo --strict`, `mix docs --warnings-as-errors`.
+- `Bier.json_library/0` for any JSON (not relevant here but repo rule).
+- End commit messages with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+
+---
+
+## File Structure
+
+- `lib/bier/auth.ex` — change `applicable?/1` (schema → config) + moduledoc.
+- `lib/bier/plugs/action_controller.ex` — update the `maybe_auth/3` call site.
+- `test/support/conformance_server.ex` — split shared instance into `bulk`/`auth`; add routing predicate; rebase variants.
+- `test/bier/auth_applicable_test.exs` — **new**, additive unit test for `applicable?/1`.
+
+This is **one task**: the library change and the harness change cannot be green independently (changing `applicable?` alone turns the whole suite red because the shared instance configures auth globally). They form a single reviewable unit whose gate is the green suite.
+
+---
+
+## Task 1: Gate the auth context on auth being configured, and split the conformance harness
+
+**Files:**
+- Modify: `lib/bier/auth.ex` (moduledoc ~22-27; `applicable?/1` at 45-46)
+- Modify: `lib/bier/plugs/action_controller.ex:79-88` (`maybe_auth/3`)
+- Modify: `test/support/conformance_server.ex` (whole file — see full new content below)
+- Create: `test/bier/auth_applicable_test.exs`
+
+**Interfaces:**
+- Produces: `Bier.Auth.applicable?(Bier.Config.t()) :: boolean()` — true iff `config.jwt_secret != nil or config.db_anon_role != nil`.
+- Produces: `Bier.ConformanceServer.base_opts/0` (no-auth bulk config), `auth_opts/0` (bulk + auth keys), `base_url/0` (bulk instance), `auth_url/0` (auth instance). `url_for/1` unchanged signature.
+- Consumes: `Bier.Config` fields `jwt_secret`, `db_anon_role` (both `String.t() | nil`); `Bier.ConformanceCase` fields `schema` (`String.t() | nil`), `request` (map with `"path"`), `id`, `config`.
+
+- [ ] **Step 1: Write the failing unit test**
+
+Create `test/bier/auth_applicable_test.exs`:
+
+```elixir
+defmodule Bier.AuthApplicableTest do
+  use ExUnit.Case, async: true
+
+  alias Bier.Auth
+  alias Bier.ConformanceServer
+
+  defp config(opts) do
+    base = [name: :"auth_applicable_#{System.unique_integer([:positive])}"]
+    Bier.Config.new!(base ++ opts, Bier.schema())
+  end
+
+  test "applicable? is true when a jwt_secret is configured" do
+    assert Auth.applicable?(config(jwt_secret: String.duplicate("x", 32)))
+  end
+
+  test "applicable? is true when a db_anon_role is configured" do
+    assert Auth.applicable?(config(db_anon_role: "web_anon"))
+  end
+
+  test "applicable? is false when neither is configured" do
+    refute Auth.applicable?(config([]))
+  end
+
+  test "base_opts (bulk) has auth disabled; auth_opts enables it" do
+    refute Auth.applicable?(config(ConformanceServer.base_opts()))
+    assert Auth.applicable?(config(ConformanceServer.auth_opts()))
+  end
+end
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `mix test test/bier/auth_applicable_test.exs`
+Expected: FAIL — `Auth.applicable?/1` currently expects a schema string, and `ConformanceServer.auth_opts/0` does not exist yet (compile/UndefinedFunctionError).
+
+- [ ] **Step 3: Change `Bier.Auth.applicable?/1` (library)**
+
+In `lib/bier/auth.ex`, replace the `applicable?/1` clause (lines 41-46):
+
+```elixir
+  @doc """
+  True when the per-request auth context (role switch + request GUCs +
+  pre-request hook) should be applied — i.e. when auth is configured
+  (`jwt_secret` or `db_anon_role`). Mirrors PostgREST, where the authenticator
+  connects and every request assumes a role whenever auth is set up.
+  """
+  @spec applicable?(Bier.Config.t()) :: boolean()
+  def applicable?(config), do: config.jwt_secret != nil or config.db_anon_role != nil
+```
+
+And replace the moduledoc paragraph (lines 22-27, the "Bier applies this context only for requests resolving to the `auth` schema …" block) with:
+
+```elixir
+  Bier applies this context whenever auth is configured for the instance
+  (`jwt_secret` or `db_anon_role`), for every exposed schema — matching
+  PostgREST. When neither is set, requests run as the connecting role with no
+  role switch or GUCs. `applicable?/1` encodes that gate.
+```
+
+- [ ] **Step 4: Update the call site**
+
+In `lib/bier/plugs/action_controller.ex`, change `maybe_auth/3` (line 79-88) so the gate reads the config, not the schema. The `schema` argument is no longer used by the gate:
+
+```elixir
+  @doc false
+  def maybe_auth(conn, config, _schema) do
+    if Bier.Auth.applicable?(config) do
+      case Bier.ServerTiming.measure(:jwt, fn -> Bier.Auth.resolve(conn, config) end) do
+        {:ok, context} -> {:ok, assign(conn, :bier_auth, context)}
+        {:error, _} = err -> err
+      end
+    else
+      {:ok, conn}
+    end
+  end
+```
+
+(Leave the caller at line 61, `maybe_auth(conn, config, schema)`, unchanged — arity is preserved.)
+
+- [ ] **Step 5: Replace `test/support/conformance_server.ex` with the two-instance version**
+
+Full new file content (only the auth split + routing changes; everything else identical to current):
+
+```elixir
 defmodule Bier.ConformanceServer do
   @moduledoc """
   Boots the shared Bier instances for the conformance suite and exposes their
@@ -220,3 +354,57 @@ defmodule Bier.ConformanceServer do
       ]
   end
 end
+```
+
+- [ ] **Step 6: Compile and run the new unit test**
+
+Run: `mix test test/bier/auth_applicable_test.exs`
+Expected: PASS (4 tests).
+
+- [ ] **Step 7: Run the full conformance suite (the acceptance gate)**
+
+Run: `mix test`
+Expected: PASS, 0 failures. This loads the fixture DB and runs all ~475 active cases across both shared instances plus variants.
+
+If failures appear, they are routing stragglers — expect at most a handful. Diagnose each:
+- **`42501` / permission-denied on an `openapi` (or root) case that reads a *relation*** → that case is on the `auth` instance and now switches to `postgrest_test_anonymous`. Fix by narrowing `auth_case?/1` to exclude it (e.g. require the request be a GET of `/`, or special-case that id), NOT by editing `spec/`.
+- **`401`/`PGRST300` on a bulk case that unexpectedly hits `/` or sends a token** → route it to the auth instance (widen the predicate for that shape).
+- Re-run `mix test` after each predicate tweak until green. Record the final predicate in the moduledoc if it changed.
+
+- [ ] **Step 8: Run the remaining CI gates**
+
+Run: `mix format --check-formatted && mix credo --strict && mix docs --warnings-as-errors`
+Expected: all pass. (`mix format` first if needed.)
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add lib/bier/auth.ex lib/bier/plugs/action_controller.ex \
+        test/support/conformance_server.ex test/bier/auth_applicable_test.exs
+git commit -m "feat(auth): gate auth context on config, not schema name
+
+Bier.Auth.applicable? now returns true whenever auth is configured
+(jwt_secret or db_anon_role), so role switching, request GUCs, and the
+db-pre-request hook apply to every exposed schema — matching PostgREST —
+instead of only a schema literally named 'auth'.
+
+The shared conformance fixture DB connects as a superuser and grants the
+anon role almost nothing, so role-switching in the bulk areas would 42501.
+That compromise moves into the harness: the shared instance splits into a
+no-auth 'bulk' instance and an auth-configured 'auth' instance, with cases
+routed by schema/path. spec/ is untouched.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+```
+
+---
+
+## Self-Review
+
+- **Spec coverage:** Part A library change (Step 3-4) ✓; harness two-instance split + routing predicate (Step 5) ✓; unit test (Step 1) ✓; green gate + straggler iteration (Step 7) ✓; format/credo/docs gates (Step 8) ✓; no `spec/` edits (constraints) ✓; `base_opts/0` kept auth-free for frozen `test/bier/*` (Step 5 + rationale) ✓.
+- **Placeholders:** none — full file content and exact commands provided.
+- **Type consistency:** `applicable?(config)` used identically in Step 3 (def) and Step 4 (call). `base_opts/0`, `auth_opts/0`, `base_url/0`, `auth_url/0`, `auth_case?/1` names consistent across Step 5 and the unit test in Step 1.
+
+## PR
+
+After the commit, open the PR (title: `feat(auth): PostgREST-faithful auth gate`). Body: summarize the library change, the harness split, and the green suite; note that connecting as `authenticator` with role GRANTs (vs superuser) remains future work. The user merges it before PR 2 begins.
