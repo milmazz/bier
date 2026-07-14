@@ -22,7 +22,7 @@ Pinned target: **PostgREST v14.12**. Total cases: **532** across 17 areas.
 | `pagination_count` (Pagination and Count) | 1250–1277 (pagination), 1700–1701 (db-max-rows) | limit/offset, Range header, exact/planned/estimated count, db-max-rows. |
 | `resource_embedding` (Resource Embedding) | 1112–1127 (select embed/spread), 1134–1135 (select one-to-one embed), 1136–1137 (select computed relationships), 1181–1187 (filters embed), 1211–1222 (ordering embed), 1276 (nested limit), 1133 (agg in embed) | Many-to-one/one-to-many/many-to-many, one-to-one (pk-as-fk, unique FK), computed relationships, nested, inner/left, disambiguation, spread. |
 | `resource_representation` (Resource Representation) | 1300–1332 (representations), 1550–1556 (Prefer), 1610–1615 (singular), 1630–1635 (nulls-stripped) | Prefer: return=representation/minimal, singular object, vnd.pgrst.object, stripped nulls. |
-| `media_type_handlers` (Media Type Handlers) | 1600–1635 (content_negotiation), 1426 (rpc csv), 1622–1624 (octet-stream) | JSON/CSV/GeoJSON/octet-stream/text, Accept negotiation, custom handlers, plan output. |
+| `media_type_handlers` (Media Type Handlers) | 1600–1638 (content_negotiation, incl. 1636–1638 custom-media-handler), 1426 (rpc csv), 1622–1624 (octet-stream) | JSON/CSV/GeoJSON/octet-stream/text, Accept negotiation, custom media handlers (anyelement, override-builtin, any-handler), plan output. |
 | `aggregate_functions` (Aggregate Functions) | 1129–1133 (select aggregate) | count/sum/group-by/alias+cast, agg in embed. |
 | `openapi` (OpenAPI) | 1619–1621 (content_negotiation openapi), 1650–1682 (openapi) | Root spec, comments→summary/description, type mapping, modes, security. |
 | `preferences` (Prefer Header) | 1550–1556 (headers prefer), 1302–1303, 1322 (return=minimal), 1551–1552 (handling), 1553–1554 (timezone), 1555–1556, 1390–1392 (max-affected) | Prefer: return, handling=strict/lenient, timezone, max-affected, missing-defaults via columns. |
@@ -104,49 +104,68 @@ page. These are tracked as soft gaps, not hard gaps.
 
 ## Validation status
 
+Machine-verified on 2026-07-14 (fixtures loaded into `bier_test`; schema and id
+checks run over every file on disk):
+
+- **Fixture load: OK.** `mix bier.fixtures.load` loaded
+  `spec/conformance/fixtures.sql` into `bier_test` and reported the area schemas
+  built. The loaded DB inspected fine (21 non-system namespaces, 602 relations,
+  1013 procs).
 - All **532** cases parse as YAML.
+- All **532** cases validate against `case.schema.json`
+  (`jsonschema` Draft 2020-12; **0** invalid cases).
+- **532** files, **532** distinct ids — **no duplicate ids**.
 - All **532** cases carry a `source:` field on the
   `raw.githubusercontent.com/PostgREST/postgrest/v14.12/...#L<n>` pattern
   required by `case.schema.json` (verified on disk this pass — 0 cases use the
-  non-raw `github.com/.../blob/` form).
-- All **532** cases validate against `case.schema.json`.
-- No duplicate ids; each of the 17 areas occupies a contiguous, non-overlapping
+  non-raw `github.com/.../blob/` form, and **no stale pin** to a non-`v14.12`
+  tag exists anywhere in `spec/`).
+- Each of the 17 areas occupies a contiguous, non-overlapping
   band (1000–1027, 1050–1099, 1100–1137, 1150–1187, 1200–1222, 1250–1277,
   1300–1332, 1350–1395, 1400–1439, 1450–1494, 1500–1516, 1550–1574, 1600–1638,
   1650–1682, 1700–1730, 1750–1767, 1800–1814).
+- **Relation coverage: no genuine gaps.** A first-path-segment check against the
+  loaded fixtures found **9** cases whose target relation/function does not
+  exist — every one is an intentional **404 negative-path** test, not a missing
+  fixture: 1001 (`test.first`), 1002 (`test.invalid`), 1360 (`mutations.garlic`),
+  1368 (`mutations.fake`), 1373 (`mutations.foozle`), 1432 (`rpc.fake` RPC),
+  1515 (`test.non_existent_table`), 1516 (`test.invalid`),
+  1765 (`observability.unknown`). No success-expecting case targets a missing
+  relation.
 
 ## Review status
 
 An adversarial citation audit — re-fetching each cited `source:` line and
-confirming it still asserts what the case claims — has now run across all 17
-areas. Result per area:
+confirming it still asserts what the case claims — ran across **all 17 areas**
+on **2026-07-14**, with a follow-up fix pass applied to the areas that needed
+it. Result per area:
 
-| Area | Audit result |
-|------|--------------|
-| url_grammar | ⚠️ revise |
-| operators | ✅ pass |
-| select | ✅ pass |
-| filters | ✅ pass |
-| ordering | ✅ pass |
-| representations | ✅ pass |
-| mutations | ✅ pass |
-| rpc | ⚠️ revise |
-| errors | ⚠️ revise (2 bad citations) |
-| headers | ✅ pass |
-| content_negotiation | ⚠️ revise |
-| openapi | ✅ pass |
-| config | ✅ pass |
-| observability | ✅ pass (2 bad citations) |
-| domain_representations | ✅ pass |
+| Area | Audit result | Fix pass |
+|------|--------------|----------|
+| url_grammar | ✅ pass | — |
+| operators | ⚠️ revise (2 open issues) | ran |
+| select | ⚠️ revise (2 open issues) | ran |
+| filters | ✅ pass | — |
+| ordering | ✅ pass | — |
+| pagination | ✅ pass | — |
+| representations | ✅ pass | ran |
+| mutations | ✅ pass | — |
+| rpc | ✅ pass | — |
+| auth | ✅ pass | — |
+| errors | ✅ pass | — |
+| headers | ✅ pass | — |
+| content_negotiation | ✅ pass | ran |
+| openapi | ✅ pass | ran |
+| config | ✅ pass | — |
+| observability | ⚠️ revise (2 open issues) | ran |
+| domain_representations | ✅ pass | — |
 
-(The **auth** and **pagination** areas were verified in an earlier pass; they
-are not part of this audit's pass/revise call-out but remain reviewed.)
+- **Passed (14):** url_grammar, filters, ordering, pagination, representations,
+  mutations, rpc, auth, errors, headers, content_negotiation, openapi, config,
+  domain_representations. (`representations`, `content_negotiation`, and
+  `openapi` passed *after* a fix pass corrected their flagged citations.)
+- **Needs revision (3):** operators, select, observability — each still carries
+  **2 open issues** after its fix pass ran.
 
-- **Passed:** operators, select, filters, ordering, representations, mutations,
-  headers, openapi, config, observability, domain_representations.
-- **Needs revision:** url_grammar, rpc, content_negotiation, errors. The
-  **errors** area has 2 confirmed bad citations to fix. **observability** passed
-  overall but still has 2 bad citations flagged for cleanup.
-
-Open follow-ups from the audit: re-cite the four "revise" areas, and correct the
-2 bad citations in errors and the 2 in observability.
+Open follow-ups from the audit: resolve the 2 remaining citation issues in each
+of **operators**, **select**, and **observability** (6 total).

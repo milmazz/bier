@@ -53,7 +53,7 @@ entries:
     claim: >
       `externalDocs.url` is `https://postgrest.org/en/<docsVersion>/references/api.html`
       and externalDocs.description is "PostgREST Documentation".
-    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response/OpenAPI.hs#L401
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response/OpenAPI.hs#L403
     cases: [1655]
 
   - id: openapi/root/db-root-spec
@@ -67,7 +67,7 @@ entries:
       is Just qi (otherwise ResourceSchema). The documented example function
       returns {"swagger":"2.0","info":{"title":"Overridden","description":"This
       is a my own API"}} and `curl http://localhost:3000` returns exactly that.
-    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest.hs#L120
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest.hs#L122
     cases: [1682]
 
   # -------------------------------------------------------------------------
@@ -96,7 +96,7 @@ entries:
       and a blank line if a comment exists). For a single-column M2O/O2O foreign
       key the FK note "This is a Foreign Key to `<tbl>.<col>`.<fk table='<tbl>'
       column='<col>'/>" is appended.
-    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response/OpenAPI.hs#L133
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response/OpenAPI.hs#L142
     cases: [1659, 1660]
 
   - id: openapi/rpc/summary-description

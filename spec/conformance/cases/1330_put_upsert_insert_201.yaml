@@ -8,7 +8,14 @@ request:
     Content-Type: application/json
   body: [{ "id": 10 }]
 schema: representations
-preconditions: []
+# id=10 MUST NOT exist for PUT to be an INSERT (-> 201). The consolidated
+# fixture seeds test.items with rows 1..15 (fixtures.sql:1386), so id=10 is
+# present by default and a bare PUT would be a REPLACE (200). The
+# representations schema is an auto-updatable view mirror of test, so the
+# precondition deletes the underlying test.items row (mirrors case 1381,
+# which deletes test.tiobe_pls before its PUT-insert).
+preconditions:
+  - "DELETE FROM test.items WHERE id = 10;"
 expect:
   status: 201
   headers:
