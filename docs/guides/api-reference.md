@@ -33,7 +33,10 @@ curl "http://localhost:4040/styles"
 ```json
 [
   {"id": 1, "name": "IPA", "description": "India Pale Ale — hop-forward and bitter"},
-  {"id": 2, "name": "Stout", "description": "Dark, roasted, full-bodied"}
+  {"id": 2, "name": "Stout", "description": "Dark, roasted, full-bodied"},
+  {"id": 3, "name": "Pilsner", "description": "Crisp pale lager"},
+  {"id": 4, "name": "Saison", "description": "Fruity, spicy farmhouse ale"},
+  {"id": 5, "name": "Hazy IPA", "description": "Juicy, cloudy New England IPA"}
 ]
 ```
 
@@ -96,15 +99,27 @@ curl "http://localhost:4040/beers?select=count()"
 ```
 
 ```bash
-curl "http://localhost:4040/beers?select=style_id,avg_abv:abv.avg()"
+curl "http://localhost:4040/beers?select=style_id,avg_abv:abv.avg()::numeric(4,2)&order=style_id.asc"
 ```
 
 ```json
 [
   {"style_id": 1, "avg_abv": 6.80},
+  {"style_id": 2, "avg_abv": 7.50},
+  {"style_id": 3, "avg_abv": 4.80},
+  {"style_id": 4, "avg_abv": 5.90},
   {"style_id": 5, "avg_abv": 7.35}
 ]
 ```
+
+This is every group, since the query is unfiltered and the brewery schema's 6
+beers span all 5 styles (`order=` is added for a deterministic group order —
+Postgres's own `GROUP BY` order is otherwise unspecified). The explicit
+`::numeric(4,2)` cast matters: `avg(numeric)` does **not** truncate to the
+source column's scale, so the same query without a cast returns a
+wide-scale value for every group, e.g. `"avg_abv": 7.3500000000000000` for
+`style_id: 5` — Bier applies no rounding of its own
+(`Bier.Embed.build_node/6` for `:agg` nodes).
 
 > **Note:** PostgREST gates aggregate functions behind the `db-aggregates-enabled`
 > config option (default off, 400 `PGRST123` when disabled). Bier does not
@@ -169,8 +184,11 @@ curl "http://localhost:4040/beers?ibu=not.gt.50"
 
 ### Quantifiers: `any()` / `all()`
 
-`eq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `match`, and `imatch` accept
-an `(any)` or `(all)` modifier, comparing against a Postgres array literal:
+`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `match`, and `imatch`
+accept an `(any)` or `(all)` modifier, comparing against a Postgres array
+literal. Note that Bier includes `neq` in this set (`Bier.QueryExecutor`
+groups it with `eq`/`gt`/`gte`/`lt`/`lte` for quantifier handling) —
+PostgREST's own grammar excludes `neq` from `any()`/`all()`:
 
 ```bash
 curl "http://localhost:4040/beers?style_id=eq(any).{1,3,5}"
@@ -189,7 +207,7 @@ double-quoted.
 curl "http://localhost:4040/beers?or=(abv.gte.8,ibu.gte.65)"
 curl "http://localhost:4040/beers?and=(or(style_id.eq.1,style_id.eq.5),abv.gte.6)"
 curl "http://localhost:4040/beers?not.or=(style_id.eq.1,style_id.eq.2)"
-curl 'http://localhost:4040/beers?or=(name.eq."Fog Line",name.eq."DIPA v12")'
+curl 'http://localhost:4040/styles?or=(description.eq."Dark, roasted, full-bodied",name.eq."Hazy IPA")'
 ```
 
 ### JSON arrow filters
@@ -314,7 +332,7 @@ the range part as `*`. Status is:
 * **416 Range Not Satisfiable** for an invalid range (see below).
 
 A negative `limit`, an offside `Range` (`to < from`), or (with a count
-requested) an `offset` past the last row all return 400/416 with code
+requested) an `offset` past the last row all return **416** with code
 `PGRST103`:
 
 ```bash
@@ -334,7 +352,7 @@ through the relation's foreign keys.
 object (or `null` when the FK is null):
 
 ```bash
-curl "http://localhost:4040/beers?select=id,name,breweries(name,city)"
+curl "http://localhost:4040/beers?select=id,name,breweries(name,city)&id=eq.1"
 ```
 
 ```json
@@ -400,7 +418,7 @@ listing the disambiguated targets to retry with.
 nesting them under a key:
 
 ```bash
-curl "http://localhost:4040/beers?select=id,name,...breweries(brewery_name:name)"
+curl "http://localhost:4040/beers?select=id,name,...breweries(brewery_name:name)&id=eq.1"
 ```
 
 ```json
@@ -462,6 +480,9 @@ curl -X POST "http://localhost:4040/check_ins" \
 [{"id": 6, "beer_id": 3, "drinker": "jess", "rating": 5, "comment": "crisp!", "created_at": "2026-07-13T10:00:00Z"}]
 ```
 
+`check_ins.created_at` defaults to `now()`, so the timestamp above is
+illustrative — running this yourself returns the actual insert time.
+
 `Prefer: return=headers-only` returns an empty body with a `Location` header
 pointing at the created row (by primary key) instead — the `Location` header
 is emitted **only** for `return=headers-only`, never for a plain insert or
@@ -513,7 +534,10 @@ HTTP/1.1 200 OK
 ```
 
 A table with no primary key silently ignores the `resolution` preference
-(there is no conflict target to upsert on).
+when no conflict target is available — unless the request also supplies
+`?on_conflict=<cols>` naming a `UNIQUE` constraint to upsert on instead
+(`Bier.Mutation.preferences/3` honors `resolution` whenever
+`relation.primary_key != []` or an explicit `on_conflict` is given).
 
 ### PATCH (update)
 
@@ -571,6 +595,9 @@ Content-Range: */1
 ```json
 [{"id": 5, "beer_id": 2, "drinker": "alex", "rating": 3, "comment": "Fine", "created_at": "2026-07-01T12:00:00Z"}]
 ```
+
+As above, `created_at` defaults to `now()` at seed time — the exact
+timestamp will differ when you load `brewery.sql` yourself.
 
 With no `Prefer` header, `DELETE` returns **204 No Content**
 (`Content-Range: */*`).
@@ -702,7 +729,7 @@ own preference). No acceptable type is a 406 with code `PGRST107`.
 |---|---|
 | `application/json` (default) | A JSON array of row objects (or a bare value for scalars). |
 | `text/csv` | A header row plus data rows, `Content-Type: text/csv; charset=utf-8`. |
-| `application/geo+json` | Rows aggregated into a GeoJSON `FeatureCollection`. Requires an actual PostGIS `geometry`/`geography` column in the selected relation — brewery tables use plain `numeric` `latitude`/`longitude` columns, not PostGIS geometry, so requesting it on `breweries` fails 400 with SQLSTATE `22023` ("geometry column is missing"). |
+| `application/geo+json` | Rows aggregated into a GeoJSON `FeatureCollection`. Offered as a producer only when the `postgis` extension is installed database-wide (`Bier.SchemaCache.postgis?/1`, checked in `Bier.Plugs.ActionController.read_producers/1`) — `brewery.sql` never runs `CREATE EXTENSION postgis;`, so against the tutorial database as shipped, `Accept: application/geo+json` on any relation (including `breweries`) fails 406 with code `PGRST107` (no acceptable media type), the same as any other unsupported `Accept`. If `postgis` *is* installed, the producer becomes available for every relation, but rendering still needs an actual `geometry`/`geography` column — `breweries`' plain `numeric` `latitude`/`longitude` columns don't qualify, so requesting it there would then fail 400 with SQLSTATE `22023` ("geometry column is missing"). |
 | `application/vnd.pgrst.object+json` | Coerces the result to a single JSON object instead of a one-element array. Fails 406 `PGRST116` ("Cannot coerce the result to a single JSON object") when the result is not exactly one row. The `+json` suffix is optional. |
 | `application/vnd.pgrst.object+json;nulls=stripped` | As above, with every null-valued key omitted from the object. |
 | `application/vnd.pgrst.array+json;nulls=stripped` | A JSON array with null-valued keys omitted from each row. |
@@ -761,7 +788,8 @@ when there is nothing to report. Every Bier-originated error also carries a
 | `PGRST202` | 404 | Unknown RPC function or no overload matches the supplied arguments. |
 | `PGRST204` | 400 | `?columns=`/payload references a column absent from the relation. |
 | `PGRST205` | 404 | Unknown table/view. |
-| `PGRST301`–`PGRST303` | 401 | JWT verification failures (missing/malformed/expired token, audience mismatch) — see [Authentication](../tutorials/authentication.md). |
+| `PGRST300` | 500 | No `jwt_secret` is configured but a JWT was presented — a server misconfiguration, not a bad token. |
+| `PGRST301`–`PGRST303` | 401 | JWT verification failures (missing/malformed/expired token, audience mismatch) — see [Authentication](../tutorials/authentication.md). Note: the no-`jwt_secret`-configured case is also reported as `PGRST301` on some code paths, and like `PGRST300` above, as a **500** rather than 401 (`Bier.Plugs.FallbackController`). |
 
 Postgres errors raised from within a query or function pass through with
 their raw 5-character `SQLSTATE` as `code`. A few notable mappings: unique

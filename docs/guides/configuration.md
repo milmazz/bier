@@ -124,12 +124,15 @@ differ from `router[:port]` (see [Validators](#validators)).
 | `password` | `string \| nil` | `nil` | via `PGRST_DB_URI` (userinfo) |
 | `ssl` | `boolean` | `false` | via `PGRST_DB_URI` (`sslmode=require\|verify-ca\|verify-full` → `true`) |
 | `pool_size` | `pos_integer` | `10` | `PGRST_DB_POOL` |
-| `db_pool_max_idletime` | `pos_integer \| nil` | `nil` | `PGRST_DB_POOL_MAX_IDLETIME` (alias `db-pool-timeout` / `PGRST_DB_POOL_TIMEOUT`) |
+| `db_pool_max_idletime` | `pos_integer \| nil` | `nil` (defaults to `30` on the standalone binary) | `PGRST_DB_POOL_MAX_IDLETIME` (alias `db-pool-timeout` / `PGRST_DB_POOL_TIMEOUT`) |
 
 There is no `PGRST_DB_HOST`-style variable — the whole connection is set from
 one `PGRST_DB_URI`, exactly as in PostgREST (see the `PGRST_DB_URI` section
-below). `db_pool_max_idletime` maps onto DBConnection's `:idle_interval`;
-`nil` (the default) defers to the driver default.
+below). `db_pool_max_idletime` maps onto DBConnection's `:idle_interval`.
+`nil` is the default for `Bier.start_link/1`/application env (`Bier.schema/0`
+in `lib/bier.ex`), and it defers to the driver default; the standalone/CLI
+surface (`Bier.CLI.Config`) instead defaults this key to `30` when it is not
+overridden (verified via `./bier --dump-config`).
 
 ### Schema & relation exposure
 
@@ -183,8 +186,14 @@ See [Schema-cache reload](#schema-cache-reload) below.
 | `jwt_secret_is_base64` | `boolean` | `false` | `PGRST_JWT_SECRET_IS_BASE64` (alias `secret-is-base64` / `PGRST_SECRET_IS_BASE64`) |
 | `jwt_role_claim_key` | `string` | `".role"` | `PGRST_JWT_ROLE_CLAIM_KEY` (alias `role-claim-key` / `PGRST_ROLE_CLAIM_KEY`) |
 
-Bier verifies **HS256** tokens only (symmetric secret); asymmetric
-(RS256/ES256/JWKS) verification is a tracked gap, not yet implemented.
+Bier verifies both symmetric and asymmetric JWTs through `:jose`
+(`Bier.JWT`): HS256/384/512 (HMAC) as well as RS256/384/512, ES256/384/512,
+PS256/384/512, and EdDSA. Which family applies is decided by the shape of
+`jwt_secret` — a JWK (a JSON object with `kty`, or a JWK Set) selects
+asymmetric verification, any other secret an HMAC `oct` key — not by the
+token's own `alg` header, and each key type carries a fixed algorithm
+allowlist. This keeps a public JWK from ever being usable as an HMAC key
+(rejecting alg-confusion attempts) and rejects `alg: none` outright.
 `jwt_role_claim_key` is a JSPath into the decoded claims, e.g. `.role`
 (default) or `."https://example.com/roles"[0]`. See
 [Validators](#validators) for the constraints on all four.

@@ -27,7 +27,7 @@ computed unless something is attached.
 | --- | --- | --- | --- |
 | `[:bier, :request, :start]` | `system_time`, `monotonic_time` | `instance`, `method`, `route` | When a request enters the pipeline (`Bier.Plugs.Observability`) |
 | `[:bier, :request, :stop]` | `duration` (native time units), `monotonic_time` | `instance`, `method`, `route`, `status`, `schema`, `relation` | When the response is sent (a `Plug.Conn.register_before_send/2` callback), so `duration` is the real request wall-clock |
-| `[:bier, :schema_cache, :load, :start]` | — | `instance`, `schemas` | Start of a schema-cache load (boot introspection or a reload) |
+| `[:bier, :schema_cache, :load, :start]` | `system_time`, `monotonic_time` | `instance`, `schemas` | Start of a schema-cache load (boot introspection or a reload) |
 | `[:bier, :schema_cache, :load, :stop]` | `duration` | `instance`, `schemas`, `status` (`:ok`), `relation_count` | A load completed and its snapshot was swapped in |
 | `[:bier, :schema_cache, :load, :exception]` | standard span measurements | `instance`, `schemas`, `kind`, `reason`, `stacktrace` | A load raised; the previous snapshot is left in place |
 | `[:bier, :pool, :status]` | `max`, `available`, `waiting` | `instance` | A periodic gauge sample of the Postgrex pool, emitted by `Bier.PoolMonitor` |
