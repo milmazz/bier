@@ -90,11 +90,13 @@ defmodule Bier.Plugs.ActionController do
   # ---- root (`/`) ----------------------------------------------------------
 
   # The root path serves the OpenAPI document for `application/openapi+json` /
-  # `application/json` / `*/*`. The root now authenticates the request (resolving
-  # the role from a bearer token, else the anon role) so the generated document
-  # is filtered by that role's privileges. A token present with no jwt-secret
-  # configured yields a 500 (PGRST300, the single line logged at log-level=error,
-  # case 1764); an invalid token with a secret yields a 401.
+  # `application/json` / `*/*`. When auth is configured the root authenticates
+  # the request (resolving the role from a bearer token, else the anon role) so
+  # the generated document is filtered by that role's privileges; when auth is
+  # not configured the full document is served unfiltered (role = nil). A token
+  # present with no jwt-secret configured yields a 500 (PGRST300, the single line
+  # logged at log-level=error, case 1764); an invalid token with a secret yields
+  # a 401.
   defp dispatch_root(conn, config) do
     if conn.method in ["GET", "HEAD"] do
       render_root(conn, config)
