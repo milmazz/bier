@@ -26,13 +26,15 @@ is Phase 2 (the Tester) and is out of scope here.
   is *agents reviewing each other's work* before it's reported. Spec research is
   exactly that shape: ~16 independent feature areas, each researched in parallel,
   each verifiable against a citable source.
-- It's the current bottleneck: per the snapshot, **no `spec/` exists yet**, and
-  every later phase (Tester, Developers, Phase 4 differential) is blocked on it.
+- Originally this was the bottleneck (no `spec/` existed and every later phase
+  was blocked on it). Today `spec/` exists and the workflow's usual job is the
+  **sync-mode re-run**: re-verifying and updating the tree against a newer
+  pinned PostgREST version.
 
 ## 2. Pinned target
 
-- **PostgREST `v14.12`** — the single version this run specs. (Override via the
-  `PINNED` constant / launch prompt.) Reaching parity with one pinned version is
+- **PostgREST `v14.12`** — the single version this run specs. (Override via
+  `args.pinned` at launch.) Reaching parity with one pinned version is
   the priority; chasing upstream drift comes later (the Spec-Drift Auditor).
 - Sources of truth, in priority order:
   1. PostgREST test tree — `test/spec/Feature/**` (Haskell) + `test/spec/fixtures/**` (SQL). **Ground truth.**
@@ -46,16 +48,51 @@ is Phase 2 (the Tester) and is out of scope here.
 
 ```
 A. Partition      one research unit per feature area (table below) — in-script, no agent
-B. Research       fan-out: 1 agent / area -> writes spec/<area>.yaml + cases + fixture fragment
+B. Research       fan-out: 1 agent / area -> writes (or re-syncs) spec/<area>.yaml + cases + fixture fragment
 C. Cross-check    fan-out: 1 fresh agent / area, adversarially re-auditing that SAME area's output (never its author)
-   └─ revise loop  on "revise" verdict, re-dispatch research with the issues (<= 2 rounds)
-D. Consolidate    1 agent: merge fixture fragments -> spec/conformance/fixtures.sql (loads on PG 14/15/16)
-E. Synthesize     1 agent: spec/README.md, spec/COVERAGE.md, spec/case.schema.json, conformance/INDEX.md
-F. Report         script returns coverage matrix + case count + the list of gaps needing a human decision
+   └─ revise loop  on "revise" verdict, re-dispatch research with the issues (<= 2 rounds; stops early if no actionable issues)
+D. Consolidate    1 agent: fold per-area fixture deltas (fixtures/*.delta.sql)
+                  into the PRIMARY spec/conformance/fixtures.sql — NEVER a
+                  regeneration from the historical fragments (they lack objects
+                  and seed-merge decisions only the merged file has); deltas are
+                  emptied after folding
+E. Verify         1 agent: MACHINE checks with real command output — fixture load
+                  (mix bier.fixtures.load / psql), every case validated against
+                  spec/case.schema.json, case-id uniqueness, zero `source:` URLs
+                  citing a non-pinned version, every case-referenced relation
+                  exists in the loaded DB, case count
+F. Synthesize     1 agent: spec/README.md, spec/COVERAGE.md, conformance/INDEX.md
+                  refreshed from disk (case.schema.json only drafted if absent;
+                  an existing "Scope decisions" section is preserved)
+G. Report         script returns coverage matrix + verified case count + the list of gaps needing a human decision
 ```
 
-Agent budget: 16 (research) + 16 (review) + up to 16×2 (revisions) + 1 + 1 ≈ **66
-max**, far under the 1,000 cap, with ≤16 running at once.
+Agent budget: worst case 17 areas × 3 rounds × 2 agents (initial + 2 revisions,
+researcher + reviewer re-dispatched per round) + 3 tail agents = **105 max**,
+far under the 1,000 cap, with ≤16 running at once. Typical runs are far smaller
+(most areas pass review in round 0).
+
+**Sync mode.** When `spec/` already exists (the usual case now), research agents
+do NOT regenerate: they diff the previous pin against the target
+(`git diff <prev>..<pinned> -- test/spec/ src/`) to find what actually changed,
+locate their area's cases by the `feature:` field, re-anchor every citation to
+the pinned version, fix changed behavior, add cases for new features, and drop
+no-longer-existing behavior as logged gaps. Behaviors the frozen
+`case.schema.json` cannot express are never approximated with weaker
+assertions — they're recorded as `needed_assertion:` gaps for the human harness
+gate, and fixture objects needing loader exposure (rpc/headers area schemas,
+new `schema:` labels) as `loader_exposure:` gaps.
+New case ids come from the area's band (fixed by its position in the canonical
+area table, stable under `args.areas` subsets) with a closed per-area overflow
+range; existing ids are never renumbered.
+
+**Fixture layering.** `spec/conformance/fixtures.sql` is the primary artifact;
+researchers write new fixture objects only to their area's
+`fixtures/<key>.delta.sql`; `fixtures_local.sql` (human-owned) and the live
+loader inputs `fixtures/rpc.sql`/`headers.sql` are untouchable. Seed-data
+ground truth for expected bodies is the CONSOLIDATED database as built by
+`mix bier.fixtures.load`, never a historical fragment. Full contract:
+`spec/conformance/fixtures/README.md`.
 
 ## 4. Feature-area taxonomy (the research units)
 
@@ -80,6 +117,11 @@ Derived from `AGENT_PLAN.md` §5.1. One agent owns one row and writes that row's
 | 14 | `openapi`            | OpenAPI 3.0 generation rules, descriptions from `COMMENT`s, security schemes                              |
 | 15 | `config`             | every PostgREST config key + semantics (`db-uri`, `db-schemas`, `db-anon-role`, `jwt-secret`, `jwt-aud`, `db-max-rows`, `server-port`, …) |
 | 16 | `observability`      | log format, `log-level`, `Server-Timing`, metrics/traces surface                                          |
+| 17 | `domain_representations` | `CREATE DOMAIN` + `CREATE CAST` conversions: read/write casts (json/text), filtering on the underlying value, defaults |
+
+Restrict a run to a subset of areas with `args.areas` (e.g.
+`{areas: ["select", "rpc"]}`); pick the PostgREST version with `args.pinned`
+(default `v14.12` — it also derives the docs major-version URL).
 
 ## 5. Agent contracts
 
@@ -91,7 +133,9 @@ Derived from `AGENT_PLAN.md` §5.1. One agent owns one row and writes that row's
   - `spec/<key>.yaml` — the area's behavior model (see `AGENT_PLAN.md` §5.1 shapes).
   - `spec/conformance/cases/NNNN_<slug>.yaml` — ≥1 black-box case per public
     feature in the area, in the §5.1 case shape (request → expect, with `source`).
-  - `spec/conformance/fixtures/<key>.sql` — the schema/data fragment its cases need.
+  - `spec/conformance/fixtures/<key>.delta.sql` — only if new/changed cases need
+    fixture objects that don't exist yet (new objects only; folded into the
+    primary `fixtures.sql` by phase D).
 - **Returns** (structured): `[{ entry_id, claim, source_url, source_line, case_ids }]`.
 - **Hard rule**: no entry without a `source` URL + line. Untraceable → omit + log a gap.
 
@@ -109,10 +153,13 @@ unrelated area would not let the reviewer verify *these* citations.
   are escalated into the final report as gaps.
 
 ### D · Consolidation agent (one)
-Merges every `spec/conformance/fixtures/*.sql` into a single
-`spec/conformance/fixtures.sql` that loads cleanly on Postgres 14/15/16: dedupe
-shared schemas/tables, resolve naming collisions, order DDL by dependency.
-Returns the conflict list it resolved.
+Folds every `spec/conformance/fixtures/*.delta.sql` into the **primary**
+`spec/conformance/fixtures.sql` (dependency-correct position, dedup against
+what's already there, rename real collisions), then empties each folded delta
+and verifies the load (`mix bier.fixtures.load`, falling back to psql / static
+check). It must NEVER regenerate `fixtures.sql` from the historical fragments
+and never touch `fixtures_local.sql` or the live loader inputs
+`rpc.sql`/`headers.sql`. Returns the folded-delta and conflict lists.
 
 ### E · Synthesis agent (one)
 Emits `spec/README.md` (version pin + overview), `spec/COVERAGE.md` (every
@@ -131,7 +178,11 @@ spec/
 ├── COVERAGE.md  case.schema.json
 └── conformance/
     ├── fixtures.sql            # consolidated, loads on PG 14/15/16
-    ├── fixtures/<key>.sql      # per-area fragments (kept for provenance)
+    ├── fixtures_local.sql      # human-owned supplement (never workflow-written)
+    ├── fixtures/README.md      # fixture layering + ownership contract
+    ├── fixtures/<key>.sql      # historical fragments (provenance only) + the
+    │                           # live loader inputs rpc.sql/headers.sql
+    ├── fixtures/<key>.delta.sql # transient write channel, emptied after folding
     ├── cases/NNNN_*.yaml       # black-box request→response records
     └── INDEX.md
 ```
@@ -184,11 +235,16 @@ re-save the script back into `.claude/workflows/`.
 
 ## 9. Caveats
 
-- **Runtime API**: the workflow runtime's agent-spawn primitive isn't publicly
-  documented. `bier-spec.js` isolates that coupling in a single `dispatch()`
-  wrapper — if your runtime names it differently (`spawnAgent`, `agent.run`, …),
-  adjust only that function. The runtime may also choose to regenerate the script
-  from this brief; this `.md` is the authoritative design either way.
+- **Structured outputs** (2026-07 revision): agents report via the runtime's
+  `schema:` StructuredOutput option — validated and retried at the tool-call
+  layer — instead of the old "end with a ```json fence" convention. Schemas are
+  kept small (paths/ids/gaps, not full entry dumps); the spec/ files on disk are
+  the real deliverable. `agent()` returns `null` for a skipped or
+  terminally-errored subagent; the script records every null as an explicit gap.
+- **Determinism**: full determinism is impossible (live web research + LLM
+  judgment). The run is made *reproducible in structure* instead: pinned-version
+  URLs, canonical area ordering, idempotent sync-mode research, machine-verified
+  acceptance facts (phase E), and no silent data loss in the report.
 - **No mid-run input**: decisions the agents can't resolve from a cited source
   (genuine PostgREST ambiguities) surface in the final report's gap list rather
   than blocking the run.

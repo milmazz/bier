@@ -2,18 +2,24 @@
 -- Bier conformance fixtures (CONSOLIDATED) — PostgREST v14.12 parity
 -- ============================================================================
 --
--- GENERATED FILE. Do not edit by hand. Regenerate from the per-area fragments
--- under spec/conformance/fixtures/*.sql with the Fixture Consolidator.
+-- PRIMARY ARTIFACT — this file is the authoritative fixture set for the
+-- conformance suite. NEVER regenerate it wholesale from the per-area fragments:
+-- it embeds merge decisions (superset seed data, collision renames, later
+-- additions) that exist only here and that the frozen case expectations depend
+-- on. It changes only (a) incrementally, by the Fixture Consolidator folding
+-- per-area spec/conformance/fixtures/*.delta.sql files in, or (b) by hand in a
+-- reviewed commit. See spec/conformance/fixtures/README.md for the layering
+-- (fixtures_local.sql is the separate human-owned supplement).
 --
--- This file is the merge of the 17 per-area fragments under
--- spec/conformance/fixtures/*.sql. Those fragments were authored
--- independently and frequently re-create the same schemas/roles/tables (often
--- with slightly different shapes or seed data). This file dedupes them into a
--- single script that loads cleanly into a fresh database on PostgreSQL 14, 15
--- and 16 (verified against the locally available server; see VERIFICATION at
--- the bottom).
+-- This file originated (2026-06) as a merge of the 17 per-area fragments under
+-- spec/conformance/fixtures/*.sql; those fragments were authored independently
+-- and frequently re-create the same schemas/roles/tables (often with slightly
+-- different shapes or seed data), deduped here into a single script that loads
+-- cleanly into a fresh database on PostgreSQL 14, 15 and 16 (see VERIFICATION
+-- at the bottom). The fragments are historical provenance now — this file has
+-- since gained objects they never had.
 --
--- Source fragments, in dependency-friendly merge order:
+-- Original source fragments, in dependency-friendly merge order:
 --   1.  auth.sql                  (roles, jwt schema, postgrest schema, test.* RPCs)
 --   2.  config.sql                (test.items)
 --   3.  observability.sql         (schema observability.*)

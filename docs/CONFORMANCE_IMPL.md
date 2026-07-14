@@ -82,11 +82,17 @@ before writing code. It encodes findings that are expensive to re-derive.
   Connecting user: the local superuser (`milmazz`); roles
   `postgrest_test_anonymous|default_role|author` already exist cluster-wide and
   are also (idempotently) created by the fixtures.
-- `spec/conformance/fixtures.sql` is the **consolidated** fixture: it merges all
-  17 per-area fragments into schema **`test`** (plus `v1`, `v2`, `observability`,
-  `private`, `postgrest`, `jwt`, `"تست"`, `"SPECIAL ""@/\#~_-"`), choosing the
-  **superset** object/seed when fragments disagree. It loads cleanly into a fresh
-  `bier_test` (`psql -v ON_ERROR_STOP=1 -f spec/conformance/fixtures.sql`).
+- `spec/conformance/fixtures.sql` is the **primary fixture artifact**: it
+  originated as the merge of the 17 per-area fragments into schema **`test`**
+  (plus `v1`, `v2`, `observability`, `private`, `postgrest`, `jwt`, `"تست"`,
+  `"SPECIAL ""@/\#~_-"`), choosing the **superset** object/seed when fragments
+  disagreed, and has since gained objects the fragments never had. It is
+  **never regenerated from the fragments** (they are historical provenance);
+  it changes only incrementally — see `spec/conformance/fixtures/README.md`
+  for the full layering, including the human-owned
+  `spec/conformance/fixtures_local.sql` supplement the loader applies after it.
+  It loads cleanly into a fresh `bier_test`
+  (`psql -v ON_ERROR_STOP=1 -f spec/conformance/fixtures.sql`).
   `test.items` ends up `bigserial` PK with rows **1..15** — the superset that
   satisfies operators/ordering/pagination/etc.
 

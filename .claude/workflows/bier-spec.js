@@ -2,62 +2,77 @@
  * bier-spec — PostgREST spec-research fan-out (Phase 1 of docs/AGENT_PLAN.md)
  * ===========================================================================
  *
- * A dynamic workflow (https://code.claude.com/docs/en/workflows) that researches
- * PostgREST's public behavior and lays down a complete `spec/` tree: one subagent
- * per feature area researches + drafts the spec, a fresh adversarial reviewer
- * cross-checks each area's findings against cited PostgREST source (re-dispatching
- * the researcher on a "revise" verdict, up to MAX_REVISIONS), then the fixtures
- * are consolidated and the result synthesized into COVERAGE.md.
+ * A dynamic workflow that researches PostgREST's public behavior and lays down
+ * — or, when spec/ already exists, RE-SYNCS — the `spec/` tree: one subagent
+ * per feature area researches + drafts (or re-verifies against the pinned
+ * version and tops up), a fresh adversarial reviewer cross-checks each area's
+ * findings against cited PostgREST source (re-dispatching the researcher on a
+ * "revise" verdict, up to MAX_REVISIONS), the fixture deltas are folded into
+ * the primary fixtures.sql, a machine-check Verify pass validates the tree
+ * with real commands, and the result is synthesized into COVERAGE.md.
  *
  * Design source of truth: docs/workflows/bier-spec.md (read it before editing).
  * Writes ONLY under spec/. Does not touch lib/, test/, or mix.exs.
  *
- * ── Runtime API ─────────────────────────────────────────────────────────────
- * This is encoded against the Claude Code dynamic-workflow runtime:
- *   - `export const meta` literal (below) declares name/description/phases.
- *   - the script body runs directly in an async context; there is no entry fn.
- *   - `agent(prompt, opts)` spawns a subagent and returns its final message as a
- *     STRING. We do NOT use the `schema:` option here: these agents do heavy,
- *     long tool work (web fetches, git clone, writing dozens of files) and
- *     reliably finish in prose rather than making the forced StructuredOutput
- *     tool call — which made `agent({schema})` throw at the tail of an otherwise
- *     successful run. Instead each agent ends with a fenced ```json block and we
- *     parse the last one (parseJsonResult), degrading gracefully if it's absent.
- *   - `parallel(thunks)` runs the per-area work concurrently (capped at
- *     min(16, cores-2) automatically) and barriers before consolidation, which
- *     genuinely needs every fixture fragment on disk first. Each area is wrapped
- *     in try/catch so one failure can't sink the barrier (and the consolidate /
- *     synthesize tail).
- *   - agents inherit all tools (Read/Write/Edit/WebFetch/WebSearch/Bash); the
- *     permissions the research agents need are pre-allowed by the operator per
- *     docs/workflows/bier-spec.md §8, not by this script.
- *   - Research is idempotent: an agent that finds its area's spec already on disk
- *     validates + tops up rather than regenerating, so a re-run after a partial
+ * Robustness / determinism notes (2026-07 revision, adversarially reviewed):
+ *   - Agent results use the runtime's `schema:` StructuredOutput option —
+ *     validation happens at the tool-call layer and the model retries on
+ *     mismatch. Schemas are deliberately SMALL (counts + gaps, not full entry
+ *     dumps) so heavy research agents aren't asked to reproduce their on-disk
+ *     work in the report.
+ *   - agent() returns null when a subagent is skipped mid-run or dies on a
+ *     terminal error; every null — including the tail Consolidate/Verify/
+ *     Synthesize agents — becomes an explicit gap in the report.
+ *   - Fixtures: spec/conformance/fixtures.sql is the PRIMARY artifact and is
+ *     never regenerated from the historical fragments (they lack objects and
+ *     seed-merge decisions the frozen expectations depend on). Researchers
+ *     write new fixture objects to per-area *.delta.sql files (parallel-safe);
+ *     the sequential Consolidator folds them in. fixtures_local.sql and the
+ *     live loader inputs rpc.sql/headers.sql are human-owned and untouchable.
+ *     See spec/conformance/fixtures/README.md.
+ *   - The Verify phase turns "fixtures load" / "cases validate" / "citations
+ *     point at the pinned version" / "referenced relations exist" into facts
+ *     from real command output instead of agent self-reports.
+ *   - Version-parametric: args.pinned (default "v14.12") drives every source
+ *     URL including the docs major version; args.areas (e.g. ["select","rpc"])
+ *     restricts the run to a subset (unknown keys are reported, and a run
+ *     matching zero areas aborts before spawning any agent).
+ *   - Case ids: agents locate an area's EXISTING cases by the `feature:` field
+ *     (on-disk ids don't all follow the band formula); NEW ids come from the
+ *     area's band computed from its position in ALL_AREAS (stable under
+ *     args.areas subsets), with a closed per-area overflow range, so parallel
+ *     areas can't collide.
+ *   - Research is idempotent: an agent that finds its area's spec on disk
+ *     syncs/tops up rather than regenerating, so a re-run after a partial
  *     failure is cheap.
  */
 
 export const meta = {
   name: "bier-spec",
-  description: "PostgREST v14 spec-research fan-out: one agent per feature area writes spec/, a fresh adversarial reviewer cross-checks cited sources, then consolidate fixtures and synthesize COVERAGE.md",
-  whenToUse: "Phase 1 of docs/AGENT_PLAN.md — build the spec/ tree from PostgREST's public behavior. Run once before the Tester phase.",
+  description: "PostgREST spec-research fan-out: one agent per feature area writes or re-syncs spec/, a fresh adversarial reviewer cross-checks cited sources, then fold fixture deltas, machine-verify the tree, and synthesize COVERAGE.md",
+  whenToUse: "Build the spec/ tree from PostgREST's public behavior, or re-sync an existing spec/ tree to a new pinned PostgREST version (pass args.pinned).",
   phases: [
-    { title: "Research", detail: "1 agent / feature area → spec/<area>.yaml + conformance cases + fixture fragment" },
+    { title: "Research", detail: "1 agent / feature area → spec/<area>.yaml + conformance cases + fixture delta (sync mode when spec/ exists)" },
     { title: "Cross-check", detail: "fresh adversarial reviewer per area re-verifies every citation; revise loop ≤2 rounds" },
-    { title: "Consolidate", detail: "merge fixture fragments → spec/conformance/fixtures.sql (loads on PG 14/15/16)" },
-    { title: "Synthesize", detail: "spec/README.md, COVERAGE.md, case.schema.json, conformance/INDEX.md" },
+    { title: "Consolidate", detail: "fold spec/conformance/fixtures/*.delta.sql into the primary fixtures.sql" },
+    { title: "Verify", detail: "machine checks: fixture load, case-schema validation, id uniqueness, stale-pin citations, referenced relations" },
+    { title: "Synthesize", detail: "spec/README.md, COVERAGE.md, conformance/INDEX.md refreshed from disk" },
   ],
 };
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
-const PINNED = (args && args.pinned) || "v14.12"; // single PostgREST version this run specs (override via args.pinned)
+const PINNED = (args && args.pinned) || "v14.12"; // PostgREST version this run specs (override via args.pinned)
 const REPO = "https://github.com/PostgREST/postgrest";
 const RAW = `https://raw.githubusercontent.com/PostgREST/postgrest/${PINNED}`;
+const DOCS = `https://postgrest.org/en/v${PINNED.replace(/^v/, "").split(".")[0]}/`;
 const MAX_REVISIONS = 2; // adversarial revise rounds per area before escalating to the gap list
 
-// The research units. One agent owns one area and writes spec/<key>.yaml.
+// The research units. One agent owns one area and writes spec/<key>.<ext>.
 // `scope` is fed verbatim into the agent prompt — keep it concrete.
-const AREAS = [
+// ORDER MATTERS: an area's position here fixes its new-case id band forever;
+// append new areas at the end, never reorder.
+const ALL_AREAS = [
   { key: "url_grammar", file: "url_grammar.md", scope: "path -> schema/table/row resolution, reserved query params, percent-encoding, the full request grammar" },
   { key: "operators", file: "operators.yaml", scope: "eq gt gte lt lte neq like ilike match imatch in is isdistinct fts plfts phfts wfts cs cd ov sl sr nxr nxl adj, plus the `not` prefix; each with pg_op, type constraints, examples" },
   { key: "select", file: "select.yaml", scope: "columns, alias, ::cast, JSON paths ->/->>, embeds (one-to-many, many-to-one, many-to-many via junction), !inner/!left, disambiguation hints, spread ...embed, computed columns, aggregate functions" },
@@ -71,211 +86,424 @@ const AREAS = [
   { key: "errors", file: "errors.yaml", scope: "PG SQLSTATE -> HTTP status map, error body shape {code,message,details,hint}, RAISE/PTxxx custom errors" },
   { key: "headers", file: "headers.yaml", scope: "request + response headers, Prefer echo, Content-Profile/Accept-Profile schema switching, Location on insert, Content-Location" },
   { key: "content_negotiation", file: "content_negotiation.yaml", scope: "application/json, text/csv, application/vnd.pgrst.object+json (single object), GeoJSON, OpenAPI, application/octet-stream (bytea), application/vnd.pgrst.plan (EXPLAIN)" },
-  { key: "openapi", file: "openapi.yaml", scope: "OpenAPI 3.0 document generation rules, descriptions sourced from COMMENTs, security schemes" },
+  { key: "openapi", file: "openapi.yaml", scope: "OpenAPI document generation rules, descriptions sourced from COMMENTs, security schemes" },
   { key: "config", file: "config.yaml", scope: "every PostgREST config key + semantics: db-uri, db-schemas, db-anon-role, jwt-secret, jwt-aud, db-max-rows, server-port, and the rest" },
   { key: "observability", file: "observability.yaml", scope: "log format, log-level, Server-Timing header, metrics/traces surface" },
+  { key: "domain_representations", file: "domain_representations.yaml", scope: "CREATE DOMAIN + CREATE CAST 'domain representation' conversions: read casts (to json/text), write casts (from json/text), filtering on the underlying value, defaults, interaction with select/mutations" },
 ];
+const REQUESTED_AREAS = args && Array.isArray(args.areas) && args.areas.length ? args.areas : null;
+const UNKNOWN_AREA_KEYS = REQUESTED_AREAS
+  ? REQUESTED_AREAS.filter((k) => !ALL_AREAS.some((a) => a.key === k))
+  : [];
+const AREAS = REQUESTED_AREAS ? ALL_AREAS.filter((a) => REQUESTED_AREAS.includes(a.key)) : ALL_AREAS;
 
-// ── Result parsing ───────────────────────────────────────────────────────────
-// agent() returns the subagent's final message as a string. We ask each agent to
-// end with a single fenced ```json block and parse the LAST one. If it's missing
-// or malformed we return a flagged object rather than throwing, so one ragged
-// agent can't sink the run — the work it wrote to disk still stands.
-
-function parseJsonResult(name, result) {
-  const matches = [...String(result).matchAll(/```json\s*([\s\S]*?)```/g)];
-  if (matches.length === 0) {
-    return { _unparsed: true, name, raw: String(result).slice(-2000) };
-  }
-  try {
-    return JSON.parse(matches[matches.length - 1][1]);
-  } catch (e) {
-    return { _unparsed: true, name, error: String(e), raw: matches[matches.length - 1][1] };
-  }
+// New-case id allocation: the band is derived from the area's position in
+// ALL_AREAS (NOT the filtered run list), so a subset run can never squat
+// another area's band. Overflow is a CLOSED per-area range for the same reason.
+function idBands(areaKey) {
+  const idx = ALL_AREAS.findIndex((a) => a.key === areaKey);
+  const band = 1000 + idx * 50;
+  const overflow = 10000 + idx * 200;
+  return { band, bandEnd: band + 49, overflow, overflowEnd: overflow + 199 };
 }
+
+// ── Structured-output schemas ────────────────────────────────────────────────
+// Kept small on purpose: the real deliverable is what the agents write under
+// spec/; the report only needs enough to steer the revise loop and the tail.
+
+const RESEARCH_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["area", "files_written", "cases_touched", "gaps"],
+  properties: {
+    area: { type: "string" },
+    files_written: { type: "array", items: { type: "string" }, description: "spec/ paths created or edited this pass (empty if everything was already correct)" },
+    cases_touched: { type: "array", items: { type: "string" }, description: "conformance case ids added, updated, or verified-unchanged this pass" },
+    gaps: { type: "array", items: { type: "string" }, description: "untraceable behaviors omitted/dropped, plus `needed_assertion:` and `loader_exposure:` items (see prompt)" },
+  },
+};
+
+const REVIEW_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["area", "verdict", "cases_checked", "issues", "missing_features"],
+  properties: {
+    area: { type: "string" },
+    verdict: { type: "string", enum: ["pass", "revise"] },
+    cases_checked: { type: "integer" },
+    issues: { type: "array", items: { type: "string" }, description: 'actionable problems, each "<case id or entry>: <what is wrong> (correct source: <url>)"; empty when verdict is pass' },
+    missing_features: { type: "array", items: { type: "string" } },
+  },
+};
+
+const CONSOLIDATE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["deltas_folded", "conflicts_resolved", "loads_clean", "verified_with", "notes"],
+  properties: {
+    deltas_folded: { type: "array", items: { type: "string" }, description: "delta files folded into fixtures.sql and emptied; [] when none existed" },
+    conflicts_resolved: { type: "array", items: { type: "string" } },
+    loads_clean: { type: "boolean" },
+    verified_with: { type: "string", enum: ["mix bier.fixtures.load", "psql", "static-check"] },
+    notes: { type: "array", items: { type: "string" } },
+  },
+};
+
+const VERIFY_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["fixtures_load_ok", "cases_schema_valid", "invalid_cases", "duplicate_ids", "stale_pin_citations", "missing_relations", "case_count", "evidence"],
+  properties: {
+    fixtures_load_ok: { type: "boolean" },
+    cases_schema_valid: { type: "boolean" },
+    invalid_cases: { type: "array", items: { type: "string" } },
+    duplicate_ids: { type: "array", items: { type: "string" } },
+    stale_pin_citations: { type: "array", items: { type: "string" }, description: "files/case ids whose source: URL references any PostgREST version other than the pinned one" },
+    missing_relations: { type: "array", items: { type: "string" }, description: "relations/functions referenced by case request paths that do not exist in the loaded DB" },
+    case_count: { type: "integer" },
+    evidence: { type: "string", description: "the exact command tails these facts came from" },
+  },
+};
+
+const SYNTH_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["total_cases", "covered_pages", "uncovered_pages", "open_gaps"],
+  properties: {
+    total_cases: { type: "integer" },
+    covered_pages: { type: "integer" },
+    uncovered_pages: { type: "array", items: { type: "string" } },
+    open_gaps: { type: "array", items: { type: "string" } },
+  },
+};
 
 // ── Prompt builders ─────────────────────────────────────────────────────────
 
-function researchPrompt(area, band, priorIssues) {
+function researchPrompt(area, priorIssues) {
+  const { band, bandEnd, overflow, overflowEnd } = idBands(area.key);
   const revising = priorIssues && priorIssues.length;
   return `You are the Spec Researcher for the Bier project, working ONLY on the
 "${area.key}" feature area of PostgREST ${PINNED}. Read docs/AGENT_PLAN.md §5.1
-for the exact deliverable shapes. You may WRITE ONLY under spec/. Never touch
-lib/, test/, or mix.exs.
+for the exact deliverable shapes. Work from the repository root (the current
+directory).
+
+AUTHORIZATION: CLAUDE.md declares spec/ frozen — that freeze governs
+conformance-IMPLEMENTATION work. This run is the operator-approved spec
+re-sync; you MAY write under spec/ within the rules below. You may still never
+touch lib/, test/, or mix.exs.
 
 Area scope: ${area.scope}
 
-IDEMPOTENCY: first check whether spec/${area.file} and this area's cases already
-exist. If they do and look complete + correctly cited, do NOT regenerate them —
-read them, fix only what's wrong or missing, and report what's there. Only do
-full research from scratch if the files are absent.
+SYNC MODE (the usual case): spec/${area.file} and this area's cases probably
+already exist, researched against an OLDER PostgREST version — spec/README.md
+records the previous pin. Do NOT regenerate from scratch, and do NOT re-derive
+everything by hand; work the DIFF:
+  - clone both pins shallow (git clone --depth 1 --branch <tag> ${REPO}) and run
+    git diff <previous-pin>..${PINNED} -- test/spec/ src/ to find what actually
+    changed; docs changes: ${DOCS};
+  - locate this area's existing cases by their \`feature:\` field, e.g.
+    grep -rl 'feature: ${area.key}' spec/conformance/cases/ — NEVER assume id
+    ranges; on-disk ids don't all follow a formula;
+  - update every \`source:\` citation to a ${PINNED} anchor: for files the diff
+    shows unchanged, re-anchor (line numbers may still shift — confirm the
+    anchored line's content matches the claim); for changed files, re-verify
+    the behavior itself;
+  - fix behavior that changed between pins, add cases for features new in
+    ${PINNED}, and drop entries/cases whose behavior no longer exists (record
+    each drop under "gaps" with why);
+  - leave files you verified as correct untouched.
+Only do full from-scratch research if this area's files are absent.
 
 Ground truth, in priority order:
   1. PostgREST tests:    ${RAW}/test/spec/Feature/...  (+ test/spec/fixtures/*.sql)
   2. PostgREST source:   ${RAW}/src/...
-  3. PostgREST docs:     https://postgrest.org/en/v14/   (behavior tests imply)
-Clone shallow if helpful: git clone --depth 1 --branch ${PINNED} ${REPO}
+  3. PostgREST docs:     ${DOCS}   (behavior the tests imply)
 
-Produce, under spec/:
-  - spec/${area.file}                       the behavior model for this area
+Deliverables, under spec/:
+  - spec/${area.file}                        the behavior model for this area
   - spec/conformance/cases/NNNN_<slug>.yaml  >=1 black-box case per public feature,
        in the AGENT_PLAN.md §5.1 case shape (id, feature, request, schema,
        preconditions, expect{status,headers,body_*}, notes, source)
-  - spec/conformance/fixtures/${area.key}.sql  the schema/data your cases need
-Pick conformance-case id ranges that won't collide: use the band [${band} .. ${band + 49}].
+  - spec/conformance/fixtures/${area.key}.delta.sql  ONLY if your new/changed
+       cases need fixture objects that don't exist yet (see FIXTURE RULES)
+For NEW cases only: allocate unused ids from [${band} .. ${bandEnd}]; if that
+band is exhausted, use ONLY [${overflow} .. ${overflowEnd}] (this area's closed
+overflow range — never stray outside it). Never renumber existing cases.
 
-HARD RULE: every entry and every case MUST carry a \`source\` URL with a line
-anchor (e.g. .../AndOrSpec.hs#L117). If you cannot trace a behavior to a real
-source line, OMIT it and record it under "gaps" — do not guess.
+FIXTURE RULES (spec/conformance/fixtures/README.md is authoritative):
+  - Seed-data ground truth is the CONSOLIDATED database as built by
+    'mix bier.fixtures.load' (e.g. test.items has rows 1..15 — a superset of
+    what any historical fragment seeds). Derive and verify every expected body
+    against a freshly loaded bier_test, NEVER against a fragment file.
+  - NEVER edit spec/conformance/fixtures.sql, fixtures_local.sql, or any
+    existing fixtures/*.sql (rpc.sql and headers.sql are LIVE loader inputs
+    with fragile invariants). New fixture objects go ONLY in
+    spec/conformance/fixtures/${area.key}.delta.sql — new objects only, never
+    DDL that duplicates what fixtures.sql already has. The consolidator folds
+    deltas in after the fan-out.
+  - A case's \`schema:\` field is a fixture-set LABEL the frozen harness sends
+    as an Accept-Profile header — NOT a file to load. Use only labels that
+    already exist on disk in other cases (test, operators, ordering, ..., rpc,
+    headers, auth). If a new behavior would need a NEW label or needs an object
+    exposed under the rpc/headers area schemas (which are built from the live
+    loader inputs, not mirrored), do NOT invent it — record a gap prefixed
+    "loader_exposure:" describing what the loader would need to expose.
+
+HARD RULES:
+  - Every entry and every case MUST carry a \`source\` URL with a line anchor
+    (e.g. .../AndOrSpec.hs#L117) pointing at ${PINNED}. If you cannot trace a
+    behavior to a real source line, OMIT it and record it under "gaps" — do not
+    guess.
+  - If a behavior cannot be expressed with the existing keys in
+    spec/case.schema.json, do NOT approximate it with a weaker assertion (e.g.
+    body_contains where an exact match is needed); record a gap prefixed
+    "needed_assertion:" describing the assertion style required. The harness
+    owner extends the schema between runs.
 ${revising ? `\nA reviewer found issues in your previous pass. Fix every one:\n- ${priorIssues.join("\n- ")}\n` : ""}
-End your final message with a single fenced json block (and nothing after it):
-\`\`\`json
-{"area":"${area.key}","entries":[{"entry_id":"","claim":"","source_url":"","source_line":0,"case_ids":[]}],"files_written":[],"gaps":[]}
-\`\`\``;
+When done, return the structured report (small: paths written, case ids touched,
+gaps). The spec/ files on disk are the real deliverable.`;
 }
 
-function reviewPrompt(area, band) {
+function reviewPrompt(area) {
   return `You are an adversarial Spec Reviewer for the Bier project. Audit the
-spec/ output for the "${area.key}" PostgREST area produced by another agent — you
-did NOT write it. Be skeptical; your job is to break it, not bless it.
+on-disk spec/ output for the "${area.key}" area of PostgREST ${PINNED}, produced
+by another agent — you did NOT write it. Be skeptical; your job is to break it,
+not bless it. You are READ-ONLY: do not modify any file. Work from the
+repository root (the current directory).
 
-For each entry in spec/${area.file} and each spec/conformance/cases/*.yaml in this
-area's id band [${band} .. ${band + 49}]:
-  1. Re-fetch the cited source (${RAW}/...) and confirm it actually supports the
-     claim. Flag any claim whose citation is missing, wrong, or contradicts it.
-  2. Check the PostgREST docs ToC for this area for MAJOR features with no case.
-  3. Lint every case against spec/case.schema.json if present (else note its absence).
+Locate this area's material:
+  - the behavior model: spec/${area.file}
+  - its conformance cases: the spec/conformance/cases/*.yaml whose \`feature:\`
+    field's leading segment is "${area.key}" (find them with e.g.
+    grep -rl 'feature: ${area.key}' spec/conformance/cases/). Do NOT rely on id
+    ranges — on-disk ids don't all follow a formula.
 
-Verdict "pass" only if every entry is correctly cited and no major feature is
-missing. Otherwise "revise" with specific, actionable issues.
+For EVERY entry in the model and EVERY case:
+  1. RE-FETCH the cited \`source:\` URL and read the cited line + surrounding
+     context. It must be a ${RAW}/... link with a #Lnnn anchor — flag citations
+     that are missing, point at a DIFFERENT PostgREST version, point to the
+     wrong line, or contradict the claim/status/header/body.
+  2. Check the PostgREST docs (${DOCS}) page for this area for MAJOR public
+     features that have NO case.
+  3. Validate each case against spec/case.schema.json (note if it is absent),
+     and flag any case whose expected body contradicts the CONSOLIDATED seed
+     data (the loaded bier_test / spec/conformance/fixtures.sql — e.g.
+     test.items is rows 1..15), which is the seed ground truth — not the
+     historical fragment files.
 
-End your final message with a single fenced json block (and nothing after it):
-\`\`\`json
-{"area":"${area.key}","verdict":"pass","issues":[],"dropped_entries":[],"missing_features":[]}
-\`\`\``;
+Verdict "pass" ONLY if every citation genuinely supports its claim at ${PINNED}
+AND no major feature is missing. Otherwise "revise", with each issue formatted
+"<case id or entry>: <what is wrong> (correct source: <url>)" so the researcher
+can act on it without re-deriving your work.`;
 }
 
 const CONSOLIDATE_PROMPT = `You are the Fixture Consolidator for the Bier project.
-Merge every spec/conformance/fixtures/*.sql fragment into a single
-spec/conformance/fixtures.sql that loads cleanly on Postgres 14, 15, and 16:
-- dedupe shared schemas/roles/tables created by more than one fragment,
-- resolve naming collisions (rename + note it),
-- order DDL so dependencies (schemas, types, tables, FKs, functions) come first,
-- if psql is available, verify it loads; otherwise do a careful static check.
-Write ONLY under spec/. End your final message with a single fenced json block:
-\`\`\`json
-{"conflicts_resolved":[],"loads_clean":true,"notes":[]}
-\`\`\``;
+spec/conformance/fixtures.sql is the PRIMARY fixture artifact. NEVER regenerate
+it from the historical fixtures/*.sql fragments — it embeds merge decisions
+(superset seeds, renames, later additions) that exist only in it and that the
+frozen case expectations depend on (spec/conformance/fixtures/README.md is
+authoritative). Work from the repository root; write ONLY under spec/.
 
-function synthesisPrompt(reviewSummary) {
+Your job: fold every spec/conformance/fixtures/*.delta.sql into fixtures.sql.
+- Integrate each delta's objects at the dependency-correct position, deduping
+  against what fixtures.sql already has; resolve real collisions by renaming
+  (note each one).
+- After folding a delta and verifying the load, EMPTY that delta file down to a
+  one-line comment recording the fold (do not delete the file).
+- NEVER touch fixtures_local.sql (human-owned), rpc.sql/headers.sql (live
+  loader inputs), or any other historical fragment.
+- Verify the result loads, preferring in this order: 'mix bier.fixtures.load'
+  (its normal behavior is to drop+recreate the local bier_test database), else
+  psql into a throwaway database, else a careful static check. Report which.
+If there are NO delta files, just run the load verification on the current
+fixtures.sql and report deltas_folded: [].`;
+
+const VERIFY_PROMPT = `You are the Spec Verifier for the Bier project — a
+machine-check pass, not a judgment call. Work from the repository root. Do NOT
+modify any file in the repository; throwaway scripts go OUTSIDE the repo (e.g.
+your scratchpad or /tmp). Run these checks and report FACTS from real command
+output — if a check cannot run, report its flag as false (or its list as
+["check-not-run: <why>"]) and say why in "evidence":
+  1. Fixture load: run 'mix bier.fixtures.load' (dropping+recreating the local
+     bier_test database is its normal, intended behavior). If mix or Postgres is
+     unavailable, fall back to loading spec/conformance/fixtures.sql plus
+     spec/conformance/fixtures_local.sql with psql into a throwaway database.
+  2. Case schema: validate EVERY spec/conformance/cases/*.yaml against
+     spec/case.schema.json (e.g. python3 with pyyaml+jsonschema, or
+     check-jsonschema). List every invalid case id.
+  3. Id uniqueness: confirm every case id is unique across the tree; list dupes.
+  4. Stale pins: grep every \`source:\` URL in spec/*.yaml, spec/*.md and
+     spec/conformance/cases/*.yaml — list every file/case whose URL references
+     a PostgREST version tag other than ${PINNED}.
+  5. Referenced relations: extract the relation each case's request path
+     targets (the first path segment; /rpc/<fn> targets function <fn>) and
+     confirm it exists in the loaded database under the case's \`schema:\`
+     label (or \`test\` when the label is null/public/test). List the missing
+     ones as "<case id>: <schema>.<relation>".
+  6. Count the case files.
+Put the exact command tails you relied on in "evidence".`;
+
+function synthesisPrompt(reviewSummary, verify) {
   return `You are the Spec Synthesizer for the Bier project. The per-area spec/
-files and conformance cases now exist. Produce, under spec/:
+files and conformance cases now exist on disk. Work from the repository root;
+write ONLY under spec/. REFRESH these to match what is on disk NOW — read the
+actual files, never trust stale counts:
   - spec/README.md        overview + the pinned version (${PINNED})
-  - spec/case.schema.json  a JSON-Schema the conformance cases validate against
-                           (the Tester owns it afterward; draft a faithful one)
-  - spec/COVERAGE.md       a table mapping every PostgREST v14 docs page -> the
-                           conformance case IDs that cover it; flag uncovered pages
-  - spec/conformance/INDEX.md  cross-reference of cases <-> feature areas
+  - spec/COVERAGE.md      a table mapping every PostgREST docs page (${DOCS})
+                          -> the conformance case IDs that cover it; flag
+                          uncovered pages. PRESERVE any existing "Scope
+                          decisions" section verbatim unless it contradicts
+                          what is now on disk (then update it and say so).
+  - spec/conformance/INDEX.md  cross-reference of cases <-> feature areas with
+                          per-area counts
+  - spec/case.schema.json ONLY if it does not exist yet (draft a faithful
+                          JSON-Schema); if it exists, leave it alone — the
+                          Tester owns it.
 
-Reviewer summary to fold into COVERAGE.md gaps:
+Adversarial-review summary to fold into COVERAGE.md gaps:
 ${reviewSummary}
 
-Write ONLY under spec/. End your final message with a single fenced json block:
-\`\`\`json
-{"total_cases":0,"covered_pages":0,"uncovered_pages":[],"open_gaps":[]}
-\`\`\``;
+Machine-verification facts (record failures honestly in COVERAGE.md):
+${JSON.stringify(verify)}`;
 }
 
 // ── Per-area unit: research → adversarial review → bounded revise loop ───────
 
-async function specifyArea(area, i) {
-  const band = 1000 + i * 50;
+async function specifyArea(area) {
   let issues = [];
-  let research = {};
-  let review = {};
+  let research = null;
+  let review = null;
 
   try {
     for (let round = 0; round <= MAX_REVISIONS; round++) {
       const suffix = round ? `:r${round}` : "";
 
-      const r = await agent(researchPrompt(area, band, issues), {
+      // A lost researcher/reviewer (null) must not erase the previous round's
+      // report — keep the last real one and stop the loop.
+      const r = await agent(researchPrompt(area, issues), {
         label: `research:${area.key}${suffix}`,
         phase: "Research",
+        schema: RESEARCH_SCHEMA,
       });
-      research = parseJsonResult(`research:${area.key}`, r);
+      if (r) research = r;
 
       // Adversarial: a fresh agent (never the author) re-verifies this area's citations.
-      const rv = await agent(reviewPrompt(area, band), {
+      const rv = await agent(reviewPrompt(area), {
         label: `review:${area.key}${suffix}`,
         phase: "Cross-check",
+        schema: REVIEW_SCHEMA,
       });
-      review = parseJsonResult(`review:${area.key}`, rv);
-
-      // _unparsed review → can't trust the verdict; stop revising and let the
-      // synthesis/gap pass surface it rather than looping pointlessly.
-      if (review.verdict === "pass" || review._unparsed) break;
+      if (rv) review = rv;
+      if (!rv || review.verdict === "pass") break;
       issues = review.issues || [];
+      // "revise" with zero actionable issues gives the researcher nothing to
+      // fix — looping would just burn tokens. Surface it as a gap instead.
+      if (!issues.length) break;
     }
   } catch (e) {
-    // One area erroring must not sink the barrier (or the consolidate/synthesize
-    // tail). Files this area already wrote to spec/ still stand.
-    return { area: area.key, band, research, review, error: String(e) };
+    // One area erroring must not sink the barrier (or the consolidate/verify/
+    // synthesize tail). Files this area already wrote to spec/ still stand.
+    return { area: area.key, research, review, error: String(e) };
   }
 
-  return { area: area.key, band, research, review };
+  return { area: area.key, research, review };
 }
 
 // ── Orchestration ───────────────────────────────────────────────────────────
 
-log(`Specifying PostgREST ${PINNED} across ${AREAS.length} feature areas (≤2 revise rounds each)...`);
-
-// Phase Research + Cross-check: every area in parallel. Barrier here is correct —
-// consolidation needs every fixture fragment written before it can merge them.
-const areaResults = (
-  await parallel(AREAS.map((area, i) => () => specifyArea(area, i)))
-).filter(Boolean);
-
-// Collect everything a human needs to decide — workflows can't ask mid-run.
-const gaps = [];
-for (const a of areaResults) {
-  for (const g of a.research.gaps || []) gaps.push({ area: a.area, kind: "research_gap", detail: g });
-  for (const m of a.review.missing_features || []) gaps.push({ area: a.area, kind: "missing_feature", detail: m });
-  if (a.review.verdict !== "pass" && (a.review.issues || []).length) {
-    gaps.push({ area: a.area, kind: "unresolved_after_revisions", issues: a.review.issues });
-  }
-  if (a.error) gaps.push({ area: a.area, kind: "area_errored", detail: a.error });
-  if (a.research._unparsed) gaps.push({ area: a.area, kind: "research_result_unparsed", detail: a.research.raw?.slice(0, 300) });
-  if (a.review._unparsed) gaps.push({ area: a.area, kind: "review_result_unparsed", detail: a.review.raw?.slice(0, 300) });
+if (UNKNOWN_AREA_KEYS.length) {
+  log(`args.areas contains unknown keys (ignored): ${UNKNOWN_AREA_KEYS.join(", ")}`);
+}
+if (AREAS.length === 0) {
+  // Abort BEFORE any agent runs — otherwise the tail would still rewrite
+  // fixtures/COVERAGE/INDEX for a run that researched nothing.
+  return {
+    workflow: "bier-spec",
+    error: "args.areas matched no known areas — nothing to do",
+    unknown_area_keys: UNKNOWN_AREA_KEYS,
+    known_area_keys: ALL_AREAS.map((a) => a.key),
+  };
 }
 
-// Phase Consolidate: merge the fixture fragments into one loadable file.
-log("Consolidating fixture fragments → spec/conformance/fixtures.sql");
-const consolidate = parseJsonResult(
-  "consolidate",
-  await agent(CONSOLIDATE_PROMPT, { label: "consolidate-fixtures", phase: "Consolidate" })
-);
+log(`Specifying PostgREST ${PINNED} across ${AREAS.length} feature areas (≤${MAX_REVISIONS} revise rounds each)...`);
 
-// Phase Synthesize: README / COVERAGE / case.schema.json / INDEX.
+// Phase Research + Cross-check: every area in parallel. Barrier here is correct —
+// the consolidator needs every fixture delta written before it can fold them.
+const areaSlots = await parallel(AREAS.map((area) => () => specifyArea(area)));
+
+// Collect everything a human needs to decide — workflows can't ask mid-run.
+// parallel() preserves input order, so slot i corresponds to AREAS[i]; a null
+// slot (skipped / terminally-errored agent) is recorded, never silently dropped.
+const gaps = [];
+const areaResults = [];
+areaSlots.forEach((slot, i) => {
+  if (!slot) {
+    log(`area ${AREAS[i].key}: agent slot returned null (skipped or terminal error)`);
+    gaps.push({ area: AREAS[i].key, kind: "area_agent_lost", detail: "parallel slot returned null (agent skipped mid-run or died after retries)" });
+    return;
+  }
+  areaResults.push(slot);
+  const research = slot.research || {};
+  const review = slot.review || {};
+  for (const g of research.gaps || []) gaps.push({ area: slot.area, kind: "research_gap", detail: g });
+  for (const m of review.missing_features || []) gaps.push({ area: slot.area, kind: "missing_feature", detail: m });
+  if (!slot.research) gaps.push({ area: slot.area, kind: "research_report_missing", detail: "research agent returned no structured report; check its on-disk output" });
+  if (!slot.review) gaps.push({ area: slot.area, kind: "review_report_missing", detail: "review agent returned no structured report; area is unverified" });
+  if (review.verdict === "revise") {
+    gaps.push({
+      area: slot.area,
+      kind: (review.issues || []).length ? "unresolved_after_revisions" : "revise_without_issues",
+      issues: review.issues || [],
+    });
+  }
+  if (slot.error) gaps.push({ area: slot.area, kind: "area_errored", detail: slot.error });
+});
+
+// Phase Consolidate: fold the fixture deltas into the primary fixtures.sql.
+log("Folding fixture deltas → spec/conformance/fixtures.sql");
+const consolidateResult = await agent(CONSOLIDATE_PROMPT, { label: "consolidate-fixtures", phase: "Consolidate", schema: CONSOLIDATE_SCHEMA });
+if (!consolidateResult) gaps.push({ kind: "consolidate_agent_lost", detail: "consolidator returned no report — delta files may be unfolded; inspect spec/conformance/fixtures/*.delta.sql" });
+else if (consolidateResult.loads_clean === false) gaps.push({ kind: "fixtures_reported_unclean", detail: (consolidateResult.notes || []).join("; ") || "consolidator reported loads_clean=false" });
+const consolidate = consolidateResult || {};
+
+// Phase Verify: machine checks with real command output — not self-reports.
+log("Verifying spec/ tree: fixture load, case schema, ids, stale pins, referenced relations");
+const verifyResult = await agent(VERIFY_PROMPT, { label: "verify-spec-tree", phase: "Verify", schema: VERIFY_SCHEMA });
+if (!verifyResult) gaps.push({ kind: "verify_agent_lost", detail: "verify agent returned no report — the tree is UNVERIFIED; do not proceed on green assumptions" });
+const verify = verifyResult || {};
+if (verify.fixtures_load_ok === false) gaps.push({ kind: "fixtures_do_not_load", detail: verify.evidence || "see verify agent output" });
+if (verify.cases_schema_valid === false) gaps.push({ kind: "cases_fail_schema", detail: (verify.invalid_cases || []).join(", ") });
+if ((verify.duplicate_ids || []).length) gaps.push({ kind: "duplicate_case_ids", detail: verify.duplicate_ids.join(", ") });
+if ((verify.stale_pin_citations || []).length) gaps.push({ kind: "stale_pin_citations", detail: verify.stale_pin_citations.join(", ") });
+if ((verify.missing_relations || []).length) gaps.push({ kind: "cases_reference_missing_relations", detail: verify.missing_relations.join(", ") });
+
+// Phase Synthesize: README / COVERAGE / INDEX refreshed from disk.
 const reviewSummary = areaResults
-  .map((a) => `- ${a.area}: ${a.review.verdict || "?"}` + ((a.review.missing_features || []).length ? ` (missing: ${a.review.missing_features.join(", ")})` : ""))
+  .map((a) => `- ${a.area}: ${(a.review && a.review.verdict) || "unreviewed"}` + (((a.review && a.review.missing_features) || []).length ? ` (missing: ${a.review.missing_features.join(", ")})` : ""))
   .join("\n");
-const synthesis = parseJsonResult(
-  "synthesize",
-  await agent(synthesisPrompt(reviewSummary), { label: "synthesize-spec", phase: "Synthesize" })
-);
+const synthesisResult = await agent(synthesisPrompt(reviewSummary, verify), { label: "synthesize-spec", phase: "Synthesize", schema: SYNTH_SCHEMA });
+if (!synthesisResult) gaps.push({ kind: "synthesize_agent_lost", detail: "synthesis agent returned no report — README/COVERAGE/INDEX may be stale" });
+const synthesis = synthesisResult || {};
 
 // The single report this run returns.
-const passed = areaResults.filter((a) => a.review.verdict === "pass").length;
+const passed = areaResults.filter((a) => a.review && a.review.verdict === "pass").length;
 return {
   workflow: "bier-spec",
   pinned_postgrest: PINNED,
   areas_total: AREAS.length,
   areas_passing_review: passed,
+  unknown_area_keys: UNKNOWN_AREA_KEYS,
   total_conformance_cases: synthesis.total_cases ?? null,
   docs_pages_covered: synthesis.covered_pages ?? null,
   docs_pages_uncovered: synthesis.uncovered_pages ?? [],
-  fixtures_load_clean: consolidate.loads_clean ?? null,
+  fixtures_load_ok: verify.fixtures_load_ok ?? null,
+  cases_schema_valid: verify.cases_schema_valid ?? null,
+  stale_pin_citations: verify.stale_pin_citations ?? null,
+  missing_relations: verify.missing_relations ?? null,
+  verified_case_count: verify.case_count ?? null,
+  verify_evidence: verify.evidence ?? null,
+  fixture_deltas_folded: consolidate.deltas_folded ?? [],
   fixture_conflicts_resolved: consolidate.conflicts_resolved ?? [],
   gaps_for_human_review: gaps.concat((synthesis.open_gaps || []).map((g) => ({ kind: "synthesis_gap", detail: g }))),
-  next: "Phase 2 (Tester): generate the failing ExUnit suite from spec/.",
+  next: "Human gate: review the spec diff and the needed_assertion:/loader_exposure: gaps, sync the test harness, then run bier-conformance.",
 };
