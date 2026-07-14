@@ -129,18 +129,20 @@ defmodule Bier.Plugs.ActionController do
   end
 
   defp generated_root_doc(conn, config) do
-    if Bier.Auth.applicable?(config) do
-      case Bier.Auth.resolve(conn, config) do
-        {:ok, context} ->
-          doc = build_openapi_document(config, context.role)
-          root_doc_body(conn, Bier.json_library().encode!(doc))
-
-        {:error, _} = err ->
-          err
-      end
-    else
-      doc = build_openapi_document(config, nil)
+    with {:ok, role} <- root_doc_role(conn, config) do
+      doc = build_openapi_document(config, role)
       root_doc_body(conn, Bier.json_library().encode!(doc))
+    end
+  end
+
+  # The document is filtered by the request's role when auth is configured
+  # (a JWT verification failure short-circuits with the error envelope);
+  # otherwise there is no role to filter by, so `nil` yields the full document.
+  defp root_doc_role(conn, config) do
+    if Bier.Auth.applicable?(config) do
+      with {:ok, context} <- Bier.Auth.resolve(conn, config), do: {:ok, context.role}
+    else
+      {:ok, nil}
     end
   end
 
