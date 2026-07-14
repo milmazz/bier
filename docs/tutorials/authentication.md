@@ -195,7 +195,7 @@ Content-Type: application/json; charset=utf-8
 ```
 
 ```json
-[{"id":9,"beer_id":1,"drinker":"sam","rating":5,"comment":"great","created_at":"2026-07-14T09:00:31.050203+00:00"}]
+[{"id":6,"beer_id":1,"drinker":"sam","rating":5,"comment":"great","created_at":"2026-07-14T09:00:31.050203+00:00"}]
 ```
 
 The check-in was created. Nothing about the SQL changed — the only

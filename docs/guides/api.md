@@ -367,7 +367,7 @@ curl "http://localhost:4040/beers?select=id,name,breweries(name,city)&id=eq.1"
 ```
 
 ```json
-[{"id": 1, "name": "Trail Crest IPA", "breweries": {"name": "Reunion Brewing", "city": "Portland"}}]
+[{"id": 1, "name": "Trail Crest IPA", "breweries": {"city": "Portland", "name": "Reunion Brewing"}}]
 ```
 
 **One-to-many** (`breweries` → its `beers` children) embeds a JSON array;

@@ -28,8 +28,8 @@ children = [
    name: MyApp.Bier,
    router: [port: 4040, scheme: :http],
    database: "brewery_dev",
-   username: "postgres",
-   password: "postgres",
+   username: "authenticator",
+   password: "secret",
    db_schemas: ["api"],
    db_anon_role: "web_anon"}
 ]
