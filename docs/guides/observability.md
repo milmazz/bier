@@ -6,7 +6,7 @@ liveness/readiness endpoints, connection-pool sampling, request-trace header
 passthrough, and the structured diagnostics it logs for database failures.
 None of this changes request handling — it is read-only instrumentation
 alongside the request pipeline described in the
-[API reference](api-reference.md) and configured via the options in the
+[API reference](api.md) and configured via the options in the
 [Configuration reference](configuration.md).
 
 Every signal on this page is scoped to one named instance (a node can host
@@ -231,5 +231,5 @@ proxy-status: PostgREST; error=PGRST
 {"code":"PGRST","message":"...","details":null,"hint":null}
 ```
 
-See the [API reference](api-reference.md) for the full table of `PGRST*`
+See the [API reference](api.md) for the full table of `PGRST*`
 codes and their HTTP statuses.

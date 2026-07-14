@@ -71,6 +71,21 @@ curl -X POST "http://localhost:4040/items" \
 curl "http://localhost:4040/rpc/add?a=1&b=2"
 ```
 
+## Documentation
+
+New to Bier? Start with the tutorials, then reach for the reference guides.
+
+**Tutorials** (learn by building a brewery catalog API)
+
+- [Getting Started](docs/tutorials/getting-started.md) — create the database, boot Bier, and make your first requests.
+- [Authentication](docs/tutorials/authentication.md) — add roles and JWTs so only members can post.
+
+**Reference**
+
+- [API reference](docs/guides/api.md) — reading, filtering, ordering, pagination, embedding, mutations, RPC, and content negotiation.
+- [Configuration](docs/guides/configuration.md) — every option, the `PGRST_*` environment variables, and standalone/Docker/CLI operation.
+- [Observability](docs/guides/observability.md) — telemetry events, Server-Timing, health endpoints, and the error envelope.
+
 ## Configuration
 
 Options are validated by a [NimbleOptions][] schema (`Bier.schema/0`). Their

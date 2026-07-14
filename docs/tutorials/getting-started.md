@@ -180,7 +180,7 @@ curl "http://localhost:4040/beers?select=name,abv&order=abv.desc&limit=3"
 
 A horizontal filter is `<column>=<operator>.<value>`. `gte` is greater-than-
 or-equal; the full operator table is in the
-[API reference](../guides/api-reference.md#horizontal-filtering).
+[API reference](../guides/api.md#horizontal-filtering).
 
 > `abv` (`numeric(4,2)`) can't be filtered yet — Bier 400s when filtering on
 > (or casting to) a parameterized type like `numeric(p,s)`, a known
@@ -302,7 +302,7 @@ routes, or serializers were written for any of this.
 
 From here:
 
-* [API reference](../guides/api-reference.md) covers the full query
+* [API reference](../guides/api.md) covers the full query
   grammar — every filter operator, aggregates, JSON paths, computed
   columns, mutations, and content negotiation — using this same brewery
   schema.

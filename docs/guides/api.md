@@ -1,4 +1,4 @@
-# API Reference
+# REST API Reference
 
 Bier generates a REST API on the fly from PostgreSQL introspection, following
 PostgREST's request grammar. This reference documents that grammar — the

@@ -307,5 +307,5 @@ You now have the whole model: anonymous requests read the catalog as
 `web_anon`, and a signed token lets a client act as `brewery_member` and
 post check-ins — with PostgreSQL's own grants, not application code, drawing
 the line between them. From here the [Configuration guide](../guides/configuration.md)
-covers every option, and the [API reference](../guides/api-reference.md)
+covers every option, and the [API reference](../guides/api.md)
 covers the full query and mutation grammar you can now use as either role.
