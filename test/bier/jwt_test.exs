@@ -131,6 +131,18 @@ defmodule Bier.JWTTest do
     end
   end
 
+  describe "verify/4 recomposition" do
+    test "still verifies a valid token end to end" do
+      token =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicG9zdGdyZXN0X3Rlc3RfYXV0aG9yIiwiaWQiOiJqZG9lIn0.B-lReuGNDwAlU1GOC476MlO0vAt9JNoHIlxg2vwMaO0"
+
+      role_path = [{:key, "role"}]
+
+      assert {:ok, %{role: "postgrest_test_author", claims: _, claims_json: _}} =
+               JWT.verify(token, @hs_secret, nil, role_path)
+    end
+  end
+
   # Mint an HS256 token (header.payload.signature) signing with `key` as the HMAC
   # secret. Used only to construct test inputs.
   defp forge_hs256(claims, key) do
