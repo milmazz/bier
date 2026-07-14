@@ -191,9 +191,15 @@ defmodule Bier.Mutation do
   # Run the mutation. We always wrap the RETURNING in a representation query so
   # we can (a) shape the body by &select / embedding and (b) count the mutated
   # rows for Content-Range and the Location header, even for minimal responses.
+  #
+  # The per-request auth context (role switch + request GUCs + db-pre-request)
+  # is applied here exactly as it is for reads (`Bier.QueryExecutor.query_read/5`)
+  # and RPC (`Bier.Rpc.exec/4`) — otherwise a write runs as the connecting role
+  # with no `request.*` GUCs and no privilege check, a security gap (#73).
   defp run(conn, %Write{} = write, sql, params) do
     pool = Bier.Registry.via(write.config.name, Postgrex)
     relations = Bier.SchemaCache.relations(write.config.name)
+    context = conn.assigns[:bier_auth]
 
     {:ok, wrapped, wparams} =
       Bier.ServerTiming.measure(:plan, fn ->
@@ -204,15 +210,49 @@ defmodule Bier.Mutation do
 
     result =
       Bier.ServerTiming.measure(:transaction, fn ->
-        Postgrex.transaction(pool, fn tx -> execute(tx, write, wrapped, wparams) end)
+        Postgrex.transaction(pool, fn tx ->
+          run_execute(tx, context, write, wrapped, wparams)
+        end)
       end)
 
     case result do
       {:ok, outcome} -> respond(conn, write, outcome)
       {:error, {:bier_rollback_ok, outcome}} -> respond(conn, write, outcome)
-      {:error, reason} -> reason
+      {:error, reason} -> map_write_error(context, reason)
     end
   end
+
+  # No auth configured for this request's schema: run the write as the
+  # connecting role, unchanged.
+  defp run_execute(tx, nil, write, wrapped, wparams),
+    do: execute(tx, write, wrapped, wparams)
+
+  # Auth configured: apply the role switch, request GUCs, and db-pre-request
+  # hook before the write (mirrors `Bier.Auth.with_context/4` on the read/RPC
+  # paths).
+  defp run_execute(tx, context, write, wrapped, wparams) do
+    Bier.Auth.with_context(tx, context, write.config, fn tx ->
+      execute(tx, write, wrapped, wparams)
+    end)
+  end
+
+  # `execute/4` threads the FULL `{:error, _}` tuple into `Postgrex.rollback/2`
+  # (so the no-context path below can return `reason` unchanged as an
+  # already-correctly-shaped `{:error, …}` term for `FallbackController`), so a
+  # write-query failure surfaces here double-wrapped: `{:error,
+  # %Postgrex.Error{}}`. A failure during the auth-context setup itself (role
+  # switch / db-pre-request, raised from `Bier.Auth.with_context/4`) is NOT
+  # double-wrapped. Match both shapes so an anonymous `42501` maps to 401
+  # (mirroring the read/RPC paths) regardless of where in the transaction it
+  # originated; anything else (including a Postgrex error with no auth
+  # context) passes through unchanged.
+  defp map_write_error(context, {:error, %Postgrex.Error{} = err}) when context != nil,
+    do: Bier.Auth.map_error(context, err)
+
+  defp map_write_error(context, %Postgrex.Error{} = err) when context != nil,
+    do: Bier.Auth.map_error(context, err)
+
+  defp map_write_error(_context, reason), do: reason
 
   # Run the wrapped representation query inside the per-request transaction and
   # collect the response payload: body/count/meta from the CTE, the PUT/upsert
