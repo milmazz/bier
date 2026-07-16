@@ -180,8 +180,10 @@ defmodule Bier.Plugs.ActionController do
   # privileges; ignore-privileges includes everything). Relations, functions,
   # and the schema comment come from the Bier.SchemaCache snapshot —
   # the same cache the request pipeline routes against — so the document never
-  # advertises a relation the instance cannot serve. Only `privileges/3` runs
-  # per request, because it depends on the request role.
+  # advertises a relation the instance cannot serve. Only the per-role
+  # privileges lookup depends on the request, and it is served from
+  # Bier.PrivilegesCache (keyed by role + snapshot generation); the catalog is
+  # queried once per role per schema-cache load.
   defp build_openapi_document(config, role) do
     schema = hd(config.db_schemas)
     cache = Bier.SchemaCache.get(config.name)
@@ -193,7 +195,8 @@ defmodule Bier.Plugs.ActionController do
 
     functions = Map.filter(cache.functions, fn {{s, _name}, _overloads} -> s == schema end)
 
-    {relations, functions} = filter_by_mode(config, role, schema, relations, functions)
+    {relations, functions} =
+      filter_by_mode(config, role, schema, relations, functions, cache.generation)
 
     Bier.OpenAPI.build(%{
       relations: relations,
@@ -205,7 +208,7 @@ defmodule Bier.Plugs.ActionController do
     })
   end
 
-  defp filter_by_mode(config, role, schema, relations, functions) do
+  defp filter_by_mode(config, role, schema, relations, functions, generation) do
     case config.openapi_mode do
       "ignore-privileges" ->
         {relations, functions}
@@ -215,7 +218,14 @@ defmodule Bier.Plugs.ActionController do
 
       _follow_privileges ->
         pg = Registry.via(config.name, Postgrex)
-        privs = Bier.Introspection.privileges(pg, [schema], role)
+
+        # Cached per {role, schema-cache generation}: a reload invalidates,
+        # so the document tracks DDL/grant changes exactly as fast as the
+        # rest of the snapshot does (issue #53 item 4).
+        privs =
+          Bier.PrivilegesCache.fetch(config.name, role, generation, fn ->
+            Bier.Introspection.privileges(pg, [schema], role)
+          end)
 
         rels =
           for r <- relations,

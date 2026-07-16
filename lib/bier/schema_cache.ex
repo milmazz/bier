@@ -22,14 +22,16 @@ defmodule Bier.SchemaCache do
             functions: %{},
             media_handlers: [],
             schema_comment: nil,
-            postgis: false
+            postgis: false,
+            generation: nil
 
   @type t :: %__MODULE__{
           relations: map(),
           functions: map(),
           media_handlers: list(),
           schema_comment: String.t() | nil,
-          postgis: boolean()
+          postgis: boolean(),
+          generation: reference() | nil
         }
 
   @doc """
@@ -74,7 +76,10 @@ defmodule Bier.SchemaCache do
       functions: Bier.Introspection.functions(conn, schemas),
       media_handlers: Bier.Introspection.media_handlers(conn, schemas),
       schema_comment: Bier.Introspection.schema_comment(conn, hd(schemas)),
-      postgis: Bier.Introspection.postgis?(conn)
+      postgis: Bier.Introspection.postgis?(conn),
+      # Stamps this snapshot for downstream generation-keyed caches
+      # (Bier.PrivilegesCache): a reload mints a new ref, invalidating them.
+      generation: make_ref()
     }
   end
 
