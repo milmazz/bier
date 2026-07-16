@@ -470,7 +470,6 @@ defmodule Bier.OpenAPITest do
                "#/parameters/rowFilter.child_entities.name",
                "#/parameters/rowFilter.child_entities.parent_id",
                "#/parameters/body.child_entities",
-               "#/parameters/select",
                "#/parameters/preferReturn"
              ]
 
@@ -480,7 +479,6 @@ defmodule Bier.OpenAPITest do
                "#/parameters/rowFilter.child_entities.id",
                "#/parameters/rowFilter.child_entities.name",
                "#/parameters/rowFilter.child_entities.parent_id",
-               "#/parameters/select",
                "#/parameters/preferReturn"
              ]
 
@@ -490,12 +488,51 @@ defmodule Bier.OpenAPITest do
     test "parameters block has shared targets and per-column rowFilter (1661)", %{doc: doc} do
       params = doc["parameters"]
 
-      for k <- ~w(select order range rangeUnit offset limit preferCount preferPost preferReturn) do
+      for k <-
+            ~w(select order range rangeUnit offset limit preferCount preferPost preferReturn preferParams on_conflict) do
         assert Map.has_key?(params, k), "missing shared parameter #{k}"
       end
 
       assert Map.has_key?(params, "rowFilter.child_entities.id")
       assert Map.has_key?(params, "body.child_entities")
+
+      # preferParams: empty enum is suppressed — the key is absent entirely
+      # (OpenAPI.hs#L171-188 makePreferParam; OpenApiSpec.hs#L1088).
+      assert params["preferParams"] == %{
+               "name" => "Prefer",
+               "in" => "header",
+               "type" => "string",
+               "required" => false,
+               "description" => "Preference"
+             }
+
+      # preferPost carries return AND resolution values, in this order
+      # (OpenAPI.hs#L184-186, makePreferParam ["return", "resolution"]).
+      assert params["preferPost"]["enum"] == [
+               "return=representation",
+               "return=minimal",
+               "return=none",
+               "resolution=ignore-duplicates",
+               "resolution=merge-duplicates"
+             ]
+
+      # on_conflict is unconditionally in the shared block (OpenAPI.hs#L242-248).
+      assert params["on_conflict"] == %{
+               "name" => "on_conflict",
+               "in" => "query",
+               "type" => "string",
+               "required" => false,
+               "description" => "On Conflict"
+             }
+
+      # rowFilter has no format key; description comes from the column COMMENT
+      # (OpenAPI.hs#L299-308 makeRowFilter).
+      assert params["rowFilter.child_entities.id"] == %{
+               "name" => "id",
+               "in" => "query",
+               "type" => "string",
+               "required" => false
+             }
     end
   end
 
@@ -638,6 +675,16 @@ defmodule Bier.OpenAPITest do
              }
 
       assert body["schema"]["required"] == ["double", "text_arr"]
+
+      # PostgREST marks the args body param required (OpenAPI.hs#L222).
+      assert body["required"] == true
+
+      # The second POST parameter is the shared preferParams ref
+      # (OpenAPI.hs#L219-226 makeProcPostParams).
+      assert Enum.at(
+               doc["paths"]["/rpc/varied_arguments_openapi"]["post"]["parameters"],
+               1
+             ) == %{"$ref" => "#/parameters/preferParams"}
 
       assert doc["paths"]["/rpc/varied_arguments_openapi"]["post"]["tags"] == [
                "(rpc) varied_arguments_openapi"

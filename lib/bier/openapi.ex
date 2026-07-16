@@ -96,7 +96,10 @@ defmodule Bier.OpenAPI do
     post =
       %{
         "tags" => tags,
-        "parameters" => [rpc_body_param(fun, summary, description)],
+        "parameters" => [
+          rpc_body_param(fun, summary, description),
+          %{"$ref" => "#/parameters/preferParams"}
+        ],
         "responses" => %{"200" => %{"description" => "OK"}}
       }
       |> put_optional("summary", summary)
@@ -136,7 +139,7 @@ defmodule Bier.OpenAPI do
       |> put_optional("description", desc)
       |> put_required(required)
 
-    %{"name" => "args", "in" => "body", "required" => false, "schema" => schema}
+    %{"name" => "args", "in" => "body", "required" => true, "schema" => schema}
   end
 
   # A VARIADIC arg or an arg with a DEFAULT is optional; everything else is required.
@@ -192,8 +195,7 @@ defmodule Bier.OpenAPI do
       :patch in methods,
       "patch",
       op.(%{
-        "parameters" =>
-          row_filter_refs(rel) ++ refs(["body.#{rel.name}", "select", "preferReturn"]),
+        "parameters" => row_filter_refs(rel) ++ refs(["body.#{rel.name}", "preferReturn"]),
         "responses" => %{"204" => %{"description" => "No Content"}}
       })
     )
@@ -201,7 +203,7 @@ defmodule Bier.OpenAPI do
       :delete in methods,
       "delete",
       op.(%{
-        "parameters" => row_filter_refs(rel) ++ refs(["select", "preferReturn"]),
+        "parameters" => row_filter_refs(rel) ++ refs(["preferReturn"]),
         "responses" => %{"204" => %{"description" => "No Content"}}
       })
     )
@@ -276,7 +278,13 @@ defmodule Bier.OpenAPI do
         "in" => "header",
         "type" => "string",
         "required" => false,
-        "enum" => ["return=representation", "return=minimal", "return=none"],
+        "enum" => [
+          "return=representation",
+          "return=minimal",
+          "return=none",
+          "resolution=ignore-duplicates",
+          "resolution=merge-duplicates"
+        ],
         "description" => "Preference"
       },
       "preferReturn" => %{
@@ -286,6 +294,20 @@ defmodule Bier.OpenAPI do
         "required" => false,
         "enum" => ["return=representation", "return=minimal", "return=none"],
         "description" => "Preference"
+      },
+      "preferParams" => %{
+        "name" => "Prefer",
+        "in" => "header",
+        "type" => "string",
+        "required" => false,
+        "description" => "Preference"
+      },
+      "on_conflict" => %{
+        "name" => "on_conflict",
+        "in" => "query",
+        "type" => "string",
+        "required" => false,
+        "description" => "On Conflict"
       }
     }
 
@@ -296,9 +318,9 @@ defmodule Bier.OpenAPI do
            "name" => col.name,
            "in" => "query",
            "type" => "string",
-           "required" => false,
-           "format" => col.type
-         }}
+           "required" => false
+         }
+         |> put_optional("description", col.comment)}
       end
 
     bodies =
