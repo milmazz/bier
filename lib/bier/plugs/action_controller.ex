@@ -23,6 +23,7 @@ defmodule Bier.Plugs.ActionController do
   alias Bier.MediaType
   alias Bier.Mutation
   alias Bier.Negotiation
+  alias Bier.OpenAPI.V3
   alias Bier.Pagination
   alias Bier.Plan
   alias Bier.Plugs.FallbackController
@@ -213,7 +214,7 @@ defmodule Bier.Plugs.ActionController do
     # openapi_version: "3.0" serves an OpenAPI 3.0.3 translation of the same
     # content; "2.0" (default) stays the PostgREST-parity Swagger wire format.
     case config.openapi_version do
-      "3.0" -> Bier.OpenAPI.V3.convert(doc)
+      "3.0" -> V3.convert(doc)
       _ -> doc
     end
   end
