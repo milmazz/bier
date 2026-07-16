@@ -513,7 +513,7 @@ defmodule Bier do
           {DynamicSupervisor,
            strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
           {Bier.HttpServerStarter, conf}
-        ] ++ listener_children(conf) ++ admin_children(conf)
+        ] ++ listener_children(conf) ++ events_children(conf) ++ admin_children(conf)
 
     Supervisor.init(children, strategy: :one_for_one)
   end
@@ -527,6 +527,15 @@ defmodule Bier do
   defp listener_children(%Bier.Config{db_channel_enabled: false}), do: []
 
   defp listener_children(%Bier.Config{} = conf), do: [{Bier.SchemaCacheListener, conf}]
+
+  # When any events_channels are configured, run the SSE events listener —
+  # a second dedicated LISTEN connection, deliberately separate from the
+  # schema-cache listener so user-facing streaming never couples to reload
+  # semantics. It owns its DB connection and retries with internal backoff,
+  # so a database outage never builds restart pressure on this supervisor.
+  defp events_children(%Bier.Config{events_channels: []}), do: []
+
+  defp events_children(%Bier.Config{} = conf), do: [{Bier.Events.Listener, conf}]
 
   # The JWT verification cache only runs when it can do work: a secret is
   # configured and jwt-cache-max-entries is positive (PostgREST's JwtNoCache
