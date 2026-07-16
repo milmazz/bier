@@ -48,6 +48,31 @@ defmodule Bier.PrivilegesCacheTest do
     assert_received :loader_ran
   end
 
+  test "a table that died mid-request behind a stale published tid falls back to the loader" do
+    name = unique_name()
+    start_supervised!({Bier.PrivilegesCache, %Bier.Config{name: name}})
+
+    gen = make_ref()
+    privs = %{relations: %{}, functions: %{}}
+    loader = spy_loader(self(), privs)
+
+    # Populate an entry so there is something to (fail to) hit later.
+    assert Bier.PrivilegesCache.fetch(name, "web_anon", gen, loader) == privs
+    assert_received :loader_ran
+
+    key = {Bier, :privileges_cache, name}
+    tid = :persistent_term.get(key)
+
+    # Stop the owner: its ETS table dies with it, and terminate/2 erases
+    # `key`. Re-publish the now-dead tid to reproduce the crash->restart
+    # window where a stale tid still lingers in :persistent_term.
+    stop_supervised!(Bier.PrivilegesCache)
+    :persistent_term.put(key, tid)
+
+    assert Bier.PrivilegesCache.fetch(name, "web_anon", gen, loader) == privs
+    assert_received :loader_ran
+  end
+
   test "schema cache snapshots carry a fresh generation ref" do
     # The never-loaded empty struct has no generation.
     assert %Bier.SchemaCache{}.generation == nil
