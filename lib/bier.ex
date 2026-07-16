@@ -541,6 +541,11 @@ defmodule Bier do
   # schema-cache listener so user-facing streaming never couples to reload
   # semantics. It owns its DB connection and retries with internal backoff,
   # so a database outage never builds restart pressure on this supervisor.
+  # Like `listener_children/1`, this starts AFTER HttpServerStarter, so the
+  # API can briefly accept SSE subscriptions before the first LISTEN is up —
+  # acceptable under the documented fire-and-forget contract (events fired in
+  # that gap are silently lost; tests wait for the listener to connect before
+  # asserting delivery).
   defp events_children(%Bier.Config{events_channels: []}), do: []
 
   defp events_children(%Bier.Config{} = conf), do: [{Bier.Events.Listener, conf}]

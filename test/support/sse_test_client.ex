@@ -58,6 +58,34 @@ defmodule Bier.SSETestClient do
     end
   end
 
+  @doc """
+  Poll the named instance's `Bier.Events.Listener` until its dedicated
+  `Postgrex.Notifications` connection is up (10ms interval), flunking after
+  `retries`.
+
+  `Bier.Events.Listener` opens its LISTEN connection asynchronously (see its
+  `handle_continue(:connect)`), and NOTIFY only reaches backends that have
+  already issued LISTEN — firing one too early silently drops the event
+  (fire-and-forget by design) and a test would otherwise hang on heartbeats
+  until ExUnit's timeout. Call this after registering an SSE subscriber and
+  before firing `notify/3`.
+  """
+  def wait_until_listener_connected(name, retries \\ 300) do
+    state = :sys.get_state(Bier.Registry.via(name, Bier.Events.Listener))
+
+    cond do
+      is_pid(state.notifications) and Process.alive?(state.notifications) ->
+        :ok
+
+      retries > 0 ->
+        Process.sleep(10)
+        wait_until_listener_connected(name, retries - 1)
+
+      true ->
+        flunk("events listener for #{inspect(name)} never connected: #{inspect(state)}")
+    end
+  end
+
   @doc "Hand-sign an HS256 JWT (no deps) for auth tests."
   def sign_hs256(claims, secret) do
     encode = fn map ->

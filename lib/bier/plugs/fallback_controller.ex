@@ -531,8 +531,13 @@ defmodule Bier.Plugs.FallbackController do
   end
 
   # Every PostgREST-originated error carries `Proxy-Status: PostgREST; error=<code>`
-  # (Error.hs proxyStatusHeader). The code is the error envelope's `code`.
+  # (Error.hs proxyStatusHeader). The code is the error envelope's `code`. Bier's
+  # own BIER-prefixed codes (the realtime events endpoint) are not PostgREST's
+  # to claim, so they carry `Proxy-Status: Bier; error=<code>` instead.
   defp maybe_proxy_status(conn, nil), do: conn
+
+  defp maybe_proxy_status(conn, "BIER" <> _ = code),
+    do: put_resp_header(conn, "proxy-status", "Bier; error=#{code}")
 
   defp maybe_proxy_status(conn, code),
     do: put_resp_header(conn, "proxy-status", "PostgREST; error=#{code}")

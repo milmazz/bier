@@ -109,8 +109,9 @@ defmodule Bier.Events.Listener do
 
   # `listen/3` returns `{:ok, ref}` once subscribed, or `{:eventually, ref}`
   # when the connection isn't actually up — not a real subscription either.
-  # It can also raise if the fresh connection died between `start_link/1`
-  # returning and this call; caught so a lost race becomes a retry.
+  # It can also exit (the underlying GenServer.call to a pid that already
+  # died) if the fresh connection died between `start_link/1` returning and
+  # this call; caught so a lost race becomes a retry.
   defp safe_listen(pid, channel) do
     Postgrex.Notifications.listen(pid, channel)
   catch

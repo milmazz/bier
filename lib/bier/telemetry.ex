@@ -95,13 +95,15 @@ defmodule Bier.Telemetry do
   `jwt_cache_max_entries > 0`), matching PostgREST, which records no cache
   observations in `JwtNoCache` mode.
 
-  ## SSE Events (#81)
+  ## SSE events (#81)
 
     * `[:bier, :events, :subscribe, :start]` — start of an SSE subscription,
       measurement `%{system_time: ...}`, metadata `:instance`, `:channels`.
     * `[:bier, :events, :subscribe, :stop]` — end of an SSE subscription,
       measurements `:duration` (native units), `:delivered` (frames sent),
-      metadata `:instance`, `:channels`.
+      metadata `:instance`, `:channels`, and `:reason` — the error returned
+      by the `Plug.Conn.chunk/2` write that ended the stream (e.g. `:closed`
+      for a client disconnect).
     * `[:bier, :events, :notification]` — one NOTIFY fanned out to subscribers,
       measurement `%{subscribers: count}`, metadata `:instance`, `:channel`.
     * `[:bier, :events, :listener]` — connection status event from the database
@@ -220,6 +222,9 @@ defmodule Bier.Telemetry do
   @doc """
   End of an SSE events subscription (`[:bier, :events, :subscribe, :stop]`).
   Measurements: `:duration` (native units), `:delivered` (frames sent).
+  Callers merge a `:reason` key into `metadata` — the error from the
+  `Plug.Conn.chunk/2` write that ended the stream (e.g. `:closed`) — before
+  calling this function.
   """
   @spec events_subscribe_stop(integer(), non_neg_integer(), map()) :: :ok
   def events_subscribe_stop(start, delivered, metadata) do
