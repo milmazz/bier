@@ -358,6 +358,10 @@ defmodule Bier do
         doc: """
         How the root OpenAPI document is served (PostgREST openapi-mode).
         `disabled` makes the root endpoint return 404 PGRST126 instead of a spec.
+        Under `follow-privileges`, the per-role privilege filtering of the
+        document is cached and refreshes on schema-cache reload (matching
+        PostgREST's reload-time freshness), so GRANT/REVOKE changes surface
+        after a reload, not on the next request.
         """
       ],
       db_root_spec: [

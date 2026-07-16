@@ -43,6 +43,11 @@ defmodule Bier.PrivilegesCache do
   mid-restart) — in the latter case nothing is cached.
   """
   @spec fetch(Bier.name(), String.t(), reference() | nil, (-> map())) :: map()
+  # A nil generation means the schema cache has never been loaded (a caller
+  # running before the first snapshot swap): bypass the cache entirely
+  # rather than risk caching an entry no later generation can ever match.
+  def fetch(_name, _role, nil, loader), do: loader.()
+
   def fetch(name, role, generation, loader) do
     case :persistent_term.get(key(name), nil) do
       nil ->
