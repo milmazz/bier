@@ -66,7 +66,14 @@ defmodule Bier.Plugs.ActionController do
         end
 
       _ ->
-        dispatch_relation(conn, config, relations)
+        # The SSE events endpoint reserves its (configurable) segment only
+        # while events_channels is non-empty; otherwise the segment resolves
+        # as a relation exactly as before.
+        if Bier.Events.handles?(conn, config) do
+          Bier.Events.handle(conn, config)
+        else
+          dispatch_relation(conn, config, relations)
+        end
     end
   end
 
