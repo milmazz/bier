@@ -67,29 +67,25 @@ defmodule Bier.Auth do
     end
   end
 
-  # JWT verification through the per-instance cache. The pre-checks mirror
-  # Bier.JWT.verify/4 and never touch the cache; the cacheable half
-  # (signature + decode) goes through Bier.JwtCache when enabled, and the
-  # per-request half (temporal/aud + role) always runs — a cached token still
-  # expires on time.
-  defp verify(nil, _config), do: {:ok, :anonymous}
-
+  # JWT verification through the per-instance cache. JWT.precheck/2 is the
+  # single source of truth for the nil/empty/no-secret gate (shared with
+  # verify/4, which this module bypasses so it can interpose Bier.JwtCache
+  # before the cacheable half); the per-request half (temporal/aud + role)
+  # always runs — a cached token still expires on time.
   defp verify(token, config) do
-    trimmed = String.trim(token)
+    case JWT.precheck(token, config.jwt_secret) do
+      {:ok, :anonymous} ->
+        {:ok, :anonymous}
 
-    cond do
-      trimmed == "" ->
-        {:error, :empty}
-
-      is_nil(config.jwt_secret) ->
-        {:error, :no_secret}
-
-      true ->
+      {:ok, trimmed} ->
         with {:ok, claims, claims_json} <- decode(trimmed, config),
              {:ok, role} <-
                JWT.validate_claims(claims, config.jwt_aud, config.jwt_role_claim_path) do
           {:ok, %{role: role, claims_json: claims_json}}
         end
+
+      {:error, _} = error ->
+        error
     end
   end
 

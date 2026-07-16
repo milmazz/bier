@@ -29,10 +29,12 @@ defmodule Bier.JWT do
   `claims_json` is the exact decoded payload JSON segment (re-encoded canonically)
   used to populate `request.jwt.claims`.
 
-  Verification is split into two public halves for caching: `decode_and_verify/2`
-  (cacheable: signature + payload decode) and `validate_claims/3` (per-request:
-  temporal + audience checks + role extraction). `Bier.JwtCache` caches only the
-  expensive `decode_and_verify/2` results; `verify/4` recomposes them.
+  Verification is split into public pieces so `Bier.Auth` can interpose a
+  cache: `precheck/2` is the nil/empty/no-secret gate, then
+  `decode_and_verify/2` (cacheable: signature + payload decode) and
+  `validate_claims/3` (per-request: temporal + audience checks + role
+  extraction). `Bier.JwtCache` caches only the expensive `decode_and_verify/2`
+  results; `verify/4` recomposes all three for direct (uncached) use.
   """
 
   alias Bier.JWT.RoleClaim
@@ -55,22 +57,35 @@ defmodule Bier.JWT do
           {:ok, :anonymous}
           | {:ok, %{role: String.t() | nil, claims: map(), claims_json: String.t()}}
           | {:error, atom() | {atom(), term()}}
-  def verify(token, secret, aud, role_claim_path \\ @default_role_claim_path)
+  def verify(token, secret, aud, role_claim_path \\ @default_role_claim_path) do
+    case precheck(token, secret) do
+      {:ok, :anonymous} -> {:ok, :anonymous}
+      {:ok, trimmed} -> verify_token(trimmed, secret, aud, role_claim_path)
+      {:error, _} = error -> error
+    end
+  end
 
-  def verify(nil, _secret, _aud, _role_claim_path), do: {:ok, :anonymous}
+  @doc """
+  Pre-checks a bearer token ahead of the decode step: `nil` (no header) ->
+  `{:ok, :anonymous}`, a blank token -> `{:error, :empty}`, no secret
+  configured -> `{:error, :no_secret}`, otherwise `{:ok, trimmed_token}`.
 
-  def verify(token, secret, aud, role_claim_path) when is_binary(token) do
+  Shared by `verify/4` and `Bier.Auth`, which interposes `Bier.JwtCache`
+  between this check and `decode_and_verify/2` rather than calling
+  `verify_token/4` directly — keeping the check in one place means the two
+  callers can't drift apart on it.
+  """
+  @spec precheck(String.t() | nil, String.t() | nil) ::
+          {:ok, :anonymous} | {:ok, String.t()} | {:error, :empty | :no_secret}
+  def precheck(nil, _secret), do: {:ok, :anonymous}
+
+  def precheck(token, secret) when is_binary(token) do
     trimmed = String.trim(token)
 
     cond do
-      trimmed == "" ->
-        {:error, :empty}
-
-      is_nil(secret) ->
-        {:error, :no_secret}
-
-      true ->
-        verify_token(trimmed, secret, aud, role_claim_path)
+      trimmed == "" -> {:error, :empty}
+      is_nil(secret) -> {:error, :no_secret}
+      true -> {:ok, trimmed}
     end
   end
 

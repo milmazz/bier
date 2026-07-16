@@ -169,6 +169,25 @@ defmodule Bier.JwtCacheTest do
       assert_receive {:verified, :dead_table}
     end
 
+    test "an ArgumentError raised by verify_fun itself propagates without a second invocation" do
+      # The rescue clause is scoped to the :ets calls only (table_lookup/2),
+      # not to verify_fun — a live table + a genuine miss means verify_fun
+      # runs outside that rescue's scope, so its own ArgumentError must
+      # propagate once, not get caught and silently re-invoke verify_fun.
+      {name, _pid} = start_cache(10)
+      test_pid = self()
+
+      assert_raise ArgumentError, "boom", fn ->
+        Bier.JwtCache.fetch(name, "raises", fn ->
+          send(test_pid, :called)
+          raise ArgumentError, "boom"
+        end)
+      end
+
+      assert_received :called
+      refute_received :called
+    end
+
     test "owner unreachable: insert/4 catches :exit and fetch still succeeds" do
       # A real owner can't be killed while leaving its table alive: an ETS
       # table dies with its owner (no heir is configured on it), so killing

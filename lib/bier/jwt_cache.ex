@@ -59,23 +59,40 @@ defmodule Bier.JwtCache do
   end
 
   defp lookup(tid, name, token, verify_fun) do
-    case :ets.lookup(tid, token) do
-      [{^token, claims, claims_json, _visited}] ->
-        :ets.update_element(tid, token, {4, true})
+    case table_lookup(tid, token) do
+      {:hit, claims, claims_json} ->
         Bier.Telemetry.jwt_cache_lookup(true, %{instance: name})
         {:ok, claims, claims_json}
 
-      [] ->
+      :miss ->
         Bier.Telemetry.jwt_cache_lookup(false, %{instance: name})
 
         with {:ok, claims, claims_json} <- verify_fun.() do
           insert(name, token, claims, claims_json)
           {:ok, claims, claims_json}
         end
+
+      :table_gone ->
+        # The table died mid-request (owner restarting): verify directly.
+        verify_fun.()
+    end
+  end
+
+  # Scoped to just the two :ets calls so a table that died mid-request is the
+  # only thing this catches — an ArgumentError raised by verify_fun itself
+  # (called outside this function) propagates normally instead of triggering
+  # a second, silent invocation.
+  defp table_lookup(tid, token) do
+    case :ets.lookup(tid, token) do
+      [{^token, claims, claims_json, _visited}] ->
+        :ets.update_element(tid, token, {4, true})
+        {:hit, claims, claims_json}
+
+      [] ->
+        :miss
     end
   rescue
-    # The table died mid-request (owner restarting): verify directly.
-    ArgumentError -> verify_fun.()
+    ArgumentError -> :table_gone
   end
 
   # The result is already verified — if the owner is down or slow, skip
