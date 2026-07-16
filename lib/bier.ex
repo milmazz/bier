@@ -473,7 +473,11 @@ defmodule Bier do
         Supervisor.child_spec({Postgrex, postgrex_opts(conf)}, id: {name, Postgrex}),
         # Samples the pool above on an interval and emits the
         # `[:bier, :pool, :status]` telemetry gauges (see Bier.Telemetry).
-        {Bier.PoolMonitor, conf}
+        {Bier.PoolMonitor, conf},
+        # Owns the per-role privileges ETS cache used by the root OpenAPI
+        # document (follow-privileges). Started before HttpServerStarter so
+        # the table exists before the first request can arrive.
+        {Bier.PrivilegesCache, conf}
       ] ++
         jwt_cache_children(conf) ++
         [
