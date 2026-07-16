@@ -477,11 +477,6 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
       )
     end
 
-    # Case 1330 PUT /items?id=eq.10 must be an INSERT (201), so id=10 must be
-    # absent from representations.items. No representations case requires id=10 to
-    # pre-exist; the others target ids 1,2,3.
-    Postgrex.query!(conn, ~s|DELETE FROM "representations"."items" WHERE id = 10|, [])
-
     # Recreate the projects -> clients foreign key for embedding resolution.
     Postgrex.query!(
       conn,

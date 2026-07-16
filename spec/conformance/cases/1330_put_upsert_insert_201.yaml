@@ -2,26 +2,24 @@ id: 1330
 feature: representations/put/single-upsert-insert-201
 request:
   method: PUT
-  path: /items?id=eq.10
+  path: /items?id=eq.10102
   headers:
     Prefer: "return=representation"
     Content-Type: application/json
-  body: [{ "id": 10 }]
+  body: [{ "id": 10102 }]
 schema: representations
-# id=10 MUST NOT exist for PUT to be an INSERT (-> 201). The consolidated
-# fixture seeds test.items with rows 1..15 (fixtures.sql:1386), so id=10 is
-# present by default and a bare PUT would be a REPLACE (200). The
-# representations schema is an auto-updatable view mirror of test, so the
-# precondition deletes the underlying test.items row (mirrors case 1381,
-# which deletes test.tiobe_pls before its PUT-insert).
-preconditions:
-  - "DELETE FROM test.items WHERE id = 10;"
+# The target id MUST NOT exist for PUT to be an INSERT (-> 201); an existing
+# row would make it a REPLACE (200, case 1331). items is seeded with rows
+# 1..15, so use an id guaranteed outside the seed range — the same trick as
+# 1364 (999999) and 1372 (10101), distinct from both so the cases stay
+# independent. The harness never executes `preconditions:` blocks, so absence
+# must hold in the seed itself, not via a precondition.
 expect:
   status: 201
   headers:
     Content-Type: application/json; charset=utf-8
     Preference-Applied: "return=representation"
-  body_exact: [{ "id": 10 }]
+  body_exact: [{ "id": 10102 }]
 notes: >-
   PUT single upsert that INSERTS a new row (PK not present) with
   return=representation yields 201 + JSON array body. Status semantics
