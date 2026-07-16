@@ -699,6 +699,68 @@ defmodule Bier.OpenAPITest do
     end
   end
 
+  describe "overloaded rpc functions merge into one path item" do
+    # PostgREST sorts a name's overloads ascending by parameter count and the
+    # last inserted path item wins, so the most-parameters overload supplies
+    # the whole /rpc/<fn> item (SchemaCache.hs#L292, Routine.hs#L89,
+    # OpenAPI.hs#L381). Issue #53 item 2.
+    test "most-parameters overload wins, regardless of input order" do
+      one_arg = %{
+        name: "overloaded",
+        comment: nil,
+        volatility: :volatile,
+        in_params: [p("a", "integer", false, false)]
+      }
+
+      two_args = %{
+        name: "overloaded",
+        comment: nil,
+        volatility: :immutable,
+        in_params: [
+          p("a", "integer", false, false),
+          p("b", "text", false, false)
+        ]
+      }
+
+      for fns <- [[one_arg, two_args], [two_args, one_arg]] do
+        doc = build_fns(fns)
+        item = doc["paths"]["/rpc/overloaded"]
+
+        # exactly one path item, shaped by the two-arg overload:
+        # immutable -> GET present, and the POST body lists both args.
+        assert Map.has_key?(item, "get")
+
+        body = hd(item["post"]["parameters"])
+        assert Map.keys(body["schema"]["properties"]) |> Enum.sort() == ["a", "b"]
+
+        assert Enum.map(item["get"]["parameters"], & &1["name"]) == ["a", "b"]
+      end
+    end
+
+    test "a volatile winner drops GET even when a stable overload exists" do
+      stable_one = %{
+        name: "ovl2",
+        comment: nil,
+        volatility: :stable,
+        in_params: [p("a", "integer", false, false)]
+      }
+
+      volatile_two = %{
+        name: "ovl2",
+        comment: nil,
+        volatility: :volatile,
+        in_params: [
+          p("a", "integer", false, false),
+          p("b", "text", false, false)
+        ]
+      }
+
+      item = build_fns([stable_one, volatile_two])["paths"]["/rpc/ovl2"]
+      refute Map.has_key?(item, "get")
+      assert Map.has_key?(item, "post")
+    end
+  end
+
   describe "build/1 proxy (openapi-server-proxy-uri)" do
     test "absent proxy: no host/schemes, basePath stays /" do
       doc = build_one_with_proxy(nil)
