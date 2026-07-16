@@ -86,7 +86,20 @@ defmodule Bier.OpenAPI do
   end
 
   defp function_paths(input) do
-    Map.new(input.functions, fn fun -> {"/rpc/#{fun.name}", function_path_item(fun)} end)
+    input.functions
+    |> Enum.group_by(& &1.name)
+    |> Map.new(fn {name, overloads} ->
+      {"/rpc/#{name}", function_path_item(winning_overload(overloads))}
+    end)
+  end
+
+  # PostgREST sorts a name's overloads ascending by parameter count and the
+  # last-inserted path item wins, so the most-parameters overload supplies the
+  # entire /rpc/<fn> item (SchemaCache.hs decodeFuncs + Routine Ord;
+  # OpenAPI.hs makePathItems fromList). Parameter-count ties fall back to
+  # input order (stable sort), approximating PostgREST's full Ord tuple.
+  defp winning_overload(overloads) do
+    overloads |> Enum.sort_by(&length(&1.in_params)) |> List.last()
   end
 
   defp function_path_item(fun) do
