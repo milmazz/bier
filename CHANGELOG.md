@@ -8,6 +8,8 @@ and this project adheres to
 
 ## Unreleased
 
+- Realtime events: config-gated SSE endpoint bridging Postgres LISTEN/NOTIFY
+  (`events_channels`, `events_path`, `events_heartbeat_interval`) (#81).
 - `application/geo+json` broadened from relation reads to also cover
   mutations (with `Prefer: return=representation`), `/rpc/*`, and embedded
   reads, whenever the PostGIS extension is installed (#63).
