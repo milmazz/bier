@@ -218,7 +218,7 @@ defmodule Bier.JwtCacheTest do
       {:ok, pid} =
         Bier.start_link(
           [name: name, router: [port: port, scheme: :http]] ++
-            Keyword.merge(Bier.ConformanceServer.base_opts(), extra_opts)
+            Keyword.merge(Bier.ConformanceServer.auth_opts(), extra_opts)
         )
 
       on_exit(fn -> stop(pid) end)
