@@ -89,23 +89,26 @@ is accepted; other methods → `405` via the existing FallbackController path.
 
 **Validation order:**
 
-1. **Parse channels** — every `channel` query param, each split on commas
+1. **Authenticate** — reuse `ActionController.maybe_auth/2` (same JWT
+   verification, same 401 envelope), checked FIRST. SSE-specific addition,
+   this endpoint only: token resolution is `Authorization` header first,
+   then an `access_token` query param fallback — the browser `EventSource`
+   API cannot set headers, so without the fallback browser clients cannot
+   authenticate. The role is used for authentication only in v1; no query
+   runs on behalf of the subscriber. **Rationale for going first:** 401
+   before 400/404, matching the rest of the API; prevents unauthenticated
+   channel enumeration (a tokenless request could otherwise probe channel
+   names via the 404/200 split).
+2. **Parse channels** — every `channel` query param, each split on commas
    (`?channel=chat,jobs` and `?channel=chat&channel=jobs` both work).
    No `channel` param, or an empty value → `400` with code `BIER002`.
-2. **Authorize** — every requested channel must be in `events_channels`;
+3. **Authorize** — every requested channel must be in `events_channels`;
    first miss → `404` with code `BIER001` (details name the rejected
    channel). Both are new `FallbackController.call/2` clauses using the
    standard `{code, message, details, hint}` envelope with a `BIER`-prefixed
    code namespace — never colliding with present or future `PGRST*` codes.
    `405`/`406` reuse the existing `:method_not_allowed` /
    `:not_acceptable` mappings.
-3. **Authenticate** — reuse `ActionController.maybe_auth/2` (same JWT
-   verification, same 401 envelope). SSE-specific addition, this endpoint
-   only: token resolution is `Authorization` header first, then an
-   `access_token` query param fallback — the browser `EventSource` API
-   cannot set headers, so without the fallback browser clients cannot
-   authenticate. The role is used for authentication only in v1; no query
-   runs on behalf of the subscriber.
 4. **Negotiate** — `Accept` must admit `text/event-stream` (`*/*` and a
    missing header count) → else `406`.
 

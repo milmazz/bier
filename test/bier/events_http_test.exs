@@ -38,6 +38,7 @@ defmodule Bier.EventsHttpTest do
     resp = Req.get!("http://127.0.0.1:#{port}/events", retry: false)
     assert resp.status == 400
     assert resp.body["code"] == "BIER002"
+    assert resp.headers["proxy-status"] == ["Bier; error=BIER002"]
   end
 
   test "GET /events with a channel outside the allowlist is 404 BIER001", %{port: port} do
@@ -45,6 +46,7 @@ defmodule Bier.EventsHttpTest do
     assert resp.status == 404
     assert resp.body["code"] == "BIER001"
     assert resp.body["details"] =~ "nope"
+    assert resp.headers["proxy-status"] == ["Bier; error=BIER001"]
   end
 
   test "one bad channel among good ones is still 404", %{port: port} do
@@ -103,21 +105,5 @@ defmodule Bier.EventsHttpTest do
     assert frames =~ ~s(data: {"msg":"hi"})
 
     :gen_tcp.close(sock)
-  end
-
-  defp wait_until_listener_connected(name, retries \\ 300) do
-    state = :sys.get_state(Bier.Registry.via(name, Bier.Events.Listener))
-
-    cond do
-      is_pid(state.notifications) and Process.alive?(state.notifications) ->
-        :ok
-
-      retries > 0 ->
-        Process.sleep(10)
-        wait_until_listener_connected(name, retries - 1)
-
-      true ->
-        flunk("events listener for #{inspect(name)} never connected: #{inspect(state)}")
-    end
   end
 end

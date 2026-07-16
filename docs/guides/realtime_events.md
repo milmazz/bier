@@ -74,17 +74,33 @@ const es = new EventSource(`/events?channel=orders&access_token=${jwt}`);
 Note that query strings tend to end up in server logs; prefer the
 `Authorization` header for non-browser clients.
 
+The token is verified once, at connect time — the SSE connection is then
+held open indefinitely and is **not** re-checked against the token's `exp`.
+A long-lived stream can therefore outlive the JWT that opened it: a token
+that expires five minutes after connecting does not cause the stream to
+close five minutes later. Bounding stream lifetime by `exp` (closing or
+requiring reauthentication when the token expires) is possible future
+hardening, not implemented in v1.
+
 ## Errors
 
-Errors use the PostgREST envelope with Bier-specific codes:
+Errors use the PostgREST envelope with Bier-specific codes. Auth is checked
+before channel validation, so on a JWT-protected instance a tokenless
+request is always 401 regardless of whether the requested channel exists:
 
 | Status | Code | When |
 |---|---|---|
+| 401 | `PGRST3xx` | JWT missing/invalid, same as the rest of the API. Checked first. |
 | 400 | `BIER002` | No `channel` query parameter. |
 | 404 | `BIER001` | A requested channel is not in `events_channels`. |
-| 401 | `PGRST3xx` | JWT missing/invalid, same as the rest of the API. |
 | 406 | `PGRST107` | `Accept` excludes `text/event-stream`. |
-| 405 | `PGRST117` | Any method other than `GET`. |
+| 405 | `PGRST117` | Any method other than `GET` or `OPTIONS`. |
+
+`OPTIONS /<events_path>` never reaches this endpoint's handler at all: the
+router's generic OPTIONS handling (the same one every relation gets)
+answers it with `200` (and, when a relation of that name exists, an
+`Allow` header) before dispatch reaches `Bier.Events`, so CORS preflight
+requests against the events endpoint work normally.
 
 ## Delivery semantics and limits
 
@@ -98,11 +114,20 @@ pretend otherwise:
   rows, notify a key and fetch the row through the regular API
   (see the tutorial for the pattern).
 * **Ordering** follows Postgres's notification queue per connection.
+* **Slow clients buffer in their own mailbox.** Delivery to each subscriber
+  is a plain Erlang message send; if a client reads slower than events
+  arrive, the backlog piles up in that subscriber's Bandit connection
+  process mailbox. This is unbounded today and affects only that one
+  subscriber — the listener process and every other subscriber are
+  unaffected. A mailbox-size guard (dropping or disconnecting a subscriber
+  that falls too far behind) is possible future hardening, not implemented
+  in v1.
 
 ## Telemetry
 
 * `[:bier, :events, :subscribe, :start | :stop]` — one span per SSE
-  connection (`:stop` carries `:duration` and `:delivered`).
+  connection (`:stop` carries `:duration`, `:delivered`, and `:reason` — the
+  chunk-write error that ended the stream, e.g. a client disconnect).
 * `[:bier, :events, :notification]` — per NOTIFY, with the `:subscribers`
   count reached.
 * `[:bier, :events, :listener]` — `:status` of `:connected` /

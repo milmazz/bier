@@ -2,11 +2,14 @@ defmodule Bier.Events do
   @moduledoc """
   Request handler for the realtime events endpoint (`GET /<events_path>`).
 
-  Bridges Postgres NOTIFY to Server-Sent Events: validates the requested
-  channels against the `events_channels` allowlist, authenticates with the
-  instance's standard JWT gate, then holds the connection open inside the
-  Bandit connection process, relaying `{:bier_event, channel, payload}`
-  messages from `Bier.Events.Listener` as SSE frames.
+  Bridges Postgres NOTIFY to Server-Sent Events: authenticates with the
+  instance's standard JWT gate FIRST (a tokenless request on a JWT-protected
+  instance is 401 regardless of channel validity — this prevents an
+  unauthenticated channel-enumeration oracle), then validates the requested
+  channels against the `events_channels` allowlist, then holds the
+  connection open inside the Bandit connection process, relaying
+  `{:bier_event, channel, payload}` messages from `Bier.Events.Listener` as
+  SSE frames.
 
   Delivery is fire-and-forget (at-most-once): NOTIFY is ephemeral, so events
   fired while a client is disconnected are lost. Clients get a `retry:` hint
@@ -24,7 +27,10 @@ defmodule Bier.Events do
   """
   @spec handles?(Plug.Conn.t(), Bier.Config.t()) :: boolean()
   def handles?(%Plug.Conn{path_info: [segment]}, config) do
-    config.events_channels != [] and segment == config.events_path
+    # Relation resolution percent-decodes its segment too (see
+    # `Bier.Plugs.ActionController`'s `decode_segment/1`); the events
+    # reservation must agree, e.g. `/event%73` also matches `events_path`.
+    config.events_channels != [] and URI.decode(segment) == config.events_path
   end
 
   def handles?(_conn, _config), do: false
@@ -36,9 +42,9 @@ defmodule Bier.Events do
   """
   @spec handle(Plug.Conn.t(), Bier.Config.t()) :: Plug.Conn.t() | {:error, term()}
   def handle(%Plug.Conn{method: "GET"} = conn, config) do
-    with {:ok, channels} <- parse_channels(conn),
+    with {:ok, conn} <- ActionController.maybe_auth(bearer_fallback(conn), config),
+         {:ok, channels} <- parse_channels(conn),
          :ok <- authorize(channels, config),
-         {:ok, conn} <- ActionController.maybe_auth(bearer_fallback(conn), config),
          :ok <- negotiate(conn) do
       stream(conn, config, channels)
     end
@@ -129,8 +135,8 @@ defmodule Bier.Events do
         Enum.each(channels, &Bier.Events.Registry.register(config.name, &1))
         loop(conn, config.events_heartbeat_interval, 0, start, metadata)
 
-      {:error, _reason} ->
-        finish(conn, 0, start, metadata)
+      {:error, reason} ->
+        finish(conn, 0, start, Map.put(metadata, :reason, reason))
     end
   end
 
@@ -141,14 +147,20 @@ defmodule Bier.Events do
     receive do
       {:bier_event, channel, payload} ->
         case chunk(conn, SSE.frame(channel, payload)) do
-          {:ok, conn} -> loop(conn, heartbeat, delivered + 1, start, metadata)
-          {:error, _reason} -> finish(conn, delivered, start, metadata)
+          {:ok, conn} ->
+            loop(conn, heartbeat, delivered + 1, start, metadata)
+
+          {:error, reason} ->
+            finish(conn, delivered, start, Map.put(metadata, :reason, reason))
         end
     after
       heartbeat ->
         case chunk(conn, SSE.heartbeat()) do
-          {:ok, conn} -> loop(conn, heartbeat, delivered, start, metadata)
-          {:error, _reason} -> finish(conn, delivered, start, metadata)
+          {:ok, conn} ->
+            loop(conn, heartbeat, delivered, start, metadata)
+
+          {:error, reason} ->
+            finish(conn, delivered, start, Map.put(metadata, :reason, reason))
         end
     end
   end

@@ -80,6 +80,18 @@ defmodule Bier.EventsStreamTest do
     assert resp.body["code"] == "PGRST302"
   end
 
+  # Pins the auth-before-allowlist ordering: unauthenticated requests must
+  # fail with 401 regardless of channel validity, so a tokenless client
+  # cannot use the 401 (auth issue) vs 404 (channel issue) response split to
+  # enumerate which channels exist without ever presenting a token.
+  test "with a jwt_secret, a tokenless subscribe to an UNKNOWN channel is still 401 (not 404)" do
+    {port, _name} = boot(jwt_secret: @secret)
+
+    resp = Req.get!("http://127.0.0.1:#{port}/events?channel=nope", retry: false)
+    assert resp.status == 401
+    assert resp.body["code"] == "PGRST302"
+  end
+
   test "a valid JWT via the access_token query param opens the stream" do
     {port, _name} = boot(jwt_secret: @secret)
     token = sign_hs256(%{"role" => "events_subscriber"}, @secret)
@@ -100,26 +112,5 @@ defmodule Bier.EventsStreamTest do
 
     assert resp.status == 401
     assert resp.body["code"] == "PGRST301"
-  end
-
-  # Bier.Events.Listener opens its dedicated LISTEN connection asynchronously
-  # (see its handle_continue(:connect)); NOTIFY only reaches backends that have
-  # already issued LISTEN, so firing it too early silently drops the event
-  # (fire-and-forget by design). Mirrors
-  # `Bier.EventsHttpTest.wait_until_listener_connected/2`.
-  defp wait_until_listener_connected(name, retries \\ 300) do
-    state = :sys.get_state(Bier.Registry.via(name, Bier.Events.Listener))
-
-    cond do
-      is_pid(state.notifications) and Process.alive?(state.notifications) ->
-        :ok
-
-      retries > 0 ->
-        Process.sleep(10)
-        wait_until_listener_connected(name, retries - 1)
-
-      true ->
-        flunk("events listener for #{inspect(name)} never connected: #{inspect(state)}")
-    end
   end
 end
