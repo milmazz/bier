@@ -402,6 +402,17 @@ defmodule Bier do
         openapi-security-active). Defaults to `false`.
         """
       ],
+      openapi_version: [
+        type: {:in, ["2.0", "3.0"]},
+        default: env(:openapi_version, "2.0"),
+        doc: """
+        Version of the generated root OpenAPI document. `"2.0"` (the default)
+        is the Swagger 2.0 document PostgREST emits, byte-for-byte; `"3.0"`
+        serves an OpenAPI 3.0.3 translation of the same content. Bier-only
+        option — PostgREST has no OpenAPI 3.x emitter (postgrest#932). Ignored
+        when `db_root_spec` overrides the document.
+        """
+      ],
       admin_server_port: [
         type: {:or, [:pos_integer, nil]},
         default: env(:admin_server_port, nil),
