@@ -459,6 +459,25 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
+  # ---- realtime events endpoint (Bier-specific BIER* codes) ----------------
+  def call(conn, {:error, :events_missing_channel}) do
+    error(conn, 400, %{
+      code: "BIER002",
+      message: "Missing channel query parameter",
+      details: nil,
+      hint: "Subscribe with ?channel=<name> (comma-separate or repeat for several)"
+    })
+  end
+
+  def call(conn, {:error, {:events_unknown_channel, channel}}) do
+    error(conn, 404, %{
+      code: "BIER001",
+      message: "Unknown event channel",
+      details: "Channel '#{channel}' is not exposed",
+      hint: "Expose it by adding the channel to events_channels"
+    })
+  end
+
   # ---- catch-all -----------------------------------------------------------
   def call(conn, _other) do
     error(conn, 500, %{
