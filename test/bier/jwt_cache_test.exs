@@ -1,5 +1,9 @@
 defmodule Bier.JwtCacheTest do
-  use ExUnit.Case, async: true
+  # async: false — the "integration (booted instance)" describe block below
+  # boots real Bier instances (real Bandit listeners + DB introspection),
+  # matching the precedent in test/bier/telemetry_test.exs and other
+  # instance-booting test files in this suite.
+  use ExUnit.Case, async: false
 
   describe "config" do
     test "jwt_cache_max_entries defaults to 1000 (PostgREST parity)" do
@@ -154,6 +158,121 @@ defmodule Bier.JwtCacheTest do
       :ok = stop_supervised!(Bier.JwtCache)
       refute Process.alive?(pid)
       assert :persistent_term.get({Bier, :jwt_cache, name}, nil) == nil
+    end
+  end
+
+  describe "integration (booted instance)" do
+    @auth_token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicG9zdGdyZXN0X3Rlc3RfYXV0aG9yIiwiaWQiOiJqZG9lIn0.B-lReuGNDwAlU1GOC476MlO0vAt9JNoHIlxg2vwMaO0"
+
+    defp start_listening_instance(name, extra_opts) do
+      port = free_port()
+
+      {:ok, pid} =
+        Bier.start_link(
+          [name: name, router: [port: port, scheme: :http]] ++
+            Keyword.merge(Bier.ConformanceServer.base_opts(), extra_opts)
+        )
+
+      on_exit(fn -> stop(pid) end)
+      wait_until_listening(port)
+      {"http://127.0.0.1:#{port}", pid}
+    end
+
+    defp authed_get(base, token) do
+      Req.get!(base <> "/authors_only",
+        headers: [
+          {"accept-profile", "auth"},
+          {"authorization", "Bearer " <> token}
+        ],
+        retry: false
+      )
+    end
+
+    test "authenticated requests go through the cache: miss then hit" do
+      name = unique_name()
+      {base, _pid} = start_listening_instance(name, [])
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [[:bier, :jwt_cache, :lookup]])
+
+      assert authed_get(base, @auth_token).status == 200
+      assert_receive {[:bier, :jwt_cache, :lookup], ^ref, _, %{hit: false, instance: ^name}}
+
+      assert authed_get(base, @auth_token).status == 200
+      assert_receive {[:bier, :jwt_cache, :lookup], ^ref, _, %{hit: true, instance: ^name}}
+    end
+
+    test "a cache hit still fails temporal validation (expired token -> 401 PGRST303)" do
+      name = unique_name()
+      {base, _pid} = start_listening_instance(name, [])
+
+      # Pre-insert an expired entry under a token whose signature was never
+      # checked: the hit path skips the signature (by design, mirroring
+      # upstream), so the 401 proves validate_claims runs per request.
+      token = "cached.expired.token"
+      claims = %{"role" => "postgrest_test_author", "exp" => 1}
+
+      :ok =
+        GenServer.call(
+          Bier.Registry.via(name, Bier.JwtCache),
+          {:insert, token, claims, Bier.json_library().encode!(claims)}
+        )
+
+      resp = authed_get(base, token)
+      assert resp.status == 401
+      assert resp.body["code"] == "PGRST303"
+    end
+
+    test "jwt_cache_max_entries: 0 disables the cache: no child, no events" do
+      name = unique_name()
+      {base, _pid} = start_listening_instance(name, jwt_cache_max_entries: 0)
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [[:bier, :jwt_cache, :lookup]])
+
+      assert Registry.lookup(Bier.Registry, {name, Bier.JwtCache}) == []
+      assert :persistent_term.get({Bier, :jwt_cache, name}, nil) == nil
+
+      assert authed_get(base, @auth_token).status == 200
+      refute_receive {[:bier, :jwt_cache, :lookup], ^ref, _, %{instance: ^name}}, 100
+    end
+  end
+
+  # ---- helpers (booted-instance tests) -------------------------------------
+  # Copied verbatim from test/bier/telemetry_test.exs.
+
+  defp unique_name do
+    Module.concat(__MODULE__, "I#{System.unique_integer([:positive])}")
+  end
+
+  # The instance supervisor is linked to the test process, so it may already be
+  # terminating by the time this on_exit cleanup runs; `Supervisor.stop/1` then
+  # exits rather than raising. Swallow both so cleanup never fails the test.
+  defp stop(pid) do
+    if Process.alive?(pid), do: Supervisor.stop(pid)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp free_port do
+    {:ok, sock} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}])
+    {:ok, port} = :inet.port(sock)
+    :gen_tcp.close(sock)
+    port
+  end
+
+  defp wait_until_listening(port, retries \\ 100) do
+    case :gen_tcp.connect(~c"127.0.0.1", port, [], 10) do
+      {:ok, sock} ->
+        :gen_tcp.close(sock)
+        :ok
+
+      {:error, _} when retries > 0 ->
+        Process.sleep(20)
+        wait_until_listening(port, retries - 1)
+
+      {:error, reason} ->
+        raise "instance did not come up on port #{port}: #{inspect(reason)}"
     end
   end
 end

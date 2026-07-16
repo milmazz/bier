@@ -473,16 +473,19 @@ defmodule Bier do
         Supervisor.child_spec({Postgrex, postgrex_opts(conf)}, id: {name, Postgrex}),
         # Samples the pool above on an interval and emits the
         # `[:bier, :pool, :status]` telemetry gauges (see Bier.Telemetry).
-        {Bier.PoolMonitor, conf},
-        # The DynamicSupervisor must start BEFORE HttpServerStarter: the latter's
-        # `handle_continue(:start_webserver, …)` starts Bandit *as a child of this
-        # DynamicSupervisor*, so it has to already be alive — otherwise that
-        # `start_child` call races the DynamicSupervisor's own startup and crashes
-        # (the supervisor then restarts HttpServerStarter, rebuilding the router).
-        {DynamicSupervisor,
-         strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
-        {Bier.HttpServerStarter, conf}
-      ] ++ listener_children(conf) ++ admin_children(conf)
+        {Bier.PoolMonitor, conf}
+      ] ++
+        jwt_cache_children(conf) ++
+        [
+          # The DynamicSupervisor must start BEFORE HttpServerStarter: the latter's
+          # `handle_continue(:start_webserver, …)` starts Bandit *as a child of this
+          # DynamicSupervisor*, so it has to already be alive — otherwise that
+          # `start_child` call races the DynamicSupervisor's own startup and crashes
+          # (the supervisor then restarts HttpServerStarter, rebuilding the router).
+          {DynamicSupervisor,
+           strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
+          {Bier.HttpServerStarter, conf}
+        ] ++ listener_children(conf) ++ admin_children(conf)
 
     Supervisor.init(children, strategy: :one_for_one)
   end
@@ -496,6 +499,13 @@ defmodule Bier do
   defp listener_children(%Bier.Config{db_channel_enabled: false}), do: []
 
   defp listener_children(%Bier.Config{} = conf), do: [{Bier.SchemaCacheListener, conf}]
+
+  # The JWT verification cache only runs when it can do work: a secret is
+  # configured and jwt-cache-max-entries is positive (PostgREST's JwtNoCache
+  # mode otherwise). Auth falls back to direct verification when absent.
+  defp jwt_cache_children(conf) do
+    if Bier.JwtCache.enabled?(conf), do: [{Bier.JwtCache, conf}], else: []
+  end
 
   # When `admin_server_port` is set, run a second Bandit listener serving the
   # admin health endpoints (separate from the catch-all API router). Started

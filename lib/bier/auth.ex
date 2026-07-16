@@ -55,9 +55,7 @@ defmodule Bier.Auth do
   """
   @spec resolve(Plug.Conn.t(), Bier.Config.t()) :: {:ok, t()} | {:error, term()}
   def resolve(conn, config) do
-    token = bearer_token(conn)
-
-    case JWT.verify(token, config.jwt_secret, config.jwt_aud, config.jwt_role_claim_path) do
+    case verify(bearer_token(conn), config) do
       {:ok, :anonymous} ->
         build_context(conn, config, nil, anon_claims(config), true)
 
@@ -66,6 +64,42 @@ defmodule Bier.Auth do
 
       {:error, reason} ->
         {:error, {:jwt, reason}}
+    end
+  end
+
+  # JWT verification through the per-instance cache. The pre-checks mirror
+  # Bier.JWT.verify/4 and never touch the cache; the cacheable half
+  # (signature + decode) goes through Bier.JwtCache when enabled, and the
+  # per-request half (temporal/aud + role) always runs — a cached token still
+  # expires on time.
+  defp verify(nil, _config), do: {:ok, :anonymous}
+
+  defp verify(token, config) do
+    trimmed = String.trim(token)
+
+    cond do
+      trimmed == "" ->
+        {:error, :empty}
+
+      is_nil(config.jwt_secret) ->
+        {:error, :no_secret}
+
+      true ->
+        with {:ok, claims, claims_json} <- decode(trimmed, config),
+             {:ok, role} <-
+               JWT.validate_claims(claims, config.jwt_aud, config.jwt_role_claim_path) do
+          {:ok, %{role: role, claims_json: claims_json}}
+        end
+    end
+  end
+
+  defp decode(token, config) do
+    decode_fun = fn -> JWT.decode_and_verify(token, config.jwt_secret) end
+
+    if Bier.JwtCache.enabled?(config) do
+      Bier.JwtCache.fetch(config.name, token, decode_fun)
+    else
+      decode_fun.()
     end
   end
 
