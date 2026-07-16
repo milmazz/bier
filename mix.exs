@@ -68,11 +68,32 @@ defmodule Bier.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "docs/injection_safety.md"],
+      extras: [
+        "README.md",
+        "docs/tutorials/getting-started.md",
+        "docs/tutorials/authentication.md",
+        "docs/guides/api.md",
+        "docs/guides/configuration.md",
+        "docs/guides/observability.md",
+        "docs/injection_safety.md",
+        "CHANGELOG.md",
+        "CONTRIBUTING.md"
+      ],
+      groups_for_extras: [
+        Tutorials: [~r"docs/tutorials/"],
+        Reference: [~r"docs/guides/", ~r"docs/injection_safety"]
+      ],
       source_ref: "main",
-      # The README mentions these for architecture context, but they are
-      # `@moduledoc false` internals — don't autolink (and don't warn).
-      skip_code_autolink_to: ["Bier.Application", "Bier.schema/0"],
+      # The README and guides mention these for architecture context, but they
+      # are `@moduledoc false`/private internals — don't autolink (and don't warn).
+      skip_code_autolink_to: [
+        "Bier.Application",
+        "Bier.Application.start/2",
+        "Bier.schema/0",
+        "Bier.Mutation.preferences/3",
+        "Bier.Plugs.ActionController.read_producers/1",
+        "Config.load/3"
+      ],
       # CONTRIBUTING.md points at docs/CONFORMANCE_IMPL.md, a repo-internal
       # contract deliberately kept out of the published docs.
       skip_undefined_reference_warnings_on: ["CONTRIBUTING.md"],
