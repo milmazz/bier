@@ -82,6 +82,67 @@ defmodule Bier.JWTTest do
     end
   end
 
+  describe "decode_and_verify/2 (cacheable half)" do
+    test "verifies the signature and returns claims plus canonical claims_json" do
+      token =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicG9zdGdyZXN0X3Rlc3RfYXV0aG9yIiwiaWQiOiJqZG9lIn0.B-lReuGNDwAlU1GOC476MlO0vAt9JNoHIlxg2vwMaO0"
+
+      assert {:ok, claims, claims_json} = JWT.decode_and_verify(token, @hs_secret)
+      assert claims["role"] == "postgrest_test_author"
+      assert claims_json == Bier.json_library().encode!(claims)
+    end
+
+    test "a bad signature is rejected without looking at claims" do
+      token =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicG9zdGdyZXN0X3Rlc3RfYXV0aG9yIiwiaWQiOiJqZG9lIn0.B-lReuGNDwAlU1GOC476MlO0vAt9JNoHIlxg2vwMaO0"
+
+      [h, p, _sig] = String.split(token, ".")
+      assert {:error, :jwt_invalid} = JWT.decode_and_verify("#{h}.#{p}.AAAA", @hs_secret)
+    end
+
+    test "wrong number of segments" do
+      assert {:error, {:parts, 2}} = JWT.decode_and_verify("a.b", @hs_secret)
+    end
+  end
+
+  describe "validate_claims/3 (per-request half)" do
+    test "extracts the role from valid claims" do
+      role_path = [{:key, "role"}]
+
+      assert {:ok, "postgrest_test_author"} =
+               JWT.validate_claims(%{"role" => "postgrest_test_author"}, nil, role_path)
+    end
+
+    test "no role claim yields nil (anon fallback happens in Auth)" do
+      role_path = [{:key, "role"}]
+      assert {:ok, nil} = JWT.validate_claims(%{"id" => "jdoe"}, nil, role_path)
+    end
+
+    test "an expired exp is rejected even without re-verifying the signature" do
+      role_path = [{:key, "role"}]
+      assert {:error, :expired} = JWT.validate_claims(%{"exp" => 1}, nil, role_path)
+    end
+
+    test "audience mismatch is rejected when jwt-aud is configured" do
+      role_path = [{:key, "role"}]
+
+      assert {:error, :not_in_audience} =
+               JWT.validate_claims(%{"aud" => "other"}, "expected", role_path)
+    end
+  end
+
+  describe "verify/4 recomposition" do
+    test "still verifies a valid token end to end" do
+      token =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicG9zdGdyZXN0X3Rlc3RfYXV0aG9yIiwiaWQiOiJqZG9lIn0.B-lReuGNDwAlU1GOC476MlO0vAt9JNoHIlxg2vwMaO0"
+
+      role_path = [{:key, "role"}]
+
+      assert {:ok, %{role: "postgrest_test_author", claims: _, claims_json: _}} =
+               JWT.verify(token, @hs_secret, nil, role_path)
+    end
+  end
+
   # Mint an HS256 token (header.payload.signature) signing with `key` as the HMAC
   # secret. Used only to construct test inputs.
   defp forge_hs256(claims, key) do

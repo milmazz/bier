@@ -53,6 +53,7 @@ defmodule Bier.Config do
           jwt_secret_is_base64: boolean(),
           jwt_aud: String.t() | nil,
           jwt_role_claim_path: RoleClaim.path(),
+          jwt_cache_max_entries: integer(),
           server_cors_allowed_origins: String.t() | nil,
           server_timing_enabled: boolean(),
           server_trace_header: String.t() | nil,
@@ -104,7 +105,8 @@ defmodule Bier.Config do
     server_timing_enabled: false,
     log_level: :error,
     jwt_secret_is_base64: false,
-    jwt_role_claim_path: [{:key, "role"}]
+    jwt_role_claim_path: [{:key, "role"}],
+    jwt_cache_max_entries: 1000
   ]
 
   @doc """

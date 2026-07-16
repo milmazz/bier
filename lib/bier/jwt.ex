@@ -28,6 +28,13 @@ defmodule Bier.JWT do
   Returns `{:ok, %{role: role | nil, claims: map, claims_json: raw_json}}` where
   `claims_json` is the exact decoded payload JSON segment (re-encoded canonically)
   used to populate `request.jwt.claims`.
+
+  Verification is split into public pieces so `Bier.Auth` can interpose a
+  cache: `precheck/2` is the nil/empty/no-secret gate, then
+  `decode_and_verify/2` (cacheable: signature + payload decode) and
+  `validate_claims/3` (per-request: temporal + audience checks + role
+  extraction). `Bier.JwtCache` caches only the expensive `decode_and_verify/2`
+  results; `verify/4` recomposes all three for direct (uncached) use.
   """
 
   alias Bier.JWT.RoleClaim
@@ -50,46 +57,82 @@ defmodule Bier.JWT do
           {:ok, :anonymous}
           | {:ok, %{role: String.t() | nil, claims: map(), claims_json: String.t()}}
           | {:error, atom() | {atom(), term()}}
-  def verify(token, secret, aud, role_claim_path \\ @default_role_claim_path)
+  def verify(token, secret, aud, role_claim_path \\ @default_role_claim_path) do
+    case precheck(token, secret) do
+      {:ok, :anonymous} -> {:ok, :anonymous}
+      {:ok, trimmed} -> verify_token(trimmed, secret, aud, role_claim_path)
+      {:error, _} = error -> error
+    end
+  end
 
-  def verify(nil, _secret, _aud, _role_claim_path), do: {:ok, :anonymous}
+  @doc """
+  Pre-checks a bearer token ahead of the decode step: `nil` (no header) ->
+  `{:ok, :anonymous}`, a blank token -> `{:error, :empty}`, no secret
+  configured -> `{:error, :no_secret}`, otherwise `{:ok, trimmed_token}`.
 
-  def verify(token, secret, aud, role_claim_path) when is_binary(token) do
+  Shared by `verify/4` and `Bier.Auth`, which interposes `Bier.JwtCache`
+  between this check and `decode_and_verify/2` rather than calling
+  `verify_token/4` directly — keeping the check in one place means the two
+  callers can't drift apart on it.
+  """
+  @spec precheck(String.t() | nil, String.t() | nil) ::
+          {:ok, :anonymous} | {:ok, String.t()} | {:error, :empty | :no_secret}
+  def precheck(nil, _secret), do: {:ok, :anonymous}
+
+  def precheck(token, secret) when is_binary(token) do
     trimmed = String.trim(token)
 
     cond do
-      trimmed == "" ->
-        {:error, :empty}
-
-      is_nil(secret) ->
-        {:error, :no_secret}
-
-      true ->
-        verify_token(trimmed, secret, aud, role_claim_path)
+      trimmed == "" -> {:error, :empty}
+      is_nil(secret) -> {:error, :no_secret}
+      true -> {:ok, trimmed}
     end
   end
 
   defp verify_token(token, secret, aud, role_claim_path) do
-    parts = String.split(token, ".")
+    with {:ok, claims, claims_json} <- decode_and_verify(token, secret),
+         {:ok, role} <- validate_claims(claims, aud, role_claim_path) do
+      {:ok, %{role: role, claims: claims, claims_json: claims_json}}
+    end
+  end
 
-    case parts do
+  @doc """
+  The cacheable half of verification (PostgREST `parseAndDecodeClaims`):
+  splits the token, verifies the signature against `secret`, and decodes the
+  payload. Returns the claims plus the canonically re-encoded payload JSON
+  used for `request.jwt.claims`. Assumes a non-empty token and a present
+  secret — callers keep the `:empty`/`:no_secret` pre-checks. `Bier.JwtCache`
+  caches exactly this function's successful result, keyed by the token.
+  """
+  @spec decode_and_verify(String.t(), String.t()) ::
+          {:ok, map(), String.t()} | {:error, atom() | {atom(), term()}}
+  def decode_and_verify(token, secret) do
+    case String.split(token, ".") do
       [header_b64, payload_b64, _sig_b64] ->
         with {:ok, header} <- decode_segment(header_b64),
              :ok <- verify_signature(header, token, secret),
              {:ok, payload_raw} <- decode_segment_raw(payload_b64),
-             {:ok, claims} <- decode_json(payload_raw),
-             :ok <- validate_temporal(claims),
-             :ok <- validate_audience(claims, aud) do
-          {:ok,
-           %{
-             role: RoleClaim.extract(claims, role_claim_path),
-             claims: claims,
-             claims_json: Bier.json_library().encode!(claims)
-           }}
+             {:ok, claims} <- decode_json(payload_raw) do
+          {:ok, claims, Bier.json_library().encode!(claims)}
         end
 
       other ->
         {:error, {:parts, length(other)}}
+    end
+  end
+
+  @doc """
+  The per-request half (PostgREST `validateClaims` + role extraction):
+  temporal (`exp`/`nbf`/`iat`) and audience checks, then the role claim.
+  Runs on every request — cache hit or not — so a cached token still starts
+  failing once its `exp` passes.
+  """
+  @spec validate_claims(map(), String.t() | nil, RoleClaim.path()) ::
+          {:ok, String.t() | nil} | {:error, atom() | {atom(), term()}}
+  def validate_claims(claims, aud, role_claim_path) do
+    with :ok <- validate_temporal(claims),
+         :ok <- validate_audience(claims, aud) do
+      {:ok, RoleClaim.extract(claims, role_claim_path)}
     end
   end
 

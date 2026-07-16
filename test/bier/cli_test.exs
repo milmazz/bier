@@ -152,6 +152,26 @@ defmodule Bier.CLITest do
     assert IO.iodata_to_binary(result.stdout) =~ "db-pool-max-idletime = 5"
   end
 
+  test "--dump-config includes jwt-cache-max-entries with its PostgREST default" do
+    result = CLI.run(["--dump-config"], env: %{})
+    assert result.exit == 0
+    assert IO.iodata_to_binary(result.stdout) =~ ~s(jwt-cache-max-entries = 1000)
+  end
+
+  test "PGRST_JWT_CACHE_MAX_ENTRIES overrides; a wrong type falls back to the default" do
+    result = CLI.run(["--dump-config"], env: %{"PGRST_JWT_CACHE_MAX_ENTRIES" => "0"})
+    assert result.exit == 0
+    assert IO.iodata_to_binary(result.stdout) =~ ~s(jwt-cache-max-entries = 0)
+
+    # A wrong-typed value coerces to :unset, which resolve/4 collapses back to
+    # the key's own default (PostgREST's wrong-type rule; case 1721's :unset
+    # dump-as-blank shape is scoped to optInt keys, not required :int keys
+    # like this one — matches server-port/db-pool).
+    result = CLI.run(["--dump-config"], env: %{"PGRST_JWT_CACHE_MAX_ENTRIES" => "notanint"})
+    assert result.exit == 0
+    assert IO.iodata_to_binary(result.stdout) =~ ~s(jwt-cache-max-entries = 1000)
+  end
+
   test "--example prints a loadable config template (case 1727 shape)" do
     result = CLI.run(["--example"], env: %{})
     assert result.exit == 0

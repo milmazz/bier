@@ -81,13 +81,19 @@ defmodule Bier.Telemetry do
     * Measurements: `:count` (always `1`).
     * Metadata: `:instance`.
 
-  ## Not yet emitted
+  ## JWT cache events (#36)
 
-  One further family from #26 depends on infrastructure Bier does not have yet
-  and is tracked as a follow-up (#36):
+    * `[:bier, :jwt_cache, :lookup]` — one per cache consultation, with
+      measurement `%{count: 1}` and metadata `%{hit: boolean, instance: name}`.
+      All lookups mirror `pgrst_jwt_cache_requests_total`; those with
+      `hit: true` mirror `pgrst_jwt_cache_hits_total`.
+    * `[:bier, :jwt_cache, :eviction]` — one per entry evicted by the SIEVE
+      hand, measurement `%{count: 1}`, metadata `%{instance: name}`; mirrors
+      `pgrst_jwt_cache_evictions_total`.
 
-    * `[:bier, :jwt_cache, …]` — Bier verifies every JWT directly; there is no
-      verification cache to instrument.
+  Emitted only when the cache is enabled (`jwt_secret` set and
+  `jwt_cache_max_entries > 0`), matching PostgREST, which records no cache
+  observations in `JwtNoCache` mode.
   """
 
   @request_start [:bier, :request, :start]
@@ -95,6 +101,8 @@ defmodule Bier.Telemetry do
   @schema_cache_load [:bier, :schema_cache, :load]
   @pool_status [:bier, :pool, :status]
   @pool_checkout_timeout [:bier, :pool, :checkout_timeout]
+  @jwt_cache_lookup [:bier, :jwt_cache, :lookup]
+  @jwt_cache_eviction [:bier, :jwt_cache, :eviction]
 
   @doc """
   Emit `[:bier, :request, :start]` and return the monotonic start time to hand
@@ -160,5 +168,23 @@ defmodule Bier.Telemetry do
   @spec pool_checkout_timeout(map()) :: :ok
   def pool_checkout_timeout(metadata) do
     :telemetry.execute(@pool_checkout_timeout, %{count: 1}, metadata)
+  end
+
+  @doc """
+  Emit `[:bier, :jwt_cache, :lookup]` for one cache consultation; `hit?` is
+  merged into the metadata as `:hit`. Called by `Bier.JwtCache`.
+  """
+  @spec jwt_cache_lookup(boolean(), map()) :: :ok
+  def jwt_cache_lookup(hit?, metadata) do
+    :telemetry.execute(@jwt_cache_lookup, %{count: 1}, Map.put(metadata, :hit, hit?))
+  end
+
+  @doc """
+  Emit `[:bier, :jwt_cache, :eviction]` for one entry evicted by the cache's
+  SIEVE hand. Called by `Bier.JwtCache`.
+  """
+  @spec jwt_cache_eviction(map()) :: :ok
+  def jwt_cache_eviction(metadata) do
+    :telemetry.execute(@jwt_cache_eviction, %{count: 1}, metadata)
   end
 end
