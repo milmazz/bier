@@ -37,7 +37,7 @@ defmodule Bier.OpenAPIV3HttpTest do
     assert resp.status == 200
     assert resp.body["openapi"] == "3.0.3"
     refute Map.has_key?(resp.body, "swagger")
-    assert resp.body["components"]["schemas"] != %{}
+    assert map_size(resp.body["components"]["schemas"]) > 0
     assert resp.body["servers"] == [%{"url" => "/"}]
   end
 

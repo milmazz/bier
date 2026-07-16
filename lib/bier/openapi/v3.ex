@@ -15,6 +15,11 @@ defmodule Bier.OpenAPI.V3 do
   shapes the 2.0 emitter produces (body params only as `body.*` shared
   definitions or the inline RPC `args`, `application/json` as the implied
   media type, `collectionFormat: "multi"` only on query params).
+
+  **Known limitation:** component keys inherit relation and column names
+  verbatim; names outside OAS 3.0.3's component-key charset (`^[a-zA-Z0-9.\-_]+$`)
+  produce technically invalid 3.0 component keys, and key sanitization is
+  deliberately out of scope for this parity-driven converter.
   """
 
   @json "application/json"
@@ -37,6 +42,10 @@ defmodule Bier.OpenAPI.V3 do
 
     body_keys = bodies |> Enum.map(&elem(&1, 0)) |> MapSet.new()
 
+    # This map enumerates the eight keys the 2.0 emitter can produce:
+    # swagger, info, externalDocs, basePath, paths, definitions, parameters,
+    # security/securityDefinitions/schemes/host (via their handlers). A new
+    # top-level emitter key must be added here or it will be silently dropped.
     %{
       "openapi" => "3.0.3",
       "info" => doc["info"],
