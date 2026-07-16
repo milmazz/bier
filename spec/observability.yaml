@@ -124,7 +124,8 @@ entries:
     claim: >
       `log-level` filters which responses get an access-log line, by status:
       crit logs nothing; error logs only >= 500; warn logs only >= 400; info
-      and debug log everything. Default log-level is "error".
+      and debug log everything. (The LogError default itself is established in
+      parseLogLevel, not here — see observability.log_level.values.)
     config_key: log-level
     source: https://github.com/PostgREST/postgrest/blob/v14.12/src/PostgREST/Logger.hs#L88
     source_line: 88
@@ -145,12 +146,14 @@ entries:
   - id: observability.log_level.values
     claim: >
       Valid `log-level` values are crit, error, warn, info, debug (parsed
-      case-sensitively from the config string); any unrecognized / absent value
-      falls back to error. The same five values are rendered back by
-      dumpLogLevel.
+      case-sensitively from the config string). Only an ABSENT value (Nothing)
+      falls back to the default LogError (Config.hs#L360); an UNRECOGNIZED value
+      does NOT fall back — parseLogLevel's `Just _` branch calls
+      `fail "Invalid logging level. Check your configuration."` (Config.hs#L366),
+      aborting startup. The same five values are rendered back by dumpLogLevel.
     config_key: log-level
-    source: https://github.com/PostgREST/postgrest/blob/v14.12/src/PostgREST/Config.hs#L357
-    source_line: 357
+    source: https://github.com/PostgREST/postgrest/blob/v14.12/src/PostgREST/Config.hs#L366
+    source_line: 366
     case_ids: [1712, 1723]   # covered by the config area's CLI dump cases
 
   - id: observability.log_query.emits_sql

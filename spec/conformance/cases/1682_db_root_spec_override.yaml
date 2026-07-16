@@ -21,4 +21,4 @@ notes: >
   mirrors the documented example (docs/references/api/openapi.rst#L60-100) and
   load.sql root(). Dispatch: ApiRequest.getResource maps [] to ResourceRoutine
   when configDbRootSpec is Just qi (ApiRequest.hs#L120-122).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest.hs#L120
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest.hs#L122

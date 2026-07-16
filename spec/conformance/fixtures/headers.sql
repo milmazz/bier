@@ -1,3 +1,15 @@
+-- LIVE LOADER INPUT — not a historical fragment. `mix bier.fixtures.load`
+-- re-loads this file to build the real `headers`/`headers_private` schemas:
+-- it splits on the first comment line whose text is "Multi-schema tables"
+-- (keeping only what precedes it — which is why this banner must NOT contain
+-- that comment line verbatim) and remaps word-boundary `test` -> `headers`
+-- and `private` -> `headers_private` (see lib/mix/tasks/bier.fixtures.load.ex).
+-- INVARIANTS an edit must preserve: the marker line stays byte-identical, and
+-- no string literal may contain the bare lowercase tokens `test`/`private`
+-- (header values like `X-Test`/`Test` differ in case and are safe). Edit only
+-- in reviewed commits; workflow agents route new headers fixture objects
+-- through headers.delta.sql instead (see README.md here).
+--
 -- Fixtures for the "headers" feature area.
 -- Covers: request/response headers, Prefer echo (Preference-Applied),
 -- Content-Profile / Accept-Profile schema switching, Location on insert,

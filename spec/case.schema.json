@@ -97,7 +97,7 @@
       }
     },
     "schema": {
-      "description": "Which spec/conformance/fixtures/<name>.sql to load before running this case.",
+      "description": "Fixture-set LABEL, not a file and not loaded per-case. The frozen harness (test/support/http_case.ex) sends any label other than null/public/test as an `Accept-Profile: <label>` request header, so the label must be a real schema exposed by the shared conformance server and built by `mix bier.fixtures.load` (view-mirrors of `test`, or the special rpc/headers/auth builds); an unknown label yields 406 PGRST106.",
       "type": "string",
       "minLength": 1
     },

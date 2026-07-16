@@ -1,3 +1,11 @@
+-- LIVE LOADER INPUT — not a historical fragment. `mix bier.fixtures.load`
+-- re-loads this file to build the real `rpc` area schema by remapping the
+-- word-boundary token `test` -> `rpc` (see lib/mix/tasks/bier.fixtures.load.ex).
+-- INVARIANTS an edit must preserve: every object stays `test`-qualified, and
+-- no string literal may contain the bare lowercase token `test` (the remap
+-- would corrupt it). Edit only in reviewed commits; workflow agents route new
+-- rpc fixture objects through rpc.delta.sql instead (see README.md here).
+--
 -- Conformance fixtures for the RPC (/rpc/<fn>) feature area.
 --
 -- Self-contained subset of PostgREST's test/spec/fixtures/schema.sql, limited to

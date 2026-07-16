@@ -10,7 +10,9 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
     2. Ensure the `postgrest_test_*` roles exist (the fixtures also create them
        idempotently; this is a belt-and-suspenders for shared clusters).
     3. Load `spec/conformance/fixtures.sql` with `psql -v ON_ERROR_STOP=1`.
-    4. Mirror schema `test` into each pure table/data area schema
+    4. Load `spec/conformance/fixtures_local.sql` (the human-owned supplement,
+       see `spec/conformance/fixtures/README.md`) the same way, if present.
+    5. Mirror schema `test` into each pure table/data area schema
        (`operators`, `ordering`, `pagination`, `representations`, `mutations`,
        `headers`, `config`, `domain_representations`) as auto-updatable views, so
        requests carrying `Accept-Profile: <area>` resolve to real exposed schemas.
@@ -53,6 +55,7 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
     ensure_roles(psql, cfg)
     recreate_database(psql, cfg)
     load_fixtures(psql, cfg, fixtures)
+    load_local_fixtures(psql, cfg)
     load_postgis_fixtures(psql, cfg)
     seed_corrections(psql, cfg)
     mirror_area_schemas(cfg)
@@ -91,6 +94,26 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
 
     if status != 0 do
       Mix.raise("psql failed loading fixtures (exit #{status}):\n#{out}")
+    end
+  end
+
+  # The human-owned supplement (see spec/conformance/fixtures/README.md): loaded
+  # right after the consolidated fixtures and BEFORE mirroring, so any `test.*`
+  # relation it creates is mirrored into the area schemas like any other.
+  # Workflow agents never write this file; absence is fine (skip, don't fail).
+  defp load_local_fixtures(psql, cfg) do
+    local = Path.expand("spec/conformance/fixtures_local.sql", File.cwd!())
+
+    if File.exists?(local) do
+      args =
+        base_args(cfg, cfg[:database]) ++
+          ["-v", "ON_ERROR_STOP=1", "-q", "-f", local]
+
+      {out, status} = System.cmd(psql, args, env: psql_env(cfg), stderr_to_stdout: true)
+
+      if status != 0 do
+        Mix.raise("psql failed loading local fixtures (exit #{status}):\n#{out}")
+      end
     end
   end
 
@@ -453,11 +476,6 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
         []
       )
     end
-
-    # Case 1330 PUT /items?id=eq.10 must be an INSERT (201), so id=10 must be
-    # absent from representations.items. No representations case requires id=10 to
-    # pre-exist; the others target ids 1,2,3.
-    Postgrex.query!(conn, ~s|DELETE FROM "representations"."items" WHERE id = 10|, [])
 
     # Recreate the projects -> clients foreign key for embedding resolution.
     Postgrex.query!(

@@ -2,19 +2,24 @@ id: 1330
 feature: representations/put/single-upsert-insert-201
 request:
   method: PUT
-  path: /items?id=eq.10
+  path: /items?id=eq.10102
   headers:
     Prefer: "return=representation"
     Content-Type: application/json
-  body: [{ "id": 10 }]
+  body: [{ "id": 10102 }]
 schema: representations
-preconditions: []
+# The target id MUST NOT exist for PUT to be an INSERT (-> 201); an existing
+# row would make it a REPLACE (200, case 1331). items is seeded with rows
+# 1..15, so use an id guaranteed outside the seed range — the same trick as
+# 1364 (999999) and 1372 (10101), distinct from both so the cases stay
+# independent. The harness never executes `preconditions:` blocks, so absence
+# must hold in the seed itself, not via a precondition.
 expect:
   status: 201
   headers:
     Content-Type: application/json; charset=utf-8
     Preference-Applied: "return=representation"
-  body_exact: [{ "id": 10 }]
+  body_exact: [{ "id": 10102 }]
 notes: >-
   PUT single upsert that INSERTS a new row (PK not present) with
   return=representation yields 201 + JSON array body. Status semantics

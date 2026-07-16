@@ -1,0 +1,20 @@
+-- ============================================================================
+-- fixtures_local.sql — HUMAN-OWNED fixture supplement
+-- ============================================================================
+--
+-- Ownership: maintained by hand, in reviewed commits only. The bier-spec /
+-- bier-spec-audit workflow agents are forbidden from reading this file as
+-- ground truth or writing to it; spec-derived fixture DDL belongs in
+-- spec/conformance/fixtures.sql (via the per-area *.delta.sql channel).
+-- See spec/conformance/fixtures/README.md for the full layering.
+--
+-- Load order: `mix bier.fixtures.load` loads this file immediately AFTER
+-- spec/conformance/fixtures.sql and BEFORE the area-schema mirroring, so any
+-- relation created here in schema `test` is automatically mirrored into every
+-- area schema (operators, ordering, ...) exactly like the consolidated
+-- fixtures. Objects here may reference fixtures.sql objects, never the other
+-- way around (fixtures.sql must load standalone).
+--
+-- Use this file for environment- or harness-support DDL that is NOT derived
+-- from the PostgREST spec (the conformance cases must never reference objects
+-- that exist only here). Currently intentionally empty.
