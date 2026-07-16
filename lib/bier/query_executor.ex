@@ -1147,10 +1147,14 @@ defmodule Bier.QueryExecutor do
     "\"" <> String.replace(ident, "\"", "\"\"") <> "\""
   end
 
-  # Cast types may include array/range/qualified forms produced internally; we
-  # validate to a conservative charset to avoid injection through the cast.
+  # Cast types may include array/range/qualified forms produced internally,
+  # plus a type modifier from introspection or a user cast (e.g. `numeric(4,2)`,
+  # `character varying(255)`, `timestamp(3) without time zone`); we validate to
+  # a conservative charset to avoid injection through the cast. A `(...)`
+  # group is allowed only as a fully-formed digit list — `(\d+(,\d+)*)` — so it
+  # cannot smuggle arbitrary SQL, matching PostgreSQL's own modifier syntax.
   def quote_type(type) do
-    if Regex.match?(~r/^[A-Za-z0-9_ \[\]\".]+$/, type) do
+    if Regex.match?(~r/^(?:[A-Za-z0-9_ \[\]\".]|\(\d+(?:,\d+)*\))+$/, type) do
       type
     else
       throw({:bad_request, :bad_cast})
