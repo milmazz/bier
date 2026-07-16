@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- NEVER edit `spec/**`, `test/conformance/**`, or `test/support/**` (frozen conformance ground truth). Do not modify existing test files either — this feature only ADDS new test files under `test/bier/`.
+- NEVER edit any EXISTING file under `spec/**`, `test/conformance/**`, or `test/support/**` (frozen conformance ground truth), and do not modify existing test files — this feature only ADDS new files: tests under `test/bier/` plus one new shared helper module `test/support/sse_test_client.ex` (user-approved exception; a new module does not alter frozen conformance behavior).
 - The full conformance suite must stay green: `mix test` (requires a local Postgres; the alias reloads the `bier_test` fixture DB first).
 - JSON serialization goes through `Bier.json_library()`, never `Jason`/`JSON` directly.
 - New error shapes are `Bier.Plugs.FallbackController.call/2` clauses, never inline responses in controllers. Bier-specific (non-PostgREST) errors use the `BIER` code namespace: `BIER001` = unknown channel (404), `BIER002` = missing channel param (400).
@@ -889,6 +889,7 @@ git commit -m "feat(#81): per-instance LISTEN fan-out listener for realtime even
 
 **Files:**
 - Create: `lib/bier/events.ex`
+- Create: `test/support/sse_test_client.ex` (shared raw-socket SSE test helpers, also used by Task 7)
 - Modify: `lib/bier/plugs/action_controller.ex:51-71` (`dispatch/3`)
 - Modify: `lib/bier/plugs/fallback_controller.ex` (two new clauses, before the catch-all)
 - Test: `test/bier/events_http_test.exs` (new file)
@@ -897,7 +898,91 @@ git commit -m "feat(#81): per-instance LISTEN fan-out listener for realtime even
 - Consumes: `Bier.Events.SSE` (Task 2), `Bier.Events.Registry.register/2` (Task 3), telemetry helpers (Task 4), `Bier.Plugs.ActionController.maybe_auth/2` (existing, public `@doc false`), `config.events_*` (Task 1).
 - Produces: `Bier.Events.handles?(conn, config) :: boolean()` and `Bier.Events.handle(conn, config) :: Plug.Conn.t() | {:error, term()}`. Error reasons `{:error, :events_missing_channel}` (→ 400 `BIER002`) and `{:error, {:events_unknown_channel, channel}}` (→ 404 `BIER001`) rendered by FallbackController.
 
-- [ ] **Step 1: Write the failing tests (error paths + single-channel happy path)**
+- [ ] **Step 1: Create the shared SSE test client**
+
+Create `test/support/sse_test_client.ex` (a NEW module in the test-only
+compile path — no frozen file is edited; shared with Task 7's tests):
+
+```elixir
+defmodule Bier.SSETestClient do
+  @moduledoc """
+  Raw `:gen_tcp` SSE client helpers for the realtime events tests.
+
+  The SSE response intentionally never ends, so Req cannot drive the
+  streaming assertions; a raw socket can. Chunked transfer framing
+  (sizes/CRLFs) is tolerated by substring matching in `recv_until/3`.
+  """
+
+  import ExUnit.Assertions
+
+  @doc "Open a socket and send a GET with an SSE Accept header."
+  def connect_sse(port, path) do
+    {:ok, sock} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false], 1_000)
+
+    :ok =
+      :gen_tcp.send(
+        sock,
+        "GET #{path} HTTP/1.1\r\nhost: 127.0.0.1\r\naccept: text/event-stream\r\n\r\n"
+      )
+
+    sock
+  end
+
+  @doc "Collect bytes until the accumulated stream contains `pattern`."
+  def recv_until(sock, pattern, acc \\ "") do
+    if acc =~ pattern do
+      acc
+    else
+      case :gen_tcp.recv(sock, 0, 3_000) do
+        {:ok, data} ->
+          recv_until(sock, pattern, acc <> data)
+
+        {:error, reason} ->
+          flunk("waiting for #{inspect(pattern)}, got #{inspect(acc)} (#{inspect(reason)})")
+      end
+    end
+  end
+
+  @doc "Fire pg_notify through the instance's request pool."
+  def notify(name, channel, payload) do
+    pool = Bier.Registry.via(name, Postgrex)
+    Postgrex.query!(pool, "SELECT pg_notify($1, $2)", [channel, payload])
+  end
+
+  @doc "Poll `fun` until truthy (10ms interval), flunking after `retries`."
+  def wait_until(fun, retries \\ 100) do
+    cond do
+      fun.() ->
+        :ok
+
+      retries == 0 ->
+        flunk("condition never became true")
+
+      true ->
+        Process.sleep(10)
+        wait_until(fun, retries - 1)
+    end
+  end
+
+  @doc "Hand-sign an HS256 JWT (no deps) for auth tests."
+  def sign_hs256(claims, secret) do
+    encode = fn map ->
+      map |> Bier.json_library().encode!() |> Base.url_encode64(padding: false)
+    end
+
+    header = encode.(%{"alg" => "HS256", "typ" => "JWT"})
+    payload = encode.(claims)
+
+    signature =
+      :crypto.mac(:hmac, :sha256, secret, header <> "." <> payload)
+      |> Base.url_encode64(padding: false)
+
+    header <> "." <> payload <> "." <> signature
+  end
+end
+```
+
+- [ ] **Step 2: Write the failing tests (error paths + single-channel happy path)**
 
 Create `test/bier/events_http_test.exs`:
 
@@ -909,6 +994,8 @@ defmodule Bier.EventsHttpTest do
   because the response intentionally never ends. Not async: real ports + DB.
   """
   use ExUnit.Case, async: false
+
+  import Bier.SSETestClient
 
   alias Bier.TestPorts
 
@@ -997,59 +1084,17 @@ defmodule Bier.EventsHttpTest do
 
     :gen_tcp.close(sock)
   end
-
-  # ---- helpers ---------------------------------------------------------------
-
-  defp connect_sse(port, path) do
-    {:ok, sock} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false], 1_000)
-
-    :ok =
-      :gen_tcp.send(
-        sock,
-        "GET #{path} HTTP/1.1\r\nhost: 127.0.0.1\r\naccept: text/event-stream\r\n\r\n"
-      )
-
-    sock
-  end
-
-  # Collect chunked bytes until the accumulated stream contains `pattern`.
-  # Chunked transfer framing (sizes/CRLFs) is tolerated by substring matching.
-  defp recv_until(sock, pattern, acc \\ "") do
-    if acc =~ pattern do
-      acc
-    else
-      case :gen_tcp.recv(sock, 0, 3_000) do
-        {:ok, data} -> recv_until(sock, pattern, acc <> data)
-        {:error, reason} -> flunk("waiting for #{inspect(pattern)}, got #{inspect(acc)} (#{inspect(reason)})")
-      end
-    end
-  end
-
-  defp notify(name, channel, payload) do
-    pool = Bier.Registry.via(name, Postgrex)
-    Postgrex.query!(pool, "SELECT pg_notify($1, $2)", [channel, payload])
-  end
-
-  defp wait_until(fun, retries \\ 100) do
-    cond do
-      fun.() -> :ok
-      retries == 0 -> flunk("condition never became true")
-      true ->
-        Process.sleep(10)
-        wait_until(fun, retries - 1)
-    end
-  end
 end
 ```
 
-Note: the `projects` relation exists in the `test` schema of the conformance fixture DB (it is used all over `spec/conformance`), and `base_opts/0` exposes `test` as the default schema.
+Note: the `complex_items` relation exists in the `test` schema of the conformance fixture DB (see `spec/conformance/fixtures.sql`), and `base_opts/0` exposes `test` as the default schema.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 3: Run test to verify it fails**
 
 Run: `mix test test/bier/events_http_test.exs`
 Expected: FAIL — currently `/events` resolves as an unknown relation (404 PGRST205), so the BIER002/BIER001/streaming assertions all fail.
 
-- [ ] **Step 3: Implement `Bier.Events`**
+- [ ] **Step 4: Implement `Bier.Events`**
 
 Create `lib/bier/events.ex`:
 
@@ -1212,7 +1257,7 @@ defmodule Bier.Events do
 end
 ```
 
-- [ ] **Step 4: Route to it from `ActionController` and render the new errors**
+- [ ] **Step 5: Route to it from `ActionController` and render the new errors**
 
 In `lib/bier/plugs/action_controller.ex`, `dispatch/3`, replace the final clause:
 
@@ -1258,7 +1303,7 @@ In `lib/bier/plugs/fallback_controller.ex`, add BEFORE the `# ---- catch-all` cl
   end
 ```
 
-- [ ] **Step 5: Run the tests**
+- [ ] **Step 6: Run the tests**
 
 Run: `mix test test/bier/events_http_test.exs`
 Expected: PASS (7 tests).
@@ -1267,11 +1312,11 @@ Also run the conformance suite to prove the feature is inert when disabled:
 `mix test`
 Expected: same pass/fail profile as `main` (no new failures).
 
-- [ ] **Step 6: Format and commit**
+- [ ] **Step 7: Format and commit**
 
 ```bash
 mix format
-git add lib/bier/events.ex lib/bier/plugs/action_controller.ex lib/bier/plugs/fallback_controller.ex test/bier/events_http_test.exs
+git add lib/bier/events.ex lib/bier/plugs/action_controller.ex lib/bier/plugs/fallback_controller.ex test/support/sse_test_client.ex test/bier/events_http_test.exs
 git commit -m "feat(#81): SSE events endpoint - routing, auth gate, stream loop"
 ```
 
@@ -1284,7 +1329,7 @@ git commit -m "feat(#81): SSE events endpoint - routing, auth gate, stream loop"
 - Modify (only if a test exposes a defect): `lib/bier/events.ex`
 
 **Interfaces:**
-- Consumes: everything from Tasks 1–6. `Bier.JWT` verifies HS256; tokens are hand-signed in the test with `:crypto.mac/4` (no new deps).
+- Consumes: everything from Tasks 1–6, including the shared `Bier.SSETestClient` helpers (`connect_sse/2`, `recv_until/3`, `notify/3`, `wait_until/2`, `sign_hs256/2`) from `test/support/sse_test_client.ex`.
 - Produces: locked-in behavior for multiplexed frames, heartbeats, registry cleanup on disconnect, and `access_token` auth.
 
 - [ ] **Step 1: Write the tests**
@@ -1296,9 +1341,11 @@ defmodule Bier.EventsStreamTest do
   @moduledoc """
   Streaming edge cases for the SSE events endpoint: multiplexing, heartbeats,
   disconnect cleanup, and JWT auth (header + access_token fallback). Raw
-  :gen_tcp client, dedicated instances, not async.
+  :gen_tcp client (Bier.SSETestClient), dedicated instances, not async.
   """
   use ExUnit.Case, async: false
+
+  import Bier.SSETestClient
 
   alias Bier.TestPorts
 
@@ -1391,58 +1438,6 @@ defmodule Bier.EventsStreamTest do
 
     assert resp.status == 401
     assert resp.body["code"] == "PGRST301"
-  end
-
-  # ---- helpers (same shape as events_http_test) -----------------------------
-
-  defp connect_sse(port, path) do
-    {:ok, sock} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false], 1_000)
-
-    :ok =
-      :gen_tcp.send(
-        sock,
-        "GET #{path} HTTP/1.1\r\nhost: 127.0.0.1\r\naccept: text/event-stream\r\n\r\n"
-      )
-
-    sock
-  end
-
-  defp recv_until(sock, pattern, acc \\ "") do
-    if acc =~ pattern do
-      acc
-    else
-      case :gen_tcp.recv(sock, 0, 3_000) do
-        {:ok, data} -> recv_until(sock, pattern, acc <> data)
-        {:error, reason} -> flunk("waiting for #{inspect(pattern)}, got #{inspect(acc)} (#{inspect(reason)})")
-      end
-    end
-  end
-
-  defp notify(name, channel, payload) do
-    pool = Bier.Registry.via(name, Postgrex)
-    Postgrex.query!(pool, "SELECT pg_notify($1, $2)", [channel, payload])
-  end
-
-  defp wait_until(fun, retries \\ 100) do
-    cond do
-      fun.() -> :ok
-      retries == 0 -> flunk("condition never became true")
-      true ->
-        Process.sleep(10)
-        wait_until(fun, retries - 1)
-    end
-  end
-
-  defp sign_hs256(claims, secret) do
-    encode = fn map -> map |> Bier.json_library().encode!() |> Base.url_encode64(padding: false) end
-    header = encode.(%{"alg" => "HS256", "typ" => "JWT"})
-    payload = encode.(claims)
-
-    signature =
-      :crypto.mac(:hmac, :sha256, secret, header <> "." <> payload)
-      |> Base.url_encode64(padding: false)
-
-    header <> "." <> payload <> "." <> signature
   end
 end
 ```
