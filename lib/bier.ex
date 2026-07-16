@@ -406,6 +406,34 @@ defmodule Bier do
         `/ready` health endpoints (PostgREST admin-server-port). When `nil`
         (the default) no admin server starts. Must differ from `router[:port]`.
         """
+      ],
+      events_channels: [
+        type: {:list, :string},
+        default: env(:events_channels, []),
+        doc: """
+        Allowlist of Postgres notification channels exposed on the SSE events
+        endpoint. The empty list (default) disables the feature entirely: no
+        listener connection is opened and no path is reserved. Bier-specific
+        (no PostgREST counterpart); see the Realtime events guide.
+        """
+      ],
+      events_path: [
+        type: :string,
+        default: env(:events_path, "events"),
+        doc: """
+        Top-level path segment reserved for the SSE events endpoint while
+        `events_channels` is non-empty. Change it if a relation of the same
+        name must stay reachable. Must be a single segment (no `/`).
+        """
+      ],
+      events_heartbeat_interval: [
+        type: :pos_integer,
+        default: env(:events_heartbeat_interval, 15_000),
+        doc: """
+        Milliseconds of silence on an SSE connection before a `: keepalive`
+        comment frame is written. Keeps idle proxies from dropping the
+        stream and bounds dead-client detection.
+        """
       ]
     ]
   end
