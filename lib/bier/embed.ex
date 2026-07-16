@@ -162,10 +162,15 @@ defmodule Bier.Embed do
     {child_cols, child_laterals, state} =
       build_row_select(e.select, target, child_alias, deeper_filters, child_scope, qe)
 
-    state = struct!(state, saved)
-
+    # `own_filters` target the embed's own columns (e.g. `tasks.id=gte.5`), so
+    # they must render while `state.relation` is still `target` — a coltype
+    # lookup against the (already-restored) parent relation would silently
+    # fall back to `:text` and bind a raw string where Postgres expects the
+    # column's real type (e.g. integer), causing a Postgrex encode error (#72).
     {where_sql, state} =
       build_embed_where(join, own_filters, child_alias, src_alias, state, qe)
+
+    state = struct!(state, saved)
 
     {order_sql, state} =
       build_order_advanced(own_order, e.select, target, child_alias, state, qe)
