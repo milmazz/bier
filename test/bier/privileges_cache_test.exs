@@ -68,6 +68,7 @@ defmodule Bier.PrivilegesCacheTest do
     # window where a stale tid still lingers in :persistent_term.
     stop_supervised!(Bier.PrivilegesCache)
     :persistent_term.put(key, tid)
+    on_exit(fn -> :persistent_term.erase(key) end)
 
     assert Bier.PrivilegesCache.fetch(name, "web_anon", gen, loader) == privs
     assert_received :loader_ran
