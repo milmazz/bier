@@ -142,6 +142,13 @@ defmodule Bier.CLI.Config do
       aliases: ["role-claim-key"]
     },
     %{
+      key: "jwt-cache-max-entries",
+      env: "PGRST_JWT_CACHE_MAX_ENTRIES",
+      kind: :int,
+      default: 1000,
+      aliases: []
+    },
+    %{
       key: "openapi-mode",
       env: "PGRST_OPENAPI_MODE",
       kind: {:enum_str, :openapi_mode},
@@ -371,12 +378,7 @@ defmodule Bier.CLI.Config do
         {:ok, entry.default}
 
       {:present, raw} ->
-        case coerce(entry.kind, raw) do
-          # A wrong-typed/unparseable value coerces to :unset, which means
-          # "fall back to the key's default" (PostgREST's wrong-type rule).
-          {:ok, :unset} -> {:ok, entry.default}
-          other -> other
-        end
+        coerce(entry.kind, raw)
     end
   end
 
@@ -512,6 +514,7 @@ defmodule Bier.CLI.Config do
         jwt_secret_is_base64: resolved["jwt-secret-is-base64"],
         jwt_aud: resolved["jwt-aud"],
         jwt_role_claim_key: resolved["jwt-role-claim-key"],
+        jwt_cache_max_entries: resolved["jwt-cache-max-entries"],
         openapi_mode: resolved["openapi-mode"],
         openapi_security_active: resolved["openapi-security-active"],
         log_level: resolved["log-level"],
