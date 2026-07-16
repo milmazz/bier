@@ -122,9 +122,9 @@ defmodule Bier.CLI.ConfigTest do
       assert resolved["db-max-rows"] == :unset
     end
 
-    test "wrong type for a required int falls back to :unset, which defaults at boot (server-port)" do
+    test "wrong type for a required int falls back to its numeric default (server-port)" do
       assert {:ok, resolved} = Config.load(%{"PGRST_SERVER_PORT" => "garbage"}, nil, %{})
-      assert resolved["server-port"] == :unset
+      assert resolved["server-port"] == 3000
     end
 
     test "empty log-level falls back to default error, not an enum error (case 1723)" do

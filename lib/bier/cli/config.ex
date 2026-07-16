@@ -378,7 +378,12 @@ defmodule Bier.CLI.Config do
         {:ok, entry.default}
 
       {:present, raw} ->
-        coerce(entry.kind, raw)
+        case coerce(entry.kind, raw) do
+          # A wrong-typed/unparseable value coerces to :unset, which means
+          # "fall back to the key's default" (PostgREST's wrong-type rule).
+          {:ok, :unset} -> {:ok, entry.default}
+          other -> other
+        end
     end
   end
 
