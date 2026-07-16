@@ -150,6 +150,54 @@ defmodule Bier.JwtCacheTest do
       assert_receive {:verified, :nc}
     end
 
+    test "table dies mid-request (owner still alive): fetch falls back via the rescue clause" do
+      # Simulates the owner mid-restart window: the persistent_term entry
+      # still points at a table id, but the underlying table is gone. Any
+      # process may :ets.delete/1 a :public table it doesn't own, which
+      # reproduces that without actually restarting the owner GenServer
+      # (still alive throughout — unlike the "no cache is running" test
+      # above, fetch/3's persistent_term lookup here succeeds and reaches
+      # lookup/4, whose :ets.lookup call raises ArgumentError, hitting the
+      # `rescue` clause, not insert/4's `catch :exit` covered next).
+      {name, pid} = start_cache(10)
+      tid = :persistent_term.get({Bier, :jwt_cache, name})
+      :ets.delete(tid)
+      assert Process.alive?(pid)
+
+      ok = {:ok, %{"role" => "a"}, ~s({"role":"a"})}
+      assert ^ok = Bier.JwtCache.fetch(name, "tok", counting_fun(self(), :dead_table, ok))
+      assert_receive {:verified, :dead_table}
+    end
+
+    test "owner unreachable: insert/4 catches :exit and fetch still succeeds" do
+      # A real owner can't be killed while leaving its table alive: an ETS
+      # table dies with its owner (no heir is configured on it), so killing
+      # the real Bier.JwtCache process would only ever re-exercise the
+      # rescue ArgumentError clause above, never insert/4's GenServer.call.
+      # Instead, publish a table under persistent_term exactly as a real
+      # owner would, but never start a process registered under
+      # `Bier.Registry.via(name, Bier.JwtCache)` — that reproduces "owner is
+      # unreachable" while leaving a live table for lookup/4 to miss on.
+      name = Module.concat(__MODULE__, "Unreachable#{System.unique_integer([:positive])}")
+      {ref, _} = attach_cache_events(name)
+
+      tid = :ets.new(Bier.JwtCache, [:set, :public, read_concurrency: true])
+      :persistent_term.put({Bier, :jwt_cache, name}, tid)
+      on_exit(fn -> :persistent_term.erase({Bier, :jwt_cache, name}) end)
+
+      assert Registry.lookup(Bier.Registry, {name, Bier.JwtCache}) == []
+
+      ok = {:ok, %{"role" => "a"}, ~s({"role":"a"})}
+
+      assert ^ok =
+               Bier.JwtCache.fetch(name, "tok", counting_fun(self(), :owner_unreachable, ok))
+
+      assert_receive {:verified, :owner_unreachable}
+
+      assert_receive {[:bier, :jwt_cache, :lookup], ^ref, %{count: 1},
+                      %{hit: false, instance: ^name}}
+    end
+
     test "stopping the cache erases its persistent_term entry" do
       {name, pid} = start_cache(10)
       ok = {:ok, %{}, "{}"}
