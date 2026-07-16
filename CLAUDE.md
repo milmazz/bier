@@ -52,7 +52,7 @@ analyzed. No dialyzer step is configured.
 
 There are two distinct supervisors and they do different things:
 
-1. **`Bier.Application`** (`mix.exs` `mod:`) starts only **`Bier.Registry`** — a process registry shared across all Bier instances in the BEAM node. It does NOT start an HTTP server.
+1. **`Bier.Application`** (`mix.exs` `mod:`) starts only shared, node-wide infrastructure: **`Bier.Registry`** (the unique-keys process registry every instance registers through) and **`Bier.Events.Registry`** (the duplicate-keys pub/sub registry for the SSE events endpoint). It does NOT start an HTTP server.
 2. **`Bier`** is itself a `Supervisor` that the host application starts via `Bier.start_link/1` (or as a child spec). Each call creates one *named instance* with its own config, its own Bandit server, and its own dynamically-generated Router module. Multiple instances coexist by passing distinct `:name` options.
 
 Implication: do not put per-instance state in `Bier.Application`. Anything tied to a configured instance belongs under the `Bier` supervisor and should be registered through `Bier.Registry.via/3`.

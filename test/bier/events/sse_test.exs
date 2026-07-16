@@ -15,6 +15,16 @@ defmodule Bier.Events.SSETest do
              "event: chat\ndata: line1\ndata: line2\n\n"
   end
 
+  test "frame/2 treats CR and CRLF as line terminators like the SSE spec" do
+    # A data: line containing a raw CR would be split at the CR by the
+    # client's EventSource parser, silently dropping the tail of the payload.
+    assert bin(SSE.frame("chat", "line1\rline2")) ==
+             "event: chat\ndata: line1\ndata: line2\n\n"
+
+    assert bin(SSE.frame("chat", "line1\r\nline2")) ==
+             "event: chat\ndata: line1\ndata: line2\n\n"
+  end
+
   test "frame/2 emits a data: line for an empty payload so the client event fires" do
     assert bin(SSE.frame("chat", "")) == "event: chat\ndata: \n\n"
   end
