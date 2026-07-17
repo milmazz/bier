@@ -459,6 +459,25 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
+  # ---- realtime events endpoint (Bier-specific BIER* codes) ----------------
+  def call(conn, {:error, :events_missing_channel}) do
+    error(conn, 400, %{
+      code: "BIER002",
+      message: "Missing channel query parameter",
+      details: nil,
+      hint: "Subscribe with ?channel=<name> (comma-separate or repeat for several)"
+    })
+  end
+
+  def call(conn, {:error, {:events_unknown_channel, channel}}) do
+    error(conn, 404, %{
+      code: "BIER001",
+      message: "Unknown event channel",
+      details: "Channel '#{channel}' is not exposed",
+      hint: "Expose it by adding the channel to events_channels"
+    })
+  end
+
   # ---- catch-all -----------------------------------------------------------
   def call(conn, _other) do
     error(conn, 500, %{
@@ -512,8 +531,13 @@ defmodule Bier.Plugs.FallbackController do
   end
 
   # Every PostgREST-originated error carries `Proxy-Status: PostgREST; error=<code>`
-  # (Error.hs proxyStatusHeader). The code is the error envelope's `code`.
+  # (Error.hs proxyStatusHeader). The code is the error envelope's `code`. Bier's
+  # own BIER-prefixed codes (the realtime events endpoint) are not PostgREST's
+  # to claim, so they carry `Proxy-Status: Bier; error=<code>` instead.
   defp maybe_proxy_status(conn, nil), do: conn
+
+  defp maybe_proxy_status(conn, "BIER" <> _ = code),
+    do: put_resp_header(conn, "proxy-status", "Bier; error=#{code}")
 
   defp maybe_proxy_status(conn, code),
     do: put_resp_header(conn, "proxy-status", "PostgREST; error=#{code}")

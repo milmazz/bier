@@ -62,7 +62,10 @@ defmodule Bier.Config do
           openapi_security_active: boolean(),
           openapi_version: String.t(),
           db_root_spec: String.t() | nil,
-          admin_server_port: pos_integer() | nil
+          admin_server_port: pos_integer() | nil,
+          events_channels: [String.t()],
+          events_path: String.t(),
+          events_heartbeat_interval: pos_integer()
         }
 
   defstruct [
@@ -108,7 +111,10 @@ defmodule Bier.Config do
     log_level: :error,
     jwt_secret_is_base64: false,
     jwt_role_claim_path: [{:key, "role"}],
-    jwt_cache_max_entries: 1000
+    jwt_cache_max_entries: 1000,
+    events_channels: [],
+    events_path: "events",
+    events_heartbeat_interval: 15_000
   ]
 
   @doc """
@@ -141,6 +147,8 @@ defmodule Bier.Config do
          :ok <- validate_db_channel(conf[:db_channel]),
          :ok <- validate_socket_mode(Keyword.get(conf, :server_unix_socket_mode, "660")),
          :ok <- validate_proxy_uri(conf[:openapi_server_proxy_uri]),
+         :ok <- validate_events_channels(Keyword.get(conf, :events_channels, [])),
+         :ok <- validate_events_path(Keyword.get(conf, :events_path, "events")),
          {:ok, conf} <- decode_jwt_secret(conf),
          {:ok, conf} <- parse_jwt_role_claim_key(conf) do
       {:ok, struct!(__MODULE__, conf)}
@@ -354,6 +362,60 @@ defmodule Bier.Config do
       {:error, "admin-server-port cannot be the same as server-port"}
     else
       :ok
+    end
+  end
+
+  @doc """
+  Each `events-channels` entry must be a usable Postgres notification channel
+  name: non-empty, at most 63 bytes (the identifier limit), no null bytes, and
+  no double quotes (`Postgrex.Notifications.listen/3` wraps the name in double
+  quotes without escaping). Validated at boot so a bad entry is a fast
+  `ArgumentError` instead of a listener crash-loop. Bier-specific key.
+  """
+  @spec validate_events_channels([String.t()]) :: :ok | {:error, String.t()}
+  def validate_events_channels(channels) when is_list(channels) do
+    Enum.find_value(channels, :ok, fn channel ->
+      case validate_channel_name(channel) do
+        :ok -> nil
+        {:error, _} = err -> err
+      end
+    end)
+  end
+
+  defp validate_channel_name(channel) do
+    cond do
+      channel == "" ->
+        {:error, "events-channels entries cannot be empty"}
+
+      byte_size(channel) > 63 ->
+        {:error, "events-channels entries cannot exceed 63 bytes"}
+
+      String.contains?(channel, <<0>>) ->
+        {:error, "events-channels entries cannot contain null bytes"}
+
+      String.contains?(channel, "\"") ->
+        {:error, "events-channels entries cannot contain double quotes"}
+
+      true ->
+        :ok
+    end
+  end
+
+  @doc """
+  `events-path` is the reserved top-level path segment for the SSE endpoint,
+  so it must be non-empty and must not contain `/`.
+  """
+  @spec validate_events_path(String.t()) :: :ok | {:error, String.t()}
+  def validate_events_path(path) when is_binary(path) do
+    cond do
+      path == "" ->
+        {:error, "events-path cannot be empty"}
+
+      String.contains?(path, "/") ->
+        {:error, "events-path must be a single path segment (no '/')"}
+
+      true ->
+        :ok
     end
   end
 end

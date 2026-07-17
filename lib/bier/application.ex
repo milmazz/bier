@@ -9,7 +9,7 @@ defmodule Bier.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [Bier.Registry | standalone_children(System.get_env())]
+    children = [Bier.Registry, Bier.Events.Registry | standalone_children(System.get_env())]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

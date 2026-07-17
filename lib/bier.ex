@@ -421,6 +421,34 @@ defmodule Bier do
         `/ready` health endpoints (PostgREST admin-server-port). When `nil`
         (the default) no admin server starts. Must differ from `router[:port]`.
         """
+      ],
+      events_channels: [
+        type: {:list, :string},
+        default: env(:events_channels, []),
+        doc: """
+        Allowlist of Postgres notification channels exposed on the SSE events
+        endpoint. The empty list (default) disables the feature entirely: no
+        listener connection is opened and no path is reserved. Bier-specific
+        (no PostgREST counterpart); see the Realtime events guide.
+        """
+      ],
+      events_path: [
+        type: :string,
+        default: env(:events_path, "events"),
+        doc: """
+        Top-level path segment reserved for the SSE events endpoint while
+        `events_channels` is non-empty. Change it if a relation of the same
+        name must stay reachable. Must be a single segment (no `/`).
+        """
+      ],
+      events_heartbeat_interval: [
+        type: :pos_integer,
+        default: env(:events_heartbeat_interval, 15_000),
+        doc: """
+        Milliseconds of silence on an SSE connection before a `: keepalive`
+        comment frame is written. Keeps idle proxies from dropping the
+        stream and bounds dead-client detection.
+        """
       ]
     ]
   end
@@ -504,7 +532,7 @@ defmodule Bier do
           {DynamicSupervisor,
            strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
           {Bier.HttpServerStarter, conf}
-        ] ++ listener_children(conf) ++ admin_children(conf)
+        ] ++ listener_children(conf) ++ events_children(conf) ++ admin_children(conf)
 
     Supervisor.init(children, strategy: :one_for_one)
   end
@@ -518,6 +546,20 @@ defmodule Bier do
   defp listener_children(%Bier.Config{db_channel_enabled: false}), do: []
 
   defp listener_children(%Bier.Config{} = conf), do: [{Bier.SchemaCacheListener, conf}]
+
+  # When any events_channels are configured, run the SSE events listener —
+  # a second dedicated LISTEN connection, deliberately separate from the
+  # schema-cache listener so user-facing streaming never couples to reload
+  # semantics. It owns its DB connection and retries with internal backoff,
+  # so a database outage never builds restart pressure on this supervisor.
+  # Like `listener_children/1`, this starts AFTER HttpServerStarter, so the
+  # API can briefly accept SSE subscriptions before the first LISTEN is up —
+  # acceptable under the documented fire-and-forget contract (events fired in
+  # that gap are silently lost; tests wait for the listener to connect before
+  # asserting delivery).
+  defp events_children(%Bier.Config{events_channels: []}), do: []
+
+  defp events_children(%Bier.Config{} = conf), do: [{Bier.Events.Listener, conf}]
 
   # The JWT verification cache only runs when it can do work: a secret is
   # configured and jwt-cache-max-entries is positive (PostgREST's JwtNoCache

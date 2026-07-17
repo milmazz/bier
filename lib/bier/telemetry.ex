@@ -94,6 +94,21 @@ defmodule Bier.Telemetry do
   Emitted only when the cache is enabled (`jwt_secret` set and
   `jwt_cache_max_entries > 0`), matching PostgREST, which records no cache
   observations in `JwtNoCache` mode.
+
+  ## SSE events (#81)
+
+    * `[:bier, :events, :subscribe, :start]` — start of an SSE subscription,
+      measurement `%{system_time: ...}`, metadata `:instance`, `:channels`.
+    * `[:bier, :events, :subscribe, :stop]` — end of an SSE subscription,
+      measurements `:duration` (native units), `:delivered` (frames sent),
+      metadata `:instance`, `:channels`, and `:reason` — the error returned
+      by the `Plug.Conn.chunk/2` write that ended the stream (e.g. `:closed`
+      for a client disconnect).
+    * `[:bier, :events, :notification]` — one NOTIFY fanned out to subscribers,
+      measurement `%{subscribers: count}`, metadata `:instance`, `:channel`.
+    * `[:bier, :events, :listener]` — connection status event from the database
+      listener, measurement `%{count: 1}`, metadata `:instance`, `:status`
+      (`:connected` or `:disconnected`).
   """
 
   @request_start [:bier, :request, :start]
@@ -103,6 +118,10 @@ defmodule Bier.Telemetry do
   @pool_checkout_timeout [:bier, :pool, :checkout_timeout]
   @jwt_cache_lookup [:bier, :jwt_cache, :lookup]
   @jwt_cache_eviction [:bier, :jwt_cache, :eviction]
+  @events_subscribe_start [:bier, :events, :subscribe, :start]
+  @events_subscribe_stop [:bier, :events, :subscribe, :stop]
+  @events_notification [:bier, :events, :notification]
+  @events_listener [:bier, :events, :listener]
 
   @doc """
   Emit `[:bier, :request, :start]` and return the monotonic start time to hand
@@ -186,5 +205,55 @@ defmodule Bier.Telemetry do
   @spec jwt_cache_eviction(map()) :: :ok
   def jwt_cache_eviction(metadata) do
     :telemetry.execute(@jwt_cache_eviction, %{count: 1}, metadata)
+  end
+
+  @doc """
+  Start of an SSE events subscription (`[:bier, :events, :subscribe, :start]`).
+  Returns the monotonic start time to pass to `events_subscribe_stop/3`.
+  Metadata: `:instance`, `:channels`.
+  """
+  @spec events_subscribe_start(map()) :: integer()
+  def events_subscribe_start(metadata) do
+    start = System.monotonic_time()
+    :telemetry.execute(@events_subscribe_start, %{system_time: System.system_time()}, metadata)
+    start
+  end
+
+  @doc """
+  End of an SSE events subscription (`[:bier, :events, :subscribe, :stop]`).
+  Measurements: `:duration` (native units), `:delivered` (frames sent).
+  Callers merge a `:reason` key into `metadata` — the error from the
+  `Plug.Conn.chunk/2` write that ended the stream (e.g. `:closed`) — before
+  calling this function.
+  """
+  @spec events_subscribe_stop(integer(), non_neg_integer(), map()) :: :ok
+  def events_subscribe_stop(start, delivered, metadata) do
+    duration = System.monotonic_time() - start
+
+    :telemetry.execute(
+      @events_subscribe_stop,
+      %{duration: duration, delivered: delivered},
+      metadata
+    )
+  end
+
+  @doc """
+  One NOTIFY fanned out to subscribers (`[:bier, :events, :notification]`).
+  Measurement `:subscribers` is how many processes received it — a steady 0
+  reveals an orphaned channel. Metadata: `:instance`, `:channel`.
+  """
+  @spec events_notification(non_neg_integer(), map()) :: :ok
+  def events_notification(subscribers, metadata) do
+    :telemetry.execute(@events_notification, %{subscribers: subscribers}, metadata)
+  end
+
+  @doc """
+  Events listener connectivity (`[:bier, :events, :listener]`): `:status` in
+  metadata is `:connected` or `:disconnected`. Useful for alerting on gap
+  windows (fire-and-forget delivery loses events while disconnected).
+  """
+  @spec events_listener(:connected | :disconnected, map()) :: :ok
+  def events_listener(status, metadata) do
+    :telemetry.execute(@events_listener, %{count: 1}, Map.put(metadata, :status, status))
   end
 end

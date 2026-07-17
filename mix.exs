@@ -72,9 +72,11 @@ defmodule Bier.MixProject do
         "README.md",
         "docs/tutorials/getting-started.md",
         "docs/tutorials/authentication.md",
+        "docs/tutorials/realtime.md",
         "docs/guides/api.md",
         "docs/guides/configuration.md",
         "docs/guides/observability.md",
+        "docs/guides/realtime_events.md",
         "docs/injection_safety.md",
         "CHANGELOG.md",
         "CONTRIBUTING.md"
