@@ -419,6 +419,55 @@ Expected: all gates PASS.
 
 While verifying #85 against the v14.12 source, one further uncased top-level gap surfaced: `postgrestSpec` emits document-level `produces` AND `consumes` lists of `[application/json, application/vnd.pgrst.object+json;nulls=stripped, application/vnd.pgrst.object+json, text/csv]` (OpenAPI.hs#L408-409); Bier emits neither key. Report this in the final summary as a candidate follow-up issue.
 
+> **Amendment (operator-approved, 2026-07-16):** bundle the document-level `produces`/`consumes` fix into this branch instead of filing a follow-up. Task 2b below; executed after the PR was first opened, as an additional commit on the same PR.
+
+---
+
+### Task 2b (amendment): Document-level `produces`/`consumes`
+
+`postgrestSpec` stamps the Swagger root with equal `produces` and `consumes` lists: the RPC trio plus `text/csv` (OpenAPI.hs#L408-409; `MTTextCSV` → `"text/csv"`, MediaType.hs). Uncased: no conformance case or `absent:` predicate targets either key (same grep as the header note).
+
+**Files:**
+- Modify: `lib/bier/openapi.ex` (`build/1` document map; reuse `@rpc_produces`)
+- Test: `test/bier/openapi_test.exs` (`"build/1 skeleton"` describe)
+
+- [ ] **Step 1: Write the failing test** — in the `"swagger + default info + externalDocs (1650/1654/1655)"` test, append:
+
+```elixir
+      # The document root advertises the rpc trio + text/csv on BOTH
+      # produces and consumes (postgrestSpec, OpenAPI.hs#L408-409).
+      expected_mimes = [
+        "application/json",
+        "application/vnd.pgrst.object+json;nulls=stripped",
+        "application/vnd.pgrst.object+json",
+        "text/csv"
+      ]
+
+      assert doc["produces"] == expected_mimes
+      assert doc["consumes"] == expected_mimes
+```
+
+- [ ] **Step 2: Run to verify it fails** — `mix test test/bier/openapi_test.exs`; expected FAIL: both keys `nil`.
+
+- [ ] **Step 3: Implement** — in `lib/bier/openapi.ex`, add below `@rpc_produces`:
+
+```elixir
+  # The document root advertises the rpc trio + csv on both produces and
+  # consumes (postgrestSpec, OpenAPI.hs#L408-409).
+  @doc_mimes @rpc_produces ++ ["text/csv"]
+```
+
+and in `build/1`'s document map, after `"basePath" => base_path,`:
+
+```elixir
+      "produces" => @doc_mimes,
+      "consumes" => @doc_mimes,
+```
+
+- [ ] **Step 4: Run** — `mix test test/bier/openapi_test.exs` then `mix test --only area:openapi` then `mix test`; expected PASS.
+
+- [ ] **Step 5: Commit** — message: `openapi: advertise document-level produces/consumes` with the OpenAPI.hs#L408-409 citation and the Co-Authored-By trailer.
+
 - [ ] **Step 3: Hand off**
 
 Use superpowers:finishing-a-development-branch. Suggested PR title: "OpenAPI root document: root path item, rpc produces, default host/schemes (#85)". The PR closes #85.

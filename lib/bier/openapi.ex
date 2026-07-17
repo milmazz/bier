@@ -17,6 +17,10 @@ defmodule Bier.OpenAPI do
     "application/vnd.pgrst.object+json"
   ]
 
+  # The document root advertises the rpc trio + csv on both produces and
+  # consumes (postgrestSpec, OpenAPI.hs#L408-409).
+  @doc_mimes @rpc_produces ++ ["text/csv"]
+
   @doc """
   Builds the Swagger 2.0 document map from an introspection snapshot.
 
@@ -38,6 +42,8 @@ defmodule Bier.OpenAPI do
       "schemes" => [scheme],
       "host" => "#{escape_host_name(host)}:#{port}",
       "basePath" => base_path,
+      "produces" => @doc_mimes,
+      "consumes" => @doc_mimes,
       "paths" => paths(input),
       "definitions" => definitions(input),
       "parameters" => parameters(input)
