@@ -180,14 +180,7 @@ defmodule Bier.OpenAPITest do
 
   describe "build/1 skeleton" do
     test "swagger + default info + externalDocs (1650/1654/1655)" do
-      doc =
-        Bier.OpenAPI.build(%{
-          relations: [],
-          functions: [],
-          schema_comment: nil,
-          security_active?: false,
-          docs_version: "v14"
-        })
+      doc = Bier.OpenAPI.build(build_input(%{}))
 
       assert doc["swagger"] == "2.0"
       assert doc["info"]["title"] == "PostgREST API"
@@ -198,27 +191,18 @@ defmodule Bier.OpenAPITest do
 
     test "schema comment seeds title/description (1656)" do
       doc =
-        Bier.OpenAPI.build(%{
-          relations: [],
-          functions: [],
-          schema_comment: "My API title\nMy API description\nthat spans\nmultiple lines",
-          security_active?: false,
-          docs_version: "v14"
-        })
+        Bier.OpenAPI.build(
+          build_input(%{
+            schema_comment: "My API title\nMy API description\nthat spans\nmultiple lines"
+          })
+        )
 
       assert doc["info"]["title"] == "My API title"
       assert doc["info"]["description"] == "My API description\nthat spans\nmultiple lines"
     end
 
     test "single-line schema comment -> title only, no description key" do
-      doc =
-        Bier.OpenAPI.build(%{
-          relations: [],
-          functions: [],
-          schema_comment: "Just a title",
-          security_active?: false,
-          docs_version: "v14"
-        })
+      doc = Bier.OpenAPI.build(build_input(%{schema_comment: "Just a title"}))
 
       assert doc["info"]["title"] == "Just a title"
       refute Map.has_key?(doc["info"], "description")
@@ -227,28 +211,14 @@ defmodule Bier.OpenAPITest do
 
   describe "build/1 security (1679/1680)" do
     test "absent by default" do
-      doc =
-        Bier.OpenAPI.build(%{
-          relations: [],
-          functions: [],
-          schema_comment: nil,
-          security_active?: false,
-          docs_version: "v14"
-        })
+      doc = Bier.OpenAPI.build(build_input(%{}))
 
       refute Map.has_key?(doc, "security")
       refute Map.has_key?(doc, "securityDefinitions")
     end
 
     test "present when security_active?" do
-      doc =
-        Bier.OpenAPI.build(%{
-          relations: [],
-          functions: [],
-          schema_comment: nil,
-          security_active?: true,
-          docs_version: "v14"
-        })
+      doc = Bier.OpenAPI.build(build_input(%{security_active?: true}))
 
       assert doc["security"] == [%{"JWT" => []}]
       assert doc["securityDefinitions"]["JWT"]["type"] == "apiKey"
@@ -775,12 +745,30 @@ defmodule Bier.OpenAPITest do
     end
   end
 
-  describe "build/1 proxy (openapi-server-proxy-uri)" do
-    test "absent proxy: no host/schemes, basePath stays /" do
+  describe "build/1 schemes/host/basePath (openapi-server-proxy-uri + server fallback)" do
+    # postgrestSpec always emits schemes/host/basePath; with no proxy they
+    # come from the server config ("http", server-host, port, "/") and the
+    # port is always appended to host (OpenAPI.hs#L393-414, L448-454;
+    # swagger2 Host ToJSON). Issue #85 item 3.
+    test "absent proxy: server config seeds schemes, escaped host:port, basePath /" do
       doc = build_one_with_proxy(nil)
-      refute Map.has_key?(doc, "host")
-      refute Map.has_key?(doc, "schemes")
+      assert doc["schemes"] == ["http"]
+      # "!4" is a listen-anywhere value: escapeHostName maps it to 0.0.0.0
+      # (Network.hs#L46-52).
+      assert doc["host"] == "0.0.0.0:4040"
       assert doc["basePath"] == "/"
+    end
+
+    test "every listen-anywhere server_host form escapes to 0.0.0.0 (Network.hs#L46-52)" do
+      for h <- ~w(* *4 !4 *6 !6) do
+        assert build_one_with_server(h, :http, 3000)["host"] == "0.0.0.0:3000"
+      end
+    end
+
+    test "a concrete server_host passes through, and :https maps the scheme" do
+      doc = build_one_with_server("api.internal", :https, 8443)
+      assert doc["schemes"] == ["https"]
+      assert doc["host"] == "api.internal:8443"
     end
 
     test "proxy URI seeds schemes, host with explicit port, and basePath" do
@@ -790,11 +778,13 @@ defmodule Bier.OpenAPITest do
       assert doc["basePath"] == "/basePath"
     end
 
-    test "scheme-default port is omitted and an empty path maps to /" do
-      doc = build_one_with_proxy("http://example.com")
-      assert doc["schemes"] == ["http"]
-      assert doc["host"] == "example.com"
-      assert doc["basePath"] == "/"
+    test "scheme-default proxy ports are still appended; empty path maps to /" do
+      # pickProxy fills 80/443 for portless URIs and postgrestSpec always
+      # renders Host with the port (OpenAPI.hs#L414, L441-446) — the
+      # previous omit-default-port behavior was a deviation.
+      assert build_one_with_proxy("http://example.com")["host"] == "example.com:80"
+      assert build_one_with_proxy("https://example.com")["host"] == "example.com:443"
+      assert build_one_with_proxy("http://example.com")["basePath"] == "/"
     end
   end
 
@@ -817,31 +807,37 @@ defmodule Bier.OpenAPITest do
   end
 
   # --- helpers ---
-  defp build_one_with_proxy(proxy_uri) do
-    Bier.OpenAPI.build(%{
-      relations: [],
-      functions: [],
-      schema_comment: nil,
-      security_active?: false,
-      proxy_uri: proxy_uri,
-      docs_version: "v14"
-    })
+  defp build_input(overrides) do
+    Map.merge(
+      %{
+        relations: [],
+        functions: [],
+        schema_comment: nil,
+        security_active?: false,
+        docs_version: "v14",
+        server_scheme: :http,
+        server_host: "!4",
+        server_port: 4040
+      },
+      overrides
+    )
   end
+
+  defp build_one_with_proxy(proxy_uri),
+    do: Bier.OpenAPI.build(build_input(%{proxy_uri: proxy_uri}))
+
+  defp build_one_with_server(host, scheme, port),
+    do:
+      Bier.OpenAPI.build(
+        build_input(%{server_host: host, server_scheme: scheme, server_port: port})
+      )
 
   defp p(name, type, variadic?, has_default?),
     do: %{name: name, type: type, variadic?: variadic?, has_default?: has_default?}
 
   defp p_var(name, type), do: p(name, type, true, false)
 
-  defp build_fns(fns) do
-    Bier.OpenAPI.build(%{
-      relations: [],
-      functions: fns,
-      schema_comment: nil,
-      security_active?: false,
-      docs_version: "v14"
-    })
-  end
+  defp build_fns(fns), do: Bier.OpenAPI.build(build_input(%{functions: fns}))
 
   defp col_map(name, type, opts \\ []) do
     %{
@@ -858,13 +854,5 @@ defmodule Bier.OpenAPITest do
     }
   end
 
-  defp build_one(rel) do
-    Bier.OpenAPI.build(%{
-      relations: [rel],
-      functions: [],
-      schema_comment: nil,
-      security_active?: false,
-      docs_version: "v14"
-    })
-  end
+  defp build_one(rel), do: Bier.OpenAPI.build(build_input(%{relations: [rel]}))
 end

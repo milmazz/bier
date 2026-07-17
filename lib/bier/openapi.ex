@@ -21,10 +21,12 @@ defmodule Bier.OpenAPI do
   Builds the Swagger 2.0 document map from an introspection snapshot.
 
   Input keys: `:relations`, `:functions`, `:schema_comment`, `:security_active?`,
-  `:docs_version`, and optionally `:proxy_uri` (openapi-server-proxy-uri).
+  `:docs_version`, `:server_scheme`, `:server_host`, `:server_port`, and
+  optionally `:proxy_uri` (openapi-server-proxy-uri).
   """
   def build(input) do
     {title, desc} = info(input.schema_comment)
+    {scheme, host, port, base_path} = server_block(input)
 
     %{
       "swagger" => "2.0",
@@ -33,35 +35,39 @@ defmodule Bier.OpenAPI do
         "url" => "https://postgrest.org/en/#{input.docs_version}/references/api.html",
         "description" => "PostgREST Documentation"
       },
-      "basePath" => "/",
+      "schemes" => [scheme],
+      "host" => "#{escape_host_name(host)}:#{port}",
+      "basePath" => base_path,
       "paths" => paths(input),
       "definitions" => definitions(input),
       "parameters" => parameters(input)
     }
     |> with_security(input.security_active?)
-    |> with_proxy(input[:proxy_uri])
   end
 
-  # openapi-server-proxy-uri overrides where the document says the API lives:
-  # the URI's scheme/host/path become `schemes`, `host` and `basePath`. The
-  # port is appended only when it isn't the scheme default, and an empty path
-  # stays the root basePath. The URI was validated at boot (Bier.Config).
-  defp with_proxy(doc, nil), do: doc
+  # postgrestSpec always receives (scheme, host, port, basePath): from
+  # openapi-server-proxy-uri when set, otherwise the server config — and the
+  # port is always rendered into `host` (OpenAPI.hs#L393-414, L448-454).
+  # PostgREST hardcodes "http" in the fallback (it has no native TLS); Bier
+  # serves :https via Bandit, so the fallback scheme follows router[:scheme].
+  defp server_block(input) do
+    case input[:proxy_uri] do
+      nil ->
+        {to_string(input.server_scheme), input.server_host, input.server_port, "/"}
 
-  defp with_proxy(doc, proxy_uri) do
-    uri = URI.parse(proxy_uri)
-
-    host =
-      if uri.port && uri.port != URI.default_port(uri.scheme),
-        do: "#{uri.host}:#{uri.port}",
-        else: uri.host
-
-    Map.merge(doc, %{
-      "schemes" => [uri.scheme],
-      "host" => host,
-      "basePath" => base_path(uri.path)
-    })
+      proxy_uri ->
+        # Validated at boot (Bier.Config): scheme is http/https, host present.
+        # URI.parse fills the scheme-default port for portless URIs, matching
+        # pickProxy's 80/443 fallback (OpenAPI.hs#L441-446).
+        uri = URI.parse(proxy_uri)
+        {uri.scheme, uri.host, uri.port, base_path(uri.path)}
+    end
   end
+
+  # Listen-anywhere host values render as 0.0.0.0 (escapeHostName,
+  # Network.hs#L46-52); concrete hosts pass through.
+  defp escape_host_name(host) when host in ["*", "*4", "!4", "*6", "!6"], do: "0.0.0.0"
+  defp escape_host_name(host), do: host
 
   defp base_path(path) when path in [nil, ""], do: "/"
   defp base_path(path), do: path
