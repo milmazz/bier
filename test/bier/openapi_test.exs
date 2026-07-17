@@ -697,6 +697,20 @@ defmodule Bier.OpenAPITest do
       assert Map.has_key?(doc["paths"]["/rpc/getallusers"], "get")
       assert Map.has_key?(doc["paths"]["/rpc/getallusers"], "post")
     end
+
+    test "get and post ops carry the rpc produces list (issue #85)", %{doc: doc} do
+      # Every RPC operation advertises json + both singular-object variants
+      # (procOp produces, OpenAPI.hs#L360; mime strings MediaType.hs#L72-74).
+      expected = [
+        "application/json",
+        "application/vnd.pgrst.object+json;nulls=stripped",
+        "application/vnd.pgrst.object+json"
+      ]
+
+      assert doc["paths"]["/rpc/varied_arguments_openapi"]["get"]["produces"] == expected
+      assert doc["paths"]["/rpc/varied_arguments_openapi"]["post"]["produces"] == expected
+      assert doc["paths"]["/rpc/reset_table"]["post"]["produces"] == expected
+    end
   end
 
   describe "overloaded rpc functions merge into one path item" do
@@ -781,6 +795,24 @@ defmodule Bier.OpenAPITest do
       assert doc["schemes"] == ["http"]
       assert doc["host"] == "example.com"
       assert doc["basePath"] == "/"
+    end
+  end
+
+  describe "root introspection path item" do
+    # PostgREST inserts a "/" path item first (makeRootPathItem,
+    # OpenAPI.hs#L370-383): GET-only, Introspection tag, and a produces
+    # pair of openapi+json / json (toMime, MediaType.hs#L72). Issue #85.
+    test "GET-only / entry with Introspection tag and produces pair" do
+      doc = build_fns([])
+
+      assert doc["paths"]["/"] == %{
+               "get" => %{
+                 "tags" => ["Introspection"],
+                 "summary" => "OpenAPI description (this document)",
+                 "produces" => ["application/openapi+json", "application/json"],
+                 "responses" => %{"200" => %{"description" => "OK"}}
+               }
+             }
     end
   end
 
