@@ -23,6 +23,7 @@ defmodule Bier.Plugs.ActionController do
   alias Bier.MediaType
   alias Bier.Mutation
   alias Bier.Negotiation
+  alias Bier.OpenAPI.V3
   alias Bier.Pagination
   alias Bier.Plan
   alias Bier.Plugs.FallbackController
@@ -190,7 +191,9 @@ defmodule Bier.Plugs.ActionController do
   # advertises a relation the instance cannot serve. Only the per-role
   # privileges lookup depends on the request, and it is served from
   # Bier.PrivilegesCache (keyed by role + snapshot generation); the catalog is
-  # queried once per role per schema-cache load.
+  # queried once per role per schema-cache load. config.openapi_version toggles
+  # the wire format: "2.0" (default) returns this Swagger document as-is; "3.0"
+  # translates it through Bier.OpenAPI.V3.convert/1 before it is encoded.
   defp build_openapi_document(config, role) do
     schema = hd(config.db_schemas)
     cache = Bier.SchemaCache.get(config.name)
@@ -205,17 +208,25 @@ defmodule Bier.Plugs.ActionController do
     {relations, functions} =
       filter_by_mode(config, role, schema, relations, functions, cache.generation)
 
-    Bier.OpenAPI.build(%{
-      relations: relations,
-      functions: function_inputs(functions),
-      schema_comment: cache.schema_comment,
-      security_active?: config.openapi_security_active,
-      proxy_uri: config.openapi_server_proxy_uri,
-      server_scheme: config.router[:scheme],
-      server_host: config.server_host,
-      server_port: config.router[:port],
-      docs_version: "v14"
-    })
+    doc =
+      Bier.OpenAPI.build(%{
+        relations: relations,
+        functions: function_inputs(functions),
+        schema_comment: cache.schema_comment,
+        security_active?: config.openapi_security_active,
+        proxy_uri: config.openapi_server_proxy_uri,
+        server_scheme: config.router[:scheme],
+        server_host: config.server_host,
+        server_port: config.router[:port],
+        docs_version: "v14"
+      })
+
+    # openapi_version: "3.0" serves an OpenAPI 3.0.3 translation of the same
+    # content; "2.0" (default) stays the PostgREST-parity Swagger wire format.
+    case config.openapi_version do
+      "3.0" -> V3.convert(doc)
+      _ -> doc
+    end
   end
 
   defp filter_by_mode(config, role, schema, relations, functions, generation) do

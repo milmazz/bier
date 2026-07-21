@@ -28,12 +28,12 @@
           {Credo.Check.Refactor.CyclomaticComplexity,
            [files: %{excluded: ["lib/bier/pg_error.ex"]}]},
           # `Bier.Config` mirrors PostgREST's full option surface in
-          # `Bier.schema/0` (41 fields today, growing as PostgREST keys are
+          # `Bier.schema/0` (46 fields today, growing as PostgREST keys are
           # implemented). The VM map-representation concern (structs >= 32
           # fields) doesn't apply: Config is created once per instance at
           # boot, never per request.
           {Credo.Check.Warning.StructFieldAmount,
-           [max_fields: 45, files: %{included: ["lib/bier/config.ex"]}]},
+           [max_fields: 50, files: %{included: ["lib/bier/config.ex"]}]},
           # `Bier.ErrorLogger` tags its entries with `:bier_instance` /
           # `:bier_error_code` metadata for host log pipelines. A library has
           # no say in the host's `:logger` formatter config, so the "key not

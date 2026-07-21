@@ -192,4 +192,17 @@ defmodule Bier.ConfigTest do
       assert config.app_settings == %{"foo" => "bar"}
     end
   end
+
+  describe "openapi_version" do
+    test "defaults to 2.0 and accepts 3.0" do
+      assert Bier.Config.new!([], Bier.schema()).openapi_version == "2.0"
+      assert Bier.Config.new!([openapi_version: "3.0"], Bier.schema()).openapi_version == "3.0"
+    end
+
+    test "rejects unknown versions" do
+      assert_raise ArgumentError, ~r/openapi_version/, fn ->
+        Bier.Config.new!([openapi_version: "3.1"], Bier.schema())
+      end
+    end
+  end
 end
