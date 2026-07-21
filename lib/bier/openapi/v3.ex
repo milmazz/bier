@@ -14,7 +14,10 @@ defmodule Bier.OpenAPI.V3 do
   The converter is intentionally NOT general purpose: it handles exactly the
   shapes the 2.0 emitter produces (body params only as `body.*` shared
   definitions or the inline RPC `args`, `application/json` as the implied
-  media type, `collectionFormat: "multi"` only on query params).
+  media type, `collectionFormat: "multi"` only on query params). The 2.0
+  document- and operation-level `produces`/`consumes` lists are dropped
+  rather than expanded into per-media-type `content` maps: the 3.0 output
+  keeps `application/json` as its single advertised media type.
 
   **Known limitation:** component keys inherit relation and column names
   verbatim; names outside OAS 3.0.3's component-key charset (`^[a-zA-Z0-9.\-_]+$`)
@@ -42,10 +45,12 @@ defmodule Bier.OpenAPI.V3 do
 
     body_keys = bodies |> Enum.map(&elem(&1, 0)) |> MapSet.new()
 
-    # This map enumerates the eight keys the 2.0 emitter can produce:
+    # This map enumerates every top-level key the 2.0 emitter can produce:
     # swagger, info, externalDocs, basePath, paths, definitions, parameters,
-    # security/securityDefinitions/schemes/host (via their handlers). A new
-    # top-level emitter key must be added here or it will be silently dropped.
+    # security/securityDefinitions/schemes/host (via their handlers), plus
+    # produces/consumes, which are dropped on purpose (see the moduledoc). A
+    # new top-level emitter key must be added here or it will be silently
+    # dropped.
     %{
       "openapi" => "3.0.3",
       "info" => doc["info"],
@@ -62,8 +67,9 @@ defmodule Bier.OpenAPI.V3 do
 
   # ---- servers -------------------------------------------------------------
 
-  # With a proxy the 2.0 doc carries schemes/host/basePath; fold them into one
-  # server URL. Without one, the API lives at the document root.
+  # The 2.0 doc always carries schemes/host/basePath (from the proxy URI when
+  # configured, the server config otherwise); fold them into one server URL.
+  # The fallback clause is defensive only.
   defp servers(%{"host" => host, "schemes" => [scheme | _]} = doc) do
     base = if doc["basePath"] in [nil, "/"], do: "", else: doc["basePath"]
     [%{"url" => "#{scheme}://#{host}#{base}"}]
@@ -116,6 +122,9 @@ defmodule Bier.OpenAPI.V3 do
     {body, params} = extract_body(op["parameters"] || [], body_keys)
 
     op
+    # 2.0-only media-type list; the 3.0 output stays application/json-only
+    # (moduledoc), so it has no `content` map to fold into.
+    |> Map.delete("produces")
     |> Map.put("parameters", Enum.map(params, &convert_op_param/1))
     |> Map.update("responses", %{}, &convert_responses/1)
     |> put_nonempty("requestBody", body)

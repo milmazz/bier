@@ -28,17 +28,20 @@ defmodule Bier.OpenAPIV3HttpTest do
     {:ok, pid} = Bier.start_link(opts)
     on_exit(fn -> if Process.alive?(pid), do: Supervisor.stop(pid) end)
     TestPorts.wait_until_listening(port)
-    %{url: "http://localhost:#{port}/"}
+    %{url: "http://localhost:#{port}/", port: port}
   end
 
-  test "GET / serves an OpenAPI 3.0.3 document", %{url: url} do
+  test "GET / serves an OpenAPI 3.0.3 document", %{url: url, port: port} do
     resp = Req.get!(url, headers: [{"accept", "application/json"}], retry: false)
 
     assert resp.status == 200
     assert resp.body["openapi"] == "3.0.3"
     refute Map.has_key?(resp.body, "swagger")
     assert map_size(resp.body["components"]["schemas"]) > 0
-    assert resp.body["servers"] == [%{"url" => "/"}]
+
+    # The default server_host "!4" renders as 0.0.0.0 (escapeHostName), and
+    # the emitter always folds scheme/host/port into the server URL.
+    assert resp.body["servers"] == [%{"url" => "http://0.0.0.0:#{port}"}]
   end
 
   test "content negotiation is unchanged: csv at root is still 406", %{url: url} do

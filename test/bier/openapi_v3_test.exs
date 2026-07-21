@@ -53,6 +53,9 @@ defmodule Bier.OpenAPIV3Test do
       schema_comment: nil,
       security_active?: Keyword.get(opts, :security_active?, false),
       proxy_uri: Keyword.get(opts, :proxy_uri),
+      server_scheme: :http,
+      server_host: "localhost",
+      server_port: 3000,
       docs_version: "v14"
     })
   end
@@ -65,12 +68,25 @@ defmodule Bier.OpenAPIV3Test do
     refute Map.has_key?(doc, "definitions")
     refute Map.has_key?(doc, "parameters")
     refute Map.has_key?(doc, "basePath")
+    refute Map.has_key?(doc, "produces")
+    refute Map.has_key?(doc, "consumes")
     assert doc["info"]["title"] == "PostgREST API"
     assert doc["externalDocs"]["description"] == "PostgREST Documentation"
   end
 
-  test "servers: root url without proxy, full url with proxy" do
-    assert V3.convert(build())["servers"] == [%{"url" => "/"}]
+  test "operation-level produces lists are dropped (2.0-only key)" do
+    doc = V3.convert(build())
+
+    root_get = doc["paths"]["/"]["get"]
+    assert root_get["summary"] == "OpenAPI description (this document)"
+    refute Map.has_key?(root_get, "produces")
+
+    refute Map.has_key?(doc["paths"]["/rpc/add"]["post"], "produces")
+    refute Map.has_key?(doc["paths"]["/rpc/add"]["get"], "produces")
+  end
+
+  test "servers: server-config url without proxy, proxy url with one" do
+    assert V3.convert(build())["servers"] == [%{"url" => "http://localhost:3000"}]
 
     doc = V3.convert(build(proxy_uri: "https://api.example.com:8443/v1"))
     assert doc["servers"] == [%{"url" => "https://api.example.com:8443/v1"}]
@@ -185,6 +201,9 @@ defmodule Bier.OpenAPIV3Test do
         schema_comment: nil,
         security_active?: false,
         proxy_uri: nil,
+        server_scheme: :http,
+        server_host: "localhost",
+        server_port: 3000,
         docs_version: "v14"
       })
       |> V3.convert()
