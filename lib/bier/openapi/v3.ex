@@ -137,10 +137,7 @@ defmodule Bier.OpenAPI.V3 do
           end
 
         %{"in" => "body"} = inline ->
-          {%{
-             "required" => inline["required"],
-             "content" => %{@json => %{"schema" => rewrite_refs(inline["schema"])}}
-           }, rest}
+          {convert_body(inline), rest}
 
         inline ->
           {body, rest ++ [inline]}
