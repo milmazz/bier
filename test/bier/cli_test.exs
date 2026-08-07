@@ -3,8 +3,13 @@ defmodule Bier.CLITest do
 
   alias Bier.CLI
 
+  # Pure-parse tests opt out of the in-database config source; with the
+  # PostgREST-default db-config=true a successful dump/boot would connect to
+  # the database (covered by the db-config wiring tests + cases 1724/1725).
+  @no_db %{"PGRST_DB_CONFIG" => "false"}
+
   test "--dump-config prints config and exits 0" do
-    result = CLI.run(["--dump-config"], env: %{"PGRST_LOG_LEVEL" => "info"})
+    result = CLI.run(["--dump-config"], env: Map.merge(@no_db, %{"PGRST_LOG_LEVEL" => "info"}))
     assert result.exit == 0
     assert IO.iodata_to_binary(result.stdout) =~ ~s(log-level = "info")
     assert IO.iodata_to_binary(result.stderr) == ""
@@ -22,7 +27,7 @@ defmodule Bier.CLITest do
 
   test "--dump-config canonicalizes jwt-role-claim-key and resolves its alias" do
     # Defaults: `.role` dumps in PostgREST's quoted form; is-base64 defaults off.
-    result = CLI.run(["--dump-config"], env: %{})
+    result = CLI.run(["--dump-config"], env: @no_db)
     assert result.exit == 0
     stdout = IO.iodata_to_binary(result.stdout)
     assert stdout =~ ~s|jwt-role-claim-key = ".\\"role\\""|
@@ -30,7 +35,9 @@ defmodule Bier.CLITest do
 
     # The deprecated `role-claim-key` alias resolves to the canonical key
     # (case 1707's shape) and the value is re-serialized quoted.
-    result = CLI.run(["--dump-config"], env: %{"PGRST_ROLE_CLAIM_KEY" => ".aliased"})
+    result =
+      CLI.run(["--dump-config"], env: Map.merge(@no_db, %{"PGRST_ROLE_CLAIM_KEY" => ".aliased"}))
+
     assert result.exit == 0
     assert IO.iodata_to_binary(result.stdout) =~ ~s|jwt-role-claim-key = ".\\"aliased\\""|
   end
@@ -43,13 +50,36 @@ defmodule Bier.CLITest do
              "failed to parse role-claim-key value (role.other)"
   end
 
+  describe "in-database config wiring (db-config, #64)" do
+    @tag capture_log: true
+    test "--dump-config with db-config on and an unreachable DB is fatal" do
+      env = %{"PGPORT" => "1", "PGUSER" => "nobody", "PGDATABASE" => "nowhere"}
+      result = CLI.run(["--dump-config"], env: env)
+
+      assert result.exit == 1
+      assert IO.iodata_to_binary(result.stderr) =~ "in-database config"
+      assert IO.iodata_to_binary(result.stdout) == ""
+    end
+
+    test "db-config=false skips the database entirely" do
+      env = %{"PGRST_DB_CONFIG" => "false", "PGPORT" => "1"}
+      result = CLI.run(["--dump-config"], env: env)
+
+      assert result.exit == 0
+      assert IO.iodata_to_binary(result.stdout) =~ "db-config = false"
+    end
+  end
+
   describe "--ready (PostgREST Client.hs parity)" do
     test "without admin-server-port it fails with the no-admin-server error" do
       result = CLI.run(["--ready"], env: %{})
 
       assert result == %{
                stdout: "",
-               stderr: ["ERROR: Admin server is not running. Please check admin-server-port config.", "\n"],
+               stderr: [
+                 "ERROR: Admin server is not running. Please check admin-server-port config.",
+                 "\n"
+               ],
                exit: 1
              }
     end
@@ -131,12 +161,14 @@ defmodule Bier.CLITest do
   end
 
   test "no flag returns a boot directive" do
-    assert {:boot, resolved} = CLI.run([], env: %{"PGRST_LOG_LEVEL" => "info"})
+    assert {:boot, resolved} =
+             CLI.run([], env: Map.merge(@no_db, %{"PGRST_LOG_LEVEL" => "info"}))
+
     assert resolved["log-level"] == :info
   end
 
   test "--dump-config defaults include the server/pool keys (case 1705 shape)" do
-    result = CLI.run(["--dump-config"], env: %{})
+    result = CLI.run(["--dump-config"], env: @no_db)
     assert result.exit == 0
     stdout = IO.iodata_to_binary(result.stdout)
     assert stdout =~ ~s(server-host = "!4")
@@ -167,7 +199,9 @@ defmodule Bier.CLITest do
     assert IO.iodata_to_binary(result.stderr) =~
              "Malformed proxy uri, a correct example: https://example.com:8443/basePath"
 
-    env = %{"PGRST_OPENAPI_SERVER_PROXY_URI" => "https://example.com:8443/basePath"}
+    env =
+      Map.merge(@no_db, %{"PGRST_OPENAPI_SERVER_PROXY_URI" => "https://example.com:8443/basePath"})
+
     result = CLI.run(["--dump-config"], env: env)
     assert result.exit == 0
 
@@ -178,7 +212,9 @@ defmodule Bier.CLITest do
   test "PGRST_APP_SETTINGS_* env vars dump as app.settings.* and env beats file (case 1729)" do
     path = write_tmp_config(~s(app.settings.from_file = "file"\napp.settings.both = "file"\n))
 
-    env = %{"PGRST_APP_SETTINGS_FOO" => "bar", "PGRST_APP_SETTINGS_BOTH" => "env"}
+    env =
+      Map.merge(@no_db, %{"PGRST_APP_SETTINGS_FOO" => "bar", "PGRST_APP_SETTINGS_BOTH" => "env"})
+
     result = CLI.run([path, "--dump-config"], env: env)
     assert result.exit == 0
     stdout = IO.iodata_to_binary(result.stdout)
@@ -190,19 +226,21 @@ defmodule Bier.CLITest do
   test "db-pool-timeout aliases db-pool-max-idletime (case 1707 shape)" do
     path = write_tmp_config("db-pool-timeout = 5\n")
 
-    result = CLI.run([path, "--dump-config"], env: %{})
+    result = CLI.run([path, "--dump-config"], env: @no_db)
     assert result.exit == 0
     assert IO.iodata_to_binary(result.stdout) =~ "db-pool-max-idletime = 5"
   end
 
   test "--dump-config includes jwt-cache-max-entries with its PostgREST default" do
-    result = CLI.run(["--dump-config"], env: %{})
+    result = CLI.run(["--dump-config"], env: @no_db)
     assert result.exit == 0
     assert IO.iodata_to_binary(result.stdout) =~ ~s(jwt-cache-max-entries = 1000)
   end
 
   test "PGRST_JWT_CACHE_MAX_ENTRIES overrides; a wrong type falls back to the default" do
-    result = CLI.run(["--dump-config"], env: %{"PGRST_JWT_CACHE_MAX_ENTRIES" => "0"})
+    result =
+      CLI.run(["--dump-config"], env: Map.merge(@no_db, %{"PGRST_JWT_CACHE_MAX_ENTRIES" => "0"}))
+
     assert result.exit == 0
     assert IO.iodata_to_binary(result.stdout) =~ ~s(jwt-cache-max-entries = 0)
 
@@ -210,7 +248,11 @@ defmodule Bier.CLITest do
     # the key's own default (PostgREST's wrong-type rule; case 1721's :unset
     # dump-as-blank shape is scoped to optInt keys, not required :int keys
     # like this one — matches server-port/db-pool).
-    result = CLI.run(["--dump-config"], env: %{"PGRST_JWT_CACHE_MAX_ENTRIES" => "notanint"})
+    result =
+      CLI.run(["--dump-config"],
+        env: Map.merge(@no_db, %{"PGRST_JWT_CACHE_MAX_ENTRIES" => "notanint"})
+      )
+
     assert result.exit == 0
     assert IO.iodata_to_binary(result.stdout) =~ ~s(jwt-cache-max-entries = 1000)
   end
@@ -229,9 +271,10 @@ defmodule Bier.CLITest do
     # --version/--help.
     assert CLI.run(["-e"], env: %{"PGRST_JWT_SECRET" => "short_secret"}).exit == 0
 
-    # The template is itself a loadable config file.
+    # The template is itself a loadable config file (env opts out of the DB
+    # read the template's own db-config = true would trigger).
     path = write_tmp_config(stdout)
-    reload = CLI.run([path, "--dump-config"], env: %{})
+    reload = CLI.run([path, "--dump-config"], env: @no_db)
     assert reload.exit == 0
   end
 

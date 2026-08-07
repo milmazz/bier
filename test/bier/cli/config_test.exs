@@ -346,6 +346,61 @@ defmodule Bier.CLI.ConfigTest do
       assert dump =~ "db-plan-enabled = false"
     end
 
+    test "in-db source: db-config key parses with PostgREST's default true" do
+      {:ok, resolved} = Config.load(%{}, nil, %{})
+      assert resolved["db-config"] == true
+
+      {:ok, resolved} = Config.load(%{"PGRST_DB_CONFIG" => "false"}, nil, %{})
+      assert resolved["db-config"] == false
+    end
+
+    test "in-db source: a db-settable key overrides env and file (case 1724 shape)" do
+      env = %{"PGRST_DB_MAX_ROWS" => "100"}
+      file = %{"db-max-rows" => 1000}
+
+      {:ok, resolved} = Config.load(env, file, %{}, %{"db-max-rows" => "500"})
+      assert resolved["db-max-rows"] == 500
+    end
+
+    test "in-db source: csv values split and trim like every other source" do
+      {:ok, resolved} = Config.load(%{}, nil, %{}, %{"db-schemas" => "test, tenant1, tenant2"})
+      assert resolved["db-schemas"] == ["test", "tenant1", "tenant2"]
+    end
+
+    test "in-db source: a non-reloadable key is ignored (case 1725 shape)" do
+      env = %{"PGRST_SERVER_PORT" => "3000"}
+
+      {:ok, resolved} = Config.load(env, nil, %{}, %{"server-port" => "9999"})
+      assert resolved["server-port"] == 3000
+    end
+
+    test "in-db source: a wrong-typed value falls back to the default, not to env" do
+      # The db value shadows env/file entirely (Config.hs `dbConf <|> env`);
+      # PostgREST's wrong-type rule then lands on the key's default.
+      env = %{"PGRST_DB_MAX_ROWS" => "100"}
+
+      {:ok, resolved} = Config.load(env, nil, %{}, %{"db-max-rows" => "abc"})
+      assert resolved["db-max-rows"] == :unset
+    end
+
+    test "db_settings_names/0 is upstream's whitelist ∩ implemented keys" do
+      names = Config.db_settings_names()
+
+      # Spot-check membership (full list cited to Config/Database.hs
+      # dbSettingsNames in the module).
+      assert "pgrst.db_max_rows" in names
+      assert "pgrst.db_schemas" in names
+      assert "pgrst.jwt_secret" in names
+      assert "pgrst.server_cors_allowed_origins" in names
+
+      # Non-reloadable / unimplemented keys stay out.
+      refute "pgrst.server_port" in names
+      refute "pgrst.db_config" in names
+      refute "pgrst.log_level" in names
+
+      assert length(names) == 18
+    end
+
     test "dump output is reparse-stable (case 1726)" do
       {:ok, resolved} =
         Config.load(

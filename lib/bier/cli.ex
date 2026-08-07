@@ -12,6 +12,7 @@ defmodule Bier.CLI do
 
   alias Bier.CLI.Config
   alias Bier.CLI.ConfigFile
+  alias Bier.CLI.DbSettings
   alias Bier.CLI.Ready
 
   @type result :: %{stdout: iodata(), stderr: iodata(), exit: non_neg_integer()}
@@ -42,12 +43,29 @@ defmodule Bier.CLI do
 
   defp load_and_dispatch(command, file_path, env) do
     with {:ok, file} <- read_file(file_path),
-         {:ok, resolved} <- Config.load(env, file, %{}) do
+         {:ok, resolved} <- Config.load(env, file, %{}),
+         {:ok, resolved} <- apply_db_settings(command, resolved, env, file) do
       dispatch(command, resolved)
     else
       {:error, message} -> error(message)
     end
   end
+
+  # PostgREST reads the in-database config (ALTER ROLE ... SET pgrst.*) before
+  # dumping the config or running the server (CLI.hs: `when configDbConfig $
+  # AppState.readInDbConfig`); the client-only --ready never connects. The
+  # re-load slots the role settings above env/file (Config.load/4 `db`).
+  defp apply_db_settings(command, resolved, env, file) when command in [:dump_config, :run] do
+    with true <- resolved["db-config"],
+         {:ok, db} <- DbSettings.fetch(resolved, env) do
+      Config.load(env, file, %{}, db)
+    else
+      false -> {:ok, resolved}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp apply_db_settings(_command, resolved, _env, _file), do: {:ok, resolved}
 
   defp dispatch(:dump_config, resolved), do: ok(Config.dump(resolved))
   defp dispatch(:run, resolved), do: {:boot, resolved}

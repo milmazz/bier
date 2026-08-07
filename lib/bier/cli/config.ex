@@ -47,6 +47,13 @@ defmodule Bier.CLI.Config do
       aliases: []
     },
     %{
+      key: "db-config",
+      env: "PGRST_DB_CONFIG",
+      kind: :bool,
+      default: true,
+      aliases: []
+    },
+    %{
       key: "db-extra-search-path",
       env: "PGRST_DB_EXTRA_SEARCH_PATH",
       kind: :csv_emptyable,
@@ -232,6 +239,32 @@ defmodule Bier.CLI.Config do
   @spec spec() :: [map()]
   def spec, do: @entries
 
+  # Keys settable from the in-database config source (`ALTER ROLE ... SET
+  # pgrst.*`): upstream's dbSettingsNames whitelist (Config/Database.hs,
+  # v14.12) intersected with the keys Bier implements. Upstream-only names not
+  # mirrored here: db_aggregates_enabled, db_pre_config, db_prepared_statements,
+  # db_hoisted_tx_settings, jwt_cache_max_lifetime (Bier's
+  # jwt-cache-max-entries is a different knob). Everything else — notably
+  # server-* bind settings and db-uri — is non-reloadable and ignored when set
+  # via the database (case 1725).
+  @db_settable_keys ~w(
+    db-anon-role db-extra-search-path db-max-rows db-plan-enabled
+    db-pre-request db-root-spec db-schemas db-tx-end
+    jwt-aud jwt-role-claim-key jwt-secret jwt-secret-is-base64
+    openapi-mode openapi-security-active openapi-server-proxy-uri
+    server-cors-allowed-origins server-trace-header server-timing-enabled
+  )
+
+  @doc """
+  The `pgrst.*` setting names the in-database config source accepts — the
+  `k = ANY(...)` filter of the role-settings query (PostgREST
+  Config/Database.hs `dbSettingsNames`).
+  """
+  @spec db_settings_names() :: [String.t()]
+  def db_settings_names do
+    for key <- @db_settable_keys, do: "pgrst." <> String.replace(key, "-", "_")
+  end
+
   @type kind ::
           :string
           | :opt_string
@@ -326,22 +359,26 @@ defmodule Bier.CLI.Config do
   end
 
   @doc """
-  Resolve every spec key from flags > env > file > default, applying aliases and
-  coercion, then run the shared semantic validators. Returns the resolved
-  `%{kebab_key => typed_value}` map, or `{:error, message}` on a fatal problem.
+  Resolve every spec key from flags > db > env > file > default, applying
+  aliases and coercion, then run the shared semantic validators. Returns the
+  resolved `%{kebab_key => typed_value}` map, or `{:error, message}` on a
+  fatal problem.
 
   `env` is a `%{"PGRST_*" => string}` map (the caller supplies it — the core
   never reads `System.get_env/0`). `file` is `nil` or a `%{kebab_key => raw}`
   map (already parsed). `flags` is a `%{kebab_key => raw}` map of command-line
-  overrides.
+  overrides. `db` is the in-database config source — a `%{kebab_key => string}`
+  map read from `ALTER ROLE ... SET pgrst.*` (`Bier.CLI.DbSettings`); it beats
+  env and file (PostgREST Config.hs `overrideFromDbOrEnvironment`:
+  `dbConf <|> env`) but only for `db_settings_names/0` keys.
   """
-  @spec load(map(), map() | nil, map()) :: {:ok, map()} | {:error, String.t()}
-  def load(env, file, flags) do
+  @spec load(map(), map() | nil, map(), map()) :: {:ok, map()} | {:error, String.t()}
+  def load(env, file, flags, db \\ %{}) do
     file = file || %{}
 
     spec()
     |> Enum.reduce_while({:ok, %{}}, fn entry, {:ok, acc} ->
-      case resolve(entry, env, file, flags) do
+      case resolve(entry, env, file, flags, db) do
         {:ok, value} -> {:cont, {:ok, Map.put(acc, entry.key, value)}}
         {:error, _} = err -> {:halt, err}
       end
@@ -372,8 +409,8 @@ defmodule Bier.CLI.Config do
     {:ok, Map.put(resolved, "app.settings", Map.merge(from_file, from_env))}
   end
 
-  defp resolve(entry, env, file, flags) do
-    case raw_source(entry, env, file, flags) do
+  defp resolve(entry, env, file, flags, db) do
+    case raw_source(entry, env, file, flags, db) do
       :absent ->
         {:ok, entry.default}
 
@@ -387,19 +424,27 @@ defmodule Bier.CLI.Config do
     end
   end
 
-  # Precedence: flags > env > file, with PostgREST's alias semantics: each
+  # Precedence: flags > db > env > file, with PostgREST's alias semantics: each
   # spelling — canonical first, then deprecated aliases — is a complete source
   # that consults its own PGRST_* env var and then its file key. So
   # PGRST_DB_SCHEMA works like PostgREST's, and a canonical file key still
   # beats an alias env var (Config.hs optWithAlias wraps full parser arms).
-  # Flags use canonical keys only.
-  defp raw_source(entry, env, file, flags) do
-    if present?(entry, Map.get(flags, entry.key)) do
-      {:present, Map.fetch!(flags, entry.key)}
-    else
-      Enum.find_value([entry.key | entry.aliases], :absent, fn key ->
-        spelling_source(entry, key, env, file)
-      end)
+  # Flags and the db source use canonical keys only (role settings carry the
+  # canonical underscored name, see db_settings_names/0).
+  defp raw_source(entry, env, file, flags, db) do
+    db_value = if entry.key in @db_settable_keys, do: Map.get(db, entry.key)
+
+    cond do
+      present?(entry, Map.get(flags, entry.key)) ->
+        {:present, Map.fetch!(flags, entry.key)}
+
+      present?(entry, db_value) ->
+        {:present, db_value}
+
+      true ->
+        Enum.find_value([entry.key | entry.aliases], :absent, fn key ->
+          spelling_source(entry, key, env, file)
+        end)
     end
   end
 
@@ -557,6 +602,48 @@ defmodule Bier.CLI.Config do
       # NimbleOptions union-type errors span several lines; CLI fatals are
       # reported as one stderr line, so collapse the message's whitespace.
       {:error, message} -> {:error, String.replace(message, ~r/\s+/, " ")}
+    end
+  end
+
+  @doc """
+  Postgrex connection options for a resolved config: the parsed `db-uri`
+  fields, with missing fields filled from the libpq-style `PG*` environment
+  variables — PostgREST connects through libpq, which applies exactly these
+  fallbacks — then `localhost`/`5432` defaults. Like libpq, a missing database
+  name falls back to the user name.
+  """
+  @spec connection_opts(map(), map()) :: keyword()
+  def connection_opts(resolved, env) do
+    from_env =
+      [
+        hostname: env["PGHOST"],
+        port: env_int(env["PGPORT"]),
+        database: env["PGDATABASE"],
+        username: env["PGUSER"],
+        password: env["PGPASSWORD"]
+      ]
+      |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
+
+    from_env
+    |> Keyword.merge(db_uri_opts(resolved["db-uri"]))
+    |> Keyword.put_new(:hostname, "localhost")
+    |> Keyword.put_new(:port, 5432)
+    |> put_default_database()
+  end
+
+  defp put_default_database(opts) do
+    case {opts[:database], opts[:username]} do
+      {nil, user} when is_binary(user) -> Keyword.put(opts, :database, user)
+      _ -> opts
+    end
+  end
+
+  defp env_int(nil), do: nil
+
+  defp env_int(s) do
+    case Integer.parse(s) do
+      {i, ""} -> i
+      _ -> nil
     end
   end
 
