@@ -43,6 +43,49 @@ defmodule Bier.CLITest do
              "failed to parse role-claim-key value (role.other)"
   end
 
+  describe "--ready (PostgREST Client.hs parity)" do
+    test "without admin-server-port it fails with the no-admin-server error" do
+      result = CLI.run(["--ready"], env: %{})
+
+      assert result == %{
+               stdout: "",
+               stderr: ["ERROR: Admin server is not running. Please check admin-server-port config.", "\n"],
+               exit: 1
+             }
+    end
+
+    test "a special server-host (the !4 default) cannot be resolved to an address" do
+      result = CLI.run(["--ready"], env: %{"PGRST_ADMIN_SERVER_PORT" => "3001"})
+
+      assert result == %{
+               stdout: "",
+               stderr: [
+                 "ERROR: The `--ready` flag cannot be used when server-host is configured as \"!4\". " <>
+                   "Please update your server-host config to \"localhost\".",
+                 "\n"
+               ],
+               exit: 1
+             }
+    end
+
+    test "a resolvable host yields the ready-check directive with the /ready URL" do
+      env = %{"PGRST_ADMIN_SERVER_PORT" => "3001", "PGRST_SERVER_HOST" => "localhost"}
+      assert CLI.run(["--ready"], env: env) == {:ready, "http://localhost:3001/ready"}
+    end
+
+    test "an IPv6 host is bracket-wrapped in the URL" do
+      env = %{"PGRST_ADMIN_SERVER_PORT" => "3001", "PGRST_SERVER_HOST" => "::1"}
+      assert CLI.run(["--ready"], env: env) == {:ready, "http://[::1]:3001/ready"}
+    end
+
+    test "config fatals still win over the ready check" do
+      env = %{"PGRST_ADMIN_SERVER_PORT" => "3001", "PGRST_JWT_SECRET" => "short_secret"}
+      result = CLI.run(["--ready"], env: env)
+      assert result.exit == 1
+      assert IO.iodata_to_binary(result.stderr) =~ "at least 32 characters"
+    end
+  end
+
   test "--dump-config rejects a non-base64 secret when is-base64 is set (case 1718 shape)" do
     # Long enough to pass the 32-byte length check (which runs first, like
     # PostgREST's raw-length rule), so the base64 decode is what rejects it.
