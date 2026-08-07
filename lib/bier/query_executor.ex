@@ -106,10 +106,14 @@ defmodule Bier.QueryExecutor do
   # the connecting superuser. That is intentional — the auth cases that read GUCs
   # use count=none, and the privilege-gated reads either succeed (granted) or
   # raise here before any count query runs.
-  defp query_read(conn, sql, params, timezone, nil),
-    do: query_with_timezone(conn, sql, params, timezone)
+  defp query_read(conn, sql, params, timezone, nil) do
+    Bier.RequestLog.record(sql)
+    query_with_timezone(conn, sql, params, timezone)
+  end
 
   defp query_read(pool, sql, params, timezone, {context, config}) do
+    Bier.RequestLog.record(sql)
+
     result =
       Postgrex.transaction(pool, fn tx ->
         Bier.Auth.with_context(tx, context, config, fn tx ->
@@ -205,8 +209,10 @@ defmodule Bier.QueryExecutor do
   # Exact `count(*)` over the filtered query (no limit/offset/order).
   defp exact_count(conn, relation, plan, relations) do
     {:ok, inner_sql, params} = build_count_query(relation, plan, relations)
+    count_sql = "SELECT count(*) FROM (#{inner_sql}) _bier_count"
+    Bier.RequestLog.record(count_sql)
 
-    case Postgrex.query(conn, "SELECT count(*) FROM (#{inner_sql}) _bier_count", params) do
+    case Postgrex.query(conn, count_sql, params) do
       {:ok, %Postgrex.Result{rows: [[n]]}} -> {:ok, n || 0}
       {:error, _} = err -> err
     end
@@ -216,8 +222,10 @@ defmodule Bier.QueryExecutor do
   # PostgREST's planned/estimated count which counts the unlimited query).
   defp planned_count(conn, relation, plan, relations) do
     {:ok, sql, params} = build_count_query(relation, plan, relations)
+    explain_sql = "EXPLAIN (FORMAT JSON) " <> sql
+    Bier.RequestLog.record(explain_sql)
 
-    case Postgrex.query(conn, "EXPLAIN (FORMAT JSON) " <> sql, params) do
+    case Postgrex.query(conn, explain_sql, params) do
       {:ok, %Postgrex.Result{rows: [[explain]]}} ->
         {:ok, extract_plan_rows(explain)}
 
@@ -288,6 +296,8 @@ defmodule Bier.QueryExecutor do
              build_function(fn_def, ret_relation, args, plan, relations, format, count_mode)
            end) do
         {:ok, sql, params} ->
+          Bier.RequestLog.record(sql)
+
           Bier.ServerTiming.measure(:transaction, fn ->
             case Postgrex.query(conn, sql, params) do
               {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
