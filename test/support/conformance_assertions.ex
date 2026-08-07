@@ -135,7 +135,10 @@ defmodule Bier.ConformanceAssertions do
     File.write!(path, resp.stdout)
 
     try do
-      second = Bier.CLI.run(["--dump-config", path], env: %{})
+      # The dumped file carries db-config = true, so the re-dump reads the
+      # in-database source again — it needs the same PG* connection env the
+      # first run had (Bier.CliCase merges it into every CLI case).
+      second = Bier.CLI.run(["--dump-config", path], env: Bier.CliCase.base_pg_env())
 
       assert IO.iodata_to_binary(second.stdout) == resp.stdout,
              "re-dumping the dumped config was not byte-identical"
