@@ -346,6 +346,20 @@ defmodule Bier.CLI.ConfigTest do
       assert dump =~ "db-plan-enabled = false"
     end
 
+    test "log-query parses with PostgREST's default false and its env var (#28)" do
+      {:ok, resolved} = Config.load(%{}, nil, %{})
+      assert resolved["log-query"] == false
+
+      {:ok, resolved} = Config.load(%{"PGRST_LOG_QUERY" => "true"}, nil, %{})
+      assert resolved["log-query"] == true
+
+      dump = Config.dump(resolved) |> IO.iodata_to_binary()
+      assert dump =~ "log-query = true"
+
+      opts = Config.to_start_opts(resolved)
+      assert opts[:log_query] == true
+    end
+
     test "in-db source: db-config key parses with PostgREST's default true" do
       {:ok, resolved} = Config.load(%{}, nil, %{})
       assert resolved["db-config"] == true
