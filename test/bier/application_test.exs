@@ -8,8 +8,11 @@ defmodule Bier.ApplicationTest do
     end
 
     test "with BIER_STANDALONE set and valid config it returns a {Bier, opts} child" do
+      # db-config=false keeps this a pure config test; the in-database source
+      # (which would connect to Postgres) is covered by the CLI wiring tests.
       env = %{
         "BIER_STANDALONE" => "1",
+        "PGRST_DB_CONFIG" => "false",
         "PGRST_DB_SCHEMAS" => "api",
         "PGRST_SERVER_PORT" => "4000"
       }
@@ -21,7 +24,10 @@ defmodule Bier.ApplicationTest do
 
     test "accepts \"true\" as well as \"1\" for the flag" do
       assert {:ok, {Bier, _opts}} =
-               Bier.Application.standalone_spec(%{"BIER_STANDALONE" => "true"})
+               Bier.Application.standalone_spec(%{
+                 "BIER_STANDALONE" => "true",
+                 "PGRST_DB_CONFIG" => "false"
+               })
     end
 
     test "with BIER_STANDALONE set and invalid config it returns the fatal message" do

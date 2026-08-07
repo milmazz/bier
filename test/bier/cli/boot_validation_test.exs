@@ -65,15 +65,17 @@ defmodule Bier.CLI.BootValidationTest do
   end
 
   describe "the standalone (BIER_STANDALONE) boot path" do
+    # PGRST_DB_CONFIG=false keeps these pure parse/validation tests off the
+    # in-database config source (which would connect to Postgres).
     test "a value the parse layer tolerates but the boot schema rejects is a fatal message" do
-      env = %{"BIER_STANDALONE" => "1", "PGRST_DB_MAX_ROWS" => "0"}
+      env = %{"BIER_STANDALONE" => "1", "PGRST_DB_CONFIG" => "false", "PGRST_DB_MAX_ROWS" => "0"}
 
       assert {:error, message} = Bier.Application.standalone_spec(env)
       assert message =~ "db_max_rows"
     end
 
     test "a non-positive server-port is a fatal message" do
-      env = %{"BIER_STANDALONE" => "1", "PGRST_SERVER_PORT" => "0"}
+      env = %{"BIER_STANDALONE" => "1", "PGRST_DB_CONFIG" => "false", "PGRST_SERVER_PORT" => "0"}
 
       assert {:error, message} = Bier.Application.standalone_spec(env)
       assert message =~ ":port"
@@ -82,7 +84,8 @@ defmodule Bier.CLI.BootValidationTest do
 
   describe "--dump-config parity (validation happens at boot, not at parse/dump)" do
     test "--dump-config still dumps db-max-rows = 0 and exits 0" do
-      result = CLI.run(["--dump-config"], env: %{"PGRST_DB_MAX_ROWS" => "0"})
+      env = %{"PGRST_DB_CONFIG" => "false", "PGRST_DB_MAX_ROWS" => "0"}
+      result = CLI.run(["--dump-config"], env: env)
 
       assert result.exit == 0
       assert IO.iodata_to_binary(result.stdout) =~ "db-max-rows = 0"
@@ -90,14 +93,16 @@ defmodule Bier.CLI.BootValidationTest do
     end
 
     test "--dump-config still dumps a non-positive server-port and exits 0" do
-      result = CLI.run(["--dump-config"], env: %{"PGRST_SERVER_PORT" => "-1"})
+      env = %{"PGRST_DB_CONFIG" => "false", "PGRST_SERVER_PORT" => "-1"}
+      result = CLI.run(["--dump-config"], env: env)
 
       assert result.exit == 0
       assert IO.iodata_to_binary(result.stdout) =~ "server-port = -1"
     end
 
     test "the CLI core still returns a boot directive for such values" do
-      assert {:boot, resolved} = CLI.run([], env: %{"PGRST_DB_MAX_ROWS" => "0"})
+      env = %{"PGRST_DB_CONFIG" => "false", "PGRST_DB_MAX_ROWS" => "0"}
+      assert {:boot, resolved} = CLI.run([], env: env)
       assert resolved["db-max-rows"] == 0
       assert {:error, _message} = Config.validated_start_opts(resolved)
     end

@@ -6,6 +6,7 @@ defmodule Bier.Application do
   use Application
 
   alias Bier.CLI.Config
+  alias Bier.CLI.DbSettings
 
   @impl true
   def start(_type, _args) do
@@ -45,13 +46,26 @@ defmodule Bier.Application do
     if env["BIER_STANDALONE"] in ["1", "true"] do
       # validated_start_opts runs Bier's own boot schema so values the parse
       # layer tolerates (e.g. db-max-rows=0) fail here with a message instead
-      # of crashing Bier.start_link/1 mid-supervision-tree.
+      # of crashing Bier.start_link/1 mid-supervision-tree. Standalone boot is
+      # PostgREST's run command, so the in-database config source applies here
+      # exactly as it does on the escript's run path.
       with {:ok, resolved} <- Config.load(env, nil, %{}),
+           {:ok, resolved} <- apply_db_settings(resolved, env),
            {:ok, opts} <- Config.validated_start_opts(resolved) do
         {:ok, {Bier, opts}}
       end
     else
       :none
+    end
+  end
+
+  defp apply_db_settings(resolved, env) do
+    with true <- resolved["db-config"],
+         {:ok, db} <- DbSettings.fetch(resolved, env) do
+      Config.load(env, nil, %{}, db)
+    else
+      false -> {:ok, resolved}
+      {:error, _} = err -> err
     end
   end
 end
