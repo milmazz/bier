@@ -12,6 +12,7 @@ defmodule Bier.CLI do
 
   alias Bier.CLI.Config
   alias Bier.CLI.ConfigFile
+  alias Bier.CLI.Ready
 
   @type result :: %{stdout: iodata(), stderr: iodata(), exit: non_neg_integer()}
 
@@ -20,9 +21,11 @@ defmodule Bier.CLI do
   @doc ~S"""
   Run the CLI core. `opts[:env]` is a `%{"PGRST_*" => string}` map (defaults to
   an empty map). Returns a `%{stdout, stderr, exit}` map for terminal commands,
-  or `{:boot, resolved}` for the default run-the-server action.
+  `{:boot, resolved}` for the default run-the-server action, or `{:ready, url}`
+  when `--ready` resolved to a URL to probe (`main/1` performs the request via
+  `Bier.CLI.Ready.check/1`).
   """
-  @spec run([String.t()], keyword()) :: result() | {:boot, map()}
+  @spec run([String.t()], keyword()) :: result() | {:boot, map()} | {:ready, String.t()}
   def run(argv, opts \\ []) do
     env = Keyword.get(opts, :env, %{})
 
@@ -49,12 +52,42 @@ defmodule Bier.CLI do
   defp dispatch(:dump_config, resolved), do: ok(Config.dump(resolved))
   defp dispatch(:run, resolved), do: {:boot, resolved}
 
+  # PostgREST Network.hs isSpecialHostName: bind-only aliases that cannot be
+  # dialed by a client.
+  @special_hostnames ~w(* *4 !4 *6 !6)
+
+  # The config half of --ready (PostgREST Client.hs `ready` / `getURL`). Bier
+  # has no separate admin-server-host key, so the admin host is server-host —
+  # exactly upstream's default (admin-server-host aliases to server-host).
+  defp dispatch(:ready, resolved) do
+    host = resolved["server-host"]
+
+    cond do
+      resolved["admin-server-port"] == :unset ->
+        error("ERROR: Admin server is not running. Please check admin-server-port config.")
+
+      host in @special_hostnames ->
+        error(
+          "ERROR: The `--ready` flag cannot be used when server-host is configured as " <>
+            "\"#{host}\". Please update your server-host config to \"localhost\"."
+        )
+
+      true ->
+        {:ready, "http://#{wrap_ipv6(host)}:#{resolved["admin-server-port"]}/ready"}
+    end
+  end
+
+  # IPv6 literals need brackets in a URL (":" is the port separator).
+  defp wrap_ipv6(host) do
+    if String.contains?(host, ":"), do: "[#{host}]", else: host
+  end
+
   # The optional positional config-file path is any argv element not starting
   # with "-". The first recognized flag selects the command; the default is
   # :run. Unknown flags are currently ignored (the server boots), and when two
   # commands are passed the first wins — PostgREST instead errors on unknown /
-  # conflicting flags. Tightening this belongs with the deferred --ready /
-  # --example work (issue #45), not this conformance slice.
+  # conflicting flags. Tightening this belongs with the deferred --example
+  # work (issue #45), not this conformance slice.
   defp parse_argv(argv) do
     file_path = Enum.find(argv, fn arg -> not String.starts_with?(arg, "-") end)
     command = Enum.find_value(argv, :run, &flag_command/1)
@@ -62,6 +95,7 @@ defmodule Bier.CLI do
   end
 
   defp flag_command("--dump-config"), do: :dump_config
+  defp flag_command("--ready"), do: :ready
   defp flag_command("--example"), do: :example
   defp flag_command("-e"), do: :example
   defp flag_command("--version"), do: :version
@@ -84,6 +118,8 @@ defmodule Bier.CLI do
 
     Options:
       --dump-config   Print the loaded configuration and exit
+      --ready         Check health by requesting the admin server's /ready
+                      endpoint; exits 0 when ready, 1 otherwise
       -e, --example   Print an example configuration file and exit
       -v, --version   Print the version and exit
       -h, --help      Print this help and exit
@@ -117,8 +153,15 @@ defmodule Bier.CLI do
   @spec main([String.t()]) :: no_return()
   def main(argv) do
     case run(argv, env: System.get_env()) do
-      {:boot, resolved} -> boot(resolved)
-      %{stdout: out, stderr: err, exit: code} -> emit(out, err, code)
+      {:boot, resolved} ->
+        boot(resolved)
+
+      {:ready, url} ->
+        %{stdout: out, stderr: err, exit: code} = Ready.check(url)
+        emit(out, err, code)
+
+      %{stdout: out, stderr: err, exit: code} ->
+        emit(out, err, code)
     end
   end
 
