@@ -275,22 +275,7 @@ defmodule Bier.Rpc do
         with {:ok, media} <-
                Negotiation.resolve(conn, ActionController.read_producers(config)),
              {:ok, plan} <- parse_plan(conn, config, fn_def) do
-          pool = Bier.Registry.via(config.name, Postgrex)
-          count_mode = Pagination.count_mode(conn)
-          exec_args = Enum.map(args, fn {n, t, _v?, val} -> {n, t, value_for_named(val)} end)
-
-          case QueryExecutor.run_function(pool, fn_def, ret_rel, exec_args, plan,
-                 count_mode: count_mode,
-                 relations: relations,
-                 format: MediaType.executor_format(media)
-               ) do
-            {:ok, %{body: body, count: count}} ->
-              columns = ActionController.csv_columns(plan, ret_rel)
-              Response.render(conn, body, count, plan, count_mode, media, columns: columns)
-
-            other ->
-              other
-          end
+          run_setof_rel(conn, config, fn_def, ret_rel, args, plan, media, relations)
         end
 
       :error ->
@@ -322,6 +307,33 @@ defmodule Bier.Rpc do
         {:error, _} = err ->
           err
       end
+    end
+  end
+
+  # The :setof_rel read itself, once media/plan have resolved: the function
+  # call becomes the FROM source of the shaped read, run under the
+  # client-disconnect watcher like any relation read.
+  defp run_setof_rel(conn, config, fn_def, ret_rel, args, plan, media, relations) do
+    pool = Bier.Registry.via(config.name, Postgrex)
+    count_mode = Pagination.count_mode(conn)
+    exec_args = Enum.map(args, fn {n, t, _v?, val} -> {n, t, value_for_named(val)} end)
+
+    result =
+      Bier.Cancellation.run(conn, config, fn ->
+        QueryExecutor.run_function(pool, fn_def, ret_rel, exec_args, plan,
+          count_mode: count_mode,
+          relations: relations,
+          format: MediaType.executor_format(media)
+        )
+      end)
+
+    case result do
+      {:ok, %{body: body, count: count}} ->
+        columns = ActionController.csv_columns(plan, ret_rel)
+        Response.render(conn, body, count, plan, count_mode, media, columns: columns)
+
+      other ->
+        other
     end
   end
 
@@ -477,8 +489,20 @@ defmodule Bier.Rpc do
   # read may itself fail with PGRST111/PGRST112).
   defp exec(pool, %Plug.Conn{method: m} = conn, sql, params) do
     read_only? = m in ["GET", "HEAD"]
-    auth = ActionController.auth_setup(conn, instance_config(conn))
+    config = instance_config(conn)
+    auth = ActionController.auth_setup(conn, config)
 
+    Bier.Cancellation.run(conn, config, fn ->
+      exec_transaction(pool, read_only?, auth, sql, params)
+    end)
+    |> case do
+      {:ok, {result, guc}} -> {:ok, result, guc}
+      {:error, %Postgrex.Error{} = err} -> map_auth_error(auth, err)
+      {:error, other} -> {:error, other}
+    end
+  end
+
+  defp exec_transaction(pool, read_only?, auth, sql, params) do
     Bier.ServerTiming.measure(:transaction, fn ->
       Postgrex.transaction(pool, fn tx ->
         if read_only?, do: Postgrex.query!(tx, "SET TRANSACTION READ ONLY", [])
@@ -486,11 +510,6 @@ defmodule Bier.Rpc do
         query_then_read_gucs(tx, sql, params)
       end)
     end)
-    |> case do
-      {:ok, {result, guc}} -> {:ok, result, guc}
-      {:error, %Postgrex.Error{} = err} -> map_auth_error(auth, err)
-      {:error, other} -> {:error, other}
-    end
   end
 
   defp query_then_read_gucs(tx, sql, params) do

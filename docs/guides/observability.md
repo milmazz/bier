@@ -32,9 +32,15 @@ computed unless something is attached.
 | `[:bier, :schema_cache, :load, :exception]` | standard span measurements | `instance`, `schemas`, `kind`, `reason`, `stacktrace` | A load raised; the previous snapshot is left in place |
 | `[:bier, :pool, :status]` | `max`, `available`, `waiting` | `instance` | A periodic gauge sample of the Postgrex pool, emitted by `Bier.PoolMonitor` |
 | `[:bier, :pool, :checkout_timeout]` | `count` (always `1`) | `instance` | A request's pool checkout was dropped from the queue after timing out |
+| `[:bier, :query, :cancelled]` | `count` (always `1`) | `instance` | An in-flight query was cancelled at the PostgreSQL backend because the HTTP client disconnected (`Bier.Cancellation`; disable with `cancel_on_disconnect: false`) |
 
 `schema` and `relation` on `[:bier, :request, :stop]` are `nil` for the root
 document, `OPTIONS`, and error responses that never resolve a target.
+
+`[:bier, :query, :cancelled]` is the only signal for a cancelled request:
+there is nobody left to respond to, so the request terminates without a
+response (and without a `[:bier, :request, :stop]` event) the same way Bandit
+terminates any client closure.
 
 The `[:bier, :schema_cache, :load, *]` family is a `:telemetry.span/3` around
 every schema-cache load — both boot-time introspection

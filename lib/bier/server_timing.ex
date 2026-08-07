@@ -91,4 +91,27 @@ defmodule Bier.ServerTiming do
         %{}
     end
   end
+
+  @doc """
+  The raw accumulator state, for handing off to another process.
+
+  `Bier.Cancellation` runs the request's database work in a task; the task
+  adopts the request's state via `restore/1`, and the phases it measures are
+  handed back the same way. Opaque — only meaningful to `restore/1`.
+  """
+  @spec export() :: term()
+  def export, do: Process.get(@key)
+
+  @doc """
+  Adopt an accumulator state `export/0`-ed from another process. A `nil`
+  state (the source was outside an initialised request) is a no-op, keeping
+  `measure/2` uninstrumented.
+  """
+  @spec restore(term()) :: :ok
+  def restore(nil), do: :ok
+
+  def restore(state) do
+    Process.put(@key, state)
+    :ok
+  end
 end

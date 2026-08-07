@@ -478,6 +478,20 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
+  # ---- client disconnect (#82, Bier-specific) ------------------------------
+  # The query was cancelled because the client went away mid-flight
+  # (`Bier.Cancellation`). There is nobody to respond to, so this terminates
+  # the request the way Bandit terminates any client closure: raising
+  # `Bandit.TransportError{error: :closed}`, which Bandit does not log unless
+  # the operator opts in (`log_client_closures`) and never writes to the dead
+  # socket. The `[:bier, :query, :cancelled]` telemetry event is the
+  # observability signal for these requests.
+  def call(_conn, {:error, :client_disconnected}) do
+    raise Bandit.TransportError,
+      message: "Client disconnected while the query was running",
+      error: :closed
+  end
+
   # ---- catch-all -----------------------------------------------------------
   def call(conn, _other) do
     error(conn, 500, %{

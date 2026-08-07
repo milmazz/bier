@@ -324,6 +324,17 @@ defmodule Bier do
         default: env(:server_cors_allowed_origins, nil),
         doc: "Comma-separated list of CORS allowed origins."
       ],
+      cancel_on_disconnect: [
+        type: :boolean,
+        default: env(:cancel_on_disconnect, true),
+        doc: """
+        When true (the default), an in-flight database query is cancelled at
+        the PostgreSQL backend when the HTTP client disconnects before the
+        response is sent (see `Bier.Cancellation`). Set to false to let such
+        queries run to completion instead, e.g. when statement-level side
+        effects must not be interrupted.
+        """
+      ],
       server_timing_enabled: [
         type: :boolean,
         default: env(:server_timing_enabled, false),

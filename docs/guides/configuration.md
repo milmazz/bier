@@ -125,10 +125,15 @@ differ from `router[:port]` (see [Validators](#validators)).
 | `ssl` | `boolean` | `false` | via `PGRST_DB_URI` (`sslmode=require\|verify-ca\|verify-full` → `true`) |
 | `pool_size` | `pos_integer` | `10` | `PGRST_DB_POOL` |
 | `db_pool_max_idletime` | `pos_integer \| nil` | `nil` (defaults to `30` on the standalone binary) | `PGRST_DB_POOL_MAX_IDLETIME` (alias `db-pool-timeout` / `PGRST_DB_POOL_TIMEOUT`) |
+| `cancel_on_disconnect` | `boolean` | `true` | — (Bier-only; PostgREST cannot do this — postgrest#699) |
 
 There is no `PGRST_DB_HOST`-style variable — the whole connection is set from
 one `PGRST_DB_URI`, exactly as in PostgREST (see the `PGRST_DB_URI` section
-below). `db_pool_max_idletime` maps onto DBConnection's `:idle_interval`.
+below). `cancel_on_disconnect` cancels the in-flight query at the PostgreSQL
+backend when the HTTP client disconnects mid-request (`Bier.Cancellation`;
+emits `[:bier, :query, :cancelled]`); set it to `false` to let such queries
+run to completion. `db_pool_max_idletime` maps onto DBConnection's
+`:idle_interval`.
 `nil` is the default for `Bier.start_link/1`/application env (`Bier.schema/0`
 in `lib/bier.ex`), and it defers to the driver default; the standalone/CLI
 surface (`Bier.CLI.Config`) instead defaults this key to `30` when it is not

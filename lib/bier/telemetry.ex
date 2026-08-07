@@ -95,6 +95,15 @@ defmodule Bier.Telemetry do
   `jwt_cache_max_entries > 0`), matching PostgREST, which records no cache
   observations in `JwtNoCache` mode.
 
+  ## Query cancellation (#82)
+
+    * `[:bier, :query, :cancelled]` — one in-flight database query cancelled
+      at the PostgreSQL backend because the HTTP client disconnected before
+      the response was sent (see `Bier.Cancellation`). Measurement
+      `%{count: 1}`, metadata `%{instance: name}`. A cancelled request emits
+      no `[:bier, :request, :stop]` — it terminates without a response, so
+      this event is its only trace.
+
   ## SSE events (#81)
 
     * `[:bier, :events, :subscribe, :start]` — start of an SSE subscription,
@@ -116,6 +125,7 @@ defmodule Bier.Telemetry do
   @schema_cache_load [:bier, :schema_cache, :load]
   @pool_status [:bier, :pool, :status]
   @pool_checkout_timeout [:bier, :pool, :checkout_timeout]
+  @query_cancelled [:bier, :query, :cancelled]
   @jwt_cache_lookup [:bier, :jwt_cache, :lookup]
   @jwt_cache_eviction [:bier, :jwt_cache, :eviction]
   @events_subscribe_start [:bier, :events, :subscribe, :start]
@@ -187,6 +197,15 @@ defmodule Bier.Telemetry do
   @spec pool_checkout_timeout(map()) :: :ok
   def pool_checkout_timeout(metadata) do
     :telemetry.execute(@pool_checkout_timeout, %{count: 1}, metadata)
+  end
+
+  @doc """
+  Emit `[:bier, :query, :cancelled]` — one in-flight query cancelled because
+  the HTTP client disconnected. Called by `Bier.Cancellation`.
+  """
+  @spec query_cancelled(map()) :: :ok
+  def query_cancelled(metadata) do
+    :telemetry.execute(@query_cancelled, %{count: 1}, metadata)
   end
 
   @doc """
