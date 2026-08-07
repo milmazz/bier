@@ -177,6 +177,13 @@ defmodule Bier.CLI.Config do
       aliases: []
     },
     %{
+      key: "log-query",
+      env: "PGRST_LOG_QUERY",
+      kind: :bool,
+      default: false,
+      aliases: []
+    },
+    %{
       key: "server-cors-allowed-origins",
       env: "PGRST_SERVER_CORS_ALLOWED_ORIGINS",
       kind: :opt_string,
@@ -568,6 +575,7 @@ defmodule Bier.CLI.Config do
         openapi_mode: resolved["openapi-mode"],
         openapi_security_active: resolved["openapi-security-active"],
         log_level: resolved["log-level"],
+        log_query: resolved["log-query"],
         server_cors_allowed_origins: resolved["server-cors-allowed-origins"],
         db_plan_enabled: resolved["db-plan-enabled"],
         db_channel: resolved["db-channel"],
