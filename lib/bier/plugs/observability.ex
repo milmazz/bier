@@ -19,19 +19,31 @@ defmodule Bier.Plugs.Observability do
       echoed verbatim on the response. An empty/nil configuration is a no-op —
       the header is not echoed.
 
-  The header is written in a `Plug.Conn.register_before_send/2` callback, which
-  fires synchronously while the response is sent — at which point every phase the
+    * **Access log + log-level + log-query** (#28): every response whose status
+      passes the `log-level` filter (`Bier.RequestLog.should_log?/2`, PostgREST
+      `Logger.hs` `shouldLogResponse`) emits one Apache-combined access line
+      through Elixir's `Logger` — at `:error` for 5xx, `:warning` for 4xx,
+      `:info` otherwise — with the resolved request role as the user field.
+      With `log-query` on, the SQL the request executed (recorded into
+      `Bier.RequestLog`'s process-scoped accumulator at the execution sites) is
+      logged under the same filter, each statement single-lined. `log-level`
+      never alters the response itself.
+
+  The headers are written in `Plug.Conn.register_before_send/2` callbacks, which
+  fire synchronously while the response is sent — at which point every phase the
   request ran (recorded into `Bier.ServerTiming`'s process-scoped accumulator as
   it went) is available, including `response`, since `Bier.Render` records its
-  rendering time before the caller calls `send_resp`. `log-level` is a
-  logging-only concern and never alters the response, so it is not handled here.
+  rendering time before the caller calls `send_resp`.
   """
 
   @behaviour Plug
 
   import Plug.Conn
 
+  require Logger
+
   alias Bier.Registry
+  alias Bier.RequestLog
 
   @impl Plug
   def init(opts), do: opts
@@ -51,10 +63,52 @@ defmodule Bier.Plugs.Observability do
     # by the instance name (a node can host several Bier instances).
     request_start = Bier.Telemetry.request_start(request_metadata(conn, name))
 
+    # Arm the per-request SQL accumulator only when log-query is on, so the
+    # execution sites' record calls stay no-ops otherwise (mirrors the
+    # ServerTiming reset above).
+    RequestLog.arm(config.log_query)
+
     conn
     |> echo_trace_header(config)
     |> register_before_send(&put_server_timing(&1, config))
     |> register_before_send(&emit_request_stop(&1, name, request_start))
+    |> register_before_send(&log_request(&1, config))
+  end
+
+  # ---- access log / log-query ----------------------------------------------
+
+  defp log_request(conn, config) do
+    if RequestLog.should_log?(config.log_level, conn.status) do
+      level = logger_level(conn.status)
+      role = role_of(conn)
+
+      Logger.log(level, fn -> RequestLog.access_line(conn, role, DateTime.utc_now()) end)
+
+      for sql <- RequestLog.drain() do
+        Logger.log(level, fn -> single_line(sql) end)
+      end
+    end
+
+    conn
+  end
+
+  # The resolved request role from the auth context (`Bier.Auth`); nil (logged
+  # as "-") when the request failed before role resolution or auth is not
+  # applicable — matching PostgREST's user field.
+  defp role_of(conn) do
+    case conn.assigns[:bier_auth] do
+      %{role: role} -> role
+      _no_auth_context -> nil
+    end
+  end
+
+  defp logger_level(status) when status >= 500, do: :error
+  defp logger_level(status) when status >= 400, do: :warning
+  defp logger_level(_status), do: :info
+
+  # PostgREST single-lines each logged query (Logger.hs showOnSingleLine).
+  defp single_line(sql) do
+    sql |> String.split("\n") |> Enum.map_join(" ", &String.trim/1)
   end
 
   # ---- request span --------------------------------------------------------

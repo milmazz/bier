@@ -269,6 +269,10 @@ defmodule Bier.Mutation do
     # already existed before the upsert.
     existed = put_existed?(tx, write.relation, write.mutation)
 
+    # The request's main statement (log-query); the safeupdate guard and the
+    # PUT-existence probe above are internal bookkeeping and stay unlogged.
+    Bier.RequestLog.record(wrapped)
+
     case Postgrex.query(tx, wrapped, wparams) do
       {:ok, %Postgrex.Result{rows: [[body, count, meta]]}} ->
         count = count || 0

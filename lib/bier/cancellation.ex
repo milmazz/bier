@@ -69,19 +69,24 @@ defmodule Bier.Cancellation do
   defp watchable_socket(_conn), do: :unsupported
 
   defp run_watched(raw, config, fun) do
-    # Server-Timing phases are accumulated in the process dictionary of
-    # whichever process runs the work (`Bier.ServerTiming`), so the task
-    # adopts the request's accumulator and hands it back with the result.
+    # Server-Timing phases and the log-query SQL accumulator live in the
+    # process dictionary of whichever process runs the work
+    # (`Bier.ServerTiming` / `Bier.RequestLog`), so the task adopts the
+    # request's accumulators and hands them back with the result.
     timing = Bier.ServerTiming.export()
+    sql_log = Bier.RequestLog.export()
 
     task =
       Task.async(fn ->
         Bier.ServerTiming.restore(timing)
+        Bier.RequestLog.restore(sql_log)
 
         try do
-          {:ok, fun.(), Bier.ServerTiming.export()}
+          {:ok, fun.(), Bier.ServerTiming.export(), Bier.RequestLog.export()}
         catch
-          kind, reason -> {:caught, kind, reason, __STACKTRACE__, Bier.ServerTiming.export()}
+          kind, reason ->
+            {:caught, kind, reason, __STACKTRACE__, Bier.ServerTiming.export(),
+             Bier.RequestLog.export()}
         end
       end)
 
@@ -125,13 +130,15 @@ defmodule Bier.Cancellation do
     {:error, :client_disconnected}
   end
 
-  defp unwrap({:ok, result, timing}) do
+  defp unwrap({:ok, result, timing, sql_log}) do
     Bier.ServerTiming.restore(timing)
+    Bier.RequestLog.restore(sql_log)
     result
   end
 
-  defp unwrap({:caught, kind, reason, stacktrace, timing}) do
+  defp unwrap({:caught, kind, reason, stacktrace, timing, sql_log}) do
     Bier.ServerTiming.restore(timing)
+    Bier.RequestLog.restore(sql_log)
     :erlang.raise(kind, reason, stacktrace)
   end
 

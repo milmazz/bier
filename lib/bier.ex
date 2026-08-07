@@ -363,6 +363,15 @@ defmodule Bier do
         log every response. Affects logging only, never the response itself.
         """
       ],
+      log_query: [
+        type: :boolean,
+        default: env(:log_query, false),
+        doc: """
+        When `true`, logs the SQL executed for each request (PostgREST
+        log-query), gated by the same `log_level` status filter as the access
+        log. Defaults to `false`.
+        """
+      ],
       openapi_mode: [
         type: {:in, ["follow-privileges", "ignore-privileges", "disabled"]},
         default: env(:openapi_mode, "follow-privileges"),

@@ -513,6 +513,8 @@ defmodule Bier.Rpc do
   end
 
   defp query_then_read_gucs(tx, sql, params) do
+    Bier.RequestLog.record(sql)
+
     with {:ok, result} <- Postgrex.query(tx, sql, params),
          {:ok, guc} <- Bier.Guc.read(tx) do
       {result, guc}
