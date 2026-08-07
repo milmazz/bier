@@ -438,13 +438,15 @@ defmodule Bier.Plugs.ActionController do
     with {:ok, prefs} <- Bier.Preferences.parse_read(conn, pool),
          {:ok, plan} <- parse(conn, config),
          {:ok, %{body: body, count: count}} <-
-           QueryExecutor.run(pool, relation, plan, relations,
-             count_mode: count_mode,
-             max_rows: config.db_max_rows,
-             timezone: prefs.timezone,
-             auth: auth_setup(conn, config),
-             format: MediaType.executor_format(media)
-           ) do
+           Bier.Cancellation.run(conn, config, fn ->
+             QueryExecutor.run(pool, relation, plan, relations,
+               count_mode: count_mode,
+               max_rows: config.db_max_rows,
+               timezone: prefs.timezone,
+               auth: auth_setup(conn, config),
+               format: MediaType.executor_format(media)
+             )
+           end) do
       conn
       |> put_preference_applied(prefs.applied)
       |> Response.render(body, count, plan, count_mode, media,

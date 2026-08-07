@@ -209,15 +209,18 @@ defmodule Bier.Mutation do
       end)
 
     result =
-      Bier.ServerTiming.measure(:transaction, fn ->
-        Postgrex.transaction(pool, fn tx ->
-          run_execute(tx, context, write, wrapped, wparams)
+      Bier.Cancellation.run(conn, write.config, fn ->
+        Bier.ServerTiming.measure(:transaction, fn ->
+          Postgrex.transaction(pool, fn tx ->
+            run_execute(tx, context, write, wrapped, wparams)
+          end)
         end)
       end)
 
     case result do
       {:ok, outcome} -> respond(conn, write, outcome)
       {:error, {:bier_rollback_ok, outcome}} -> respond(conn, write, outcome)
+      {:error, :client_disconnected} = err -> err
       {:error, reason} -> map_write_error(context, reason)
     end
   end
