@@ -13,7 +13,9 @@ defmodule Bier.JWT do
     * empty bearer token                            -> `:empty` (PGRST301, 401)
     * not exactly 3 dot-separated parts             -> `{:parts, n}` (PGRST301, 401)
     * bad base64 / JSON / signature                 -> `:jwt_invalid` (PGRST301, 401)
-    * `exp` in the past                             -> `:expired` (PGRST303, 401)
+    * `exp` more than 30s in the past               -> `:expired` (PGRST303, 401)
+    * `nbf` more than 30s in the future             -> `:not_yet_valid` (PGRST303, 401)
+    * `iat` more than 30s in the future             -> `:issued_at_future` (PGRST303, 401)
     * non-numeric `exp`/`nbf`/`iat`                  -> `{:claim_not_number, claim}` (PGRST303)
     * `aud` not a string / array of strings          -> `:aud_not_string` (PGRST303)
     * audience mismatch (when `jwt-aud` configured)  -> `:not_in_audience` (PGRST303)
@@ -175,8 +177,13 @@ defmodule Bier.JWT do
 
   # ---- claims validation --------------------------------------------------
 
-  # `exp`/`nbf`/`iat` must be numbers when present. `exp` must be in the future;
-  # `nbf` must not be in the future. PostgREST mirrors the JOSE spec here.
+  # PostgREST allows 30 seconds of clock skew between the token issuer and this
+  # server when checking the temporal claims (Auth/Jwt.hs `allowedSkewSeconds`).
+  @allowed_skew_seconds 30
+
+  # `exp`/`nbf`/`iat` must be numbers when present. With the skew allowance:
+  # `exp` fails only once it is more than 30s in the past; `nbf` and `iat` fail
+  # only when more than 30s in the future (Auth/Jwt.hs `inThePast`/`inTheFuture`).
   defp validate_temporal(claims) do
     now = System.system_time(:second)
 
@@ -184,9 +191,17 @@ defmodule Bier.JWT do
          :ok <- check_numeric(claims, "nbf"),
          :ok <- check_numeric(claims, "iat") do
       cond do
-        is_number(claims["exp"]) and claims["exp"] <= now -> {:error, :expired}
-        is_number(claims["nbf"]) and claims["nbf"] > now -> {:error, :jwt_invalid}
-        true -> :ok
+        is_number(claims["exp"]) and claims["exp"] < now - @allowed_skew_seconds ->
+          {:error, :expired}
+
+        is_number(claims["nbf"]) and claims["nbf"] > now + @allowed_skew_seconds ->
+          {:error, :not_yet_valid}
+
+        is_number(claims["iat"]) and claims["iat"] > now + @allowed_skew_seconds ->
+          {:error, :issued_at_future}
+
+        true ->
+          :ok
       end
     end
   end

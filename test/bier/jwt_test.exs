@@ -123,6 +123,48 @@ defmodule Bier.JWTTest do
       assert {:error, :expired} = JWT.validate_claims(%{"exp" => 1}, nil, role_path)
     end
 
+    test "an exp within the 30s clock-skew allowance is still accepted" do
+      role_path = [{:key, "role"}]
+      exp = System.system_time(:second) - 20
+
+      assert {:ok, nil} = JWT.validate_claims(%{"exp" => exp}, nil, role_path)
+    end
+
+    test "an exp beyond the 30s clock-skew allowance is rejected" do
+      role_path = [{:key, "role"}]
+      exp = System.system_time(:second) - 45
+
+      assert {:error, :expired} = JWT.validate_claims(%{"exp" => exp}, nil, role_path)
+    end
+
+    test "an nbf within the 30s clock-skew allowance is accepted" do
+      role_path = [{:key, "role"}]
+      nbf = System.system_time(:second) + 20
+
+      assert {:ok, nil} = JWT.validate_claims(%{"nbf" => nbf}, nil, role_path)
+    end
+
+    test "an nbf beyond the 30s clock-skew allowance is rejected as not yet valid" do
+      role_path = [{:key, "role"}]
+      nbf = System.system_time(:second) + 45
+
+      assert {:error, :not_yet_valid} = JWT.validate_claims(%{"nbf" => nbf}, nil, role_path)
+    end
+
+    test "an iat within the 30s clock-skew allowance is accepted" do
+      role_path = [{:key, "role"}]
+      iat = System.system_time(:second) + 20
+
+      assert {:ok, nil} = JWT.validate_claims(%{"iat" => iat}, nil, role_path)
+    end
+
+    test "an iat beyond the 30s clock-skew allowance is rejected as issued at future" do
+      role_path = [{:key, "role"}]
+      iat = System.system_time(:second) + 45
+
+      assert {:error, :issued_at_future} = JWT.validate_claims(%{"iat" => iat}, nil, role_path)
+    end
+
     test "audience mismatch is rejected when jwt-aud is configured" do
       role_path = [{:key, "role"}]
 
