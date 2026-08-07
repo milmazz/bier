@@ -65,6 +65,38 @@ defmodule Bier.Plugs.FallbackControllerTest do
     assert log =~ "PGRST001"
   end
 
+  test "a not-yet-valid JWT (future nbf) renders 401 PGRST303 'JWT not yet valid'" do
+    conn = FallbackController.call(build_conn(unique_name()), {:error, {:jwt, :not_yet_valid}})
+
+    assert conn.status == 401
+
+    assert decode_body(conn) == %{
+             "code" => "PGRST303",
+             "message" => "JWT not yet valid",
+             "details" => nil,
+             "hint" => nil
+           }
+
+    assert Plug.Conn.get_resp_header(conn, "www-authenticate") ==
+             [~s(Bearer error="invalid_token", error_description="JWT not yet valid")]
+  end
+
+  test "a future-issued JWT (future iat) renders 401 PGRST303 'JWT issued at future'" do
+    conn = FallbackController.call(build_conn(unique_name()), {:error, {:jwt, :issued_at_future}})
+
+    assert conn.status == 401
+
+    assert decode_body(conn) == %{
+             "code" => "PGRST303",
+             "message" => "JWT issued at future",
+             "details" => nil,
+             "hint" => nil
+           }
+
+    assert Plug.Conn.get_resp_header(conn, "www-authenticate") ==
+             [~s(Bearer error="invalid_token", error_description="JWT issued at future")]
+  end
+
   # ---- helpers -------------------------------------------------------------
 
   defp unique_name do

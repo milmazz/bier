@@ -273,6 +273,16 @@ defmodule Bier.Plugs.FallbackController do
     jwt_error(conn, "PGRST303", "JWT expired")
   end
 
+  # `nbf` more than 30s in the future -> 401 PGRST303.
+  def call(conn, {:error, {:jwt, :not_yet_valid}}) do
+    jwt_error(conn, "PGRST303", "JWT not yet valid")
+  end
+
+  # `iat` more than 30s in the future -> 401 PGRST303.
+  def call(conn, {:error, {:jwt, :issued_at_future}}) do
+    jwt_error(conn, "PGRST303", "JWT issued at future")
+  end
+
   # Non-numeric exp/nbf/iat claim -> 401 PGRST303.
   def call(conn, {:error, {:jwt, {:claim_not_number, claim}}}) do
     jwt_error(conn, "PGRST303", "The JWT '#{claim}' claim must be a number")
