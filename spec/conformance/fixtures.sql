@@ -1,5 +1,6 @@
 -- ============================================================================
--- Bier conformance fixtures (CONSOLIDATED) — PostgREST v14.12 parity
+-- Bier conformance fixtures (CONSOLIDATED) — PostgREST parity
+-- (originally v14.12; carries the v16.0 re-sync additions, see FOLDED DELTAS)
 -- ============================================================================
 --
 -- PRIMARY ARTIFACT — this file is the authoritative fixture set for the
@@ -113,6 +114,25 @@
 --                          isodate, bytea_b64, unixtz, monetary, devil_int) all
 --                          live in `public` exactly as upstream; their names do
 --                          not collide with each other or with any table.
+-- ----------------------------------------------------------------------------
+-- FOLDED DELTAS (append one line per fold; see fixtures/README.md)
+-- ----------------------------------------------------------------------------
+-- 2026-08-08  PostgREST v14.12 -> v16.0 spec re-sync. Five per-area deltas
+--             folded in and emptied; no name collided with an existing object,
+--             so nothing was renamed:
+--   * content_negotiation.delta.sql -> public."application/vnd.pgrst.object" and
+--       public."text/tab-separated-values" domains (section 3c);
+--       test.pgrst_obj_json_trans/pgrst_obj_agg and
+--       test.tsv_trans/tsv_final/tsv_agg (section 6, content_negotiation block).
+--       Cases 1642 / 1644 / 1646.
+--   * headers.delta.sql             -> test.get_vary_header_override()
+--       (section 6, headers block) + GRANT (section 9). Case 1576.
+--   * ordering.delta.sql            -> test.arrays (section 4) + its 2 seed rows
+--       (section 8). Cases 1225 / 1226.
+--   * rpc.delta.sql                 -> test."true"() (section 6, rpc block) +
+--       GRANT (section 9). Case 1440.
+--   * url_grammar.delta.sql         -> test.pgrst_reserved_chars (section 4) +
+--       its 3 seed rows (section 8). Case 1029.
 -- ----------------------------------------------------------------------------
 
 BEGIN;
@@ -295,6 +315,17 @@ CREATE DOMAIN public.devil_int AS int DEFAULT 666;
 CREATE DOMAIN public."application/vnd.geo2+json" AS jsonb;
 CREATE DOMAIN public."application/json"          AS json;
 CREATE DOMAIN public."*/*"                        AS bytea;
+
+-- A VENDORED mime modelled as a domain (content_negotiation.delta.sql, case
+-- 1642): registering a handler for it must have NO effect, because
+-- negotiateContent matches the vendored types before consulting the handler
+-- map. The aggregate in section 6 is dead weight by design.
+CREATE DOMAIN public."application/vnd.pgrst.object" AS json;
+
+-- A mime PostgREST does not know (decodes to MTOther => no charset appended to
+-- the response Content-Type). Handled for ONE relation by test.tsv_agg in
+-- section 6 (content_negotiation.delta.sql, cases 1644/1646).
+CREATE DOMAIN public."text/tab-separated-values" AS text;
 
 -- ===========================================================================
 -- 4. Tables + inline FKs (parents declared before children)
@@ -730,6 +761,31 @@ CREATE TABLE test.evil_friends(
   name text
 );
 
+-- arrays (ordering.delta.sql): int[] / int[][] columns exercised by json-path
+-- array-index ordering (cases 1225/1226 — `order=numbers->0.desc`,
+-- `order=numbers_mult->2->2.asc`). Definition mirrors upstream
+-- test/spec/fixtures/schema.sql `create table test.arrays`; the seed rows are
+-- upstream's (section 8) and must not be diverged.
+CREATE TABLE test.arrays (
+  id           int primary key,
+  numbers      int[],
+  numbers_mult int[][]
+);
+
+-- pgrst_reserved_chars (url_grammar.delta.sql): column names carrying every
+-- PostgREST reserved character (`*`, `:`, `(`, `)`, `,`, `.`) plus leading/
+-- inner/trailing spaces, so the %22-quoted-identifier rule can be exercised in
+-- both `select` and a filter key (case 1029). Mirrors upstream
+-- test/spec/fixtures/schema.sql; the surrounding spaces in the seed values come
+-- from upstream's `COPY ... CSV DELIMITER '|'`.
+CREATE TABLE test.pgrst_reserved_chars (
+  "*id*" integer,
+  ":arr->ow::cast" text,
+  "(inside,parens)" text,
+  "a.dotted.column" text,
+  "  col  w  space  " text
+);
+
 -- ---------------------------- schema: private ------------------------------
 CREATE TABLE private.stuff (
   id integer PRIMARY KEY,
@@ -988,6 +1044,23 @@ begin
 end;
 $$ LANGUAGE plpgsql;
 
+-- get_vary_header_override (headers.delta.sql, case 1576): v16.0 appends a
+-- default `Vary: Accept, Prefer, Range` only when the response does not already
+-- carry a Vary. Setting Vary through the `response.headers` GUC (merged in
+-- before that check) therefore replaces the default verbatim rather than adding
+-- a second Vary. Upstream drives the same override through a `db-pre-request`
+-- function, which the conformance runner cannot set per case; the GUC payload
+-- below is the docs' own example. Routine shape mirrors
+-- test.get_int_and_guc_headers above so the scalar body renders as in case 1566.
+CREATE FUNCTION test.get_vary_header_override() RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  PERFORM set_config('response.headers', '[{"Vary": "Accept, Prefer, X-Test-Vary"}]', true);
+  RETURN 1;
+END
+$$;
+
 -- ----------------------- test (content_negotiation.sql) --------------------
 -- getproject / getallprojects are consolidated below (shared with rpc.sql).
 CREATE OR REPLACE FUNCTION test.unnamed_bytea_param(bytea) RETURNS bytea AS $$
@@ -1033,6 +1106,48 @@ CREATE OR REPLACE FUNCTION test.ret_any_mt()
 RETURNS public."*/*" AS $$
   SELECT 'any'::public."*/*";
 $$ LANGUAGE sql;
+
+-- An override attempt on the VENDORED application/vnd.pgrst.object (case 1642).
+-- negotiateContent matches the vendored types before it consults the handler
+-- map, so this aggregate must never be dispatched to. Its sfunc returns NULL, so
+-- an implementation that DID wrongly dispatch would answer `null` instead of the
+-- singular object — which is exactly what case 1642 detects.
+CREATE OR REPLACE FUNCTION test.pgrst_obj_json_trans(
+  state public."application/vnd.pgrst.object",
+  next  anyelement
+) RETURNS public."application/vnd.pgrst.object" AS $$
+  SELECT NULL::public."application/vnd.pgrst.object";
+$$ LANGUAGE sql;
+
+CREATE AGGREGATE test.pgrst_obj_agg(anyelement) (
+  initcond = '{"overridden": "true"}',
+  stype    = public."application/vnd.pgrst.object",
+  sfunc    = test.pgrst_obj_json_trans
+);
+
+-- A custom media type handled for ONE relation (cases 1644/1646). The aggregate
+-- is defined over the test.projects row type, so it is only negotiable on
+-- /projects and only with the default select (the defaultSelect gate in
+-- Plan/Negotiate.hs) — hence the 406 of case 1646 when `select=` is explicit.
+CREATE OR REPLACE FUNCTION test.tsv_trans(state text, next test.projects)
+RETURNS public."text/tab-separated-values" AS $$
+  SELECT (
+    state || next.id::text || E'\t' || next.name || E'\t' ||
+    coalesce(next.client_id::text, '') || E'\n'
+  )::public."text/tab-separated-values";
+$$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION test.tsv_final(data public."text/tab-separated-values")
+RETURNS public."text/tab-separated-values" AS $$
+  SELECT (E'id\tname\tclient_id\n' || data)::public."text/tab-separated-values";
+$$ LANGUAGE sql;
+
+CREATE AGGREGATE test.tsv_agg(test.projects) (
+  initcond  = '',
+  stype     = public."text/tab-separated-values",
+  sfunc     = test.tsv_trans,
+  finalfunc = test.tsv_final
+);
 
 -- ------------------------------ test (rpc.sql) -----------------------------
 CREATE FUNCTION test.add_them(a integer, b integer) RETURNS integer
@@ -1162,6 +1277,15 @@ CREATE FUNCTION test.computed_designers(test.videogames) RETURNS SETOF test.desi
 CREATE FUNCTION test.computed_videogames(test.designers) RETURNS SETOF test.videogames
   LANGUAGE sql STABLE
   AS $$ SELECT * FROM test.videogames WHERE designer_id = $1.id $$;
+
+-- "true" (rpc.delta.sql, case 1440): a routine whose name is a PostgreSQL
+-- reserved word must still be reachable at /rpc/<name>. Declares no volatility,
+-- so it is VOLATILE — deliberately: GET runs it in a read-only transaction and a
+-- VOLATILE routine that performs no write must still succeed (contrast case
+-- 1427, where nextval() raises 25006 -> 405).
+CREATE FUNCTION test."true"() RETURNS boolean
+    LANGUAGE sql
+    AS $_$ select true; $_$;
 
 -- ----------------------------- test (errors.sql) ---------------------------
 -- (raise_pt402 already defined above with rpc.sql; rest follow.)
@@ -1593,6 +1717,20 @@ INSERT INTO test.datarep_next_two_todos VALUES (1, 2, 3, 'school related');
 INSERT INTO test.datarep_next_two_todos VALUES (2, 1, 3, 'do these first');
 -- evil_friends intentionally has NO seed rows.
 
+-- test.arrays (ordering.delta.sql) — upstream test/spec/fixtures/data.sql rows.
+INSERT INTO test.arrays (id, numbers, numbers_mult) VALUES
+  (0, '{1,2,3}',    '{{1,2,3},{4,5,6},{7,8,9}}'),
+  (1, '{11,12,13}', '{{11,12,13},{14,15,16},{17,18,19}}');
+
+-- test.pgrst_reserved_chars (url_grammar.delta.sql) — the leading/trailing
+-- spaces are load-bearing (case 1029 asserts them verbatim).
+INSERT INTO test.pgrst_reserved_chars
+  ("*id*", ":arr->ow::cast", "(inside,parens)", "a.dotted.column", "  col  w  space  ")
+VALUES
+  (1, ' arrow-1 ', ' parens-1 ', ' dotted-1 ', ' space-1'),
+  (2, ' arrow-2 ', ' parens-2 ', ' dotted-2 ', ' space-2'),
+  (3, ' arrow-3 ', ' parens-3 ', ' dotted-3 ', ' space-3');
+
 -- private.stuff
 INSERT INTO private.stuff (id, name) VALUES (1, 'stuff 1');
 
@@ -1642,6 +1780,10 @@ GRANT EXECUTE ON FUNCTION
   test.reset_table(), test.getallusers(), test.root()
   TO postgrest_test_anonymous, postgrest_test_author;
 
+-- folded deltas: reserved-word RPC (case 1440) + the Vary GUC override (1576).
+GRANT EXECUTE ON FUNCTION test."true"() TO postgrest_test_anonymous;
+GRANT EXECUTE ON FUNCTION test.get_vary_header_override() TO postgrest_test_anonymous;
+
 -- author: owns/guards authors_only + privileged_hello.
 GRANT ALL ON TABLE test.authors_only TO postgrest_test_author;
 REVOKE EXECUTE ON FUNCTION test.privileged_hello(text) FROM PUBLIC;
@@ -1661,4 +1803,15 @@ COMMIT;
 -- planner-dependent behavior is the ROWS estimate on getallprojects()/
 -- get_projects_above() consumed by count=planned cases, which is intentional
 -- and unchanged across PG14-18.
+--
+-- 2026-08-08 (v16.0 delta fold): re-verified end to end with
+-- `mix bier.fixtures.load`, which drops/recreates bier_test and loads this file
+-- with `psql -v ON_ERROR_STOP=1 -f` before mirroring the area schemas — clean,
+-- zero errors. The folded objects were then spot-checked against their cases:
+-- test.tsv_agg over projects 1-2 yields exactly the 47 bytes of case 1644;
+-- test."true"() => true (1440); test.get_vary_header_override() => 1 with
+-- response.headers set to the Vary payload (1576); test.arrays orders 1,0 by
+-- numbers->0 desc and 0,1 by numbers_mult->2->2 asc (1225/1226); and
+-- test.pgrst_reserved_chars row "*id*"=1 renders the four quoted columns with
+-- the surrounding spaces of case 1029.
 -- ============================================================================

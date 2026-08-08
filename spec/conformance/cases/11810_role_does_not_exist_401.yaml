@@ -1,0 +1,32 @@
+id: 11810
+feature: auth/role-switching/role-does-not-exist
+request:
+  method: GET
+  path: /authors_only
+  headers: { Accept: application/json }
+  jwt:
+    sign_with: hs256_test_secret
+    payload: { "role": "not existing" }
+schema: auth
+preconditions: []
+expect:
+  status: 401
+  body_exact:
+    {
+      "code": "22023",
+      "details": null,
+      "hint": null,
+      "message": 'role "not existing" does not exist',
+    }
+notes: >-
+  New in v16.0 as a black-box assertion (it lived in test/io/test_auth.py at
+  v14.12 and only asserted the message). The token verifies and the claims
+  validate, so role extraction yields `not existing`; the failure happens later,
+  when the transaction issues the role switch. Postgres raises SQLSTATE 22023
+  (invalid_parameter_value), which PostgREST special-cases: 22023 is normally
+  400, but a message starting with `role` and ending in `does not exist` maps to
+  401 (Error.hs#L561-L563, upstream issue #3601). The envelope is the plain
+  Postgres one -- code is the SQLSTATE, not a PGRST* code. Case 11808 reaches
+  the same 401 through a `jwt-role-claim-key` pointing at an `aud` element;
+  this case is the default `$.role` path with the exact body pinned.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L120

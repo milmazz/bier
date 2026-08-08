@@ -1,57 +1,67 @@
 # Coverage
 
-Maps every page of the PostgREST **v14** documentation
-([postgrest.org/en/v14](https://postgrest.org/en/v14)) to the conformance case
-ids that cover it. The docs-page list follows the v14 site's **References**
+Maps every page of the PostgREST **v16** documentation
+([postgrest.org/en/v16](https://postgrest.org/en/v16/)) to the conformance case
+ids that cover it. The docs-page list follows the v16 site's **References**
 section and its **API** sub-pages.
 
 A docs page with no covering case (and not explicitly scoped out below) is
 flagged **GAP**.
 
-Pinned target: **PostgREST v14.12**. Total cases: **532** across 17 areas.
+Pinned target: **PostgREST v16.0**. Total cases: **611** across 17 areas
+(counted on disk this pass, not carried over).
 
 ## References → API sub-pages
 
 | Docs page (`references/api/...`) | Covering case ids | Notes |
 |----------------------------------|-------------------|-------|
-| `tables_views` (Tables and Views) | 1000–1027 (url_grammar), 1050–1099 (operators), 1100–1137 (select), 1150–1187 (filters), 1200–1222 (ordering), 1300–1332 (representations), 1350–1395 (mutations) | Read/write of tables & views: path resolution, horizontal/logical filters, operators, vertical filtering (select), ordering, insert/update/delete/upsert. |
-| `functions` (Functions as RPC) | 1400–1439 (rpc), 1005–1007 (url_grammar /rpc paths), 1023 (rpc profile), 1489–1490 (auth rpc) | GET/POST RPC, scalar/setof/composite/void returns, args, variadic, volatility, overloaded functions, single unnamed JSON parameter. |
-| `schemas` (Schemas) | 1008–1012, 1022, 1023 (url_grammar profile), 1557–1560, 1574 (headers profile), 1024 (table not in schema) | Accept-Profile / Content-Profile, multi-schema routing, unacceptable schema. |
-| `computed_fields` (Computed Fields) | 1128 (select computed-column), 1208 (ordering computed) | Computed (virtual) columns in select and order. |
-| `domain_representations` (Domain Representations) | 1800–1814 (domain_representations) | **COVERED**: CREATE DOMAIN cast representations — read (format cast shapes output), write (parser cast applied to bodies), filter (domain-typed predicates), default (no cast → base type). |
-| `pagination_count` (Pagination and Count) | 1250–1277 (pagination), 1700–1701 (db-max-rows) | limit/offset, Range header, exact/planned/estimated count, db-max-rows. |
-| `resource_embedding` (Resource Embedding) | 1112–1127 (select embed/spread), 1134–1135 (select one-to-one embed), 1136–1137 (select computed relationships), 1181–1187 (filters embed), 1211–1222 (ordering embed), 1276 (nested limit), 1133 (agg in embed) | Many-to-one/one-to-many/many-to-many, one-to-one (pk-as-fk, unique FK), computed relationships, nested, inner/left, disambiguation, spread. |
-| `resource_representation` (Resource Representation) | 1300–1332 (representations), 1550–1556 (Prefer), 1610–1615 (singular), 1630–1635 (nulls-stripped) | Prefer: return=representation/minimal, singular object, vnd.pgrst.object, stripped nulls. |
-| `media_type_handlers` (Media Type Handlers) | 1600–1638 (content_negotiation, incl. 1636–1638 custom-media-handler), 1426 (rpc csv), 1622–1624 (octet-stream) | JSON/CSV/GeoJSON/octet-stream/text, Accept negotiation, custom media handlers (anyelement, override-builtin, any-handler), plan output. |
-| `aggregate_functions` (Aggregate Functions) | 1129–1133 (select aggregate) | count/sum/group-by/alias+cast, agg in embed. |
-| `openapi` (OpenAPI) | 1619–1621 (content_negotiation openapi), 1650–1682 (openapi) | Root spec, comments→summary/description, type mapping, modes, security. |
-| `preferences` (Prefer Header) | 1550–1556 (headers prefer), 1302–1303, 1322 (return=minimal), 1551–1552 (handling), 1553–1554 (timezone), 1555–1556, 1390–1392 (max-affected) | Prefer: return, handling=strict/lenient, timezone, max-affected, missing-defaults via columns. |
+| `tables_views` (Tables and Views) | 1000–1029 (url_grammar), 1050–1099 (operators), 1100–1141 (select), 1150–1190 (filters), 1200–1226 (ordering), 1300–1333 (representations), 1350–1397 (mutations) | Read/write of tables & views: path resolution, horizontal/logical filters, operators, vertical filtering (select), ordering, insert/update/delete/upsert. |
+| `functions` (Functions as RPC) | 1400–1440 (rpc), 1005–1007 (url_grammar /rpc paths), 1023 (rpc profile), 1489–1490 (auth rpc), 1570 (rpc status GUC) | GET/POST RPC, scalar/setof/composite/void returns, args, variadic, volatility, overloaded functions, single unnamed JSON parameter, reserved-word function name (1440). |
+| `schemas` (Schemas) | 1008–1012, 1022–1024 (url_grammar profile), 1557–1560, 1574 (headers profile), 1730 (`db-schema` singular alias), 1733–1734 (`db-schemas` rejects `pg_catalog` / `information_schema`) | Accept-Profile / Content-Profile, multi-schema routing, unacceptable schema, restricted system schemas (new in v16). |
+| `computed_fields` (Computed Fields) | 1128 (select computed-column), 1208 (ordering computed), 1806 (domain rep. via view + computed column) | Computed (virtual) columns in select and order. |
+| `domain_representations` (Domain Representations) | 1800–1820 (domain_representations) | **COVERED**: CREATE DOMAIN cast representations — read (format cast shapes output, incl. implicit `select=*` and through-embed), write (parser cast applied to bodies, `columns=` param), filter (domain-typed predicates, `in`/`not.in`, across relations), default (no cast → base type), error paths (1819–1820). |
+| `pagination_count` (Pagination and Count) | 1250–1277 (pagination), 1431 (rpc Range header), 1700–1701 (db-max-rows) | limit/offset, Range header, exact/planned/estimated count, db-max-rows. |
+| `resource_embedding` (Resource Embedding) | 1112–1127, 1133–1141 (select embed/spread/one-to-one/computed rels/aliases), 1181–1190 (filters embed), 1211–1224 (ordering embed/related), 1276 (nested limit), 1028 (legacy embed target name), 1736 (`url-use-legacy-target-names` dump) | Many-to-one/one-to-many/many-to-many, one-to-one (pk-as-fk, unique FK), computed relationships, nested, inner/left, disambiguation, spread, and the v16 target-name→alias migration (1028, 1138–1141, 1188–1190, 1224). |
+| `resource_representation` (Resource Representation) | 1300–1333 (representations), 1550–1556 (Prefer), 1610–1615, 1629 (singular), 1630–1635 (nulls-stripped) | Prefer: return=representation/minimal/headers-only, singular object, vnd.pgrst.object, stripped nulls. |
+| `media_type_handlers` (Media Type Handlers) | 1600–1646 (content_negotiation, incl. 1636–1638/1642/1644/1646 custom-media-handler), 1426 (rpc csv) | JSON/CSV/GeoJSON/octet-stream/text, Accept negotiation and precedence (1639–1641, 1645), custom media handlers (anyelement, override-builtin, any-handler, vendored-not-overridable, table aggregate, default-select requirement), plan output. |
+| `aggregate_functions` (Aggregate Functions) | 1129–1133 (select aggregate), 1644 (aggregate through a custom media handler) | count/sum/group-by/alias+cast, agg in embed. |
+| `openapi` (OpenAPI) | 1650–1682 (openapi), 1619–1621, 1645 (content_negotiation openapi) | Root spec, comments→summary/description, type mapping, modes, security, `db-root-spec`. |
+| `preferences` (Prefer Header) | 1550–1556, 1577–1581 (headers prefer), 1302–1304, 1313–1314, 1322, 1324, 1332–1333 (return=minimal / headers-only), 1390–1392 (max-affected), 1551–1552 (handling), 1553–1554, 1577–1581 (timezone) | Prefer: return, handling=strict/lenient, timezone (incl. ± offsets, leap seconds, invalid under default/lenient/strict), max-affected, missing-defaults via `columns`. |
+| `vary_header` (Vary Header) | 1575 (default `Vary: Accept, Prefer, Range`), 1576 (`response.headers` GUC override replaces it verbatim) | **NEW page in v16** — covered. |
 | `cors` (CORS) | 1702–1704 (config CORS) | Allowed-origin echo, empty config allows all, non-matching origin. |
-| `options` (OPTIONS method) | 1019 (url_grammar options), 1757 (observability OPTIONS server-timing) | OPTIONS Allow header; OPTIONS server-timing subset. Partial — no dedicated OPTIONS-Allow body assertions beyond 1019. |
-| `url_grammar` (URL Grammar) | 1000–1027 (url_grammar), 1013–1016 (reserved params), 1017–1018 (percent-encoding), 1025–1027 (reserved-character `%22`-quoting in filter values) | Path/method resolution, reserved query params, %-encoding, `+`→space, double-quoting reserved characters in filter values (`in.()`, mixed, `not.in()`). |
+| `options` (OPTIONS method) | 1019 (url_grammar OPTIONS Allow), 1757, 1768–1769 (observability OPTIONS server-timing on table / rpc / root) | OPTIONS Allow header; OPTIONS Server-Timing subset. Partial — no dedicated `Allow`-body assertions beyond 1019. |
+| `url_grammar` (URL Grammar) | 1000–1029 (url_grammar) | Path/method resolution, reserved query params (incl. the legacy embed target name, 1028), %-encoding, `+`→space, double-quoting reserved characters in filter values and in quoted identifiers (1025–1027, 1029). |
 
 ## References → top-level pages
 
 | Docs page (`references/...`) | Covering case ids | Notes |
 |------------------------------|-------------------|-------|
-| `auth` (Authentication) | 1450–1494 (auth) | JWT validation/claims, roles, anonymous, audience, pre-request, GUC claims, login token minting. |
-| `cli` (CLI) | 1705–1730 (config CLI cases) | `--dump-config`, validation, env/file/precedence, coercion, aliases. Implemented by `Bier.CLI` (escript + in-process core), driven in-process by `Bier.CliCase`. Most cases pass; full-table dump (1705) and `--example` (1727) deferred as `:cli_parity`. See **Scope decisions**. |
-| `transactions` (Transactions) | 1387–1392 (safe-update/delete, max-affected), 1722 (db-tx-end), 1713 (db-tx-end validation), 1759 (transaction timing) | Tx-scoped GUCs, safe-update/safe-delete (rollback on missing WHERE), db-tx-end. Partial — no explicit characteristics/isolation-level case. |
-| `connection_pool` (Connection Pool) | — (OUT OF SCOPE) | Pool sizing/acquisition behavior is operational and not observable as deterministic black-box HTTP. See **Scope decisions**. Config surface lives at `db-pool`, `db-pool-acquisition-timeout`, `db-pool-max-lifetime`, `db-pool-max-idletime` (alias `db-pool-timeout`), `db-pool-automatic-recovery` — the config case that would exercise their parsing/aliasing (1707) is itself deferred as `:unmodeled_key` (Bier does not model the pool keys), so no running case covers them today. |
+| `auth` (Authentication) | 1450–1499 + 11800–11818 (auth) | JWT validation/claims, HS256 (incl. binary/base64 secret) and RS256 (JWK and JWKS), roles, role-claim-key JSON Path, anonymous, audience, pre-request, GUC claims, login-token minting, clock-skew errors. Partial — see **Known gaps**. |
+| `cli` (CLI) | 1705–1738 (all 34 `request.kind: cli` cases) | `--dump-config`, `--example`, validation, env/file/db precedence, coercion, aliases. Driven in-process by `Bier.CliCase`. |
+| `transactions` (Transactions) | 1387–1392 (safe-update/delete, max-affected), 1713, 1722 (db-tx-end validation + enum mapping), 1759 (transaction timing) | Tx-scoped GUCs, safe-update/safe-delete (rollback on missing WHERE), db-tx-end. Partial — no explicit characteristics/isolation-level case. |
+| `connection_pool` (Connection Pool) | — (OUT OF SCOPE) | Pool sizing/acquisition behavior is operational and not observable as deterministic black-box HTTP. See **Scope decisions**. |
 | `schema_cache` (Schema Cache) | — (DEFERRED) | Schema-cache reload (`NOTIFY pgrst, 'reload schema'` / SIGUSR1) needs a reload-signal harness. See **Scope decisions**. |
-| `errors` (Errors) | 1500–1516 (errors), 1432–1434 (rpc errors), 1024, 1185 (not-found), 1455–1464 (auth JWT errors) | SQLSTATE→HTTP mapping, PGRST error codes, RAISE PGRST full control, 4xx/5xx envelopes. |
-| `configuration` (Configuration) | 1700–1730 (config) | Sources (env/file/db-role-settings), aliases, validation, coercion, precedence, app-settings. |
-| `observability` (Observability) | 1750–1767 (observability) | Server-Timing, trace header, log-level→status logging. |
-| `admin_server` (Admin Server) | 1717 (admin-port = server-port fatal) | Port-collision validation (case 1717, library-enforced in `Bier.Config`) plus `/live`/`/ready` covered by ExUnit (`test/bier/admin_server_test.exs`). Partial — case 1717 now runs via the CLI harness (`Bier.CliCase`); `/metrics` not yet implemented. |
+| `errors` (Errors) | 1500–1518 (errors), 1432–1434 (rpc errors), 1002, 1024, 1185 (not-found / invalid path), 1455–1464 + 11809–11814 (auth JWT errors), 1506, 1515–1516, 1518 (Proxy-Status envelope) | SQLSTATE→HTTP mapping, PGRST error codes, RAISE PGRST full control, 4xx/5xx envelopes, `Proxy-Status`, client-error-verbosity=minimal. |
+| `configuration` (Configuration) | 1700–1738 (config) | Sources (env/file/db-role-settings), aliases, validation, coercion, precedence, app-settings, plus the v16 keys `client-error-verbosity` (1731–1732), `server-reuseport` (1735), `url-use-legacy-target-names` (1736), `admin-server-unix-socket` (1737–1738). |
+| `observability` (Observability) | 1750–1769 (observability), 1497 (JWT-cache Server-Timing), 1625–1628, 1643 (execution plan), 1506/1515/1516/1518/1002 (Proxy-Status) | Server-Timing, Trace header, log-level→status logging, execution plan, Proxy-Status. Partial — see **Known gaps** (Metrics, SQL query logs, Server version header). |
+| `admin_server` (Admin Server) | 1717 (admin-port = server-port fatal), 1737 (`admin-server-unix-socket` dump), 1738 (admin socket-mode validation) | Config-surface validation via the CLI harness; `/live` and `/ready` covered by ExUnit (`test/bier/admin_server_test.exs`). Partial — `/metrics` and `/schema_cache` have no case. |
+| `http_server` (HTTP Server) | — (OUT OF SCOPE, new page in v16) | The page documents exactly one behavior: Warp's graceful shutdown on `SIGTERM`. See **Scope decisions**. |
 | `listener` (Listener) | — (DEFERRED) | LISTEN/NOTIFY channel (`db-channel`) reload trigger needs the same reload-signal harness. See **Scope decisions**. |
 
 ## Scope decisions
 
-This pass formalizes which uncovered docs pages are intentional vs. true gaps.
+This section formalizes which uncovered docs pages are intentional vs. true
+gaps. Bullets carried over from the previous (v14.12) pass are preserved; the
+three that the current tree contradicts are marked **UPDATED (v16.0)** with the
+old claim and what replaced it.
 
-- **`domain_representations` — now COVERED.** The new area 1800–1814 (15 cases,
-  fixture `fixtures/domain_representations.sql`) exercises domain cast
-  representations end to end (read/write/filter/default). It is no longer a gap.
+- **`domain_representations` — COVERED. UPDATED (v16.0):** the previous entry
+  said "the new area 1800–1814 (15 cases)". On disk the area is now
+  **1800–1820, 21 cases** (fixture `fixtures/domain_representations.sql`),
+  adding implicit-`select=*` formatting (1815), through-embed with `select=*`
+  (1816), `not.in` and cross-relation text-parser filters (1817–1818), and two
+  unknown-column error paths (1819–1820). It exercises domain cast
+  representations end to end (read/write/filter/default) and is not a gap.
 
 - **`connection_pool` — OUT OF SCOPE.** Pool behavior (sizing, acquisition
   timeout, lifetime/idletime recycling, automatic recovery) is an operational
@@ -61,111 +71,226 @@ This pass formalizes which uncovered docs pages are intentional vs. true gaps.
   keys are validated for parsing/aliasing in the config area:
   `db-pool`, `db-pool-acquisition-timeout`, `db-pool-max-lifetime`,
   `db-pool-max-idletime` (alias `db-pool-timeout`), `db-pool-automatic-recovery`.
+  **UPDATED (v16.0):** the previous entry added that "the config case that would
+  exercise their parsing/aliasing (1707) is itself deferred as `:unmodeled_key`,
+  so no running case covers them today." That is no longer true — 1707
+  (`config/aliases`) is a live CLI case, and `case.schema.json` has no
+  `pending`/`pending_reason` field at all (see the `cli` bullet).
 
 - **`schema_cache` — DEFERRED (future work).** Schema-cache reload and
   stale-cache behavior are only testable with a schema-reload-signal harness
   (`NOTIFY pgrst, 'reload schema'` or SIGUSR1) that mutates the live schema mid
   run and asserts the API re-introspects. No such harness exists yet; cases are
-  deferred until one is built.
+  deferred until one is built. (v16 additionally documents an admin
+  `/schema_cache` endpoint — same deferral, no case.)
 
 - **`listener` — DEFERRED (future work).** The LISTEN/NOTIFY channel
   (`db-channel`, `db-channel-enabled`) is the transport for the same
   reload-signal harness. Deferred together with `schema_cache`.
 
-- **`cli` (config CLI cases 1705–1730) — now COVERED, with honest deferrals.**
-  `Bier.CLI` provides a standalone, drop-in PostgREST-compatible CLI (`PGRST_*`
-  env, kebab config file, `--dump-config`), driven in-process by `Bier.CliCase`.
-  The 15 cases that map onto config Bier implements pass (1706, 1708–1710,
-  1712, 1713, 1717, 1719–1723, 1726, 1728, 1730). The rest keep an explicit
-  `pending_reason` instead of a parity façade: `:cli_parity` (full default-table
-  dump 1705, `--example` 1727 — would require modeling keys Bier does not
-  implement); `:unmodeled_key` (1707, 1711, 1714, 1715, 1716, 1718, 1729 —
-  `jwt-role-claim-key`, `server-unix-socket-mode`, `openapi-server-proxy-uri`,
-  `jwt-secret-is-base64`, `app.settings.*`); `:db_config` (1724, 1725 — DB
-  role-settings source, needs a live connection at parse time). Standalone
-  packaging (`mix release` + Dockerfile) and `--ready` are tracked in #45.
+- **`http_server` — OUT OF SCOPE (new page in v16).** The whole page documents
+  Warp's graceful shutdown on `SIGTERM`: stop accepting new requests, let
+  in-flight requests finish, close idle `Keep-Alive` connections, and mark
+  shutdown responses non-reusable (`Connection: close` on HTTP/1.x). Asserting
+  any of that requires signalling the server process mid-flight and observing
+  connection reuse — outside the request/response shape `case.schema.json`
+  expresses, and non-deterministic as a black-box case. No case authored; not
+  counted as a gap in the summary below, but recorded here so the page is not
+  silently dropped.
+
+- **`cli` (config CLI cases) — COVERED. UPDATED (v16.0):** the previous entry
+  described the band as 1705–1730 with 15 passing cases and a per-case
+  `pending_reason` taxonomy (`:cli_parity`, `:unmodeled_key`, `:db_config`).
+  Neither half survives contact with the tree: the CLI band is now
+  **1705–1738 (34 cases)**, and **no spec case carries `pending` or
+  `pending_reason`** — those are not properties of `case.schema.json`; they were
+  harness-side tags. The harness's only remaining deferral is `:status_text`
+  (`test/conformance/conformance_test.exs`), which excludes the **6** cases that
+  assert `expect.status_text` (1508–1511, 1513–1514) because `Req` does not
+  expose the HTTP reason phrase. The `:db_config` deferrals were retired when the
+  in-database config source landed. `Bier.CLI` provides the standalone,
+  drop-in PostgREST-compatible CLI (`PGRST_*` env, kebab config file,
+  `--dump-config`); standalone packaging (`mix release` + Dockerfile) is tracked
+  in #45.
 
 ## Coverage summary
 
-- Docs pages enumerated: **24** (15 API sub-pages + 9 top-level reference pages,
-  counting `url_grammar` once).
-- Pages with at least one covering case: **20**.
-- Pages explicitly scoped: **3** — `connection_pool` (out of scope),
-  `schema_cache` (deferred), `listener` (deferred).
+- Docs pages enumerated: **27** — 16 API sub-pages + 11 top-level reference
+  pages (the `references/api` parent page is counted once, through its
+  sub-pages; `url_grammar` is counted once).
+- Pages with at least one covering case: **23**.
+- Pages explicitly scoped: **4** — `connection_pool` (out of scope),
+  `http_server` (out of scope, new in v16), `schema_cache` (deferred),
+  `listener` (deferred).
 - Pages flagged **GAP** (no covering case and not scoped out): **0**.
 
-`domain_representations`, previously a gap, is now covered. The remaining three
-uncovered pages are deliberate scope decisions (one operational, two deferred
-pending a reload-signal harness), not unaddressed gaps.
+Two pages are new in v16 relative to the previous pass: `api/vary_header`
+(covered, 1575–1576) and `http_server` (scoped out — see above).
 
-Several pages are marked **Partial** in the notes above (OPTIONS, transactions,
-admin_server): they have covering cases but not the full breadth of the docs
-page. These are tracked as soft gaps, not hard gaps.
+Several pages are marked **Partial** in the notes above (`options`,
+`transactions`, `admin_server`, `observability`, `auth`): they have covering
+cases but not the full breadth of the docs page. These are soft gaps, itemized
+next.
+
+## Known gaps
+
+Soft gaps — documented public behavior with no conformance case. None of these
+is a citation defect; each is recorded because the ground truth to cite either
+does not exist upstream at v16.0, or cannot be expressed in the current case
+shape.
+
+### auth (adversarial review verdict: **revise** — all findings informational)
+
+- **`kid` verification.** Docs *JWT Signature Verification → Asymmetric Keys →
+  kid verification*: a JWT whose `kid` matches no key in a JWKS is rejected 401;
+  a JWT without `kid` falls back to trying each key. No case. The reviewer
+  independently confirmed the gap's justification: `kid` appears nowhere in
+  `test/io/*` or `test/spec/Feature/Auth/*` at v16.0, and the new
+  `AsymmetricJwtSpec` JWKSet context uses a **single-key** set — so no black-box
+  ground truth exists to cite. Informational, not a defect.
+- **`jwt-role-claim-key` `search()` filter.** The *JWT Role Extraction* docs name
+  `search()` as the only JSON Path function available, and `CHANGELOG.md#L91`
+  makes it the replacement for the removed `^==` / `==^` / `*==` operators. No
+  case. Verified: no `search(` occurrence in `test/io/fixtures/fixtures.yaml` at
+  v16.0, so "no fixture exercises it end-to-end" is accurate.
+- **Multi-request behaviors** — blocked on `case.schema.json` expressiveness, and
+  correctly disclosed as gaps rather than approximated:
+  (a) `JwtCacheSpec.hs#L20`/`#L35` assert *cross-request* properties (the second
+  JWT parse duration ≤ the first); case 1497 pins only the single-shot 200, and
+  the `jwt;dur=` metric itself is pinned by observability case 1750.
+  (b) `AuthSpec.hs#L138` "recovers after 401 error with logged in user" is a
+  three-request ordered sequence.
+- **Deliberately not carried over (available strengthenings, not defects):** the
+  upstream `Content-Length` matchers on `AuthSpec.hs#L24`/`#L37`/`#L102` (96 /
+  97 / 100) for cases 1450/1451/1455, and the `Proxy-Status` header on the
+  PGRST301 response (`ErrorSpec.hs#L51`) for 1457. Both are disclosed in
+  `auth.yaml`'s `gaps:`, and the `Proxy-Status` envelope behavior is already
+  pinned by the errors area (1002, 1506, 1515–1516, 1518).
+- Further auth gaps recorded in `spec/auth.yaml` (`gaps:`): ES256 and EdDSA
+  verification (library-supported, no upstream test at v16.0), JWKS multi-key
+  rotation, and relative-time claim values (the 30 s clock-skew *boundary* is
+  modeled but unconstrained, because `request.jwt.payload` is a static object —
+  upstream never asserts the inside-the-window side either).
+
+### observability
+
+- **Metrics** (`/metrics`, plus the schema-cache / connection-pool / JWT-cache /
+  GHC runtime metric families) — no case; the admin `/metrics` endpoint is not
+  implemented.
+- **SQL query logs** (`log-query`) — documented in v16, implemented in Bier
+  (`log-query` CLI config key), but no conformance case pins it.
+- **Server version header** — no case asserts the `Server: postgrest/<version>`
+  response header.
+
+### admin_server
+
+- `/metrics` and `/schema_cache` endpoints have no case (`/live` and `/ready`
+  are covered by ExUnit, not by the conformance suite).
+
+### options / transactions
+
+- `options`: no dedicated assertions on the `Allow` header contents beyond 1019.
+- `transactions`: no explicit transaction-characteristics / isolation-level case.
 
 ## Validation status
 
-Machine-verified on 2026-07-14 (fixtures loaded into `bier_test`; schema and id
-checks run over every file on disk):
+Machine-verified on **2026-08-08** against branch `spec/postgrest-v16`
+(HEAD `83cc92b` plus the uncommitted/untracked spec changes). Fixtures were
+loaded into `bier_test`; schema, id, pin, and relation checks were run over
+every file on disk.
 
 - **Fixture load: OK.** `mix bier.fixtures.load` loaded
-  `spec/conformance/fixtures.sql` into `bier_test` and reported the area schemas
-  built. The loaded DB inspected fine (21 non-system namespaces, 602 relations,
-  1013 procs).
-- All **532** cases parse as YAML.
-- All **532** cases validate against `case.schema.json`
-  (`jsonschema` Draft 2020-12; **0** invalid cases).
-- **532** files, **532** distinct ids — **no duplicate ids**.
-- All **532** cases carry a `source:` field on the
-  `raw.githubusercontent.com/PostgREST/postgrest/v14.12/...#L<n>` pattern
-  required by `case.schema.json` (verified on disk this pass — 0 cases use the
-  non-raw `github.com/.../blob/` form, and **no stale pin** to a non-`v14.12`
-  tag exists anywhere in `spec/`).
-- Each of the 17 areas occupies a contiguous, non-overlapping
-  band (1000–1027, 1050–1099, 1100–1137, 1150–1187, 1200–1222, 1250–1277,
-  1300–1332, 1350–1395, 1400–1439, 1450–1494, 1500–1516, 1550–1574, 1600–1638,
-  1650–1682, 1700–1730, 1750–1767, 1800–1814).
+  `spec/conformance/fixtures.sql` and exited 0, reporting the mirrored area
+  schemas (`operators, ordering, pagination, representations, mutations, config,
+  domain_representations`). The loaded DB inspected fine: **23** non-system
+  schemas, **618** relations, **1027** functions.
+- All **611** cases parse as YAML. **0** parse errors.
+- All **611** cases validate against `case.schema.json` (`jsonschema`
+  Draft 2020-12) — **0** invalid cases.
+- **611** files, **611** distinct ids — **no duplicate ids**.
+- **Source pins: clean.** All **611** cases carry a `source:` on the
+  `raw.githubusercontent.com/PostgREST/postgrest/v16.0/...#L<n>` pattern
+  (`611 postgrest/v16.0`, zero cases on any other tag and zero on the non-raw
+  `github.com/.../blob/` form).
+- **Stale-pin sweep:** the only two `v14.12` strings inside the case/spec
+  documents were prose in `README.md:64` and `COVERAGE.md:119` illustrating the
+  *shape* of a `source:` URL, not real citations; both were rewritten to `v16.0`
+  in this pass. **Noted, out of scope:** three frozen fixture-provenance files
+  still carry `v14.12` URLs in comments — `fixtures/ordering.sql` (27),
+  `fixtures/auth.sql` (4), `fixtures/config.sql` (2). Per
+  `conformance/fixtures/README.md` those files are historical provenance and
+  explicitly **not authoritative** (the live artifact is `fixtures.sql`), so they
+  were deliberately left alone.
+- **Id bands.** Sixteen areas each occupy one contiguous band; two areas are
+  non-contiguous and must stay that way: **representations** (1300–1314,
+  1320–1324, 1330–1333 — the gaps are deliberate sub-feature spacing) and
+  **auth** (1450–1499 **+ 11800–11818** — the overflow band, the only 5-digit
+  ids in the tree).
 - **Relation coverage: no genuine gaps.** A first-path-segment check against the
-  loaded fixtures found **9** cases whose target relation/function does not
-  exist — every one is an intentional **404 negative-path** test, not a missing
-  fixture: 1001 (`test.first`), 1002 (`test.invalid`), 1360 (`mutations.garlic`),
-  1368 (`mutations.fake`), 1373 (`mutations.foozle`), 1432 (`rpc.fake` RPC),
-  1515 (`test.non_existent_table`), 1516 (`test.invalid`),
-  1765 (`observability.unknown`). No success-expecting case targets a missing
-  relation.
+  loaded fixtures — run **alias-aware**, resolving each case's `schema:` *label*
+  through `test/support/conformance_server.ex` (`db_schema_aliases`,
+  `db_profile_default`/`db_profile_schemas`, and `http_case.ex`'s suppression of
+  `Accept-Profile` for `null`/`public`/`test`) — checked **535** targets and
+  found **15** whose relation/function does not exist. Every one is an
+  intentional negative case whose target is *supposed* to be absent:
+  1001, 1002 (404), 1010, 1012 (406), 1024 (404 — the table exists only in `v2`,
+  which is the point), 1360, 1368, 1373 (404), 1432 (404, function), 1515, 1516,
+  1517 (404), 1560 (406), 1652 (406), 1765 (404). **Zero** success-expecting case
+  targets a missing relation. (A naive label→schema check reports 30 missing;
+  15 of those are false positives from treating the label as a schema name.)
+- **All five `*.delta.sql` write channels are empty** — the fixture
+  Consolidator folded them into `fixtures.sql`.
+
+### Open verification finding (carry into the conformance run)
+
+**None of the three `openapi`-area fixture-set labels names a schema that exists
+in the loaded DB, and the labels are inert.** All 33 openapi cases carry one of
+`openapi` (31), `openapi_no_schema_comment` (1654) or `openapi_variadic` (1672).
+`test/support/http_case.ex` turns each into an `Accept-Profile: <label>` request
+header, yet `mix bier.fixtures.load` creates none of them — confirmed directly
+against the loaded DB: `select nspname from pg_namespace where nspname like
+'openapi%'` returns only `openapi_no_comment`. The area's objects live in schema
+`test` (`spec/conformance/fixtures/openapi.sql:24–41`: `CREATE SCHEMA IF NOT
+EXISTS test; CREATE TABLE test.entities …`), and the loader deliberately does
+**not** mirror `openapi` (`lib/mix/tasks/bier.fixtures.load.ex:29` —
+"Function-heavy areas (rpc, openapi, headers) are intentionally NOT mirrored").
+
+Why it is currently harmless, and why that is itself worth recording:
+`Bier.Plugs.ActionController.dispatch/3` routes the root path (`conn.path_info
+== []`) straight to `dispatch_root/2` **without** calling `resolve_profile/2`,
+and `build_openapi_document/2` selects `hd(config.db_schemas)`. The root document
+is therefore always generated from the *first* configured schema (`test` on the
+shared instance; `openapi_no_comment` on the 1654 variant), and the
+`Accept-Profile` header these 32 root cases send is ignored end to end. The
+labels assert nothing today, and they would break the moment root-path profile
+resolution is implemented. Case 1652 (`GET /entities` under `Accept-Profile:
+openapi`, expects 406) is the only openapi case that reaches relation dispatch;
+`reject_openapi_media/1` runs before relation resolution
+(`action_controller.ex:329–341`), so its 406 is plausibly reached for the right
+reason, but it is the one to re-check first.
+
+Resolving this belongs to the harness/fixture owner — `test/**` is frozen to
+spec work, and `fixtures/openapi.sql` is frozen provenance (its header still
+reads "Derived from PostgREST v14.12 test/spec/fixtures/schema.sql"; the live
+artifact `fixtures.sql` is what actually loads). Note this is **not** a v16.0
+regression: the same mismatch existed at the previous pin and simply was not
+surfaced, because the relation check only inspects the first path segment and
+these cases request `/`.
 
 ## Review status
 
-An adversarial citation audit — re-fetching each cited `source:` line and
-confirming it still asserts what the case claims — ran across **all 17 areas**
-on **2026-07-14**, with a follow-up fix pass applied to the areas that needed
-it. Result per area:
+The v16.0 re-sync re-pinned **every** case `source:` from `v14.12` to `v16.0`, so
+the per-area audit verdicts recorded by the v14.12 pass no longer describe the
+citations on disk and are not carried forward. All 17 area behavior models are
+marked `version: v16.0` and each closes with an explicit `gaps:` list.
 
-| Area | Audit result | Fix pass |
-|------|--------------|----------|
-| url_grammar | ✅ pass | — |
-| operators | ⚠️ revise (2 open issues) | ran |
-| select | ⚠️ revise (2 open issues) | ran |
-| filters | ✅ pass | — |
-| ordering | ✅ pass | — |
-| pagination | ✅ pass | — |
-| representations | ✅ pass | ran |
-| mutations | ✅ pass | — |
-| rpc | ✅ pass | — |
-| auth | ✅ pass | — |
-| errors | ✅ pass | — |
-| headers | ✅ pass | — |
-| content_negotiation | ✅ pass | ran |
-| openapi | ✅ pass | ran |
-| config | ✅ pass | — |
-| observability | ⚠️ revise (2 open issues) | ran |
-| domain_representations | ✅ pass | — |
+The adversarial review summary handed to this synthesis covers **auth**:
 
-- **Passed (14):** url_grammar, filters, ordering, pagination, representations,
-  mutations, rpc, auth, errors, headers, content_negotiation, openapi, config,
-  domain_representations. (`representations`, `content_negotiation`, and
-  `openapi` passed *after* a fix pass corrected their flagged citations.)
-- **Needs revision (3):** operators, select, observability — each still carries
-  **2 open issues** after its fix pass ran.
+| Area | v16.0 audit result | Nature of findings |
+|------|--------------------|--------------------|
+| auth | ⚠️ revise | 4 informational gaps, **0 citation defects** — the reviewer independently re-verified each gap's justification against v16.0 sources and confirmed all four are correct. See **Known gaps → auth**. |
+| every other area | not re-audited in the input to this pass | Citations are self-reported at the v16.0 pin. |
 
-Open follow-ups from the audit: resolve the 2 remaining citation issues in each
-of **operators**, **select**, and **observability** (6 total).
+Open follow-up: run `bier-spec-audit` over the 16 areas without a recorded v16.0
+adversarial verdict, and re-check the `openapi` label finding above before
+trusting that area's results.
