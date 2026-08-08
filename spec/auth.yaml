@@ -79,10 +79,52 @@ jwt_verification:
     # "Expected 3 parts in JWT; got N".
     wrong_parts: {status: 401, code: PGRST301, message: "Expected 3 parts in JWT; got 2"}
     wrong_parts_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L117
+    # Re-asserted verbatim by the v16.0 ErrorSpec "JWT Token format errors"
+    # block (see decode_errors below).
+    wrong_parts_source_alt: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L191
     # All PGRST301 / PGRST303 decode/claims errors carry a WWW-Authenticate
     # header: Bearer error="invalid_token", error_description="<message>".
     invalid_token_header_format: 'Bearer error="invalid_token", error_description="<message>"'
     invalid_token_header_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L684
+  # -------------------------------------------------------------------------
+  # Decode-stage failures (jose `JWT.decode` errors), NEW as black-box
+  # assertions in v16.0.
+  #
+  # At the v14.12 pin these three were asserted only by the process-level io
+  # suite (test/io/test_auth.py::test_jwt_errors, deleted in v16.0); v16.0 moved
+  # them into the hspec suite as Feature/Query/ErrorSpec.hs "JWT Errors" /
+  # "Test JWT Token format errors", which pins the full response envelope. The
+  # behavior itself did not change between the pins — only its ground-truth
+  # tier did (io test -> black-box test), which is why cases exist for them now.
+  #
+  # All three are PGRST301/401; `details` is what distinguishes them.
+  # -------------------------------------------------------------------------
+  decode_errors:
+    dispatch_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Auth/Jwt.hs#L99
+    details_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L676
+    # Structurally valid token whose signature does not verify under any
+    # configured key -> jose KeyError. `details` carries jose's message.
+    wrong_secret:
+      status: 401
+      code: PGRST301
+      message: "No suitable key or wrong key type"
+      details: "None of the keys was able to decode the JWT"
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L107
+    # Three parts of garbage -> jose BadCrypto. No details.
+    bad_crypto:
+      status: 401
+      code: PGRST301
+      message: "JWT cryptographic operation failed"
+      details: null
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L203
+    # `alg: none` (unsecured JWT) -> jose BadAlgorithm. `details` carries jose's
+    # message. An unsigned token must never authenticate.
+    algorithm_none:
+      status: 401
+      code: PGRST301
+      message: "Wrong or unsupported encoding algorithm"
+      details: "JWT is unsecured but expected 'alg' was not 'none'"
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L215
   error_codes:
     # Canonical JWT error code -> message map (source of truth). Unchanged
     # between v14.12 and v16.0; only the file location moved.
@@ -106,12 +148,27 @@ claim_validation:
   # Expired token (exp in the past) -> 401 PGRST303 "JWT expired".
   expired: {status: 401, code: PGRST303, message: "JWT expired"}
   expired_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L106
+  # v16.0 re-asserts the same error at the skew boundary (exp = now - 35s), in
+  # the new ErrorSpec "we allow 30 seconds clock skew" context.
+  expired_skew_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L134
   # A far-future exp verifies.
   unexpired_ok:
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L82
   # NEW in v16.0: a numeric iat that is not in the future verifies.
   iat_valid_ok:
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L87
+  # nbf numerically in the future (beyond the 30s skew) -> 401 PGRST303.
+  # NEW as a black-box assertion in v16.0: at v14.12 this lived only in
+  # test/io/test_auth.py::test_jwt_errors, which v16.0 deleted after moving the
+  # assertion into ErrorSpec's "we allow 30 seconds clock skew" context.
+  nbf_future: {status: 401, code: PGRST303, message: "JWT not yet valid"}
+  nbf_future_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L148
+  nbf_future_impl_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Auth/Jwt.hs#L59
+  # iat numerically in the future (beyond the 30s skew) -> 401 PGRST303.
+  # Same provenance as nbf_future.
+  iat_future: {status: 401, code: PGRST303, message: "JWT issued at future"}
+  iat_future_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L162
+  iat_future_impl_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Auth/Jwt.hs#L60
   # exp claim present but not a number -> 401 PGRST303.
   exp_not_number: {status: 401, code: PGRST303, message: "The JWT 'exp' claim must be a number"}
   exp_not_number_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L145
@@ -156,28 +213,45 @@ audience:
     # String aud not matching -> 401 PGRST303 "JWT not in audience".
     string_mismatch: {status: 401, code: PGRST303, message: "JWT not in audience"}
     string_mismatch_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L35
+    # v16.0 adds a second, independent assertion of the same error in
+    # ErrorSpec's "Test JWT Audience error" block (jwt-aud = "spec tests").
+    string_mismatch_source_alt: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L177
     # Empty string aud -> treated as a non-matching value -> 401.
     empty_string_mismatch: {status: 401, code: PGRST303, message: "JWT not in audience"}
     empty_string_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L49
-    # Single-element array aud containing the configured value -> 200.
+    # Single-element array aud containing the configured value -> 200. Its own
+    # upstream it-block, distinct from the multi-element match below (case 11817).
     array_single_match_ok:
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L64
     # Array aud containing the configured value (any position) -> 200.
     array_contains_ok:
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L76
-    # Array aud not containing the configured value -> 401.
+    # Single-element array aud NOT containing the configured value -> 401. The
+    # negative counterpart of array_single_match_ok, and its own upstream
+    # it-block distinct from array_no_match below (case 11818). A one-element
+    # array must not be conflated with the ignored empty-array branch.
+    array_single_no_match: {status: 401, code: PGRST303, message: "JWT not in audience"}
+    array_single_no_match_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L88
+    # Array aud (multi-element) not containing the configured value -> 401.
     array_no_match: {status: 401, code: PGRST303, message: "JWT not in audience"}
     array_no_match_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L103
     # Empty array aud -> audience ignored -> 200 (`null auds || any ...`).
     empty_array_ignored:
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L117
     empty_array_impl_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Auth/Jwt.hs#L76
-    # null aud -> audience ignored -> 200.
+    # Explicit `aud: null` -> audience ignored -> 200. Own it-block, distinct
+    # from empty_array_ignored (case 11816).
     null_ignored:
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L129
-    # Absent aud claim -> 200.
+    # Absent aud claim: the audience check is SKIPPED entirely (the claims
+    # decoder does `parseMaybe (.:? "aud")`, so a missing key yields Nothing and
+    # `audMatchesCfg` is never applied) -> 200. This is NOT the same as the
+    # no-JWT branch below, which short-circuits before claim validation
+    # (case 11815 vs case 1494).
     absent_ok:
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L142
+    absent_impl_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Auth/Jwt.hs#L84
+    absent_check_site_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Auth/Jwt.hs#L61
     # No JWT at all -> the audience check never runs -> 200.
     no_jwt_ok:
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L153
@@ -257,6 +331,18 @@ role_switching:
     # does not exist -> SQLSTATE 22023 -> 401 (special-cased).
     nonexistent_role: {key: "$.aud[1]", status: 401, source: "https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L183"}
     nonexistent_role_status_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L563
+  # The same 401 is reached through the DEFAULT `$.role` path when the token
+  # simply names a role that does not exist. NEW as a black-box assertion in
+  # v16.0 (ErrorSpec "JWT Errors"); at v14.12 only test/io/test_auth.py, now
+  # deleted, asserted it — and only the message, not the envelope. The response
+  # carries the raw Postgres envelope: `code` is the SQLSTATE 22023, not a
+  # PGRST* code, and `details`/`hint` are null.
+  role_does_not_exist:
+    status: 401
+    code: "22023"
+    message: 'role "not existing" does not exist'
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L120
+    status_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L561
   # With no JWT, requests run as the configured db-anon-role
   # (postgrest_test_anonymous in the fixtures).
   anon_role_when_no_jwt:
@@ -304,7 +390,12 @@ role_switching:
 pre_request:
   config_key: db-pre-request
   config_alias: pre-request
-  config_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L179
+  # The option parser, where both the canonical key and its deprecated alias are
+  # declared: `optWithAlias (optString "db-pre-request") (optString "pre-request")`
+  # — the same parseAppConfig block that declares jwt-aud (#L304) and
+  # jwt-role-claim-key (#L305). (Config.hs#L179 is only the --dump-config output
+  # row for db-pre-request; it never mentions the alias.)
+  config_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L291
   # In v16.0 the pre-request call moved into its own module; it is still a bare
   # `select <proc>()` issued after the transaction variables (role included)
   # are set.
@@ -409,27 +500,113 @@ gaps:
      defined (Error.hs#L659) but no v16.0 Feature/Auth test exercises kid
      matching against a multi-key JWKS — the new JWKSet context uses a
      single-key set. Omitted."
-  - "JWTNotYetValid / JWTIssuedAtFuture (nbf/iat numerically in the future):
-     error variants exist (Error.hs#L667-L668) and the 30s skew window is in
-     source (Auth/Jwt.hs#L64), but no v16.0 test asserts the live behavior for a
-     future nbf/iat value. Only the 'not a number' validation and (new in
-     v16.0) the valid-iat happy path are test-anchored."
-  - "needed_assertion: repeat-request. Feature/Auth/JwtCacheSpec.hs asserts
-     properties across TWO identical requests (second JWT parse duration <= the
-     first; both succeed). case.schema.json has no way to express 'issue this
-     request N times and compare responses', so case 1497 pins only the
-     single-shot 200. An assertion style like `repeat: 2` plus per-response
-     assertions (or a `header_monotonic` comparator on Server-Timing) would be
-     needed to cover the cache-hit behavior."
-  - "harness: the new cases 1495-1499 and 11800-11808 all carry a per-case
-     `config:` block (jwt-role-claim-key / jwt-aud / jwt-secret /
-     jwt-cache-max-entries / server-timing-enabled). test/support/
+  - "needed_assertion: relative-time claim values. Upstream expresses its time
+     claims as `relativeSeconds N` against the wall clock, deliberately picking
+     ±35s — 5s outside the 30s allowance — under the context name 'we allow 30
+     seconds clock skew' (ErrorSpec.hs#L133-L174); `relativeSeconds 0` is the
+     valid-iat counterpart (AuthSpec.hs#L88). `request.jwt.payload` is a static
+     JSON object, so cases 11811/11812 (and 1456) can only use fixed sentinels
+     far outside the window — they pin the error, not its boundary. Expressing
+     the boundary needs a relative-time primitive in the payload, e.g.
+     `exp: {relative_seconds: -35}` resolved by the harness at request time.
+     Until then the 30s allowance (Auth/Jwt.hs#L64) is modeled here but no case
+     constrains it, in either direction. Note that upstream itself never asserts
+     the inside-the-window side (e.g. exp = now-25s succeeding) either, so a
+     case for that would have no ground truth to cite."
+  - "NOT EXPANDED (deliberate): AudienceJwtSecretSpec's `disabledSpec` block
+     (jwt-aud unset) repeats the SAME assertion — aud is ignored, 200 — once per
+     aud shape: string #L160, empty string #L172, 1-element array #L185,
+     multi-element array #L197, empty array #L209, null #L221, absent #L234, no
+     JWT #L245. `audMatchesCfg` degenerates to `const True` when jwt-aud is
+     unset (Config.hs#L71), so the aud value is never inspected and all eight
+     it-blocks exercise one code path. Only the first is modeled
+     (`when_jwt_aud_unset.any_aud_ignored`, case 1474); the other seven would be
+     seven copies of one case. Every it-block of the ENABLED `spec` block
+     (jwt-aud set) is, by contrast, now pinned one-for-one: #L23->1468,
+     #L35->1469, #L49->1470, #L64->11817, #L76->1471, #L88->11818, #L103->1472,
+     #L117->1473, #L129->11816, #L142->11815, #L153->1494."
+  - "needed_assertion: multi-request sequences. TWO upstream behaviors need a
+     case shape that can issue more than one request, which case.schema.json
+     cannot express today; both are modeled nowhere else, so they are recorded
+     here rather than silently dropped.
+     (a) Feature/Auth/JwtCacheSpec.hs asserts properties across two IDENTICAL
+     requests (second JWT parse duration <= the first; both succeed). Case 1497
+     pins only the single-shot 200. An assertion style like `repeat: 2` plus
+     per-response assertions (or a `header_monotonic` comparator on
+     Server-Timing) would cover the cache-hit behavior.
+     (b) AuthSpec.hs#L138 'recovers after 401 error with logged in user' is a
+     three-request SEQUENCE with DIFFERENT requests: an unauthenticated
+     `POST /authors_only` (which 401s), then `POST /rpc/problem` with a valid
+     postgrest_test_author token (which errors inside the proc), then
+     `GET /authors_only` with that same token, which must return 200 — i.e. a
+     failed request must not poison the connection/transaction state for the
+     next one. Expressing it needs an ordered `requests:` list with the
+     assertion attached to the last element; approximating it with the final
+     GET alone would assert nothing about recovery, so no case was authored.
+     Source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L138"
+  - "id-band: the v16.0 re-sync grew auth from 45 to 69 cases. The first 5
+     additions filled the primary band to its ceiling (1495-1499); with
+     1450-1499 then FULL (all 50 ids in use), the remaining 19 went to the
+     closed overflow band this run assigned to auth, 11800-11818. Those 19 are
+     the only 5-digit case ids in the whole tree, and because `11800` sorts
+     immediately after `1180` they interleave with the filters area's 1180-1189
+     cases in any lexical (non-numeric) listing. They were deliberately NOT
+     renumbered into a free 4-digit band: the assigned overflow range is this
+     fan-out's cross-area collision-avoidance mechanism, and straying outside it
+     could collide with a concurrently-running area's allocation. Action for the
+     harness/index owner: spec/conformance/INDEX.md must record auth as
+     `1450-1499 + 11800-11818`, 69 cases — this pass edited that row in place,
+     and any regeneration of INDEX.md must preserve the two-range band rather
+     than re-deriving a single contiguous one. If the tree later standardizes on
+     4-digit ids, renumber 11800-11818 as one atomic pass across all areas."
+  - "harness: per-case `config:` blocks in this area. test/support/
      conformance_server.ex spins a dedicated instance only for ids listed in its
-     hard-coded `@variant_case_ids`, so these ids must be added there (harness
-     owner) before they can run. Case 1495 additionally needs the symbolic
-     jwt-secret value `asymmetric_jwks_public_key` registered next to the
-     existing `asymmetric_jwk_public_key` (the same RS256 public JWK wrapped as
-     `{\"keys\": [ ... ]}`)."
+     hard-coded `@variant_case_ids`; everything else runs on the shared `auth`
+     instance (jwt_secret \"reallyreallyreallyreallyverysafe\", db_anon_role
+     postgrest_test_anonymous, db_pre_request auth.switch_role, jwt-aud unset,
+     default role-claim-key `$.role`). Exact inventory, from grepping `^config:`
+     over the cases whose `feature:` starts with auth — (a) ALREADY
+     variant-backed: 1467, 1468, 1469, 1470, 1471, 1472, 1473, 1491, 1493.
+     (b) MUST BE ADDED by the harness owner — they carry `config:`, are not
+     listed, and the pinned expectation depends on that config: 1495, 1498, 1499,
+     11800, 11801, 11802, 11803, 11804, 11805, 11806, 11807, 11808, 11815, 11816,
+     11817, 11818. The last four are the aud cases this pass added; each sets
+     `jwt-aud: youraudience`, exactly like the already-variant-backed 1468-1473,
+     and 11815/11816/11817 would FALSELY pass on the shared instance (where
+     jwt-aud is unset, so every aud is ignored and 200 is reached for the wrong
+     reason) — they only constrain anything once the variant runs. Case 1495
+     additionally needs the symbolic jwt-secret value
+     `asymmetric_jwks_public_key` registered next to the existing
+     `asymmetric_jwk_public_key` (the same RS256 public JWK wrapped as
+     `{\"keys\": [ ... ]}`); the harness `resolve/1` maps only the latter today.
+     (c) carry `config:` and are not listed, but the shared `auth` instance
+     already satisfies them so the expectation holds either way (adding them is
+     harmless, not required): 1466 — its `jwt-secret` is the base64 spelling of
+     those same 32 secret bytes, which is exactly why the case must carry
+     `jwt-secret` alongside `jwt-secret-is-base64: true`; 1474 (jwt-aud: null =
+     the shared default); 1475, 1476, 1477 (db-pre-request test.switch_role vs
+     the equivalent auth.switch_role mirror the shared instance runs); 1492
+     (db-anon-role: null — a valid token authenticates regardless); 1494
+     (jwt-aud set, but the request carries no JWT); 1497 (jwt-cache-max-entries /
+     server-timing-enabled affect instrumentation only, and the pinned
+     observable is the 200). (d) carry NO `config:` at all and therefore need no
+     harness action: 1496 (a plain `iat` payload case — an earlier pass wrongly
+     counted it among the config-carrying ids) and 11809-11814."
+  - "harness (optional): case 11809 needs a token signed with a secret OTHER
+     than the server's, which `request.jwt.sign_with` cannot name (the harness
+     map holds only `hs256_test_secret`). The token is therefore spelled out as
+     a literal Authorization header, reproducing upstream's
+     `generateJWTWithSecret [json|{}|] \"wrong secret\"` byte for byte
+     (SpecHelper.hs#L230). Registering a second symbolic secret (e.g.
+     `hs256_wrong_secret` -> `wrong secret`) would let that case go back to the
+     declarative `jwt:` form; nothing depends on it."
+  - "Proxy-Status on JWT errors: ErrorSpec.hs#L51 asserts that a PGRST301
+     response also carries `Proxy-Status: PostgREST; error=PGRST301` (and
+     `Content-Length: 89`). That it-block predates the v16.0 pin and the header
+     is generic error-envelope behavior owned by the errors area (cases 1002,
+     1506, 1515-1516, 1518 already pin it for other codes), so no auth case
+     duplicates it. No auth case asserts Proxy-Status today; adding it to case
+     1457 (the same 2-part token) would close it without a new id."
   - "Upstream AuthSpec pins exact `Content-Length` values on three responses
      (96 on the anon 42501 401, 97 on the authenticated 42501 403, 100 on the
      empty-JWT PGRST301 401 — AuthSpec.hs#L24, #L37, #L102). These matchers

@@ -1,0 +1,30 @@
+id: 11813
+feature: auth/jwt/bad-crypto
+request:
+  method: GET
+  path: /authors_only
+  headers:
+    Accept: application/json
+    Authorization: "Bearer quifquirndsjagnrgniur.fonvoienqhhdj.iuqvnvhojah"
+schema: auth
+preconditions: []
+expect:
+  status: 401
+  body_exact:
+    {
+      "code": "PGRST301",
+      "details": null,
+      "hint": null,
+      "message": "JWT cryptographic operation failed",
+    }
+notes: >-
+  New in v16.0 as a black-box assertion (v14.12 had it only in
+  test/io/test_auth.py::test_jwt_errors). Three dot-separated parts of random
+  characters clear the parts check but fail inside `JWT.decode` with jose's
+  `BadCrypto`, mapped to `JwtDecodeErr BadCrypto` (Auth/Jwt.hs#L106) ->
+  PGRST301 "JWT cryptographic operation failed" (Error.hs#L661). `BadCrypto`
+  carries no payload, so `details` stays null -- that is what distinguishes this
+  response from case 11809 (wrong secret -> `KeyError` with a details string)
+  and case 11814 (alg none -> `BadAlgorithm` with a details string), even though
+  all three are PGRST301/401.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L203
