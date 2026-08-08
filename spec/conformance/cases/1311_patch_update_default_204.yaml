@@ -14,5 +14,5 @@ expect:
     Content-Range: "0-0/*"
   headers_absent: [Content-Type, Content-Length]
   body_exact: ""
-notes: "PATCH with no return token yields 204, empty body, no Content-Type/Content-Length, Content-Range 0-0/*. Mirrors UpdateSpec.hs:68."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L68
+notes: "PATCH with no return token yields 204, empty body, no Content-Type/Content-Length, Content-Range 0-0/*. Mirrors UpdateSpec.hs:67."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L67

@@ -16,4 +16,4 @@ expect:
     details: null
     hint: null
 notes: "A single unsupported Accept type yields 406 with PGRST107 and a JSON error body. Mirrors QuerySpec 'unknown accept type with 406'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1179
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1191

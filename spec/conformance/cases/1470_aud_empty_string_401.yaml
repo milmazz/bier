@@ -15,4 +15,4 @@ expect:
   status: 401
   body_exact: { "code": "PGRST303", "details": null, "hint": null, "message": "JWT not in audience" }
 notes: "Empty string aud is a non-matching value -> PGRST303."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L43
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L49

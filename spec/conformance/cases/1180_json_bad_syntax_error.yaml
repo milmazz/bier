@@ -19,4 +19,4 @@ notes: >
   Malformed json path is a 400 PGRST100. Exercises the shared json-path
   parser (pJsonPath) used by both select and filters. Mirrors JsonOperatorSpec
   "gives a meaningful error on bad syntax".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L296
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/JsonOperatorSpec.hs#L308

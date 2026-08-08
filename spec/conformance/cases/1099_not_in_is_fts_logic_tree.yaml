@@ -14,4 +14,4 @@ expect:
 notes: >
   `not` negates in/is/fts inside a logic tree. Mirrors AndOrParamsSpec.hs
   'operators with not' / 'in, is, fts can be negated'.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L190
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L188

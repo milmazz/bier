@@ -1,0 +1,20 @@
+id: 1738
+feature: config/validation/admin-socket-mode-not-octal
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_ADMIN_SERVER_UNIX_SOCKET_MODE: "800"
+preconditions: []
+expect:
+  exit_code: nonzero
+  stderr_contains: "Invalid admin-server-unix-socket-mode: not an octal"
+notes: >
+  NEW in v16.0. parseSocketFileMode is now applied to
+  admin-server-unix-socket-mode too (Config.hs#L329) and its failure messages
+  are built from the key name (#L380/#L383), so an invalid admin socket mode
+  reports the admin key rather than the hard-coded server-unix-socket-mode text
+  used in v14.12. Same 600..777 octal rule as case 1714/1715.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L380

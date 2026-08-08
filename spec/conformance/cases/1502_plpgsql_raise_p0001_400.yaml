@@ -18,4 +18,4 @@ notes: >
   pgErrorStatus maps to HTTP 400 (treated as client input error). The body is
   the standard error envelope. Mirrors RpcSpec.hs "treats simple plpgsql raise
   as invalid input".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L605
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L608

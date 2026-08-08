@@ -14,5 +14,5 @@ expect:
   body_exact:
     - { "id": 1, "name": "parent v1-1" }
     - { "id": 2, "name": "parent v1-2" }
-notes: "No Accept-Profile -> first exposed schema (v1) is used and echoed in Content-Profile. Mirrors MultipleSchemaSpec.hs:22-31."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L22
+notes: "No Accept-Profile -> first exposed schema (v1) is used and echoed in Content-Profile. Mirrors MultipleSchemaSpec.hs:24-33."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/MultipleSchemaSpec.hs#L24

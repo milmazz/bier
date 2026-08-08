@@ -16,4 +16,4 @@ notes: >-
   True) returns a single object (not an array) with null-valued keys omitted;
   Content-Type echoes the stripped singular media type. Mirrors NullsStripSpec
   'strips nulls when Accept: application/vnd.pgrst.object+json;nulls=stripped'.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/NullsStripSpec.hs#L58
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/NullsStripSpec.hs#L56

@@ -15,5 +15,5 @@ notes: >
   limit/offset apply at every nesting level (top-level limit=1, projects.limit=2,
   projects.tasks.limit=1). Embedded limits do not change the top-level
   Content-Range, which reflects only the top-level window '0-0/*'. Mirrors
-  RangeSpec.hs:203.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L203
+  RangeSpec.hs:202.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L202

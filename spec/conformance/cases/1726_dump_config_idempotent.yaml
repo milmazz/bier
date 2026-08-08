@@ -14,4 +14,4 @@ expect:
   exit_code: 0
   dump_reparse_stable: true
 notes: "A dumped config, written back to a file and re-dumped, must be byte-identical. Mirrors test_cli.py:test_stable_config."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L189
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_cli.py#L189

@@ -14,5 +14,6 @@ expect:
 notes: >
   Inserting a child row that references a non-existent parent raises
   foreign_key_violation (23503), which pgErrorStatus maps to HTTP 409.
-  Status mapping asserted at Error.hs:610. The body code is the raw SQLSTATE.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Error.hs#L610
+  Status mapping asserted at Error.hs:554 (mapSQLtoHTTP). The body code is the
+  raw SQLSTATE.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L554

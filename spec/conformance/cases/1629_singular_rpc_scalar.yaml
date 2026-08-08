@@ -14,4 +14,4 @@ expect:
 notes: >-
   A singular request on a scalar RPC result succeeds with 200 (the scalar is
   wrapped as the single object). Mirrors SingularSpec 'succeeds for scalar result'.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L281
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/SingularSpec.hs#L280

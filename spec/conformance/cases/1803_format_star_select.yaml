@@ -41,4 +41,4 @@ expect:
       },
     ]
 notes: "select=* formats every domain column: bytea_b64 -> base64, unixtz -> epoch integer, monetary -> JSON string keeping scale. Mirrors QuerySpec.hs 'formats star select'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1575
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1587

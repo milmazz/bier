@@ -11,4 +11,4 @@ preconditions:
 expect:
   status: 204
 notes: "A filter satisfies pg-safeupdate's WHERE requirement -> 204."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L29
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L31

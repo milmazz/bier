@@ -14,4 +14,4 @@ expect:
     WWW-Authenticate: 'Bearer error="invalid_token", error_description="Empty JWT is sent in Authorization header"'
   body_exact: { "message": "Empty JWT is sent in Authorization header", "code": "PGRST301", "hint": null, "details": null }
 notes: "Empty bearer token -> PGRST301."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L89
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L94

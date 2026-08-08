@@ -16,5 +16,5 @@ expect:
 notes: >
   count=exact on a partial window returns 206 Partial Content with the full
   count after '/'. getitemrange(2,4) yields ids {3,4} (total 2); limit=1
-  offset=1 returns id 4 as window 1-1. Mirrors RpcSpec.hs:69.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L69
+  offset=1 returns id 4 as window 1-1. Mirrors RpcSpec.hs:72.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L72

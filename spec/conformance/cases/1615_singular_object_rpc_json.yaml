@@ -15,4 +15,4 @@ expect:
     Content-Type: application/vnd.pgrst.object+json; charset=utf-8
   body_exact: { "id": 1, "name": "Windows 7", "client_id": 1 }
 notes: "A singular RPC returning a single json proc row returns the single object. Mirrors SingularSpec 'returns a single object for json proc'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L286
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/SingularSpec.hs#L285

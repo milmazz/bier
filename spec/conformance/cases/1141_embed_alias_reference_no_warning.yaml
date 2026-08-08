@@ -1,0 +1,26 @@
+id: 1141
+feature: select/embed/alias/alias-reference-no-warning
+request:
+  method: GET
+  path: "/projects?id=eq.1&select=id,name,the_tasks:tasks(id,name)&the_tasks.order=name.asc"
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  headers_absent: ["Warning"]
+  body_exact:
+    - {"id": 1, "name": "Windows 7", "the_tasks": [{"id": 2, "name": "Code w7"}, {"id": 1, "name": "Design w7"}]}
+notes: >
+  The other side of the v16.0 deprecation boundary (case 1138): addressing an
+  aliased embed by its ALIAS is the supported form and emits no `Warning`
+  header. `readPlanWarning` only fires for a node whose
+  `relIsLegacyTargetNameMatch` is True, and `updateLegacyAttrs` sets that flag
+  only when the addressed name equals the relation name AND differs from the
+  alias (Plan.hs L1032-L1036), so an alias reference never marks the node.
+  Upstream's positive assertion for the alias form is QuerySpec.hs:1159
+  ("ordering embeded entities with alias"), which v16.0 rewrote from
+  `tasks.order` to `the_tasks.order` precisely because of this deprecation.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan.hs#L167

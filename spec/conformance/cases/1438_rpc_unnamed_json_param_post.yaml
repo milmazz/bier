@@ -17,4 +17,4 @@ notes: >
   body as that argument (the body is not destructured into named params); the
   echoing unnamed_json_param returns the body verbatim. This is distinct from the
   deprecated Prefer: params=single-object header.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1149
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1152

@@ -19,4 +19,4 @@ notes: >-
   not explicitly set' (GET /rpc/ret_any_mt, Accept */* -> 200, Content-Type
   application/octet-stream). The same handler also accepts arbitrary media types
   (app/bingo, text/bango, image/boingo) and still emits octet-stream.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/CustomMediaSpec.hs#L322
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L320

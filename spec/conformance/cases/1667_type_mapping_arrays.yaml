@@ -18,5 +18,5 @@ expect:
     - { path: "$.definitions.openapi_types.properties.a_numeric_arr", equals: { format: "numeric[]", type: "array", items: { type: "number" } } }
     - { path: "$.definitions.openapi_types.properties.a_json_arr", equals: { format: "json[]", type: "array", items: {} } }
     - { path: "$.definitions.openapi_types.properties.a_jsonb_arr", equals: { format: "jsonb[]", type: "array", items: {} } }
-notes: "Array types map to type:array with element-typed items; json[]/jsonb[] items are {}. Mirrors OpenApiSpec.hs:543-651"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L543
+notes: "Array types map to type:array with element-typed items; json[]/jsonb[] items are {}. Mirrors OpenApiSpec.hs:542-650"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L542

@@ -14,4 +14,4 @@ expect:
 notes: >
   JSON arrow paths work inside and/or logic groups. Row 4 jsonb_col a.b=foo,
   row 5 jsonb_col b=bar. Mirrors JsonOperatorSpec "can be filtered with and/or".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L173
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/JsonOperatorSpec.hs#L185

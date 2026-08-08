@@ -12,5 +12,5 @@ expect:
   exit_code: 0
   dump_contains:
     - 'db-schemas = "aliased_schema"'
-notes: "Singular db-schema is a deprecated alias for db-schemas. Source Config.hs optWithAlias db-schemas/db-schema (#L273-L274)."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L273
+notes: "Singular db-schema is a deprecated alias for db-schemas. In v16.0 the pair is resolved inside parseDbSchemas (Config.hs#L296, #L361-L371)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L296

@@ -10,5 +10,5 @@ expect:
   status: 200
   body_jsonpath:
     - { path: "$.definitions.child_entities.properties.parent_id.description", equals: "Note:\nThis is a Foreign Key to `entities.id`.<fk table='entities' column='id'/>" }
-notes: "A single-column M2O FK column with no comment gets the FK note only. Mirrors OpenApiSpec.hs:168-172"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L168
+notes: "A single-column M2O FK column with no comment gets the FK note only. Mirrors OpenApiSpec.hs:167-171"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L167

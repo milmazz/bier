@@ -17,4 +17,4 @@ expect:
       { "id": 3, "clr": "\"#01E240\"" },
     ]
 notes: "An explicit ::text cast is applied on top of the representation: the already-formatted JSON string is re-serialized, yielding a quoted string. Mirrors QuerySpec.hs 'formats, renames and allows manual casting on top'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1566
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1578

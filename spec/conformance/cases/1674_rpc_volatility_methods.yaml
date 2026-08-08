@@ -13,5 +13,5 @@ expect:
     - { path: "$.paths['/rpc/reset_table'].post", present: true }
     - { path: "$.paths['/rpc/getallusers'].get", present: true }
     - { path: "$.paths['/rpc/getallusers'].post", present: true }
-notes: "VOLATILE -> POST only; STABLE -> GET+POST. Mirrors OpenApiSpec.hs:1061-1077 and OpenAPI.hs:366-368"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L1061
+notes: "VOLATILE -> POST only; STABLE -> GET+POST. Mirrors OpenApiSpec.hs:1060-1076 and OpenAPI.hs:363-365"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L1060

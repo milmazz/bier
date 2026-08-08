@@ -17,5 +17,5 @@ expect:
   exit_code: 0
   dump_contains:
     - 'server-port = 3000'
-notes: "Non-reloadable keys (e.g. server-port) set via ALTER ROLE pgrst.* are ignored; the value comes from env/file. Mirrors db_config.sql non-reloadable block (#L52)."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/db_config.sql#L52
+notes: "Non-reloadable keys (e.g. server-port) set via ALTER ROLE pgrst.* are ignored; the value comes from env/file. Only the keys listed in Config/Database.hs dbSettingsNames (#L45) are honoured. Mirrors db_config.sql non-reloadable block (#L39-L58)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/db_config.sql#L56

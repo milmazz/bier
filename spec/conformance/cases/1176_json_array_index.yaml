@@ -14,4 +14,4 @@ expect:
 notes: >
   A well-formed integer in a json path is an array index. Only row 1's data
   has element 0 == 1. Mirrors JsonOperatorSpec "can filter by array indexes".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L182
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/JsonOperatorSpec.hs#L194

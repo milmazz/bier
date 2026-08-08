@@ -1,0 +1,30 @@
+id: 1397
+feature: mutations/upsert/put/multi-element-payload-first-only
+request:
+  method: PUT
+  path: /tiobe_pls?name=eq.Java
+  headers:
+    Content-Type: application/json
+    Accept: application/vnd.pgrst.object+json
+    Prefer: return=representation
+  body:
+    - { "name": "Java", "rank": 19 }
+    - { "name": "Swift", "rank": 12 }
+schema: mutations
+preconditions:
+  - "DELETE FROM test.tiobe_pls WHERE name = 'Java';"
+  - "INSERT INTO test.tiobe_pls (name, rank) VALUES ('Java', 1);"
+expect:
+  status: 200
+  headers:
+    Content-Type: application/vnd.pgrst.object+json; charset=utf-8
+  body_exact: { "name": "Java", "rank": 19 }
+notes: >-
+  PUT addresses exactly one resource, so a multi-element JSON array payload does
+  not error: only the FIRST element is applied and returned (the trailing
+  {"name":"Swift"} element is not a second upsert). Upstream first asserts
+  GET /tiobe_pls?name=eq.Java returns [{Java,1}] so the PUT is an update, then
+  asserts the singular body {"name":"Java","rank":19} with
+  matchContentTypeSingular ("application/vnd.pgrst.object+json; charset=utf-8",
+  SpecHelper.hs#L51-L53). Mirrors UpsertSpec.hs#L428-L439.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L428

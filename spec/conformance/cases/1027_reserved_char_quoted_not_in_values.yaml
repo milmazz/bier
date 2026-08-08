@@ -16,4 +16,4 @@ expect:
     - { "name": "Larry Thompson" }
     - { "name": "Double O Seven(007)" }
 notes: 'The same %22 double-quote quoting of reserved characters applies to not.in.(): the three comma-containing names are excluded, leaving the unquoted-name rows. Mirrors QuerySpec "succeeds when only quoted values are present" (upstream get "/w_or_wo_comma_names?name=not.in.(\"Hebdon, John\",\"Williams, Mary\",\"Smith, Joseph\")&limit=3").'
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1296
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1308

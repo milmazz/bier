@@ -1,0 +1,24 @@
+id: 1769
+feature: observability/server-timing/options-root
+request:
+  method: OPTIONS
+  path: /
+  headers: {}
+schema: observability
+config:
+  server-timing-enabled: true
+preconditions: []
+expect:
+  status: 200
+  headers_present: [Server-Timing]
+  headers_match:
+    Server-Timing: "jwt;dur=[0-9]+\\.[0-9]+.*parse;dur=[0-9]+\\.[0-9]+.*response;dur=[0-9]+\\.[0-9]+"
+  headers_absent_in_value:
+    Server-Timing: [plan, transaction]
+  body_exact: null
+notes: >
+  OPTIONS on the root document carries only the jwt, parse and response timing
+  metrics; plan and transaction are absent. Third assertion of the same
+  upstream it-block that cases 1757 (table) and 1768 (rpc) cover. Mirrors
+  ServerTimingSpec.hs:104-111.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ServerTimingSpec.hs#L104

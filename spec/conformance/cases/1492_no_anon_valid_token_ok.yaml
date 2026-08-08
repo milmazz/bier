@@ -13,4 +13,4 @@ preconditions: []
 expect:
   status: 200
 notes: "With anon disabled, a valid token still authenticates normally."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/NoAnonSpec.hs#L15
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/NoAnonSpec.hs#L15

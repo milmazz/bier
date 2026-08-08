@@ -15,4 +15,4 @@ expect:
     - { "id": 4, "name": "OSX", "client_id": 2 }
     - { "id": 5, "name": "Orphan", "client_id": null }
 notes: "eq(any) -> `id = ANY('{3,4,5}')`. Mirrors QuerySpec.hs any/all quantifiers 'works with the eq operator'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1494
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1506

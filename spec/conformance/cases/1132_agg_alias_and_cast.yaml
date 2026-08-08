@@ -20,4 +20,4 @@ expect:
 notes: >
   Aggregate output alias plus result cast: total_charged:invoice_total.sum()::text
   (AggregateFunctionsSpec.hs:76; alias form documented at L69).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L76
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L76

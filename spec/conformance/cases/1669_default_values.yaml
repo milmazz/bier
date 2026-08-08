@@ -15,5 +15,5 @@ expect:
     - { path: "$.definitions.openapi_defaults.properties.numeric.default", equals: 42.2 }
     - { path: "$.definitions.openapi_defaults.properties.date.default", equals: "1900-01-01" }
     - { path: "$.definitions.openapi_defaults.properties.time.default", equals: "13:00:00" }
-notes: "Column defaults surfaced as JSON-decoded default values; string casts/quotes stripped. Mirrors OpenApiSpec.hs:654-708"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L654
+notes: "Column defaults surfaced as JSON-decoded default values; string casts/quotes stripped. Mirrors OpenApiSpec.hs:653-707"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L653

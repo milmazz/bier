@@ -18,5 +18,5 @@ expect:
     Preference-Applied: "return=headers-only"
   headers_absent: [Content-Type]
   body_exact: ""
-notes: "return=headers-only yields 201, empty body, and a Location header pointing at the created row by PK. Mirrors InsertSpec.hs:131."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L131
+notes: "return=headers-only yields 201, empty body, and a Location header pointing at the created row by PK. Mirrors InsertSpec.hs:128."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L128

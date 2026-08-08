@@ -1,0 +1,25 @@
+id: 1768
+feature: observability/server-timing/options-rpc
+request:
+  method: OPTIONS
+  path: /rpc/getallprojects
+  headers: {}
+schema: observability
+config:
+  server-timing-enabled: true
+preconditions: []
+expect:
+  status: 200
+  headers_present: [Server-Timing]
+  headers_match:
+    Server-Timing: "jwt;dur=[0-9]+\\.[0-9]+.*parse;dur=[0-9]+\\.[0-9]+.*response;dur=[0-9]+\\.[0-9]+"
+  headers_absent_in_value:
+    Server-Timing: [plan, transaction]
+  body_exact: null
+notes: >
+  OPTIONS on an RPC endpoint carries only the jwt, parse and response timing
+  metrics; plan and transaction are absent because no query plan is built and
+  no database transaction is opened. Second assertion of the same upstream
+  it-block that case 1757 covers for a table. Mirrors
+  ServerTimingSpec.hs:96-103.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ServerTimingSpec.hs#L96

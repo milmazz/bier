@@ -14,4 +14,4 @@ expect:
     Content-Range: "*/*"
   headers_absent: [Content-Type, Content-Length]
 notes: "DELETE existing row with no return= -> 204, Content-Range */*."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L17
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L15

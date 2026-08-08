@@ -14,4 +14,4 @@ expect:
     - { "k": "xyyx", "extra": "u" }
     - { "k": "xYYx", "extra": "v" }
 notes: "ilike is case-insensitive; `*` rewritten to `%`. Mirrors QuerySpec.hs 'matches with ilike'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L143
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L148

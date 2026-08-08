@@ -1,0 +1,29 @@
+id: 1224
+feature: ordering/embed/legacy_target_name_warning
+request:
+  method: GET
+  path: /projects?id=eq.1&select=id,name,the_tasks:tasks(id,name)&tasks.name=like.Code*&tasks.order=name.asc&tasks.limit=1
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  headers_match:
+    Warning: '^299 \S+ "Embedded resource was referenced by relation name even though it has an alias\. This is deprecated and will stop working in a future release\. Update `tasks` to `the_tasks` in query string filters, orders or limits\."$'
+  body_exact:
+    - id: 1
+      name: "Windows 7"
+      the_tasks:
+        - { id: 2, name: "Code w7" }
+notes: >
+  NEW in v16.0. Under the default url-use-legacy-target-names=true an aliased
+  embed may still be addressed by its relation name in filters/orders/limits
+  (`tasks.order=` for `the_tasks:tasks(...)`); the request succeeds but the
+  response carries a deprecation Warning header. Upstream emits
+  `299 PostgRESTv<major.minor> "<msg> Update `tasks` to `the_tasks` in query
+  string filters, orders or limits."` — the product token is the server's own
+  identity, so it is matched as `\S+` rather than pinned to PostgREST's literal
+  version string; every other byte of the header is asserted exactly.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1183

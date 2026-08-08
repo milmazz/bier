@@ -11,5 +11,5 @@ expect:
   body_jsonpath:
     - { path: "$.paths['/rpc/varied_arguments_openapi'].get.summary", equals: "An RPC function" }
     - { path: "$.paths['/rpc/varied_arguments_openapi'].get.description", equals: "Just a test for RPC function arguments" }
-notes: "Function COMMENT -> RPC operation summary/description. Mirrors OpenApiSpec.hs:730-742"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L730
+notes: "Function COMMENT -> RPC operation summary/description. Mirrors OpenApiSpec.hs:729-741"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L729

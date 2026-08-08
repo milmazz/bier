@@ -1,0 +1,30 @@
+id: 1140
+feature: select/embed/alias/same-table-twice-independent-filters
+request:
+  method: GET
+  path: "/projects?id=eq.1&select=name,tasks(id,name),design_tasks:tasks(id,name)&tasks.name=like.Code*&design_tasks.name=like.Design*"
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+config:
+  url-use-legacy-target-names: false
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - name: "Windows 7"
+      tasks: [{"id": 2, "name": "Code w7"}]
+      design_tasks: [{"id": 1, "name": "Design w7"}]
+notes: >
+  New in v16.0 (changelog "Fix unexpected results when embedding and filtering
+  the same table more than once", requires `url-use-legacy-target-names=false`).
+  The same relation may be embedded twice — once plain, once aliased — and each
+  filter resolves to exactly one node because target resolution becomes
+  `fromMaybe relName relAlias == targetNodeName` (Plan.hs `matchTarget`,
+  v16.0 L1027-L1030). Upstream demonstrates this with places/visits
+  (QuerySpec.hs:1699); this case reproduces the same shape on the fixture DB's
+  projects/tasks one-to-many, which exists in bier_test (places/visits do not).
+  Under the legacy resolution both filters would collapse onto whichever node
+  `find` hit first.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1699

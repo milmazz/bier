@@ -9,4 +9,4 @@ preconditions: []
 expect:
   status: 406
 notes: "A singular GET that matches zero rows fails with 406 (cannot coerce to a single object). Mirrors SingularSpec 'fails for zero rows'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L20
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/SingularSpec.hs#L19

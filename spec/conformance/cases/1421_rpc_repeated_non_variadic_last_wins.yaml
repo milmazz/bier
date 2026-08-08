@@ -12,4 +12,4 @@ expect:
     Content-Type: application/json; charset=utf-8
   body_exact: "Hello, world"
 notes: "Repeated query params for a non-VARIADIC scalar param take the last value."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L751
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L754

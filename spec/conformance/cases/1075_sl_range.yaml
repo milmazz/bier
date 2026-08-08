@@ -14,4 +14,4 @@ expect:
     - { "id": 1 }
     - { "id": 2 }
 notes: "sl -> `<<` strictly left of, on numrange. Mirrors AndOrParamsSpec.hs 'can handle range operators'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L142
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L140

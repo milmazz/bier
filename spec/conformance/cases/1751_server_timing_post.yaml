@@ -23,4 +23,4 @@ notes: >
   POST returning representation (201) still emits the full Server-Timing metric
   set (jwt, parse, plan, transaction, response). Mirrors
   ServerTimingSpec.hs:28-36.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L28
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ServerTimingSpec.hs#L28

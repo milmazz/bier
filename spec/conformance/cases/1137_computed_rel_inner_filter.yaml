@@ -17,5 +17,5 @@ notes: >
   A computed relationship works with !inner and a filter on the embedded
   resource: only videogames whose computed designer matches name like
   *Hironobu* are returned, and count=exact yields Content-Range 0-1/2
-  (ComputedRelsSpec.hs:51, within "works with !inner and count=exact").
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ComputedRelsSpec.hs#L51
+  (ComputedRelsSpec.hs:49, within "works with !inner and count=exact").
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ComputedRelsSpec.hs#L49

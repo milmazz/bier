@@ -9,5 +9,5 @@ schema: headers
 preconditions: []
 expect:
   status: 200
-notes: "handling=lenient ignores invalid preferences and succeeds (200). Mirrors PreferencesSpec.hs:47-49."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L46
+notes: "handling=lenient ignores invalid preferences and succeeds (200). Mirrors Preferences/HandlingSpec.hs:44-46."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/HandlingSpec.hs#L44

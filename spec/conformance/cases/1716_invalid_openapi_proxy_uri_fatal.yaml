@@ -12,4 +12,4 @@ expect:
   exit_code: nonzero
   stderr_contains: "Malformed proxy uri, a correct example: https://example.com:8443/basePath"
 notes: "A malformed openapi-server-proxy-uri aborts startup. Mirrors cli fixture 'invalid openapi-server-proxy-uri'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L59
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L59

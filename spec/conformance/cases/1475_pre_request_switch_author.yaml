@@ -16,4 +16,4 @@ expect:
   status: 200
   body_exact: "postgrest_test_author"
 notes: "Pre-request proc reads request.jwt.claims->id (=1) and SET ROLE postgrest_test_author."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L202
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L207

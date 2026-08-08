@@ -15,5 +15,5 @@ expect:
   body_exact: null
 notes: >
   With server-trace-header=X-Request-Id, the incoming X-Request-Id is echoed
-  verbatim on the response (root spec). Mirrors ObservabilitySpec.hs:14-20.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/ObservabilitySpec.hs#L14
+  verbatim on the response (root spec). Mirrors ObservabilitySpec.hs:17-23.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/ObservabilitySpec.hs#L17

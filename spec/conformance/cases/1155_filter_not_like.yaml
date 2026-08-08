@@ -12,4 +12,4 @@ expect:
     Content-Type: application/json; charset=utf-8
   body_exact: [{ "k": "xYYx", "extra": "v" }]
 notes: 'not. negates the like operator. Mirrors QuerySpec "matches with like using not operator".'
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L139
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L144

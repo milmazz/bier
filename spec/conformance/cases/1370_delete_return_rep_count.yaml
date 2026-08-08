@@ -16,4 +16,4 @@ expect:
     Preference-Applied: return=representation, count=exact
   body_exact: [{ "id": 2 }]
 notes: "DELETE return=rep + count=exact -> 200, deleted row(s), Content-Range */1."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L29
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L27

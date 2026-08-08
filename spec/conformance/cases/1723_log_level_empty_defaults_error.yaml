@@ -13,4 +13,4 @@ expect:
   dump_contains:
     - 'log-level = "error"'
 notes: "An empty string for an optString key is treated as absent, so log-level falls back to its default 'error'. Mirrors cli fixture 'log-level='."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L71
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L71

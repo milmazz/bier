@@ -15,4 +15,4 @@ notes: >
   child_entity 3 belongs to entity 2, so the !inner filter keeps only entity 2.
   Mirrors EmbedInnerJoinSpec one-to-many "filters source tables when the
   embedded table is filtered" (eq.3 branch).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L134
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L133

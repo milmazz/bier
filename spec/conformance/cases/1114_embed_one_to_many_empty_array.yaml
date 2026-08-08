@@ -11,5 +11,5 @@ expect:
   headers:
     Content-Type: application/json; charset=utf-8
   body_exact: [{"id":5,"tasks":[]}]
-notes: "rows with no children return [] instead of null (QuerySpec.hs:665)"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L665
+notes: "rows with no children return [] instead of null (QuerySpec.hs:670)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L670

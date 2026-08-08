@@ -1,0 +1,41 @@
+id: 1309
+feature: representations/post/return-headers-only-composite-pk-location
+request:
+  method: POST
+  path: /car_models
+  headers:
+    Prefer: "return=headers-only"
+    Content-Type: application/json
+  body: { "name": "Enzo", "year": 2021 }
+schema: representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Location: "/car_models?name=eq.Enzo&year=eq.2021"
+    Content-Range: "*/*"
+    Content-Length: "0"
+    Preference-Applied: "return=headers-only"
+  headers_absent: [Content-Type]
+  body_exact: ""
+notes: >-
+  A composite primary key renders as MULTIPLE eq. filters in the Location
+  header joined with `&`. locationF aggregates one `<col>=eq.<value>` pair per
+  PK column by walking json_each_text over row_to_json of the inserted row — so
+  the pairs follow the relation's COLUMN order restricted to the PK columns, not
+  the order of the primary-key constraint — and Response.hs renders the pairs
+  with renderSimpleQuery (SqlFragment.hs#L223-L231, Response.hs#L91-L99). For
+  car_models both orders coincide: (name, year). Mirrors
+  the upstream it-block "should not throw and return location header for
+  partitioned tables when selecting without PK" (InsertSpec.hs#L142-L154), which
+  POSTs {"name":"Enzo","year":2021} to /car_models with
+  Prefer: return=headers-only and asserts exactly this Location plus 201,
+  Content-Range */*, Content-Length 0, Preference-Applied: return=headers-only
+  and an absent Content-Type. Upstream declares car_models as a PARTITIONED
+  table; the partitioning is incidental to the Location rule (locationF only
+  reads the inserted row's PK columns), and the consolidated fixture builds
+  car_models as a plain table with the same composite PK (name, year), seeded
+  empty — so the insert always succeeds and affects exactly one row, which is
+  what the `count(_postgrest_t) = 1` guard in Statements.hs#L48 requires for a
+  Location to be produced at all.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L142

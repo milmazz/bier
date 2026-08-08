@@ -18,4 +18,4 @@ expect:
 notes: >
   An RPC call (200) emits the full Server-Timing metric set. Mirrors
   ServerTimingSpec.hs:67-75.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L67
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ServerTimingSpec.hs#L67

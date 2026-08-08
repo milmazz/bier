@@ -1,0 +1,37 @@
+id: 1029
+feature: url_grammar/reserved-characters/quoted-identifier
+request:
+  method: GET
+  path: /pgrst_reserved_chars?select=%22:arr-%3Eow::cast%22,%22(inside,parens)%22,%22a.dotted.column%22,%22%20%20col%20%20w%20%20space%20%20%22&%22*id*%22=eq.1
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - ":arr->ow::cast": " arrow-1 "
+      "(inside,parens)": " parens-1 "
+      "a.dotted.column": " dotted-1 "
+      "  col  w  space  ": " space-1"
+notes: >
+  The dual of the reserved-character rule for filter VALUES (cases 1025-1027):
+  a column identifier containing a PostgREST reserved character must be wrapped
+  in double quotes, percent-encoded as %22, in both `select` and the filter key.
+  Here `*id*` needs the quoting because of `*`, `:arr->ow::cast` because of `:`,
+  `(inside,parens)` because of `(`, `,` and `)`, `a.dotted.column` because of
+  `.`, and `  col  w  space  ` because of its leading/inner/trailing spaces
+  (%20). v16.0 added `*` to the documented reserved set
+  (docs/references/api/url_grammar.rst#L54, changed from v14.12's ", . : ()");
+  `*` is reserved because like/ilike rewrite a `*` in the value into the SQL `%`
+  wildcard (src/library/PostgREST/Query/SqlFragment.hs#L415). The parser itself
+  is byte-identical between the pins. Mirrors QuerySpec "will select and filter
+  a quoted column that has PostgREST reserved characters" (it at L1290, get at
+  L1291, body at L1292). Fixture: test.pgrst_reserved_chars is new here, added
+  in fixtures/url_grammar.delta.sql, mirroring upstream
+  test/spec/fixtures/schema.sql#L1821-L1827 and data.sql#L571-L576; the
+  surrounding spaces in the values come from upstream's
+  `COPY ... CSV DELIMITER '|'` and were reproduced and verified against a
+  loaded bier_test.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1290

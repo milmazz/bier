@@ -1,0 +1,32 @@
+id: 1577
+feature: headers/prefer/timezone-offset-positive
+request:
+  method: GET
+  path: /timestamps
+  headers:
+    Prefer: "timezone=+05:30"
+schema: headers
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: "timezone=+05:30"
+  body_exact:
+    - { "t": "2023-10-18T07:07:59.611-05:30" }
+    - { "t": "2023-10-18T09:07:59.611-05:30" }
+    - { "t": "2023-10-18T11:07:59.611-05:30" }
+notes: >
+  NEW in PostgREST v16.0: a numeric UTC offset is a valid `timezone`
+  preference. Under v14.12 the preference had to be a member of
+  pg_timezone_names (`isTimezonePrefAccepted`), which numeric offsets are
+  not, so `timezone=+05:30` was dropped; v16.0 removed that check
+  (src/library/PostgREST/ApiRequest/Preferences.hs#L138, #L157, #L161-L163) and the
+  value goes straight to the session's TimeZone setting, so the offset is
+  applied AND echoed in Preference-Applied. Note the sign: PostgreSQL reads a
+  bare `+05:30` in POSIX style, so the rendered offset is `-05:30` — the
+  wire bytes below are upstream's and were re-verified against a loaded
+  bier_test (`SET LOCAL TIME ZONE '+05:30'` over headers.timestamps).
+  Mirrors the exact it-block at Preferences/TimezoneSpec.hs:60-68 ("should
+  change with positive offset").
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/TimezoneSpec.hs#L60

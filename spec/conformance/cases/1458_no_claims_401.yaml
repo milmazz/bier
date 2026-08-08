@@ -11,4 +11,4 @@ preconditions: []
 expect:
   status: 401
 notes: "Token with empty claims {} -> no role to switch to -> 401."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L123
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L128

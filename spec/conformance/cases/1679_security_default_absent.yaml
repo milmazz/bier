@@ -11,5 +11,5 @@ expect:
   body_jsonpath:
     - { path: "$.security", absent: true }
     - { path: "$.securityDefinitions", absent: true }
-notes: "By default neither security nor securityDefinitions is present. Mirrors OpenApiSpec.hs:1095-1106"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L1095
+notes: "By default neither security nor securityDefinitions is present. Mirrors OpenApiSpec.hs:1094-1105"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L1094

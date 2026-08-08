@@ -18,5 +18,5 @@ notes: >
   related order on a one-to-one relationship combined with a JSON arrow inside
   the relation reference: order=trash_details(jsonb_col->key).asc. trash_details.id
   references trash.id (one-to-one). The .desc variant is symmetric and asserted at
-  RelatedQueriesSpec.hs#L58.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L49
+  RelatedQueriesSpec.hs#L56.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L47

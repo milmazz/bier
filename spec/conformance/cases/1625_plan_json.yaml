@@ -17,4 +17,4 @@ notes: >-
   Accept application/vnd.pgrst.plan+json returns the JSON EXPLAIN plan; the
   Content-Type defaults for=application/json and appends charset. Mirrors
   PlanSpec 'outputs the total cost for a single filter on a table'.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PlanSpec.hs#L34
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PlanSpec.hs#L34

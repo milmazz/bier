@@ -18,5 +18,5 @@ expect:
 notes: >-
   PUT to an existing pk replaces the row -> 200. Upstream first asserts
   GET /tiobe_pls?name=eq.Java returns [{Java,1}] then PUTs rank 13.
-  Mirrors UpsertSpec.hs#L417-L427.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L417
+  Mirrors UpsertSpec.hs#L415-L425.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L415

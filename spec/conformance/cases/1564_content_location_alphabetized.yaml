@@ -11,5 +11,5 @@ expect:
   headers:
     Content-Location: "/no_pk?a=eq.1&b=eq.1"
   body_exact: []
-notes: "Content-Location reorders filter params alphabetically (canonical form). Mirrors QuerySpec.hs:1234-1239."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1234
+notes: "Content-Location reorders filter params alphabetically (canonical form). Mirrors QuerySpec.hs:1246-1251."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1246

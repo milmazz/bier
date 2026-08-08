@@ -14,5 +14,5 @@ expect:
     - { path: "$.paths['/child_entities'].post.responses['201'].description", equals: "Created" }
     - { path: "$.paths['/child_entities'].patch.responses['204'].description", equals: "No Content" }
     - { path: "$.paths['/child_entities'].delete.responses['204'].description", equals: "No Content" }
-notes: "Per-method response status descriptions for a writable table. Mirrors OpenApiSpec.hs:75-122 and OpenAPI.hs:324-340"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L118
+notes: "Per-method response status descriptions for a writable table. Mirrors OpenApiSpec.hs:74-121 and OpenAPI.hs:321-337"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L117

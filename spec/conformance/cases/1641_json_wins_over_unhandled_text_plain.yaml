@@ -1,0 +1,23 @@
+id: 1641
+feature: content_negotiation/precedence/known-but-unhandled
+request:
+  method: GET
+  path: /projects?id=eq.1
+  headers: { Accept: "text/plain, application/json" }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 1, "name": "Windows 7", "client_id": 1 }
+notes: >-
+  text/plain is a media type PostgREST *knows* (MTTextPlain) but for which a
+  relation has no handler, so it is skipped and the next acceptable type wins:
+  Accept "text/plain, application/json" on a table produces JSON, not 406.
+  Mirrors CustomMediaSpec 'will match json in presence of text/plain'
+  (upstream regression for issue #2170), which asserts status 200 and
+  Content-Type application/json; charset=utf-8. The body is the ordinary JSON
+  array for projects id=1 (same row asserted by CustomMediaSpec#L200).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L222

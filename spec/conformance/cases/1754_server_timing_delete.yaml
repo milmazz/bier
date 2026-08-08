@@ -18,4 +18,4 @@ expect:
 notes: >
   DELETE (204, no body) still emits the full Server-Timing metric set. Mirrors
   ServerTimingSpec.hs:57-65.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L57
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ServerTimingSpec.hs#L57

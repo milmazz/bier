@@ -14,4 +14,4 @@ preconditions: []
 expect:
   status: 200
 notes: "Empty array aud is ignored even when jwt-aud is set -> 200."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L111
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L117

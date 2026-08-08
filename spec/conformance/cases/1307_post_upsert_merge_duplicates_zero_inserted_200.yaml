@@ -19,13 +19,13 @@ notes: >-
   ZERO rows are inserted yields 200 (not 201) with an empty JSON array body.
   This is the isInsertIfGTZero edge in the MutationCreate dispatch: when
   rsInserted <= 0 AND preferResolution == Just MergeDuplicates the status is
-  status200 instead of status201 (Response.hs#L110-L115), and Just Full returns
-  the (empty) body (Response.hs#L117). Mirrors UpsertSpec.hs#L77-L81, which
+  status200 instead of status201 (Response.hs#L104-L109), and Just Full returns
+  the (empty) body (Response.hs#L111). Mirrors UpsertSpec.hs#L75-L79, which
   posts an empty payload [] to /articles with
   ["return=representation","resolution=merge-duplicates"] and asserts
   matchStatus=200 with body [json|[]|]. This case uses /clients (a single-PK
   table in the fixture) so resolution=merge-duplicates is honored
   (responsePreferences keeps preferResolution only when the relation has a PK or
-  on_conflict is supplied, Response.hs#L281-L287). Backs the
+  on_conflict is supplied, Response.hs#L275-L279). Backs the
   status_base.merge_duplicates_zero_inserted: 200 claim in representations.yaml.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L77
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L75

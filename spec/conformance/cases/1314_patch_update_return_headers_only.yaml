@@ -1,0 +1,37 @@
+id: 1314
+feature: representations/patch/return-headers-only
+request:
+  method: PATCH
+  path: /items?id=eq.5
+  headers:
+    Prefer: "return=headers-only"
+    Content-Type: application/json
+  body: { "id": 5 }
+schema: representations
+preconditions: []
+expect:
+  status: 204
+  headers:
+    Content-Range: "0-0/*"
+    Preference-Applied: "return=headers-only"
+  headers_absent: [Content-Type, Content-Length, Location]
+  body_exact: ""
+notes: >-
+  return=headers-only is NOT special-cased for PATCH: the MutationUpdate
+  dispatch has arms only for `Just Full` and `Just None`, so HeadersOnly falls
+  into the `_` catch-all and behaves exactly like return=minimal — 204, empty
+  body, no Content-Type/Content-Length, Content-Range still present
+  (Response.hs#L135, header list at Response.hs#L128). No Location either: the
+  location expression is only built when the mutation is an INSERT
+  (Statements.hs#L45-L52, `isInsert && rep == Just HeadersOnly`). The status,
+  Content-Range and absent Content-Type/Content-Length are asserted upstream by
+  the PATCH ... Prefer: return=headers-only it-block at UpdateSpec.hs#L649-L657
+  (on /datarep_todos_computed; this case substitutes /items, the mutable
+  relation this area's fixture isolates). The
+  Preference-Applied: return=headers-only echo is DERIVED FROM SOURCE — that
+  upstream block asserts neither its presence nor its absence — via
+  responsePreferences passing preferRepresentation through for any
+  MutateReadPlan{} (Response.hs#L281-L283), prefAppliedHeader including it
+  (Preferences.hs#L182), and toHeaderValue HeadersOnly = "return=headers-only"
+  (Preferences.hs#L222).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L649

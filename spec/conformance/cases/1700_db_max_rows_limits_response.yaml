@@ -16,4 +16,4 @@ expect:
     Content-Range: 0-1/*
   body_exact: [{ "id": 1 }, { "id": 2 }]
 notes: "With db-max-rows=2 the server caps results at 2 rows; total count is '*'. Mirrors QueryLimitedSpec.hs:16."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QueryLimitedSpec.hs#L16
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QueryLimitedSpec.hs#L16

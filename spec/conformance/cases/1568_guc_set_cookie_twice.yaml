@@ -15,11 +15,11 @@ notes: >
   response.headers may emit the SAME header name twice: upstream asserts TWO
   distinct "Set-Cookie" response headers, "sessionid=38afes7a8; HttpOnly; Path=/"
   AND "id=a3fWa; Expires=Wed, 21 Oct 2015 07:28:00 GMT; Secure; HttpOnly"
-  (RpcSpec.hs:1075-1084 has two separate matchHeader "Set-Cookie" assertions).
+  (RpcSpec.hs:1078-1087 has two separate matchHeader "Set-Cookie" assertions).
   The case.schema.json headers map is string->string and cannot express a
   repeated header, so the two values are encoded here as a single newline ("\n")
   -delimited string; the conformance runner MUST split this expectation on "\n"
   and assert each value appears as its own Set-Cookie response header (Set-Cookie
   must never be comma-folded). This is an encoding workaround, not a behavior
-  change. Mirrors RpcSpec.hs:1075-1084.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1075
+  change. Mirrors RpcSpec.hs:1078-1087.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1078

@@ -1,0 +1,26 @@
+id: 1645
+feature: content_negotiation/openapi/root-any
+request:
+  method: GET
+  path: /
+  headers: { Accept: "*/*" }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/openapi+json; charset=utf-8
+  body_jsonpath:
+    - { path: "$.swagger", exists: true }
+notes: >-
+  The root path produces only [MTOpenAPI, MTApplicationJSON, MTAny]; any
+  non-empty intersection with the Accept list resolves to MTOpenAPI, and the
+  root response always emits toContentType MTOpenAPI (Response.hs#L208). So
+  Accept */* on "/" yields the OpenAPI document with
+  "application/openapi+json; charset=utf-8", not application/json - the
+  asymmetry documented in resource_representation.rst ("*/*, resolves to
+  application/json for API endpoints and to application/openapi+json for the
+  root endpoint") and exercised upstream by OpenApiSpec's plain `get "/"`
+  (no Accept header, i.e. */*) at OpenApiSpec.hs#L41-L48. Contrast case 1639
+  (same Accept, relation path -> application/json).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan.hs#L247

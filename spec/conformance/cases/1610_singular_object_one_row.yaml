@@ -12,4 +12,4 @@ expect:
     Content-Type: application/vnd.pgrst.object+json; charset=utf-8
   body_exact: { "id": 5 }
 notes: "Accept vnd.pgrst.object+json returns a single object (not an array) for exactly one row. Mirrors SingularSpec 'will select an existing object'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L24
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/SingularSpec.hs#L23

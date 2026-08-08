@@ -12,4 +12,4 @@ expect:
   status: 403
   body_exact: { "hint": null, "details": null, "code": "42501", "message": "permission denied for table private_table" }
 notes: "Authenticated role (postgrest_test_author) lacking privilege gets 403, not 401, and no WWW-Authenticate header."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L29
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L27

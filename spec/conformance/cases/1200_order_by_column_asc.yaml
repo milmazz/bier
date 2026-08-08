@@ -12,4 +12,4 @@ expect:
     Content-Range: "0-1/*"
   body_exact: [{ "id": 1 }, { "id": 2 }]
 notes: "Mirrors PostgREST QuerySpec 'by a column asc'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1074
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1079

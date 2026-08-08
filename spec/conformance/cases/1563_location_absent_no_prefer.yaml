@@ -14,5 +14,5 @@ expect:
     Content-Length: "0"
   headers_absent: [Content-Type, Location]
   body_exact: null
-notes: "POST with no return preference -> 201, no Location, no body. Mirrors InsertSpec.hs:159-170."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L159
+notes: "POST with no return preference -> 201, no Location, no body. Mirrors InsertSpec.hs:156-167."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L156

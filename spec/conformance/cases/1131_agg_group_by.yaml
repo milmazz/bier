@@ -20,4 +20,4 @@ expect:
 notes: >
   Plain fields selected alongside aggregates become an implicit GROUP BY;
   one row per distinct group (AggregateFunctionsSpec.hs:53).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L53
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L53

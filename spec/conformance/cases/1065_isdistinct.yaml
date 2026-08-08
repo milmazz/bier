@@ -14,4 +14,4 @@ expect:
     - { "a": null }
     - { "a": "1" }
 notes: "isdistinct -> `a IS DISTINCT FROM 2` (null-safe). Mirrors QuerySpec.hs 'matches with IS DISTINCT FROM'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L565
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L570

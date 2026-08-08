@@ -14,5 +14,5 @@ expect:
     message: "Invalid preferences given with handling=strict"
     details: "Invalid preferences: anything"
     hint: null
-notes: "handling=strict with an unknown preference -> 400 PGRST122. Mirrors PreferencesSpec.hs:18-22."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L18
+notes: "handling=strict with an unknown preference -> 400 PGRST122. Mirrors Preferences/HandlingSpec.hs:15-19."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/HandlingSpec.hs#L15

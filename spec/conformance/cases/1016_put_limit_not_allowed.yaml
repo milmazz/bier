@@ -15,5 +15,5 @@ expect:
   body_jsonpath:
     - { path: "$.code", equals: PGRST114 }
     - { path: "$.message", equals: "limit/offset querystring parameters are not allowed for PUT" }
-notes: "PUT with a limit/offset query param is rejected (PutLimitNotAllowedError, PGRST114, 400). Traced to ApiRequest.getRanges; no dedicated Feature spec line located (see url_grammar.md gaps)"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest.hs#L177
+notes: "PUT with a limit/offset query param is rejected (PutLimitNotAllowedError, PGRST114, 400). Traced to ApiRequest.getRanges (v16.0 L178: method == \"PUT\" && topLevelRange /= allRange); status 400 at Error.hs#L111, code PGRST114 at Error.hs#L158, message at Error.hs#L185. Still no dedicated Feature spec line in v16.0 (see url_grammar.md gaps)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L178

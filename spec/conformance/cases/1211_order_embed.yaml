@@ -17,4 +17,4 @@ expect:
         - { id: 2, name: "Code w7" }
         - { id: 1, name: "Design w7" }
 notes: "ordering embedded entities via <embed>.order=name.asc."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1149
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1154

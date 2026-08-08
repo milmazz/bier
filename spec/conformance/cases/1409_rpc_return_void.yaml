@@ -12,4 +12,4 @@ expect:
   headers_absent: [Content-Type, Content-Length]
   body_exact: ""
 notes: "void return -> 204 with no Content-Type and no Content-Length / empty body."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L468
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L471

@@ -11,5 +11,5 @@ expect:
   body_jsonpath:
     - { path: "$.paths['/authors_only']", absent: true }
     - { path: "$.paths['/rpc/privileged_hello']", absent: true }
-notes: "Default openapi-mode (follow-privileges): anonymous role cannot see privileged table/function. Mirrors OpenApiSpec.hs:212-216, 1010-1014"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L212
+notes: "Default openapi-mode (follow-privileges): anonymous role cannot see privileged table/function. Mirrors OpenApiSpec.hs:211-215, 1009-1013"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L211

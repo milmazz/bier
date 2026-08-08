@@ -14,4 +14,4 @@ expect:
     WWW-Authenticate: Bearer
   body_exact: { "hint": null, "details": null, "code": "PGRST302", "message": "Anonymous access is disabled" }
 notes: "Server started without db-anon-role: an unauthenticated request -> PGRST302."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/NoAnonSpec.hs#L24
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/NoAnonSpec.hs#L24

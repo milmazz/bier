@@ -14,5 +14,5 @@ notes: >
   Drives the log-level filter: at info (and debug) every response is logged,
   including a 200 root request (which would NOT be logged at warn/error).
   Asserts the 200 status the filter keys on; stdout emission verified at io
-  level. Mirrors test_io.py:test_log_level (info branch).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_io.py#L742
+  level. Mirrors test_io.py:561-570 (test_log_level, info branch).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_io.py#L561

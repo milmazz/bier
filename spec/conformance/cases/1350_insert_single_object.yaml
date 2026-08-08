@@ -24,8 +24,8 @@ expect:
 notes: >-
   PostgREST emits the Location header only when return=headers-only is
   requested; a plain POST (no Prefer) and return=representation do NOT set
-  Location (see InsertSpec.hs#L114/L125/L268, all matchHeaderAbsent hLocation).
+  Location (see InsertSpec.hs#L111/L122/L265, all matchHeaderAbsent hLocation).
   This case mirrors the auto_incrementing_pk headers-only insert at
-  InsertSpec.hs#L199-L209 ("Location" <:> "/auto_incrementing_pk?id=eq.2"),
+  InsertSpec.hs#L196-L206 ("Location" <:> "/auto_incrementing_pk?id=eq.2"),
   applied to the serial-pk `items` table.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L207
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L204

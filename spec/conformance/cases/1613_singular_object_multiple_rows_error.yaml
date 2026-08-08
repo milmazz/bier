@@ -19,4 +19,4 @@ expect:
     code: PGRST116
     hint: null
 notes: "A singular mutation matching multiple rows fails 406/PGRST116; the error body is plain JSON, not vnd.pgrst.object+json. Mirrors SingularSpec 'raises an error for multiple rows'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L68
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/SingularSpec.hs#L67

@@ -8,5 +8,5 @@ schema: openapi
 preconditions: []
 expect:
   status: 406
-notes: "Unsupported media type (text/csv) at root is 406. Mirrors OpenApiSpec.hs:36-39"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L36
+notes: "Unsupported media type (text/csv) at root is 406. Mirrors OpenApiSpec.hs:35-38"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L35

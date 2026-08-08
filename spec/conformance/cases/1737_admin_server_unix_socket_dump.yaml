@@ -1,0 +1,22 @@
+id: 1737
+feature: config/admin-server-unix-socket/dump
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_ADMIN_SERVER_UNIX_SOCKET: "/tmp/admin_io_test.sock"
+    PGRST_ADMIN_SERVER_UNIX_SOCKET_MODE: "666"
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'admin-server-unix-socket = "/tmp/admin_io_test.sock"'
+    - 'admin-server-unix-socket-mode = "666"'
+notes: >
+  NEW in v16.0. The admin server can be exposed on a unix socket, with its own
+  octal file mode (default "660", see case 1705). Golden:
+  configs/no-defaults-env.yaml#L47-L48 -> configs/expected/no-defaults.config#L3-L4.
+  Socket binding itself is not exercisable over HTTP.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/no-defaults.config#L3

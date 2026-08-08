@@ -17,5 +17,5 @@ expect:
     details: null
     hint: null
     message: "Root endpoint metadata is disabled"
-notes: "openapi-mode=disabled -> 404 PGRST126 at root. Mirrors DisabledOpenApiSpec.hs:15-21"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/DisabledOpenApiSpec.hs#L15
+notes: "openapi-mode=disabled -> 404 PGRST126 at root. Mirrors DisabledOpenApiSpec.hs:17-23"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/DisabledOpenApiSpec.hs#L17

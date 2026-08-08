@@ -14,4 +14,4 @@ expect:
   status: 200
   body_exact: "cookievalue"
 notes: "request.cookies GUC exposes parsed Cookie pairs."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L895
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L898

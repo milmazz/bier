@@ -19,5 +19,5 @@ expect:
   headers:
     Access-Control-Allow-Origin: http://example.com
     Access-Control-Allow-Credentials: "true"
-notes: "Preflight from an allowed origin echoes that origin and sets credentials true. Mirrors test_io.py:test_preflight_request_with_cors_allowed_origin_config."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_io.py#L1299
+notes: "Preflight from an allowed origin echoes that origin and sets credentials true. Mirrors CorsSpec.hs 'OPTIONS preflight request should return Access-Control-Allow-Origin equal to origin' (the v14.12 io test moved into the hspec suite in v16.0)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/CorsSpec.hs#L74

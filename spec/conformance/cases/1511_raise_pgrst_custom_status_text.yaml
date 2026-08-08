@@ -20,4 +20,4 @@ notes: >
   RAISE 'PGRST' DETAIL with status 404 AND a custom status_text "My Not Found"
   -> that string overrides the standard reason phrase. Mirrors RpcSpec.hs "get
   message and details from PGRST raise and checks custom status message".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1400
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1403

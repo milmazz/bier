@@ -12,4 +12,4 @@ expect:
     Content-Range: 0-0/1
   body_exact: 7
 notes: "A function returning a single scalar reports exact count 1 (Content-Range 0-0/1) under Prefer count=exact."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L99
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L102

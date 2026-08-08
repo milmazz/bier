@@ -16,4 +16,4 @@ expect:
 notes: >
   orders by a field of a composite-type column using the `->` arrow:
   order=num->i.asc. Distinct grammar path from jsonb (arrow on a composite type).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L240
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/JsonOperatorSpec.hs#L253

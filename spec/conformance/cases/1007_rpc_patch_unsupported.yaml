@@ -8,5 +8,5 @@ schema: multi
 preconditions: []
 expect:
   status: 405
-notes: "PATCH on /rpc/<fn> is InvalidRpcMethod (405). Mirrors RpcSpec 'PATCH fails'"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L625
+notes: "PATCH on /rpc/<fn> is InvalidRpcMethod (405). Mirrors RpcSpec 'PATCH fails' (v16.0 it at L628, request at L629, 405 at L630)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L628

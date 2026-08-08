@@ -13,5 +13,5 @@ expect:
     Content-Range: "*/*"
     Content-Length: "23"
   body_exact: [{ "id": 2, "name": "Two" }]
-notes: "DELETE return=representation shapes the deleted-row body via &select. Mirrors DeleteSpec.hs:61."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L61
+notes: "DELETE return=representation shapes the deleted-row body via &select. Mirrors DeleteSpec.hs:59."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L59

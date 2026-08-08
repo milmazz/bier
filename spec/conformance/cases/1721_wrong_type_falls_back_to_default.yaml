@@ -13,4 +13,4 @@ expect:
   dump_contains:
     - 'db-max-rows = ""'
 notes: "A value of the wrong type for an optInt key coerces to Nothing and falls back to the default, rather than aborting. Mirrors configs/types.config (db-max-rows = true)."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/types.config#L10
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/types.config#L10

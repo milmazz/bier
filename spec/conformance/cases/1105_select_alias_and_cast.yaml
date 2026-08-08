@@ -11,5 +11,5 @@ expect:
   headers:
     Content-Type: application/json; charset=utf-8
   body_exact: [{"myId":"1"}]
-notes: "rename simple column with casting (QuerySpec.hs:599)"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L599
+notes: "rename simple column with casting (QuerySpec.hs:604)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L604

@@ -10,5 +10,5 @@ expect:
   status: 200
   body_jsonpath:
     - { path: "$.definitions.menagerie.properties.enum", equals: { format: "test.enum_menagerie_type", type: "string", enum: ["foo", "bar"] } }
-notes: "Enum column -> type string, format <schema.enum type>, enum array of labels. Mirrors OpenApiSpec.hs:710-726"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L710
+notes: "Enum column -> type string, format <schema.enum type>, enum array of labels. Mirrors OpenApiSpec.hs:709-725"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L709

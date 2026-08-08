@@ -16,5 +16,5 @@ expect:
     - {"id":3,"client_name":"Apple"}
     - {"id":4,"client_name":"Apple"}
     - {"id":5,"client_name":null}
-notes: "spread embed ...clients(...) flattens the parent's columns into the row (SpreadQueriesSpec.hs:15)"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SpreadQueriesSpec.hs#L15
+notes: "spread embed ...clients(...) flattens the parent's columns into the row (SpreadQueriesSpec.hs:13)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/SpreadQueriesSpec.hs#L13

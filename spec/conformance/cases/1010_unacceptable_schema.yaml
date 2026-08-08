@@ -15,4 +15,4 @@ expect:
     - { path: "$.message", equals: "Invalid schema: unknown" }
     - { path: "$.details", equals: null }
 notes: "Accept-Profile not in db-schemas -> UnacceptableSchema (PGRST106, 406) with hint listing exposed schemas. Mirrors MultipleSchemaSpec unknown schema. hint text depends on exact db-schemas list so only code/message asserted here"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L76
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/MultipleSchemaSpec.hs#L78

@@ -18,5 +18,5 @@ expect:
     code: "PGRST103"
     details: "An offset of 1 was requested, but there are only 0 rows."
     hint: null
-notes: "Nonzero start with no items + count=exact -> 416, Content-Range '*/0', Content-Length 144. Mirrors RangeSpec.hs:281."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L281
+notes: "Nonzero start with no items + count=exact -> 416, Content-Range '*/0', Content-Length 144. Mirrors RangeSpec.hs:280."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L280

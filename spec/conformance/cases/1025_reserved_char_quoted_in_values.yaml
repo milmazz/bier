@@ -16,4 +16,4 @@ expect:
     - { "name": "Williams, Mary" }
     - { "name": "Smith, Joseph" }
 notes: 'Reserved characters (here the comma) inside an in.() filter value must be wrapped in double quotes, percent-encoded as %22, so the comma is read as part of the value rather than as the list separator. Mirrors QuerySpec "values with quotes in IN and NOT IN" / "succeeds when only quoted values are present" (the %22 is the URL form of the literal double quote shown in the upstream get string).'
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1293
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1305

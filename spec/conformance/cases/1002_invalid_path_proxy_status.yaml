@@ -16,4 +16,4 @@ expect:
     hint: null
     message: Invalid path specified in request URL
 notes: "InvalidResourcePath sets Proxy-Status header with error code. Mirrors ErrorSpec proxy-status ApiRequest error"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ErrorSpec.hs#L34
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L34

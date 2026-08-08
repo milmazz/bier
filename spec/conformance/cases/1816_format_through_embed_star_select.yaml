@@ -1,0 +1,45 @@
+id: 1816
+feature: domain_representations/read/through_embed_star_select
+request:
+  method: GET
+  path: /datarep_next_two_todos?select=id,name,second_item:datarep_todos!datarep_next_two_todos_second_item_id_fkey(*)&order=id
+  headers: { Accept: application/json }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    [
+      {
+        "id": 1,
+        "name": "school related",
+        "second_item":
+          {
+            "id": 3,
+            "name": "Algebra",
+            "label_color": "#01E240",
+            "due_at": "2018-01-01T14:12:34.123456Z",
+            "icon_image": null,
+            "created_at": 1513213350,
+            "budget": "0.00",
+          },
+      },
+      {
+        "id": 2,
+        "name": "do these first",
+        "second_item":
+          {
+            "id": 3,
+            "name": "Algebra",
+            "label_color": "#01E240",
+            "due_at": "2018-01-01T14:12:34.123456Z",
+            "icon_image": null,
+            "created_at": 1513213350,
+            "budget": "0.00",
+          },
+      },
+    ]
+notes: "Star select inside a to-one embed expands to the embedded relation's columns and still applies each domain's representation cast. Mirrors QuerySpec.hs 'formats through join with star select' (v16.0 request carries the explicit &order=id)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1615

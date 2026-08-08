@@ -19,4 +19,4 @@ expect:
     - { "id": 4, "name": "Vier", "field-with_sep": 1, "settings": null, "arr_data": null }
     - { "id": 6, "name": "Sechs", "field-with_sep": 6, "settings": null, "arr_data": [1, 2, 3] }
 notes: "missing=default fills column DEFAULT (field-with_sep=1) for objects omitting it; explicit values kept."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L500
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L497

@@ -17,4 +17,4 @@ expect:
       unexpected ")" expecting field name (* or [a..z0..9_$]), negation operator (not) or logic operator (and, or)
     hint: null
 notes: 'A logic group needs >=1 condition; or=() is a 400 PGRST100. Mirrors AndOrParamsSpec "cannot have zero conditions".'
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L218
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L216

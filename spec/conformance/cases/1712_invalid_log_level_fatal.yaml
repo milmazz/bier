@@ -12,4 +12,4 @@ expect:
   exit_code: nonzero
   stderr_contains: "Invalid logging level. Check your configuration."
 notes: "log-level must be one of crit|error|warn|info|debug. Mirrors cli fixture 'invalid log-level'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/fixtures/fixtures.yaml#L49
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L49

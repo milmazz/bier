@@ -12,4 +12,4 @@ expect:
     Content-Type: application/json; charset=utf-8
   body_exact: [{ "id": 1 }, { "id": 2 }]
 notes: 'and(...) groups nested inside or(...). Mirrors AndOrParamsSpec "can be nested inside the same expression".'
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L55
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L53

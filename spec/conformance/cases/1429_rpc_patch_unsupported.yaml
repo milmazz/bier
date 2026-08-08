@@ -9,4 +9,4 @@ preconditions: []
 expect:
   status: 405
 notes: "PATCH on /rpc/<fn> is unsupported -> 405 (InvalidRpcMethod)."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L626
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L629

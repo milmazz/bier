@@ -21,4 +21,4 @@ notes: >
   (empty array when nothing matches). child_entity 1 (id.eq.1) and child_entity
   2 (name.eq."child entity 2") both belong to entity 1. Mirrors AndOrParamsSpec
   "can do logic on the second level".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L29
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L27

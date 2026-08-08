@@ -14,4 +14,4 @@ expect:
 notes: >-
   options= plan parameters (e.g. buffers) are echoed verbatim in the response
   Content-Type. Mirrors PlanSpec 'outputs blocks info when using the buffers option'.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PlanSpec.hs#L59
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PlanSpec.hs#L59

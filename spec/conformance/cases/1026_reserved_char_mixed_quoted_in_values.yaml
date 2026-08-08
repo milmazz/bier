@@ -15,4 +15,4 @@ expect:
     - { "name": "Hebdon, John" }
     - { "name": "David White" }
 notes: 'An in.() list may mix unquoted values with double-quoted values: only the entry carrying a reserved character (the comma in "Hebdon, John") needs the %22 quoting, while "David White" can stay unquoted. Mirrors QuerySpec "succeeds w/ and w/o quoted values" (upstream get "/w_or_wo_comma_names?name=in.(David White,\"Hebdon, John\")").'
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1301
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1313

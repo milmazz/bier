@@ -14,4 +14,4 @@ notes: >
   does not end with "requires a WHERE clause", pgErrorStatus maps it to HTTP 500
   (generic server error). Mirrors ErrorSpec.hs "should return 500 for
   cardinality_violation".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ErrorSpec.hs#L16
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L16

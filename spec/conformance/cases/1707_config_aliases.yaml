@@ -10,7 +10,7 @@ config:
     db-pool-timeout: 5
     max-rows: 1000
     pre-request: "check_alias"
-    role-claim-key: ".aliased"
+    role-claim-key: "$$.aliased"
     root-spec: "open_alias"
     secret-is-base64: true
 preconditions: []
@@ -21,8 +21,8 @@ expect:
     - 'db-pool-max-idletime = 5'
     - 'db-max-rows = 1000'
     - 'db-pre-request = "check_alias"'
-    - 'jwt-role-claim-key = ".\"aliased\""'
+    - 'jwt-role-claim-key = "$$.aliased"'
     - 'db-root-spec = "open_alias"'
     - 'jwt-secret-is-base64 = true'
-notes: "Deprecated alias keys resolve to their canonical key. Mirrors configs/aliases.config dumped output."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/configs/aliases.config#L1
+notes: "Deprecated alias keys resolve to their canonical key. Mirrors configs/aliases.config dumped output. In a config FILE a literal '$' is written '$$' (Data.Configurator interpolation escape) and dumpJSPath re-escapes it on output, so both the input and the dumped jwt-role-claim-key read \"$$.aliased\"."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/aliases.config#L1

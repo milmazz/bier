@@ -11,4 +11,4 @@ expect:
   status: 400
   body_exact: { "code": "21000", "details": null, "hint": null, "message": "DELETE requires a WHERE clause" }
 notes: "With pg-safeupdate, a full-table DELETE (no filter) -> 400, Postgres 21000."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L35
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L37

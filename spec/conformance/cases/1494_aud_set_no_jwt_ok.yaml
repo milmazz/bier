@@ -11,4 +11,4 @@ preconditions: []
 expect:
   status: 200
 notes: "Even with jwt-aud set, a request with no JWT runs as anon and succeeds on a granted table."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L147
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L153

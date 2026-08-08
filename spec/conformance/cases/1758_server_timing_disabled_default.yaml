@@ -16,7 +16,7 @@ expect:
   body_exact: [{ "id": 6, "name": "Oscorp", "referee": 3, "auditor": 4, "manager_id": 6 }]
 notes: >
   server-timing-enabled defaults to false; when disabled the Server-Timing
-  header is omitted entirely (App.hs only appends it when
-  configServerTimingEnabled). Mirrors App.hs:210 and the default in
-  Config.hs:728.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/App.hs#L210
+  header is omitted entirely - App.hs:253/256 only appends the header when
+  configServerTimingEnabled is true, and withTiming (App.hs:272-279) then
+  returns Nothing for every stage. Default `fromMaybe False` at Config.hs:321.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L256

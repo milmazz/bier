@@ -11,5 +11,5 @@ expect:
   headers:
     Content-Range: "0-2/*"
   body_exact: [{"id":1},{"id":2},{"id":3}]
-notes: "Top level limit with query parameter. Mirrors RangeSpec.hs:189."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L189
+notes: "Top level limit with query parameter. Mirrors RangeSpec.hs:188."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L188

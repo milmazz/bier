@@ -14,4 +14,4 @@ expect:
     WWW-Authenticate: 'Bearer error="invalid_token", error_description="JWT expired"'
   body_exact: { "message": "JWT expired", "code": "PGRST303", "hint": null, "details": null }
 notes: "exp=1446678149 (past) -> PGRST303 JWT expired."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L101
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L106

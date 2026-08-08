@@ -1,0 +1,22 @@
+id: 1731
+feature: config/client-error-verbosity/dump
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_CLIENT_ERROR_VERBOSITY: "minimal"
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'client-error-verbosity = "minimal"'
+notes: >
+  NEW in v16.0. `client-error-verbosity` accepts only "minimal" or "verbose"
+  (default "verbose", see case 1705) and round-trips through --dump-config.
+  Golden: configs/no-defaults-env.yaml sets PGRST_CLIENT_ERROR_VERBOSITY=minimal
+  and configs/expected/no-defaults.config#L7 dumps it back. The HTTP-observable
+  effect (details/hint omitted from the error envelope) is covered by the errors
+  area, cases 1517/1518.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/no-defaults.config#L7

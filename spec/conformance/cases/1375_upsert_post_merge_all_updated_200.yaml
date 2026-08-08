@@ -26,5 +26,5 @@ expect:
     - { "name": "C", "rank": 1 }
 notes: >-
   When every row already exists (all updates, nothing inserted) merge-duplicates
-  returns 200. Mirrors UpsertSpec.hs#L36-L46.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L36
+  returns 200. Mirrors UpsertSpec.hs#L34-L44.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L34

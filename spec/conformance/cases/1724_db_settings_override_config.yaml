@@ -22,4 +22,4 @@ expect:
     - 'db-max-rows = 500'
     - 'db-schemas = "test,tenant1,tenant2"'
 notes: "With db-config=true, reloadable keys from ALTER ROLE ... SET pgrst.* override the config file. Mirrors test_cli.py:test_expected_config_from_db_settings and db_config.sql."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L168
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_cli.py#L168

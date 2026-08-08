@@ -1,0 +1,39 @@
+id: 1576
+feature: headers/vary/guc-override
+request:
+  method: GET
+  path: /rpc/get_vary_header_override
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Vary: "Accept, Prefer, X-Test-Vary"
+  body_exact: 1
+notes: >
+  NEW in PostgREST v16.0, companion to case 1575: the default
+  `Vary: Accept, Prefer, Range` is only appended when the response does not
+  already carry a Vary — `hdrs ++ … ++ [varyHeader | not $ varyHeaderPresent
+  hdrs]` (src/library/PostgREST/App.hs#L253 with #L262). Because the
+  `response.headers` GUC is merged into those headers before that check
+  (Response.hs#L240, `addHeadersIfNotIncluded pgrstHeaders (guc headers)`),
+  setting Vary from SQL replaces the default verbatim rather than adding a
+  second Vary. The docs state this explicitly and give the very
+  `set_config('response.headers', '[{"Vary": "Accept, Prefer, X-Test-Vary"}]',
+  true)` payload used by the fixture ("As any other response header, it's
+  available for override by updating response.headers GUC variable …
+  PostgREST will use provided value verbatim",
+  docs/references/api/vary_header.rst#L6-L16). Upstream's own test drives the
+  same override through a `db-pre-request` function (`custom_vary_hdr`,
+  schema.sql#L3875, HttpHeaderSpec.hs#L15-L24); the conformance runner cannot
+  set `db-pre-request` per case, so the identical GUC is set from an RPC
+  instead — the suppression check inspects the final header list and is
+  indifferent to which SQL wrote it. The routine ships in
+  spec/conformance/fixtures/headers.delta.sql; it lives in `test` (hence
+  `schema: test`) because the `headers` area schema is built by the loader
+  from the human-owned `headers.sql` live input. Body 1 follows the scalar
+  RPC rendering already modelled by rpc.return.scalar, matching the existing
+  `get_int_and_guc_headers` case 1566.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L253

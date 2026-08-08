@@ -20,4 +20,4 @@ notes: >
   transaction, response metrics in that order, each "<name>;dur=<ms>" (one
   decimal). headers_match values are regexes mirroring PostgREST's
   matchServerTimingHasTiming. Mirrors ServerTimingSpec.hs:18-26.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L18
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ServerTimingSpec.hs#L18

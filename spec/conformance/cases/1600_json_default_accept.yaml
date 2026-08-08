@@ -13,4 +13,4 @@ expect:
   body_exact:
     - { "id": 1 }
 notes: "application/json is the default producer; Content-Type carries charset=utf-8. Mirrors RawOutputTypesSpec json response."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L66
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L69

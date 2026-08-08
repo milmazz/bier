@@ -16,5 +16,5 @@ expect:
   body_exact:
     - { "id": 3, "name": "parent v2-3" }
     - { "id": 4, "name": "parent v2-4" }
-notes: "Accept-Profile: v2 reads from schema v2; echoed in Content-Profile. Mirrors MultipleSchemaSpec.hs:44-53."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L44
+notes: "Accept-Profile: v2 reads from schema v2; echoed in Content-Profile. Mirrors MultipleSchemaSpec.hs:46-55."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/MultipleSchemaSpec.hs#L46

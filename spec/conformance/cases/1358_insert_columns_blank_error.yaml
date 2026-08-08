@@ -12,4 +12,4 @@ expect:
   body_jsonpath:
     - { path: "$.code", equals: "PGRST100" }
 notes: "Blank ?columns= -> 400 PGRST100 parse error."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L458
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L455

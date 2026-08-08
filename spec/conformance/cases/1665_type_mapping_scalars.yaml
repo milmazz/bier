@@ -19,5 +19,5 @@ expect:
     - { path: "$.definitions.openapi_types.properties.a_numeric", equals: { format: "numeric", type: "number" } }
     - { path: "$.definitions.openapi_types.properties.a_real", equals: { format: "real", type: "number" } }
     - { path: "$.definitions.openapi_types.properties.a_double_precision", equals: { format: "double precision", type: "number" } }
-notes: "Scalar PG->Swagger type/format mapping. Mirrors OpenApiSpec.hs:365-513"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L365
+notes: "Scalar PG->Swagger type/format mapping. Mirrors OpenApiSpec.hs:364-512"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L364

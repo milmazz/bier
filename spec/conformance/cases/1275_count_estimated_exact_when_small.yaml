@@ -22,4 +22,4 @@ notes: >
   request param); this case assumes the same max-rows the PostgREST suite uses
   for QueryLimitedSpec (max-rows=2). When the exact count is small it is
   deterministic regardless of max-rows.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QueryLimitedSpec.hs#L60
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QueryLimitedSpec.hs#L60

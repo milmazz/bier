@@ -21,4 +21,4 @@ expect:
       },
     ]
 notes: "Two domain columns each apply their own AS json cast: color -> #RRGGBB, isodate -> timestamptz with trailing Z. Mirrors QuerySpec.hs 'formats two columns with different formatters'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1540
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1552

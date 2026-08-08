@@ -12,5 +12,5 @@ expect:
   status: 204
   headers_absent:
     - Content-Type
-notes: "DELETE on a relation resolves to ActRelationMut MutationDelete; valid (unlike DELETE on /rpc). The exposed schema تست is verified at SpecHelper.hs#L181 (configDbSchemas=[تست]) and schema.sql#L10. Mirrors UnicodeSpec delete, percent-encoded unicode path; the cited test asserts matchHeaderAbsent hContentType."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UnicodeSpec.hs#L31
+notes: "DELETE on a relation resolves to ActRelationMut MutationDelete; valid (unlike DELETE on /rpc). The exposed schema تست is set inline in v16.0 at UnicodeSpec.hs#L15 (configDbSchemas = fromList [\"تست\"]) and created at fixtures/schema.sql#L10. Mirrors UnicodeSpec delete, percent-encoded unicode path; the cited block asserts 204 and matchHeaderAbsent hContentType (L37-L38)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UnicodeSpec.hs#L32

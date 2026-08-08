@@ -17,4 +17,4 @@ expect:
     - { "id": 3, "name": "parent v2-3" }
     - { "id": 4, "name": "parent v2-4" }
 notes: "Accept-Profile selects schema for read methods; same path resolves to v2.parents. Mirrors MultipleSchemaSpec read from v2"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L45
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/MultipleSchemaSpec.hs#L47

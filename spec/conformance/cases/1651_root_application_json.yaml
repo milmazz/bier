@@ -12,5 +12,5 @@ expect:
     Content-Type: application/json; charset=utf-8
   body_jsonpath:
     - { path: "$.swagger", equals: "2.0" }
-notes: "GET / also served for application/json with json content-type. Mirrors RootSpec.hs:24-31"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/RootSpec.hs#L24
+notes: "GET / also served for application/json with json content-type. Mirrors RootSpec.hs:27-34"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/RootSpec.hs#L27

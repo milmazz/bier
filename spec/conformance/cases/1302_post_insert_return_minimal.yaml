@@ -15,5 +15,5 @@ expect:
     Preference-Applied: "return=minimal"
   headers_absent: [Content-Type]
   body_exact: ""
-notes: "return=minimal yields 201, empty body, no Content-Type, and &select is ignored. Mirrors InsertSpec.hs:62."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L62
+notes: "return=minimal yields 201, empty body, no Content-Type, and &select is ignored. Mirrors InsertSpec.hs:59."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L59

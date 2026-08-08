@@ -17,4 +17,4 @@ expect:
     Preference-Applied: return=representation
   body_exact: []
 notes: "PATCH matching zero rows + return=rep -> 200 with empty array."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L79
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L78

@@ -16,6 +16,6 @@ expect:
 notes: >
   count=exact where the returned window equals the total returns 200 (not 206).
   getallprojects() returns all 5 projects; Content-Range '0-4/5'. Mirrors
-  RpcSpec.hs:84 (HEAD form asserts Content-Range '0-4/5', status 200); body
+  RpcSpec.hs:87 (HEAD form asserts Content-Range '0-4/5', status 200); body
   shape derived from the projects fixture rows.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L84
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L87
