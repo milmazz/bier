@@ -21,6 +21,7 @@ notes: >
   so this single case pins the default value. Upstream asserts only the
   status and this header ("match any body"), which is why no body assertion
   is made here. Mirrors the exact it-block at
-  HttpHeaderSpec.hs:26-34 ("Test default Vary header value matches default
-  one"), whose request is also `GET /projects` with the base config.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/HttpHeaderSpec.hs#L26
+  HttpHeaderSpec.hs:27-34 ("Test default Vary header value matches default
+  one", Vary assertion at L34), whose request is also `GET /projects`; the
+  enclosing `withConfig baseCfg` is at L26.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/HttpHeaderSpec.hs#L27

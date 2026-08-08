@@ -1,7 +1,7 @@
 # Conformance case index
 
-Cross-reference of the **611** conformance cases under `spec/conformance/cases/`.
-Pinned target: **PostgREST v16.0** (all 611 `source:` URLs).
+Cross-reference of the **614** conformance cases under `spec/conformance/cases/`.
+Pinned target: **PostgREST v16.0** (all 614 `source:` URLs).
 
 Each case is one YAML file `NNNN_<slug>.yaml` validated against
 [`../case.schema.json`](../case.schema.json). Cases are grouped into 17 feature
@@ -50,14 +50,14 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | rpc | 41 | 1400–1440 | `fixtures/rpc.sql` | `rpc`, `test` |
 | auth | 69 | 1450–1499 **+ 11800–11818** | `fixtures/auth.sql` | `auth` |
 | errors | 19 | 1500–1518 | `fixtures/errors.sql` | `test` |
-| headers | 32 | 1550–1581 | `fixtures/headers.sql` | `headers`, `test` |
+| headers | 35 | 1550–1584 | `fixtures/headers.sql` | `headers`, `test` |
 | content_negotiation | 47 | 1600–1646 | `fixtures/content_negotiation.sql` | `test` |
 | openapi | 33 | 1650–1682 | `fixtures/openapi.sql` | `openapi`, `openapi_no_schema_comment`, `openapi_variadic` |
 | config | 39 | 1700–1738 | `fixtures/config.sql` | `config` |
 | observability | 20 | 1750–1769 | `fixtures/observability.sql` | `observability` |
 | domain_representations | 21 | 1800–1820 | `fixtures/domain_representations.sql` | `domain_representations` |
 
-Total: **611 cases**, **17 areas**, **17 fixture fragments**
+Total: **614 cases**, **17 areas**, **17 fixture fragments**
 (plus 5 `*.delta.sql` write channels, all currently empty — see
 [`fixtures/README.md`](fixtures/README.md) for who may write which file).
 
@@ -85,6 +85,19 @@ grep -h '^feature:' spec/conformance/cases/1800_format_single_domain_column.yaml
   target-name case, reuses the ordering fixture set), and **`test` appears under
   `rpc`** (case 1440) and **under `headers`** (case 1576).
 
+## Cross-area ownership caveat
+
+`Prefer:` coverage is split across three areas by design — `headers` owns the
+header semantics, `mutations` owns the table-flavored `max-affected` cases
+(1390–1392), and `spec/rpc.yaml` explicitly delegates the RPC flavor of both
+`handling` and `max-affected` to the headers area rather than duplicating it.
+That delegation currently lands nowhere: **no case in any band exercises
+`Prefer: handling` or `Prefer: max-affected` against `/rpc/*`**, and `PGRST128`
+("Function must return SETOF or TABLE when max-affected preference is used with
+handling=strict") appears nowhere in the tree. Recorded in
+[`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → headers*; when closing it,
+decide the owning band first so the delegation stops being circular.
+
 ## Per-area sub-feature breakdown
 
 The `feature:` field is a slash-delimited path `<area>/<sub-feature>/...`. The
@@ -103,7 +116,7 @@ sub-features present per area (second segment, as on disk):
 | rpc | 1400–1440 | return, setof, args, method, content-negotiation, count, shape, error, overloaded, single-unnamed-param, name |
 | auth | 1450–1499, 11800–11818 | anonymous, claims, role, role-claim-key, role-switching, jwt, audience, pre-request, guc, rpc |
 | errors | 1500–1518 | sqlstate, pgrst_code, raise, headers, verbosity |
-| headers | 1550–1581 | prefer, profile, location, content-location, guc, vary |
+| headers | 1550–1584 | prefer, profile, location, content-location, guc, vary |
 | content_negotiation | 1600–1646 | json, csv, geojson, octet-stream, singular, nulls-stripped, plan, openapi, precedence, error, custom-media-handler |
 | openapi | 1650–1682 | root, defaults, comments, table, types, rpc, mode, security |
 | config | 1700–1738 | dump-config, sources, aliases, validation, coercion, precedence, db-max-rows, db-tx-end, db-extra-search-path, app-settings, server-cors-allowed-origins, cli, client-error-verbosity, server-reuseport, url-use-legacy-target-names, admin-server-unix-socket |
@@ -112,9 +125,21 @@ sub-features present per area (second segment, as on disk):
 
 ### v16.0 additions worth knowing
 
-- **headers/vary** (1575–1576) covers the new `references/api/vary_header` docs
-  page: the default `Vary: Accept, Prefer, Range` and its verbatim replacement
-  through the `response.headers` GUC.
+- **headers** grew its band to **1550–1584** (35 cases). Three ids are new in
+  this pass: **1582** and **1583** (see below) and **1584**
+  (`headers/prefer/timezone`, the two-token `Preference-Applied:
+  handling=strict, timezone=…` echo that its sibling 1553 cannot pin).
+- **headers/vary** (1575–1576, 1582–1583) covers the new
+  `references/api/vary_header` docs page: the default
+  `Vary: Accept, Prefer, Range`, its verbatim replacement through the
+  `response.headers` GUC, its presence on every non-error response including
+  OPTIONS (1582), and its absence on error responses (1583) — the last two
+  derived from App.hs' `toWaiResponse` funnel
+  (`src/library/PostgREST/App.hs#L253`), which errors bypass. The third path — a
+  CORS *preflight*, answered by the wai-cors middleware before `toWaiResponse` —
+  is **not** pinned; it is an open gap against the existing preflight cases
+  1702/1703 in the config band (see [`../COVERAGE.md`](../COVERAGE.md) →
+  *Known gaps → headers*).
 - **config** gained four v16 keys: `client-error-verbosity` (1731–1732),
   `server-reuseport` (1735), `url-use-legacy-target-names` (1736), and
   `admin-server-unix-socket` (1737–1738), plus `db-schemas` rejecting
@@ -126,7 +151,7 @@ sub-features present per area (second segment, as on disk):
 
 ## Case file shapes
 
-Most cases are HTTP request/response (**577**). The **config** area additionally
+Most cases are HTTP request/response (**580**). The **config** area additionally
 uses a **CLI** shape (`request.kind: cli`, `request.flag: "--dump-config"`)
 asserting on `expect.exit_code`, `expect.dump_contains`,
 `expect.dump_reparse_stable`, and `expect.stderr_contains` rather than an HTTP

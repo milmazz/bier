@@ -1,0 +1,31 @@
+id: 1584
+feature: headers/prefer/timezone
+request:
+  method: GET
+  path: /timestamps
+  headers:
+    Prefer: "handling=strict, timezone=America/Los_Angeles"
+schema: headers
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: "handling=strict, timezone=America/Los_Angeles"
+  body_exact:
+    - { "t": "2023-10-18T05:37:59.611-07:00" }
+    - { "t": "2023-10-18T07:37:59.611-07:00" }
+    - { "t": "2023-10-18T09:37:59.611-07:00" }
+notes: >
+  Companion to case 1553 (the same valid timezone sent WITHOUT
+  `handling=strict`). A valid timezone is applied either way and the rendered
+  body is identical, but the echo is not: with both preferences sent,
+  `Preference-Applied` carries two tokens in the order
+  `handling=strict, timezone=America/Los_Angeles`, so this case pins the
+  multi-token echo bytes that 1553 cannot. Mirrors the exact it-block "should
+  change timezone with handling=strict" at
+  Preferences/TimezoneSpec.hs:14-22, the sibling of 1553's it-block (L24-L32)
+  inside the same `context "test Prefer: timezone=America/Los_Angeles"` (L13).
+  Body verified against a freshly loaded bier_test (`set time zone
+  'America/Los_Angeles'` over `headers.timestamps`, 3 rows).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/TimezoneSpec.hs#L14

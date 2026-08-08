@@ -13,7 +13,7 @@ that compatibility means, case by case, so it can be checked automatically.
 Everything here targets **PostgREST v16.0** (docs:
 [postgrest.org/en/v16](https://postgrest.org/en/v16/)). Every conformance case
 carries a `source:` URL pinned to the `v16.0` git tag with a `#L<line>` anchor,
-fetchable via `raw.githubusercontent.com`. All **611** cases are pinned to
+fetchable via `raw.githubusercontent.com`. All **614** cases are pinned to
 `v16.0` — verified on disk this pass. When bumping the target version, re-pin
 the sources and re-run the review pass.
 
@@ -33,7 +33,7 @@ spec/
 ├── <area>.yaml | url_grammar.md   # 17 per-area behavior models (the "why")
 └── conformance/
     ├── INDEX.md               # area <-> id band <-> fixture cross-reference
-    ├── cases/NNNN_<slug>.yaml # 611 conformance cases (the "what", machine-checkable)
+    ├── cases/NNNN_<slug>.yaml # 614 conformance cases (the "what", machine-checkable)
     ├── fixtures.sql           # the authoritative merged DDL+seed set
     ├── fixtures_local.sql     # human-owned harness supplement
     └── fixtures/              # per-area fragments + write-channel deltas (see its README)
@@ -49,9 +49,14 @@ There are two layers:
    defaults, and rules of an area in prose/structured form, each claim citing a
    PostgREST source line, and each closing with an explicit `gaps:` list of
    behaviors that were *not* modeled and why. They are the human-readable
-   rationale. All 17 are marked `version: v16.0`.
+   rationale. All 17 declare the v16.0 pin, but the key spelling is not uniform
+   on disk: 10 use `version: v16.0`, 5 use `version: PostgREST v16.0`
+   (`errors`, `filters`, `observability`, `operators`, `ordering`),
+   `pagination.yaml` uses `postgrest_version: v16.0`, and `url_grammar.md`
+   states it in prose ("Version pinned: **PostgREST v16.0**"). Do not grep for
+   a single spelling.
 
-2. **Conformance cases** — 611 YAML files under `conformance/cases/`. Each is one
+2. **Conformance cases** — 614 YAML files under `conformance/cases/`. Each is one
    concrete scenario: a request and the exact response (status, headers, body)
    PostgREST produces. These are the machine-checkable contract.
 
@@ -80,11 +85,11 @@ source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/...#L<n>
 
 Two request shapes are supported:
 
-- **HTTP** (the common case, 577 cases): `request.method` + `request.path`, with
+- **HTTP** (the common case, 580 cases): `request.method` + `request.path`, with
   optional `request.headers` / `request.body` / `request.body_raw`. The **auth**
   area may add `request.jwt` to have the runner mint and send a signed token
-  (case 11809 instead spells out a literal `Authorization` header, because it
-  needs a token signed with a secret the harness does not know).
+  (32 cases do; case 11809 instead spells out a literal `Authorization` header,
+  because it needs a token signed with a secret the harness does not know).
 - **CLI** (config startup behavior, 34 cases — all of them in `config`,
   ids 1705–1738): `request.kind: cli` with `request.flag: "--dump-config"`,
   asserting on `expect.exit_code`, `expect.dump_contains`,
@@ -151,7 +156,7 @@ print("OK" if not bad else f"{bad} errors")
 PY
 ```
 
-All **611** cases currently parse and validate, with **no duplicate ids**.
+All **614** cases currently parse and validate, with **no duplicate ids**.
 
 ## Review status
 
@@ -160,3 +165,9 @@ a line anchor. The v16.0 re-sync's adversarial review — re-fetching the cited
 line and confirming it still asserts what the case claims — is summarized
 per area in [`COVERAGE.md`](COVERAGE.md), together with the open gaps and the
 machine-verification results for this pass.
+
+Two areas carry a recorded v16.0 adversarial verdict so far — **auth** and
+**headers**, both ⚠️ *revise* with **zero citation defects** (all findings are
+missing-coverage gaps, now itemized in `COVERAGE.md` → *Known gaps*). The other
+15 areas have not been re-audited at this pin; run `bier-spec-audit` over them
+before treating their citations as verified.

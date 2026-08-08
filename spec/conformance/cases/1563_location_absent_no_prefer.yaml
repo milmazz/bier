@@ -14,5 +14,9 @@ expect:
     Content-Length: "0"
   headers_absent: [Content-Type, Location]
   body_exact: null
-notes: "POST with no return preference -> 201, no Location, no body. Mirrors InsertSpec.hs:156-167."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L156
+notes: >
+  POST with no return preference -> 201, no Location, no body. Mirrors the
+  it-block at InsertSpec.hs:157-167 ("should not throw and return no location
+  header when selecting without PK") inside the "requesting no representation"
+  context (L156).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L157

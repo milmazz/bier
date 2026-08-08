@@ -18,5 +18,9 @@ expect:
     Preference-Applied: "return=headers-only"
   headers_absent: [Content-Type]
   body_exact: null
-notes: "return=headers-only -> 201 with Location keyed by PK, no body. Mirrors InsertSpec.hs:127-140."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L127
+notes: >
+  return=headers-only -> 201 with Location keyed by PK, no body. Mirrors the
+  it-block at InsertSpec.hs:128-140 ("should not throw and return location
+  header when selecting without PK", assertions at L134-L139) inside the
+  "requesting headers only representation" context (L127).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L128
