@@ -22,4 +22,4 @@ notes: >
   OPTIONS on /rpc/<fn> and on /. headers_absent_in_value asserts the named
   substrings do NOT appear in the Server-Timing value. Mirrors
   ServerTimingSpec.hs:87-111.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L87
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ServerTimingSpec.hs#L87

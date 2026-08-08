@@ -17,4 +17,4 @@ expect:
 notes: >
   orders by a two-level json path with nulls first; rows lacking foo->bar sort
   first (their relative order is the input order as PostgreSQL leaves ties).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L235
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/JsonOperatorSpec.hs#L247

@@ -16,4 +16,4 @@ expect:
     details: null
     hint: null
 notes: "DELETE on /rpc/<fn> is unsupported -> 405 PGRST101 with the fixed message."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L618
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L621

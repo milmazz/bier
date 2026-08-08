@@ -15,4 +15,4 @@ expect:
     type: FeatureCollection
     features: []
 notes: "GeoJSON on no matching rows returns an empty features array but still a FeatureCollection. Mirrors PostGISSpec 'gives an empty features array on no rows'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PostGISSpec.hs#L36
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PostGISSpec.hs#L36

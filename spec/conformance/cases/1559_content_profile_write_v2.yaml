@@ -15,5 +15,5 @@ expect:
   headers:
     Content-Profile: v2
   body_exact: [{ "id": 0, "parent": { "id": 3, "name": "parent v2-3" } }]
-notes: "Content-Profile: v2 targets schema v2 on a write; echoed in Content-Profile. Mirrors the exact it-block at MultipleSchemaSpec.hs:139-148 (\"succeeds inserting on the v2 schema and returning its parent\")."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L139
+notes: "Content-Profile: v2 targets schema v2 on a write; echoed in Content-Profile. Mirrors the exact it-block at MultipleSchemaSpec.hs:141-150 (\"succeeds inserting on the v2 schema and returning its parent\")."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/MultipleSchemaSpec.hs#L141

@@ -18,4 +18,4 @@ expect:
       "message": 'invalid input syntax for type timestamp with time zone: "Z"',
     }
 notes: "isodate has no `text AS isodate` cast; PostgREST does not fall back on the JSON parser (which would rewrite Z to +00:00). The raw Z reaches the base type and errors. Mirrors QuerySpec.hs 'in the absense of text parser, does not try to use the JSON parser for query parameters'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1614
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1626

@@ -1,0 +1,18 @@
+id: 1734
+feature: config/validation/db-schemas-restricted-information-schema
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_DB_SCHEMAS: "public, information_schema"
+preconditions: []
+expect:
+  exit_code: nonzero
+  stderr_contains: "db-schemas does not allow schema: 'information_schema'"
+notes: >
+  NEW in v16.0. The restriction applies after the comma split, so a restricted
+  schema anywhere in the list is fatal (Config.hs#L367, schemas bound at #L370).
+  Mirrors the multi-schema half of test_cli.py:test_restricted_db_schemas.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_cli.py#L298

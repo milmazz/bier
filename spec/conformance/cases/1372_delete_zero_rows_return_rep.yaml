@@ -15,4 +15,4 @@ expect:
     Content-Range: "*/*"
   body_exact: []
 notes: "DELETE matching no rows + return=rep -> 200 with [] and Content-Range */*."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L106
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L104

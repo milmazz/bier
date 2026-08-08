@@ -24,4 +24,4 @@ notes: >
   takes the domain DEFAULT (666); because there is no representation cast, devil_int
   serializes with the base int type's plain JSON rendering (a bare number, 666). The
   returned representation is [{"id": 666, "name": "Lu"}] with status 201.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L572
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L562

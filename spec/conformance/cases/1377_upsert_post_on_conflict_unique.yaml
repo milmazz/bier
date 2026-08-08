@@ -24,4 +24,4 @@ expect:
     - { "unique_key": 1, "value": "B" }
     - { "unique_key": 2, "value": "C" }
 notes: "?on_conflict=unique_key targets the UNIQUE column (not pk) as the upsert conflict target; key 1 updated, key 2 inserted -> 201."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L83
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L81

@@ -14,5 +14,5 @@ expect:
     - { path: "$.paths['/rpc/varied_arguments_openapi'].post.parameters[0].schema.properties.double", equals: { format: "double precision", type: "number" } }
     - { path: "$.paths['/rpc/varied_arguments_openapi'].post.parameters[0].schema.properties.text_arr", equals: { format: "text[]", type: "array", items: { type: "string" } } }
     - { path: "$.paths['/rpc/varied_arguments_openapi'].post.parameters[0].schema.required[0]", equals: "double" }
-notes: "RPC POST body schema: object with per-arg properties, required = no-DEFAULT args, description from comment. Mirrors OpenApiSpec.hs:876-1008"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L876
+notes: "RPC POST body schema: object with per-arg properties, required = no-DEFAULT args, description from comment. Mirrors OpenApiSpec.hs:875-1007"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L875

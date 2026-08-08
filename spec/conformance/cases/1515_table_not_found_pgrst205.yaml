@@ -20,4 +20,4 @@ notes: >
   HTTP 404, the Proxy-Status header carrying the code, and the standard
   envelope. No hint when there is no >=75% similar table name. Mirrors
   ErrorSpec.hs "works with SchemaCache error".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ErrorSpec.hs#L42
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L42

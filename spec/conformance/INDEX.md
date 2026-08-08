@@ -25,11 +25,11 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | ordering | 23 | 1200–1222 | `fixtures/ordering.sql` | `ordering` |
 | pagination | 28 | 1250–1277 | `fixtures/pagination.sql` | `pagination` |
 | representations | 18 | 1300–1332 | `fixtures/representations.sql` | `representations` |
-| mutations | 46 | 1350–1395 | `fixtures/mutations.sql` | `mutations` |
+| mutations | 48 | 1350–1397 | `fixtures/mutations.sql` | `mutations` |
 | rpc | 40 | 1400–1439 | `fixtures/rpc.sql` | `rpc` |
 | auth | 45 | 1450–1494 | `fixtures/auth.sql` | `auth` |
-| errors | 17 | 1500–1516 | `fixtures/errors.sql` | `test` |
-| headers | 25 | 1550–1574 | `fixtures/headers.sql` | `headers` |
+| errors | 19 | 1500–1518 | `fixtures/errors.sql` | `test` |
+| headers | 32 | 1550–1581 | `fixtures/headers.sql` | `headers`, `test` |
 | content_negotiation | 39 | 1600–1638 | `fixtures/content_negotiation.sql` | `test` |
 | openapi | 33 | 1650–1682 | `fixtures/openapi.sql` | `openapi`, `openapi_no_schema_comment`, `openapi_variadic` |
 | config | 31 | 1700–1730 | `fixtures/config.sql` | `config` |
@@ -60,11 +60,11 @@ sub-features present per area:
 | ordering | 1200–1222 | direction, nulls, json_path, computed_column, multi_column, composite, related, embed, error |
 | pagination | 1250–1277 | limit_offset, range_header, count, embedded |
 | representations | 1300–1332 | post, patch, delete, put |
-| mutations | 1350–1395 | insert, update, delete, upsert, columns-param, missing-default, safe-update, safe-delete, max-affected |
+| mutations | 1350–1397 | insert, update, delete, upsert, columns-param, missing-default, safe-update, safe-delete, max-affected |
 | rpc | 1400–1439 | return, setof, args, method, content-negotiation, count, shape, error, overloaded, single-unnamed-param |
 | auth | 1450–1494 | anonymous, claims, role, jwt, audience, pre-request, guc, rpc |
-| errors | 1500–1516 | sqlstate, pgrst_code, raise, headers |
-| headers | 1550–1574 | prefer, profile, location, content-location, guc |
+| errors | 1500–1518 | sqlstate, pgrst_code, raise, headers, verbosity |
+| headers | 1550–1581 | prefer, profile, location, content-location, guc, vary |
 | content_negotiation | 1600–1638 | json, csv, geojson, octet-stream, singular, nulls-stripped, plan, openapi, precedence, error, custom-media-handler (anyelement, override-builtin, any-handler) |
 | openapi | 1650–1682 | root, defaults, comments, table, types, rpc, mode, security |
 | config | 1700–1730 | dump-config, sources, aliases, validation, coercion, precedence, db-max-rows, db-tx-end, db-extra-search-path, app-settings, server-cors-allowed-origins, cli |

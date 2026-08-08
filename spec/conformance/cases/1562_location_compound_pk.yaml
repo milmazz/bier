@@ -19,7 +19,7 @@ expect:
   headers_absent: [Content-Type]
   body_exact: null
 notes: >
-  Compound PK -> Location includes every PK column. Mirrors InsertSpec.hs:145-157
+  Compound PK -> Location includes every PK column. Mirrors InsertSpec.hs:142-154
   (upstream uses a partitioned car_models; behavior under test is the multi-column
   Location filter).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L145
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L142

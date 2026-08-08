@@ -20,4 +20,4 @@ expect:
 notes: >
   PUT (single-row upsert by PK) returning representation emits the full
   Server-Timing metric set. Mirrors ServerTimingSpec.hs:47-55.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ServerTimingSpec.hs#L47
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ServerTimingSpec.hs#L47

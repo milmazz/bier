@@ -14,4 +14,4 @@ expect:
     - { "id": 2 }
     - { "id": 3 }
 notes: "cs -> `@>` contains, on integer[]. Mirrors QuerySpec.hs 'matches with cs operator'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L555
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L560

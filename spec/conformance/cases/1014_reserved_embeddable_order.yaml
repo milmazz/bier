@@ -15,5 +15,5 @@ expect:
   body_exact:
     - { "id": 2, "name": "parent v1-2" }
     - { "id": 1, "name": "parent v1-1" }
-notes: "order is a reserved-embeddable param (matched by last dot-word), not a column filter. Reserved-embeddable set defined in QueryParams.parse"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L166
+notes: "order is a reserved-embeddable param (matched by last dot-word via endingIn at L167-L169), not a column filter. Reserved-embeddable set defined in QueryParams.parse (v16.0: reservedEmbeddable = [\"order\", \"limit\", \"offset\", \"and\", \"or\"] at L174)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/QueryParams.hs#L174

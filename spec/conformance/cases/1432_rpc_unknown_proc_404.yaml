@@ -15,4 +15,4 @@ notes: >
   asserts status only. The closest-proc hint behavior (a non-null PGRST202 body)
   is a distinct feature exercised by the neighboring `sayhell` test (L208) and is
   tracked separately as a missing-feature gap; it is not asserted for `fake`.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L206
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L209

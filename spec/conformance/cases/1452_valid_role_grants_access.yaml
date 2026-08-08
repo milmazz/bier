@@ -11,4 +11,4 @@ preconditions: []
 expect:
   status: 200
 notes: "HS256 token role=postgrest_test_author grants SELECT on authors_only."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L73
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L71

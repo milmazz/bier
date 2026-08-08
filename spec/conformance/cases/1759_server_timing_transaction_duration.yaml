@@ -19,5 +19,8 @@ notes: >
   reports a transaction duration in [2000ms, 3000ms). The regex matches a
   4-digit ms value beginning with 2 (>=2000, <3000). Timing-sensitive: see
   gaps in observability.yaml; best validated at the io level. Mirrors
-  test_io.py:test_server_timing_transaction_duration.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_io.py#L1789
+  test_settings.py:437-462
+  (test_server_timing_transaction_duration_with_role_statement_timeout), which
+  in v16.0 moved out of test_io.py and runs under a role with a 3s statement
+  timeout.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_settings.py#L462

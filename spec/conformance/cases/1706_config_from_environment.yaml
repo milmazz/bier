@@ -19,4 +19,4 @@ expect:
     - 'server-port = 80'
     - 'log-level = "info"'
 notes: "Config is read directly from PGRST_* environment variables with no config file. Mirrors test_cli.py:test_expected_config_from_environment."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L151
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_cli.py#L151

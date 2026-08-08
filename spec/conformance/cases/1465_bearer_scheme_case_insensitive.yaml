@@ -11,4 +11,4 @@ preconditions: []
 expect:
   status: 200
 notes: "Lowercase 'bearer' scheme is accepted (so is 'Bearer')."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L229
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L234

@@ -20,4 +20,4 @@ notes: >
   Mirrors QuerySpec "errs when the embedded resource doesn't exist and an
   embedded filter is applied to it" (reproduced against the entities fixture;
   resource name changed to non_existent_children, message/hint pattern verbatim).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L523
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L528

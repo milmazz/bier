@@ -26,4 +26,4 @@ notes: >-
   so body_raw is used rather than body_exact. Exercises the override/custom
   negotiation path (Plan.hs vendored-vs-overridable) positively, complementing
   the negative 1624.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/CustomMediaSpec.hs#L171
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L169

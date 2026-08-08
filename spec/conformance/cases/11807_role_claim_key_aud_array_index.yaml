@@ -1,0 +1,21 @@
+id: 11807
+feature: auth/role-claim-key/aud-array-index
+request:
+  method: GET
+  path: /authors_only
+  headers: { Accept: application/json }
+  jwt:
+    sign_with: hs256_test_secret
+    payload: { "aud": ["postgrest_test_author"] }
+schema: auth
+preconditions: []
+config:
+  jwt-aud: postgrest_test_author
+  jwt-role-claim-key: "$.aud[0]"
+expect:
+  status: 200
+notes: >-
+  An array-valued `aud` satisfies the audience check when ANY element matches
+  (Auth/Jwt.hs#L76), and `$.aud[0]` then extracts that element as the role.
+  Upstream asserts the status only.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L179

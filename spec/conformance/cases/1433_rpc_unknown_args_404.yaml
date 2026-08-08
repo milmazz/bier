@@ -16,4 +16,4 @@ expect:
     code: "PGRST202"
     details: "Searched for the function test.add_them with parameters a, b, smthelse, but no matches were found in the schema cache."
 notes: "Unknown extra arg is not ignored; 404 PGRST202 with a hint pointing at the real signature."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L236
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L239

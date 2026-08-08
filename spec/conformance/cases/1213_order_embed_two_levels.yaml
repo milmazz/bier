@@ -26,4 +26,4 @@ expect:
 notes: >
   ordering embedded entities two levels deep: tasks ordered by name asc, and
   each task's users ordered by name desc.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1159
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1164

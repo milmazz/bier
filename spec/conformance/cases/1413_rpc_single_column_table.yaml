@@ -13,4 +13,4 @@ expect:
   body_exact:
     - { "a": "A" }
 notes: "A single-column TABLE return responds with a JSON array of objects keyed by the column."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L696
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L699

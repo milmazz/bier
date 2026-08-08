@@ -15,4 +15,4 @@ expect:
     - { "id": 1, "name": "parent v1-1" }
     - { "id": 2, "name": "parent v1-2" }
 notes: "['rpc', name] path resolves to a routine; GET invokes it as read. Default profile v1. Mirrors MultipleSchemaSpec rpc default schema. schema 'multi' selects db-schemas=[v1,v2]"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L175
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/MultipleSchemaSpec.hs#L177

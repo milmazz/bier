@@ -15,4 +15,4 @@ notes: >
   The `not` prefix is usable on each operator inside and()/or() logic trees:
   here not.cs (array), not.eq, not.like. Mirrors AndOrParamsSpec.hs
   'operators with not' / 'eq, cs, like can be negated'.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L187
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L185

@@ -2,7 +2,7 @@ id: 1807
 feature: domain_representations/read/through_embed
 request:
   method: GET
-  path: /datarep_next_two_todos?select=id,name,first_item:datarep_todos!datarep_next_two_todos_first_item_id_fkey(label_color,due_at)
+  path: /datarep_next_two_todos?select=id,name,first_item:datarep_todos!datarep_next_two_todos_first_item_id_fkey(label_color,due_at)&order=id
   headers: { Accept: application/json }
 schema: domain_representations
 preconditions: []
@@ -25,5 +25,5 @@ expect:
           { "label_color": "#000000", "due_at": "2018-01-02T00:00:00Z" },
       },
     ]
-notes: "Domain representations are applied to embedded (joined) resources. Mirrors QuerySpec.hs 'formats through join'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1599
+notes: "Domain representations are applied to embedded (joined) resources. Mirrors QuerySpec.hs 'formats through join'. v16.0 added the explicit `&order=id` to the upstream request (the top-level row order was previously unspecified); the expected body is unchanged."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1611

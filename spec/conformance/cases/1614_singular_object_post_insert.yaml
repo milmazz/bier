@@ -17,4 +17,4 @@ expect:
     Content-Type: application/vnd.pgrst.object+json; charset=utf-8
   body_exact: { "id": 102, "address": "xxx" }
 notes: "POST insert of one row with return=representation + singular returns 201 and the single object. Mirrors SingularSpec 'works for one row with return=rep' (creating rows)."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/SingularSpec.hs#L117
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/SingularSpec.hs#L116

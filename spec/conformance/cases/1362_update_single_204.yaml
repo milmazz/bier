@@ -15,4 +15,4 @@ expect:
     Content-Range: 0-0/*
   headers_absent: [Content-Type, Content-Length]
 notes: "Single-row PATCH with no return= -> 204, Content-Range 0-0/*."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L68
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L67

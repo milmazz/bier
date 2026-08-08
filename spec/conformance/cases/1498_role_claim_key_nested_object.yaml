@@ -1,0 +1,23 @@
+id: 1498
+feature: auth/role-claim-key/nested-object
+request:
+  method: GET
+  path: /authors_only
+  headers: { Accept: application/json }
+  jwt:
+    sign_with: hs256_test_secret
+    payload:
+      postgrest: { "a_role": "postgrest_test_author" }
+      other: claims
+schema: auth
+preconditions: []
+config:
+  jwt-role-claim-key: "$.postgrest.a_role"
+expect:
+  status: 200
+notes: >-
+  v16.0 replaced the JSPath DSL of `jwt-role-claim-key` with RFC 9535 JSON Path
+  (CHANGELOG.md#L88): every value must now start with `$`, so the v14.12 key
+  `.postgrest.a_role` becomes `$.postgrest.a_role`. A nested member path
+  selects the role to switch to. Upstream asserts the status only.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L123

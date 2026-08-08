@@ -13,4 +13,4 @@ expect:
   body_jsonpath:
     - { path: "$.swagger", exists: true }
 notes: "GET / with Accept application/openapi+json returns the OpenAPI doc with the openapi+json Content-Type. Mirrors OpenApiSpec 'root path returns a valid openapi spec'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L20
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L19

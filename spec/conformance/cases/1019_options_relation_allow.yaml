@@ -11,5 +11,5 @@ expect:
   headers:
     Allow: OPTIONS,GET,HEAD,POST,PUT,PATCH,DELETE
     Content-Length: "0"
-notes: "OPTIONS on a writeable relation resolves to ActRelationInfo and returns the Allow header of supported methods. Mirrors OptionsSpec writeable table"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OptionsSpec.hs#L17
+notes: "OPTIONS on a writeable relation resolves to ActRelationInfo and returns the Allow header of supported methods. Mirrors OptionsSpec 'includes read/write methods for writeable table' (v16.0 it at L15, request at L16, Allow assertion at L18, Content-Length 0 at L19)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OptionsSpec.hs#L16

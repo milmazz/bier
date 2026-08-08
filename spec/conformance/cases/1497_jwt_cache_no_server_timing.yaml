@@ -1,0 +1,26 @@
+id: 1497
+feature: auth/jwt/cache-server-timing-disabled
+request:
+  method: GET
+  path: /authors_only
+  headers: { Accept: application/json }
+  jwt:
+    sign_with: hs256_test_secret
+    payload: { "role": "postgrest_test_author" }
+schema: auth
+preconditions: []
+config:
+  jwt-cache-max-entries: 86400
+  server-timing-enabled: false
+expect:
+  status: 200
+notes: >-
+  New in v16.0 (Feature/Auth/JwtCacheSpec.hs is a new file): with the JWT cache
+  enabled and `server-timing-enabled = false`, requests carrying a JWT still
+  succeed — the cache must not depend on the timing instrumentation. Upstream
+  issues the same request twice to also exercise the cache-hit path; the case
+  shape has no "repeat this request N times" primitive, so only the single-shot
+  observable upstream asserts (200) is pinned here. The positive counterpart —
+  the `jwt;dur=` Server-Timing metric when timing IS enabled — is covered by the
+  observability area (case 1750).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/JwtCacheSpec.hs#L55

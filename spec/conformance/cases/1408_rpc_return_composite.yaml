@@ -13,4 +13,4 @@ expect:
     Content-Type: application/json; charset=utf-8
   body_exact: { "x": 10, "y": 5 }
 notes: "A function returning a composite type in the exposed schema returns a single JSON object (single-row)."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L447
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L450

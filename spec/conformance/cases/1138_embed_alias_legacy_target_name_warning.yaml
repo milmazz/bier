@@ -1,0 +1,28 @@
+id: 1138
+feature: select/embed/alias/legacy-target-name-warning
+request:
+  method: GET
+  path: "/projects?id=eq.1&select=id,name,the_tasks:tasks(id,name)&tasks.name=like.Code*&tasks.order=name.asc&tasks.limit=1"
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  headers_match:
+    Warning: '^299 \S+ "Embedded resource was referenced by relation name even though it has an alias\. This is deprecated and will stop working in a future release\. Update `tasks` to `the_tasks` in query string filters, orders or limits\."$'
+  body_exact:
+    - {"id": 1, "name": "Windows 7", "the_tasks": [{"id": 2, "name": "Code w7"}]}
+notes: >
+  New in v16.0. With the default `url-use-legacy-target-names = true`, filters,
+  orders and limits may still address an aliased embed by its *relation* name
+  (`tasks.` while the embed is aliased `the_tasks`), but the response now
+  carries a deprecation `Warning` header (QuerySpec.hs:1183, "filters, orders
+  and limits aliased embeded entities using the target name"). The header value
+  is `299 <product-version> "<msg> Update `<relName>` to `<alias>` in query
+  string filters, orders or limits."` (App.hs warningHeaders, v16.0 L264-L270);
+  upstream builds the version token as "PostgRESTv" <> prettyVersion, so the
+  case matches it as an opaque token rather than pinning PostgREST's own
+  version string.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1183

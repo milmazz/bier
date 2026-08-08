@@ -1,0 +1,22 @@
+id: 1736
+feature: config/url-use-legacy-target-names/dump
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  env:
+    PGRST_URL_USE_LEGACY_TARGET_NAMES: "false"
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'url-use-legacy-target-names = false'
+notes: >
+  NEW in v16.0. Boolean, default true (see case 1705). Turning it off makes an
+  aliased embed addressable only by its alias in filters/orders/limits; the
+  HTTP-observable PGRST108 that results is covered by the select area, case
+  1139. This case pins the config surface only:
+  configs/no-defaults-env.yaml sets PGRST_URL_USE_LEGACY_TARGET_NAMES=false and
+  configs/expected/no-defaults.config#L47 dumps it back.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/no-defaults.config#L47

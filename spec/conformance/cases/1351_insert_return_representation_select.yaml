@@ -27,5 +27,5 @@ notes: >-
   (smth, other, fake_id, garbage, kkk, hey) are ignored rather than rejected,
   and ?select=id,body shapes the returned representation. The extra-keys-ignored
   behavior REQUIRES ?columns (without it, unknown keys are treated as columns and
-  error). Mirrors InsertSpec.hs#L445-L455.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L445
+  error). Mirrors InsertSpec.hs#L442-L452.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L442

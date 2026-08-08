@@ -11,5 +11,5 @@ expect:
   headers:
     Content-Type: application/json; charset=utf-8
   body_exact: []
-notes: "Percent-encoded path decodes to the unicode relation موارد in exposed schema تست. The schema name تست is verified: testUnicodeCfg sets configDbSchemas=[تست] (SpecHelper.hs#L181) and the schema/table are created at schema.sql#L10/L187. Mirrors UnicodeSpec read."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UnicodeSpec.hs#L17
+notes: "Percent-encoded path decodes to the unicode relation موارد in exposed schema تست. The schema name تست is verified inline in v16.0 at UnicodeSpec.hs#L15 (baseCfg { configDbSchemas = fromList [\"تست\"] }) — v16 dropped the named testUnicodeCfg helper that v14.12 kept in SpecHelper.hs — and the schema/table are created at fixtures/schema.sql#L10/L187. Mirrors UnicodeSpec read (get at L18, shouldRespondWith \"[]\" at L19)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UnicodeSpec.hs#L18

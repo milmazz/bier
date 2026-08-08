@@ -16,4 +16,4 @@ expect:
     Content-Range: 0-0/*
   body_exact: [{ "id": 1 }]
 notes: "Additional client Range narrows within the db-max-rows cap. Mirrors QueryLimitedSpec.hs:22."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QueryLimitedSpec.hs#L22
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QueryLimitedSpec.hs#L22

@@ -21,4 +21,4 @@ notes: >-
   CustomMediaSpec 'fails if doesn't have an aggregate defined' (GET
   /rpc/get_lines with Accept application/octet-stream). The path is an RPC
   (not a relation) to match the cited it-block exactly.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/CustomMediaSpec.hs#L163
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L161

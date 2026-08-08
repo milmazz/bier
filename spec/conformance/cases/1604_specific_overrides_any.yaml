@@ -11,4 +11,4 @@ expect:
   headers:
     Content-Type: text/csv; charset=utf-8
 notes: "A specific available preference listed before */* overrides */*; the response is CSV. Mirrors QuerySpec 'specific available preference should override */*'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1201
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1213

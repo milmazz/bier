@@ -1,0 +1,23 @@
+id: 11800
+feature: auth/role-claim-key/quoted-key-path
+request:
+  method: GET
+  path: /authors_only
+  headers: { Accept: application/json }
+  jwt:
+    sign_with: hs256_test_secret
+    payload:
+      "https://www.example.com/roles": [{ "value": "postgrest_test_author" }]
+      other: 666
+schema: auth
+preconditions: []
+config:
+  jwt-role-claim-key: '$["https://www.example.com/roles"][0].value'
+expect:
+  status: 200
+notes: >-
+  A claim name containing characters other than `_` must be quoted with the RFC
+  9535 bracket selector: v14.12's `."https://www.example.com/roles"[0].value`
+  becomes `$["https://www.example.com/roles"][0].value` (CHANGELOG.md#L90).
+  Mixed member/index/member traversal. Upstream asserts the status only.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L137

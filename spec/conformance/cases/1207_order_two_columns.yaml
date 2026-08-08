@@ -17,4 +17,4 @@ expect:
     - { "client_id": 1, "id": 1, "name": "Windows 7" }
     - { "client_id": null, "id": 5, "name": "Orphan" }
 notes: "by two columns with nulls and direction specified."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1126
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1131

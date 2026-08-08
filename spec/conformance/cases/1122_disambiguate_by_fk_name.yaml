@@ -14,5 +14,5 @@ expect:
 notes: >
   can embed by FK name: the projects->clients FK constraint is renamed to
   "client" in the fixture, so `client(...)` targets that relationship and the
-  embed key is the FK name (EmbedDisambiguationSpec.hs:177).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedDisambiguationSpec.hs#L177
+  embed key is the FK name (EmbedDisambiguationSpec.hs:175).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/EmbedDisambiguationSpec.hs#L175

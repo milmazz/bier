@@ -14,4 +14,4 @@ expect:
     - { "id": 3 }
     - { "id": 4 }
 notes: "GET invokes a STABLE SETOF-table proc as a read; args from query string; returns JSON array of row objects."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L123
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L126

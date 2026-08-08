@@ -14,5 +14,5 @@ expect:
     Preference-Applied: "return=minimal"
   headers_absent: [Content-Type, Content-Length]
   body_exact: ""
-notes: "DELETE return=minimal yields 204, empty body, &select ignored, and echoes Preference-Applied: return=minimal. Mirrors DeleteSpec.hs:49."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L49
+notes: "DELETE return=minimal yields 204, empty body, &select ignored, and echoes Preference-Applied: return=minimal. Mirrors DeleteSpec.hs:47."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L47

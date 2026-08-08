@@ -17,14 +17,14 @@ expect:
 notes: >-
   Default (no return token) POST insert yields 201 with empty body,
   Content-Length 0, and NO Content-Type header. Status/body/header behavior is
-  the Nothing branch of the MutationCreate dispatch in Response.hs#L120 (empty
-  body) combined with the isInsertIfGTZero default 201 (Response.hs#L110-L115);
+  the Nothing branch of the MutationCreate dispatch in Response.hs#L114 (empty
+  body) combined with the isInsertIfGTZero default 201 (Response.hs#L104-L109);
   Content-Length 0 + absent Content-Type follow from contentLengthHeader on the
   empty body and the headers list carrying no contentTypeHeaders in the Nothing
   branch. The same observable behavior is exercised upstream by the no-token
-  inserts on /menagerie at InsertSpec.hs#L23-L33 (matchHeaderAbsent
-  hContentType + "Content-Length" <:> "0") and InsertSpec.hs#L49-L60; this case
+  inserts on /menagerie at InsertSpec.hs#L20-L31 (matchHeaderAbsent
+  hContentType + "Content-Length" <:> "0") and InsertSpec.hs#L46-L58; this case
   uses /complex_items (a single-PK table present in the fixture) rather than
   /menagerie, so it is sourced to the dispatch branch it exercises rather than
   the /menagerie it-block.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Response.hs#L120
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L114

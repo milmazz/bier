@@ -15,5 +15,5 @@ expect:
     Content-Range: "0-0/*"
     Preference-Applied: "return=representation"
   body_exact: [{ "id": 2 }]
-notes: "PATCH with return=representation yields 200 + JSON array of updated rows + Content-Range 0-0/*. Mirrors UpdateSpec.hs:94."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L94
+notes: "PATCH with return=representation yields 200 + JSON array of updated rows + Content-Range 0-0/*. Mirrors UpdateSpec.hs:93."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L93

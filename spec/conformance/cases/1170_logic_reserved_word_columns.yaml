@@ -22,4 +22,4 @@ notes: >
   STRONGER than what the pinned source guarantees. A conformance runner that
   wants to stay faithful to the source should assert only status 200; the []
   is asserted here because the fixture is fully controlled by this area.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L289
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L287

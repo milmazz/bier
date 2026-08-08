@@ -12,4 +12,4 @@ expect:
     Content-Type: application/json; charset=utf-8
   body_exact: ["hi", "there"]
 notes: "With GET a VARIADIC parameter is supplied via repeated query params (?v=hi&v=there)."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L724
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L727

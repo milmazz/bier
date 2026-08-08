@@ -15,4 +15,4 @@ expect:
     - { "a": "2", "b": "0" }
     - { "a": "1", "b": "0" }
 notes: "by a column desc with nulls first."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1108
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1113

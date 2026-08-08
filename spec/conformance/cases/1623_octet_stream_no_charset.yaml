@@ -17,4 +17,4 @@ notes: >-
   toContentType appends '; charset=utf-8' to every media type EXCEPT
   MTOctetStream and MTOther; octet-stream responses carry a bare
   application/octet-stream Content-Type with no charset.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/MediaType.hs#L59
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L62

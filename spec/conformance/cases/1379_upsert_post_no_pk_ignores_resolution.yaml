@@ -18,4 +18,4 @@ expect:
   body_exact:
     - { "a": "1", "b": "0" }
 notes: "Table with no pk: resolution preference is silently ignored; no resolution=... in Preference-Applied."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L157
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L155

@@ -17,4 +17,4 @@ expect:
     message: "'clientsx' is not an embedded resource in this request"
 notes: >
   related order fails when the relation is not embedded in select; 400 PGRST108.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L141
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L139

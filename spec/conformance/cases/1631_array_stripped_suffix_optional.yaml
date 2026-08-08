@@ -23,4 +23,4 @@ notes: >-
   application/vnd.pgrst.array+json;nulls=stripped and the response Content-Type
   is still normalized to the +json form. Mirrors NullsStripSpec 'strips nulls
   when Accept: application/vnd.pgrst.array;nulls=stripped'.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/NullsStripSpec.hs#L48
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/NullsStripSpec.hs#L46

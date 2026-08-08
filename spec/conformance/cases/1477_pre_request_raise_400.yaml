@@ -16,4 +16,4 @@ expect:
   status: 400
   body_exact: { "hint": "Please contact administrator", "details": null, "code": "P0001", "message": "Disabled ID --> 3" }
 notes: "Pre-request proc, id=3 -> RAISE EXCEPTION surfaces as P0001/400 with the raised message and hint."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L220
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L225

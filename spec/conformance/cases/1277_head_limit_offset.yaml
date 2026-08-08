@@ -14,5 +14,5 @@ expect:
   body_exact: ""
 notes: >
   HEAD request with limit/offset returns no body but the same Content-Range
-  ('2-4/*') as the equivalent GET. Mirrors RangeSpec.hs:217.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L217
+  ('2-4/*') as the equivalent GET. Mirrors RangeSpec.hs:216.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L216

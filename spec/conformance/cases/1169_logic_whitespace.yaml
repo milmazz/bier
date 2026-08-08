@@ -14,4 +14,4 @@ expect:
 notes: >
   Whitespace is allowed around parens, commas, and and/or keywords in a
   logic tree. Mirrors AndOrParamsSpec "allows whitespace".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L213
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L211

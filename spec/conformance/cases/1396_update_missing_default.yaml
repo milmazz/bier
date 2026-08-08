@@ -1,0 +1,34 @@
+id: 1396
+feature: mutations/missing-default/update
+request:
+  method: PATCH
+  path: /complex_items?id=eq.3&columns=name,field-with_sep
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation, missing=default
+  body: { "name": "Tres" }
+schema: mutations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Preference-Applied: missing=default, return=representation
+  body_exact:
+    - {
+        "id": 3,
+        "name": "Tres",
+        "settings": { "foo": { "bar": "baz", "int": 1 } },
+        "arr_data": [1, 2, 3],
+        "field-with_sep": 1,
+      }
+notes: >-
+  Prefer: missing=default also applies to PATCH: `field-with_sep` is listed in
+  ?columns but absent from the JSON object, so the column DEFAULT (1) is written
+  instead of NULL. Columns outside ?columns (settings, arr_data) keep their
+  stored values. Mirrors UpdateSpec.hs#L371-L381 ("updates table using default
+  values(field-with_sep) when json keys are undefined"), which the mutations
+  area schema reproduces: `mutations.complex_items` is a real table (LIKE
+  test.complex_items INCLUDING ALL) whose `field-with_sep` DEFAULT is 1 and
+  whose id=3 row seeds settings={"foo":{"bar":"baz","int":1}} and
+  arr_data={1,2,3}.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L371

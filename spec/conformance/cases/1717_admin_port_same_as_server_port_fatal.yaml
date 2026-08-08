@@ -13,4 +13,4 @@ expect:
   exit_code: nonzero
   stderr_contains: "admin-server-port cannot be the same as server-port"
 notes: "admin-server-port must differ from server-port. Mirrors test_cli.py:test_server_port_and_admin_port_same_value."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_cli.py#L119
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_cli.py#L119

@@ -28,5 +28,5 @@ expect:
     - { "name": "C", "rank": 1 }
 notes: >-
   resolution=merge-duplicates upserts on pk; status is 201 because at least one
-  row (Javascript, not seeded) was inserted. Mirrors UpsertSpec.hs#L21-L34.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L21
+  row (Javascript, not seeded) was inserted. Mirrors UpsertSpec.hs#L19-L32.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L19

@@ -16,4 +16,4 @@ expect:
     code: "PT402"
     message: "Payment Required"
 notes: "A RAISE with SQLSTATE prefix PTxyz maps to HTTP status xyz; the body carries message/details/hint/code."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L769
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L772

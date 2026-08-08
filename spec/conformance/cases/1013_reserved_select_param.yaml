@@ -13,5 +13,5 @@ expect:
   headers:
     Content-Type: application/json; charset=utf-8
   body_exact: [{ "id": 1 }]
-notes: "select is a reserved param (shapes response, not a column filter); id=eq.1 is a horizontal filter. Reserved set defined in QueryParams.parse"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L165
+notes: "select is a reserved param (shapes response, not a column filter); id=eq.1 is a horizontal filter. Reserved set defined in QueryParams.parse (v16.0: reserved = [\"select\", \"columns\", \"on_conflict\"] at L173, isFilter at L172); the block is byte-identical to v14.12, only the src/library/ path and line numbers moved."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/QueryParams.hs#L173

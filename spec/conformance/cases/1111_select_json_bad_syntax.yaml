@@ -15,5 +15,5 @@ expect:
     message: "\"failed to parse select parameter (data->>--34)\" (line 1, column 9)"
     code: "PGRST100"
     hint: null
-notes: "gives a meaningful error on bad syntax -> PGRST100 (JsonOperatorSpec.hs:296)"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L296
+notes: "gives a meaningful error on bad syntax -> PGRST100 (JsonOperatorSpec.hs:308)"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/JsonOperatorSpec.hs#L308

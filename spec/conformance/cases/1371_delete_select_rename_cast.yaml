@@ -15,4 +15,4 @@ expect:
   status: 200
   body_exact: [{ "ciId": "3", "ciName": "Three" }]
 notes: "DELETE return=rep with ?select supports column rename + cast."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/DeleteSpec.hs#L70
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L68

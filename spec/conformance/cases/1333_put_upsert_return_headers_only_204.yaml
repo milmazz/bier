@@ -1,0 +1,35 @@
+id: 1333
+feature: representations/put/single-upsert-return-headers-only
+request:
+  method: PUT
+  path: /items?id=eq.7
+  headers:
+    Prefer: "return=headers-only"
+    Content-Type: application/json
+  body: [{ "id": 7 }]
+schema: representations
+preconditions: []
+expect:
+  status: 204
+  headers:
+    Preference-Applied: "return=headers-only"
+  headers_absent: [Content-Type, Content-Length, Content-Range, Location]
+  body_exact: ""
+notes: >-
+  PUT (single upsert) with return=headers-only takes the `_` catch-all arm of
+  the MutationSingleUpsert dispatch: 204, empty body, and a header list that is
+  prefHeader ALONE (Response.hs#L154). That makes PUT the only mutation whose
+  empty-body response carries no Content-Range at all — the Full arm is the only
+  one that adds Content-Length/Content-Type (Response.hs#L150-L152). The 204
+  also overrides the insert-vs-replace status rule (Response.hs#L148-L149),
+  which applies only to the Full arm; id=7 exists in the seeded items 1..15, so
+  this request is a replace, but the status would be 204 either way. Location is
+  absent because the location expression is only built for INSERT mutations
+  (Statements.hs#L45-L52) and a PUT plan is not one. DERIVED FROM SOURCE: v16.0
+  has no upstream it-block for PUT + return=headers-only. The
+  Preference-Applied echo follows responsePreferences passing
+  preferRepresentation through for any MutateReadPlan{} (Response.hs#L281-L283)
+  and prefAppliedHeader (Preferences.hs#L182, token at Preferences.hs#L222) —
+  the same mechanism upstream asserts for PUT + return=minimal at
+  UpsertSpec.hs#L543-L552 (case 1332).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L154

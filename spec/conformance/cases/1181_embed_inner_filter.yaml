@@ -15,4 +15,4 @@ notes: >
   Filtering an !inner-embedded resource filters the parent table too: only
   entity 1 (which owns child_entity 1) survives. Mirrors EmbedInnerJoinSpec
   one-to-many "filters source tables when the embedded table is filtered".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L130
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L129

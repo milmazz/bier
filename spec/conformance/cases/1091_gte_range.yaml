@@ -15,4 +15,4 @@ expect:
     - { "id": 3 }
     - { "id": 4 }
 notes: "gte -> `>=` on numrange. Mirrors AndOrParamsSpec.hs 'can handle range operators'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L134
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L132

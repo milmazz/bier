@@ -13,4 +13,4 @@ expect:
   status: 400
   body_exact: { "code": "PGRST124", "details": "The query affects 14 rows", "hint": null, "message": "Query result exceeds max-affected preference constraint" }
 notes: "handling=strict + max-affected=10 with 14 matching rows -> 400 PGRST124 (transaction rolled back)."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L124
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/MaxAffectedSpec.hs#L14

@@ -1,0 +1,23 @@
+id: 1643
+feature: content_negotiation/plan/options-multiple
+request:
+  method: GET
+  path: /projects
+  headers: { Accept: "application/vnd.pgrst.plan+json; options=analyze|wal" }
+schema: test
+preconditions:
+  - "Requires db-plan-enabled = true; otherwise the plan media type does not resolve and negotiation returns 406 / PGRST107."
+expect:
+  status: 200
+  headers:
+    Content-Type: 'application/vnd.pgrst.plan+json; for="application/json"; options=analyze|wal; charset=utf-8'
+  body_jsonpath:
+    - { path: "$[0].Plan", exists: true }
+notes: >-
+  Several plan options may be requested at once, separated by "|"; decodeMediaType
+  splits options= on "|" (MediaType.hs#L172) and toMime re-joins the recognised
+  ones with "|" in the fixed order analyze, verbose, settings, buffers, wal
+  (MediaType.hs#L85). The response Content-Type therefore echoes
+  options=analyze|wal. Mirrors PlanSpec 'outputs WAL info when using the wal
+  option'. Complements case 1627, which covers the single-option form.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PlanSpec.hs#L77

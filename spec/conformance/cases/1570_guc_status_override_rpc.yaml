@@ -12,5 +12,5 @@ expect:
     Content-Type: application/json; charset=utf-8
   body_exact:
     message: "invalid user or password"
-notes: "response.status GUC overrides HTTP status (403) on RPC. Mirrors RpcSpec.hs:1124-1131."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1124
+notes: "response.status GUC overrides HTTP status (403) on RPC. Mirrors RpcSpec.hs:1127-1134."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1127

@@ -12,4 +12,4 @@ expect:
     Content-Type: text/csv; charset=utf-8
   body_raw: "id\n3\n4"
 notes: "A SETOF proc renders as CSV under Accept: text/csv."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L135
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L138

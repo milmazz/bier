@@ -13,5 +13,5 @@ expect:
   body_exact:
     - { "id": 2 }
     - { "id": 3 }
-notes: "limit and offset are reserved-embeddable params folded into ranges by getRanges/QueryParams; offset ending is internally rewritten to limit"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L142
+notes: "limit and offset are reserved-embeddable params folded into ranges by getRanges/QueryParams; the offset ending is internally rewritten to limit (v16.0: limits at L150, offsets/replaceLast at L152 and L176, ranges at L178+)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/QueryParams.hs#L150

@@ -15,4 +15,4 @@ expect:
     - { "id": 1, "name": "parent v1-1" }
     - { "id": 2, "name": "parent v1-2" }
 notes: "No Accept-Profile header -> first configured schema (v1) is used; resolved schema echoed in Content-Profile. Mirrors MultipleSchemaSpec default read"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L23
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/MultipleSchemaSpec.hs#L25

@@ -17,4 +17,4 @@ notes: >
   When the RAISE 'PGRST' has no DETAIL at all, PostgREST returns PGRST121 with
   HTTP 500 and details "DETAIL is missing in the RAISE statement". Mirrors
   RpcSpec.hs "returns error for missing DETAIL option in the RAISE statement".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1434
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1437

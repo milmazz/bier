@@ -22,4 +22,4 @@ notes: >
   status 332, custom reason phrase "My Custom Status", extra header X-Header,
   and the body taken verbatim from MESSAGE. Mirrors RpcSpec.hs "gets message
   and details from raise sqlstate PGRST".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1368
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1371

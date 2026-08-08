@@ -1,0 +1,25 @@
+id: 11808
+feature: auth/role-switching/nonexistent-role
+request:
+  method: GET
+  path: /authors_only
+  headers: { Accept: application/json }
+  jwt:
+    sign_with: hs256_test_secret
+    payload: { "aud": ["postgrest_test_author", "postgrest_test_invalid"] }
+schema: auth
+preconditions: []
+config:
+  jwt-aud: postgrest_test_author
+  jwt-role-claim-key: "$.aud[1]"
+expect:
+  status: 401
+notes: >-
+  The audience check passes (an array `aud` matches when ANY element matches,
+  Auth/Jwt.hs#L76) but `$.aud[1]` extracts `postgrest_test_invalid`, which is
+  not a Postgres role. Switching to it fails inside the transaction with
+  SQLSTATE 22023, which PostgREST special-cases to 401 when the message is
+  `role ... does not exist` (Error.hs#L561-L563, upstream issue #3601) — the
+  only SQLSTATE-driven 401 that is not 42501. Upstream (test_auth.py#L113)
+  asserts the status only.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L183

@@ -11,6 +11,6 @@ preconditions: []
 expect:
   exit_code: 0
   dump_contains:
-    - 'app.settings.foo = "bar"'
-notes: "PGRST_APP_SETTINGS_<NAME> env vars are normalized into app.settings.<name> GUCs. Source Config.hs parseAppSettings/normalize (#L310-L315)."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L310
+    - 'app.settings.FOO = "bar"'
+notes: "PGRST_APP_SETTINGS_<NAME> env vars are normalized into app.settings.<NAME> GUCs. `normalize` only strips the PGRST_APP_SETTINGS_ prefix and prepends 'app.settings.', so the remainder is kept verbatim with no case folding."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L348

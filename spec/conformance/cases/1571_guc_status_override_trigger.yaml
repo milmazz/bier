@@ -11,5 +11,5 @@ preconditions: []
 expect:
   status: 205
   body_exact: null
-notes: "INSTEAD OF UPDATE trigger sets response.status=205. Mirrors RpcSpec.hs:1133-1137."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1133
+notes: "INSTEAD OF UPDATE trigger sets response.status=205. Mirrors RpcSpec.hs:1136-1140."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1136

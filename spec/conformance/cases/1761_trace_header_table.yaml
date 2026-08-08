@@ -15,5 +15,5 @@ expect:
   body_exact: null
 notes: >
   The trace header is echoed on a table read (HEAD /projects). Mirrors
-  ObservabilitySpec.hs:22-27.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/ObservabilitySpec.hs#L22
+  ObservabilitySpec.hs:25-30.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/ObservabilitySpec.hs#L25

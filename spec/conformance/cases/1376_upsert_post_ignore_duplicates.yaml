@@ -24,5 +24,5 @@ expect:
     - { "name": "PHP", "rank": 9 }
 notes: >-
   ignore-duplicates skips conflicting rows (Python exists, ON CONFLICT DO
-  NOTHING); only the newly inserted PHP is returned. Mirrors UpsertSpec.hs#L167-L177.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L167
+  NOTHING); only the newly inserted PHP is returned. Mirrors UpsertSpec.hs#L165-L175.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L165

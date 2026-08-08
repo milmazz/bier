@@ -19,5 +19,5 @@ expect:
   headers:
     Access-Control-Allow-Origin: "*"
   body_jsonpath: []
-notes: "Empty (but present) CORS config allows all origins; preflight returns '*' and lists POST in allowed methods. Mirrors test_io.py:test_preflight_request_with_empty_cors_allowed_origin_config."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/io/test_io.py#L1322
+notes: "Empty (but present) CORS config allows all origins; preflight returns '*' and lists POST in allowed methods. In v16.0 server-cors-allowed-origins is a plain list whose empty value makes corsOrigins Nothing (Cors.hs#L31). Mirrors CorsSpec.hs 'OPTIONS preflight request should allow all origins when config is not set or empty'."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/CorsSpec.hs#L113

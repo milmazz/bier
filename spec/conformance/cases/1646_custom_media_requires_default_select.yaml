@@ -1,0 +1,27 @@
+id: 1646
+feature: content_negotiation/custom-media-handler/default-select-required
+request:
+  method: GET
+  path: /projects?id=in.(1,2)&select=id
+  headers: { Accept: text/tab-separated-values }
+schema: test
+preconditions:
+  - "Requires the DOMAIN \"text/tab-separated-values\" and the aggregate test.tsv_agg(test.projects) (content_negotiation.delta.sql); case 1644 is the succeeding counterpart."
+expect:
+  status: 406
+  headers:
+    Content-Type: application/json; charset=utf-8
+notes: >-
+  A relation-scoped media handler is an aggregate over the WHOLE row type, so it
+  is only negotiable when the request uses the default select: lookupHandler
+  gates both of its (RelId identifier, ...) probes behind `when' defaultSelect`
+  (Plan/Negotiate.hs#L76-L77), and an explicit `select=` makes hasDefaultSelect
+  false. With no anyelement handler for the mime either, negotiation finds
+  nothing and fails 406 / PGRST107 - even though the very same Accept succeeds
+  on the same relation without `select=` (case 1644). Mirrors CustomMediaSpec's
+  "using select query parameter" 406 group ('will fail for specific aggregate
+  with fewer columns' and its more/reordered siblings), which upstream exercises
+  with /lines + application/vnd.twkb; the local fixture registers the equivalent
+  relation-scoped aggregate on test.projects instead. Upstream asserts only the
+  406, so this case does the same and does not pin the error body.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L301

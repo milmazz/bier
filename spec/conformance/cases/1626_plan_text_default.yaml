@@ -14,4 +14,4 @@ expect:
 notes: >-
   A bare application/vnd.pgrst.plan (no +suffix) defaults to the +text format
   and for=application/json. Mirrors PlanSpec 'outputs in text format by default'.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PlanSpec.hs#L285
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PlanSpec.hs#L295

@@ -14,5 +14,5 @@ expect:
     - 'db-channel = "pgrst"'
     - 'server-port = 3000'
     - 'log-level = "error"'
-notes: "The --example flag prints the documented example config template. Source Config.hs exampleConfigFile (#L624-L737)."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/Config.hs#L624
+notes: "The --example flag prints the documented example config template. Source Config.hs exampleConfigFile (#L677-L798)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L677

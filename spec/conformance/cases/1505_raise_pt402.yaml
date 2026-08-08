@@ -21,4 +21,4 @@ notes: >
   envelope code is the literal SQLSTATE PT402; message/details/hint come from
   the RAISE USING fields. Mirrors RpcSpec.hs "can map a RAISE error code and
   message to a http status".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L768
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L771

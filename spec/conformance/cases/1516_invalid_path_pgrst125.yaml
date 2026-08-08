@@ -21,4 +21,4 @@ notes: >
   with HTTP 404 and the Proxy-Status header. Demonstrates the standard envelope
   for an ApiRequest-class error. Mirrors ErrorSpec.hs "works with ApiRequest
   error".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ErrorSpec.hs#L33
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L33

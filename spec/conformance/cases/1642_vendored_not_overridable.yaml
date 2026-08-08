@@ -1,0 +1,28 @@
+id: 1642
+feature: content_negotiation/custom-media-handler/vendored-not-overridable
+request:
+  method: GET
+  path: /projects?id=eq.1
+  headers: { Accept: application/vnd.pgrst.object }
+schema: test
+preconditions:
+  - "Requires the DOMAIN \"application/vnd.pgrst.object\" and the anyelement aggregate test.pgrst_obj_agg (content_negotiation.delta.sql); without them the case degenerates into a duplicate of 1611."
+expect:
+  status: 200
+  headers:
+    Content-Type: application/vnd.pgrst.object+json; charset=utf-8
+    Content-Length: "41"
+  body_exact: { "id": 1, "name": "Windows 7", "client_id": 1 }
+notes: >-
+  The vendored media types (vnd.pgrst.plan / vnd.pgrst.object /
+  vnd.pgrst.array) cannot be overridden by a custom media-type handler:
+  negotiateContent matches them in matchMT BEFORE consulting the handler map
+  (Plan/Negotiate.hs#L64-L67), so an anyelement aggregate whose stype is the
+  DOMAIN "application/vnd.pgrst.object" is never invoked. Even with that
+  aggregate registered, the response is the ordinary singular object and the
+  ordinary vnd.pgrst.object+json Content-Type - NOT the aggregate's output.
+  Mirrors CustomMediaSpec 'will not override vendored media types like
+  application/vnd.pgrst.object'. The upstream fixture defines exactly this
+  override (test/spec/fixtures/schema.sql#L3522-L3533); the local equivalent
+  lives in fixtures/content_negotiation.delta.sql.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L197

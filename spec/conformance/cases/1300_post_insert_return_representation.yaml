@@ -15,6 +15,13 @@ expect:
     Content-Type: application/json; charset=utf-8
     Content-Range: "*/1"
     Preference-Applied: "return=representation, count=exact"
+  headers_absent: [Location]
   body_exact: [{ "id": 6, "name": "New Project", "clients": { "id": 2, "name": "Apple" } }]
-notes: "POST insert with return=representation yields 201 + JSON array body + Preference-Applied. Mirrors InsertSpec.hs:96."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L96
+notes: >-
+  POST insert with return=representation yields 201 + JSON array body +
+  Preference-Applied. No Location header: the SQL builder computes a location
+  only when the representation is exactly HeadersOnly
+  (Statements.hs#L45-L52), so return=representation never carries one — the
+  upstream it-block asserts matchHeaderAbsent hLocation at InsertSpec.hs#L99.
+  Mirrors InsertSpec.hs:93.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L93

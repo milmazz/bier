@@ -13,4 +13,4 @@ expect:
   body_exact:
     - { "a": "A", "b": "B" }
 notes: "A multi-column TABLE return responds with a JSON array of multi-key objects."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L701
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L704

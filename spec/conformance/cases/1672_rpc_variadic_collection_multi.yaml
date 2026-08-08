@@ -12,5 +12,5 @@ expect:
   status: 200
   body_jsonpath:
     - { path: "$.paths['/rpc/variadic_param'].get.parameters[0]", equals: { collectionFormat: "multi", in: "query", items: { format: "text", type: "string" }, name: "v", required: false, type: "array" } }
-notes: "VARIADIC argument uses collectionFormat:multi with type:array and typed items. Mirrors OpenApiSpec.hs:1041-1059"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L1041
+notes: "VARIADIC argument uses collectionFormat:multi with type:array and typed items. Mirrors OpenApiSpec.hs:1040-1058"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L1040

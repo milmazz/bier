@@ -11,4 +11,4 @@ preconditions: []
 expect:
   status: 200
 notes: "Tokens with extra unknown fields still authenticate."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L78
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L76

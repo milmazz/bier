@@ -12,4 +12,4 @@ expect:
     Content-Type: application/json; charset=utf-8
   body_exact: [{ "id": 1 }, { "id": 2 }]
 notes: 'or= simple logic. Mirrors AndOrParamsSpec "can do simple logic".'
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L18
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L16

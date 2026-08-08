@@ -14,4 +14,4 @@ expect:
   status: 200
   body_exact: [{ "id": 1, "body": "Some real content", "owner": "postgrest_test_anonymous" }]
 notes: "PATCH ?columns=body updates only the body column; extra json keys ignored."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpdateSpec.hs#L338
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L337

@@ -16,4 +16,4 @@ expect:
 notes: >
   orders by a composite-type field's text form using the `->>` arrow:
   order=num->>i.desc.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/JsonOperatorSpec.hs#L244
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/JsonOperatorSpec.hs#L256

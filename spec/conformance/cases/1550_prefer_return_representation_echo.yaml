@@ -20,10 +20,10 @@ expect:
 notes: >
   A single applied "Prefer: return=representation" is echoed verbatim in
   Preference-Applied with NO count token: count defaults to none unless a
-  separate "Prefer: count=exact" is also supplied. Contrast the L98 test,
+  separate "Prefer: count=exact" is also supplied. Contrast the L95 test,
   which adds a second Prefer header and therefore echoes
   "return=representation, count=exact"; this case deliberately exercises the
   single-preference path, so Content-Range is "*/*". Mirrors the exact
-  it-block at InsertSpec.hs:119-128 ("should not throw and return location
+  it-block at InsertSpec.hs:116-125 ("should not throw and return location
   header when selecting without PK").
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L120
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L117

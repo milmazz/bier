@@ -20,4 +20,4 @@ notes: >-
   the builtin Content-Type application/json; charset=utf-8 but the body is the
   handler's output. Mirrors CustomMediaSpec 'will override the application/json
   handler for a single table' (GET /ov_json).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/CustomMediaSpec.hs#L180
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L178

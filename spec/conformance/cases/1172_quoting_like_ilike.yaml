@@ -14,4 +14,4 @@ expect:
 notes: >
   like / ilike patterns may be double-quoted to protect reserved chars.
   Mirrors AndOrParamsSpec "like and ilike can have quotes".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/AndOrParamsSpec.hs#L206
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L204

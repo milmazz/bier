@@ -15,4 +15,4 @@ expect:
     - { path: "$.code", equals: PGRST106 }
     - { path: "$.message", equals: "Invalid schema: unknown" }
 notes: "Unknown Content-Profile on write -> UnacceptableSchema (PGRST106, 406). Mirrors MultipleSchemaSpec 'fails when inserting on an unknown schema' (POST /children, Content-Profile: unknown)"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L150
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/MultipleSchemaSpec.hs#L152

@@ -21,5 +21,5 @@ notes: >
   Documented at resource_embedding.rst "Null filtering on Embedded Resources"
   (not.is.null == !inner example, L1016-1026). Mirrors RelatedQueriesSpec
   "related conditions through null operator on embed" > "works on a
-  one-to-many relationship" (not.is.null branch, L177-184).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L177
+  one-to-many relationship" (not.is.null branch, L175-182).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L175

@@ -16,4 +16,4 @@ expect:
   status: 200
   body_exact: "postgrest_test_default_role"
 notes: "Pre-request proc, id=2 -> SET ROLE postgrest_test_default_role."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AuthSpec.hs#L211
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L216

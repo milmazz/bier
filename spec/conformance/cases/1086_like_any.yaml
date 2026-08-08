@@ -14,4 +14,4 @@ expect:
     - { "id": 1 }
     - { "id": 2 }
 notes: "like(any) -> `body like ANY('{%plan%,%brain%}')`. Mirrors QuerySpec.hs any/all quantifiers 'works with the like/ilike operator'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1519
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1531

@@ -20,4 +20,4 @@ notes: >
   related order references the embed's alias: order=client(name).asc where the
   embed is aliased client:clients(name); nulls follow PostgreSQL default for asc
   (last).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RelatedQueriesSpec.hs#L27
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L25

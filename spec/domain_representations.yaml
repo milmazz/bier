@@ -1,5 +1,6 @@
 # Behavior model for the "domain_representations" feature area of PostgREST
-# v14.12 (upstream name: "Data representations").
+# v16.0 (upstream name: "Domain Representations", formerly "Data
+# representations").
 #
 # Scope: PostgreSQL DOMAIN types over a base type, plus the casts that register
 # how PostgREST (de)serializes a column of that domain:
@@ -8,24 +9,42 @@
 #   * CREATE CAST (text AS <domain>) -- parse:     query-string filter values
 # Covered: a domain rendered via a registered `<domain> AS json` cast, the
 # inverse `json AS <domain>` cast on insert, the `text AS <domain>` cast used
-# for filter values, formatting through embeds/views/computed columns, manual
-# ::cast layered on top, NULL handling, and the DEFAULT behaviour when no
-# `<domain> AS json` cast exists (the base type's plain JSON rendering).
+# for filter values (including IN / NOT IN predicates and filters targeting an
+# embedded relation), formatting through embeds/views/computed columns, manual
+# ::cast layered on top, NULL handling, ?columns interaction, and the DEFAULT
+# behaviour when no `<domain> AS json` cast exists (the base type's plain JSON
+# rendering).
 #
-# Every entry carries a `source` URL with a line anchor into PostgREST v14.12.
+# Every entry carries a `source` URL with a line anchor into PostgREST v16.0.
 # Behaviors that could not be traced to a real source line are recorded under
 # `gaps` (see end of file) and NOT modeled as claims.
 #
+# v14.12 -> v16.0 re-sync notes (the diff, for the record):
+#   * The area is behaviorally UNCHANGED. `src/library/PostgREST/SchemaCache/
+#     Representations.hs` differs only by a dropped `{-# LANGUAGE DeriveGeneric
+#     #-}` pragma; the `dataRepresentations` catalog query in `SchemaCache.hs`
+#     (pg_cast where castcontext='i' AND castmethod='f' AND either side is a
+#     domain and the other is json/text) is byte-identical; the resolver
+#     (`withTransformer`/`withOutputFormat`/`withTextParse`/`withJsonParse` in
+#     `Plan.hs`) is unchanged; the `datarep_*` fixture DDL and seed rows are
+#     unchanged; `docs/references/api/domain_representations.rst` is unchanged.
+#   * Two upstream requests gained an explicit `&order=id` (the two embed tests
+#     and the cross-relation filter test) — same expected bodies, deterministic
+#     top-level ordering. Cases 1807/1816/1818 carry the v16.0 request.
+#   * The one intentionally-unsupported behavior (ilike on a data-rep column)
+#     now asserts a PostgreSQL-version-dependent error body and no longer pins
+#     Content-Length; it stays unmodeled (see gaps).
+#
 # Convention for `source_url`: raw.githubusercontent.com line anchors, pinned to
-# the v14.12 tag, matching the form mandated by spec/case.schema.json. Each #Lnn
+# the v16.0 tag, matching the form mandated by spec/case.schema.json. Each #Lnn
 # lands on the `it`/definition line of the upstream HSpec test or SQL fixture
 # that demonstrates the behavior; line numbers were re-derived directly from the
-# raw v14.12 files. To view in a browser, replace
-# `raw.githubusercontent.com/PostgREST/postgrest/v14.12/` with
-# `github.com/PostgREST/postgrest/blob/v14.12/`.
+# raw v16.0 files. To view in a browser, replace
+# `raw.githubusercontent.com/PostgREST/postgrest/v16.0/` with
+# `github.com/PostgREST/postgrest/blob/v16.0/`.
 
 area: domain_representations
-version: v14.12
+version: v16.0
 fixture: spec/conformance/fixtures/domain_representations.sql
 schema: test
 
@@ -36,8 +55,8 @@ entries:
       A column whose type is a DOMAIN with a registered `CREATE CAST (<domain>
       AS json)` is serialized in GET responses by that cast. The `color` domain
       (integer) reads out as the formatted string "#RRGGBB".
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1536
-    source_line: 1536
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1548
+    source_line: 1548
     cases: [1800]
 
   - entry_id: domain_representations.format_multiple_distinct
@@ -45,8 +64,8 @@ entries:
       Distinct domain columns in the same row each apply their own
       representation cast independently (color -> "#RRGGBB", isodate ->
       timestamptz with trailing "Z").
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1540
-    source_line: 1540
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1552
+    source_line: 1552
     cases: [1801]
 
   - entry_id: domain_representations.format_nulls
@@ -54,25 +73,35 @@ entries:
       NULL handling is delegated to the cast function. A NULL `isodate`
       serializes as JSON null; a NULL `color` serializes as the empty string ""
       because its json cast maps NULL to to_json('').
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1570
-    source_line: 1570
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1582
+    source_line: 1582
     cases: [1802]
 
   - entry_id: domain_representations.format_star_select
     claim: >
-      `select=*` (and implicit star) formats every domain column via its
-      representation cast: bytea_b64 -> unpadded base64 string, unixtz ->
-      integer epoch seconds, monetary -> JSON string preserving scale.
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1575
-    source_line: 1575
+      `select=*` formats every domain column via its representation cast:
+      bytea_b64 -> unpadded base64 string, unixtz -> integer epoch seconds,
+      monetary -> JSON string preserving scale.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1587
+    source_line: 1587
     cases: [1803]
+
+  - entry_id: domain_representations.format_implicit_star_select
+    claim: >
+      Omitting `select` entirely (implicit star) produces exactly the same
+      formatted document as an explicit `select=*`: star expansion happens
+      before the representation casts are installed, so every domain column is
+      still formatted.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1595
+    source_line: 1595
+    cases: [1815]
 
   - entry_id: domain_representations.format_rename
     claim: >
       A renamed domain column (`select=clr:label_color`) still applies its
       representation cast; only the JSON key changes.
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1562
-    source_line: 1562
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1574
+    source_line: 1574
     cases: [1804]
 
   - entry_id: domain_representations.manual_cast_on_top
@@ -81,8 +110,8 @@ entries:
       (`select=clr:label_color::text`) is applied on top of the representation:
       the formatted JSON string is itself re-serialized, yielding a quoted
       string like "\"#000000\"".
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1566
-    source_line: 1566
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1578
+    source_line: 1578
     cases: [1805]
 
   - entry_id: domain_representations.format_in_view_and_computed
@@ -90,17 +119,37 @@ entries:
       Domain representations apply to view columns, including a computed view
       column whose expression is cast back to the domain
       (e.g. (label_color/2)::color renders as "#RRGGBB").
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1553
-    source_line: 1553
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1565
+    source_line: 1565
     cases: [1806]
 
   - entry_id: domain_representations.format_through_embed
     claim: >
       Domain representations are applied to embedded (joined) resources, so a
       domain column read through a to-one embed is still formatted.
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1599
-    source_line: 1599
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1611
+    source_line: 1611
     cases: [1807]
+
+  - entry_id: domain_representations.format_through_embed_star_select
+    claim: >
+      A star select INSIDE a to-one embed expands to the embedded relation's
+      columns and applies each of their representation casts, exactly as a
+      top-level star select does.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1615
+    source_line: 1615
+    cases: [1816]
+
+  - entry_id: domain_representations.select_unknown_column_error
+    claim: >
+      Selecting a column that does not exist alongside data-representation
+      columns fails the ordinary way: no transform is installed for the unknown
+      field, Postgres raises 42703 and PostgREST returns 400 with the standard
+      {code, details, hint, message} envelope
+      ("column datarep_todos.banana does not exist").
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1556
+    source_line: 1556
+    cases: [1819]
 
   # --- filter: text AS domain cast -----------------------------------------
   - entry_id: domain_representations.filter_text_parser
@@ -108,8 +157,8 @@ entries:
       When a `CREATE CAST (text AS <domain>)` is registered, query-string filter
       values are parsed with it before comparison. `label_color=eq.000100`
       matches the row whose color is the parsed value.
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1610
-    source_line: 1610
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1622
+    source_line: 1622
     cases: [1808]
 
   - entry_id: domain_representations.filter_no_text_parser_no_json_fallback
@@ -117,17 +166,36 @@ entries:
       In the absence of a `text AS <domain>` cast (isodate has none), PostgREST
       does NOT fall back on the JSON parser for query-string filter values; the
       raw value reaches the base type and may error there.
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1614
-    source_line: 1614
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1626
+    source_line: 1626
     cases: [1809]
 
   - entry_id: domain_representations.filter_text_parser_in_predicate
     claim: >
       The `text AS <domain>` parser is also applied to each value of an `in.(...)`
       predicate.
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1624
-    source_line: 1624
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1636
+    source_line: 1636
     cases: [1810]
+
+  - entry_id: domain_representations.filter_text_parser_not_in_predicate
+    claim: >
+      The `text AS <domain>` parser is applied to each value of a negated
+      `not.in.(...)` predicate as well; rows whose domain column is NULL are
+      excluded by the NOT IN comparison as usual.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1643
+    source_line: 1643
+    cases: [1817]
+
+  - entry_id: domain_representations.filter_text_parser_across_relations
+    claim: >
+      The `text AS <domain>` parser also runs for a filter targeting an EMBEDDED
+      relation (`<embed>.<domain column>=neq.<value>`); an excluded to-one embed
+      collapses to null and a surviving one is still formatted by its
+      representation cast.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1649
+    source_line: 1649
+    cases: [1818]
 
   # --- write: json AS domain cast ------------------------------------------
   - entry_id: domain_representations.parse_post_body_select_shaped
@@ -135,8 +203,8 @@ entries:
       On POST with return=representation, JSON body values for domain columns
       are parsed via `CREATE CAST (json AS <domain>)`, and the returned columns
       are re-formatted via the `<domain> AS json` cast (round trip).
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L824
-    source_line: 824
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L814
+    source_line: 814
     cases: [1811]
 
   - entry_id: domain_representations.parse_post_body_all_columns
@@ -145,8 +213,8 @@ entries:
       the JSON body and formats them back: color "#001100", isodate parsed and
       rendered with trailing Z, bytea_b64 padded on read-back, unixtz as epoch
       integer, monetary preserving its numeric string.
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L834
-    source_line: 834
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L824
+    source_line: 824
     cases: [1812]
 
   - entry_id: domain_representations.columns_param_uses_defaults
@@ -155,9 +223,19 @@ entries:
       columns fall back to their table DEFAULT (parsed/formatted accordingly),
       e.g. due_at defaults to the isodate '2018-01-01' rendered as
       "2018-01-01T00:00:00Z".
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L845
-    source_line: 845
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L835
+    source_line: 835
     cases: [1813]
+
+  - entry_id: domain_representations.columns_param_unknown_column
+    claim: >
+      If ?columns= names a column that is not in the schema cache, the request
+      fails with 400 PGRST204 ("Could not find the '<col>' column of '<relation>'
+      in the schema cache") BEFORE any body value is parsed — an invalid
+      domain value elsewhere in the body never surfaces and no row is written.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L845
+    source_line: 845
+    cases: [1820]
 
   # --- default behaviour: no domain AS json cast ---------------------------
   - entry_id: domain_representations.no_cast_uses_base_type
@@ -167,14 +245,15 @@ entries:
       number). On a POST that omits the domain column with Prefer: missing=default,
       the column takes the domain DEFAULT (666) and the return=representation body
       is [{"id": 666, "name": "Lu"}] with status 201.
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L572
-    source_line: 572
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L562
+    source_line: 562
     cases: [1814]
 
 # ---------------------------------------------------------------------------
 # gaps: behaviors observed in the area but NOT modeled as conformance cases
-# because they could not be pinned to a stable, unambiguous source line, or are
-# explicitly out of the data-representations contract.
+# because they could not be pinned to a stable, unambiguous source line, are
+# explicitly out of the data-representations contract, or cannot be expressed
+# with the current case/harness contract.
 # ---------------------------------------------------------------------------
 gaps:
   - id: domain_representations.ilike_unsupported
@@ -182,13 +261,59 @@ gaps:
       Pattern operators (ilike/like) are intentionally NOT supported on
       data-representation columns; the upstream test only asserts PostgREST does
       not panic and surfaces the raw Postgres "operator does not exist" error.
-      The exact 404 status + error body are an implementation detail of how the
-      unsupported operator is surfaced rather than a representation contract, so
-      it is left unmodeled.
-    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/QuerySpec.hs#L1643
+      In v16.0 the asserted body became PostgreSQL-version-dependent (the
+      details/hint split differs on PG >= 19) and the Content-Length assertion
+      was dropped, so there is no single stable expected body. Left unmodeled.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1655
+
+  - id: domain_representations.star_and_explicit_mix
+    note: >
+      needed_assertion: "formats star and explicit mix"
+      (`/datarep_todos?select=due_at,*`) expects a JSON object with a DUPLICATE
+      `due_at` key — the explicitly-selected column and the star-expanded one
+      both appear, and PostgREST emits both. `expect.body_exact` is parsed as
+      YAML/JSON into a map, so duplicate keys collapse and the assertion cannot
+      be written. This needs a raw-body-equality assertion for JSON responses
+      (an `expect.body_raw_json` that compares the exact wire bytes, or
+      `body_contains` over the serialized object) before the case can be added.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1603
+
+  - id: domain_representations.mutation_isolation
+    note: >
+      The whole upstream PATCH block (UpdateSpec.hs "Data representations",
+      L646-L744: parses values in a PATCH body, formats individually selected
+      values, formats a computed column on return=representation, bulk PATCH
+      with ?columns=, PGRST204 on an unknown ?columns entry, and the
+      no-rows-matched case) plus the InsertSpec "on updatable view" context and
+      the headers-only POST are NOT modeled. Every one of them mutates rows
+      1..4 of datarep_todos / datarep_todos_computed, which the read cases
+      1800-1810 and 1815-1819 assert on. Upstream can do this because its test
+      app runs with `configDbTxRollbackAll = True` (SpecHelper.hs#L176), i.e.
+      every request's transaction is rolled back; Bier's conformance harness
+      runs one shared instance with `async: true` and no per-request rollback,
+      so these cases would be order-dependent. NOTE this already affects the
+      three existing mutation cases 1811/1812/1813 (all POST id=5 into
+      datarep_todos, so at most one can succeed) and case 1806 (an unfiltered
+      read of datarep_todos_computed that sees any leftover row). Modeling this
+      block needs the harness to gain per-case rollback (PostgREST's
+      db-tx-end=rollback-allow-override + `Prefer: tx=rollback`, or a fixture
+      reload between mutation cases).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/SpecHelper.hs#L176
+
   - id: domain_representations.arrays_and_composites
     note: >
       The area brief asked about domains nested in arrays/composites. PostgREST
-      v14.12 ships no test fixture exercising a representation cast on an array
+      v16.0 ships no test fixture exercising a representation cast on an array
       element type or a composite field, so no behavior could be cited; omitted
-      rather than guessed.
+      rather than guessed. The catalog query that discovers representations
+      (SchemaCache.hs dataRepresentations) only matches casts where one side is
+      a DOMAIN (`typtype = 'd'`) and the other is exactly json or text.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/SchemaCache.hs#L361
+
+  - id: domain_representations.rpc_unsupported
+    note: >
+      Domain representations are explicitly NOT implemented for RPC; the
+      CHANGELOG entry that introduced the feature states "data representations
+      are not implemented for RPC", and v16.0 ships no RpcSpec test exercising
+      a datarep domain. No case models RPC + representations.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/CHANGELOG.md#L608

@@ -14,4 +14,4 @@ expect:
     - { "id": 3 }
     - { "id": 4 }
 notes: "limit/offset window a SETOF proc result and set Content-Range (unbounded total when no count requested)."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L309
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L312

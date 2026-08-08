@@ -13,5 +13,5 @@ expect:
   headers:
     Content-Type: application/json; charset=utf-8
   body_exact: [{ "id": 1, "name": "parent v1-1" }]
-notes: "A literal '+' in a query value decodes to a space because PostgREST parses the query string with parseQueryReplacePlus True; equivalent to %20"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/src/PostgREST/ApiRequest/QueryParams.hs#L149
+notes: "A literal '+' in a query value decodes to a space because PostgREST parses the query string with parseQueryReplacePlus True (v16.0 QueryParams.hs#L157); equivalent to %20."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/QueryParams.hs#L157

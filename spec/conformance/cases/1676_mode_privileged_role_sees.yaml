@@ -13,5 +13,5 @@ expect:
   body_jsonpath:
     - { path: "$.paths['/authors_only'].post.tags[0]", equals: "authors_only" }
     - { path: "$.paths['/rpc/privileged_hello'].post.tags[0]", equals: "(rpc) privileged_hello" }
-notes: "With a JWT for a role that has the privilege, the privileged table/function appear. JWT role=postgrest_test_author, secret reallyreallyreallyreallyverysafe. Mirrors OpenApiSpec.hs:218-224, 1016-1023"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/OpenApi/OpenApiSpec.hs#L218
+notes: "With a JWT for a role that has the privilege, the privileged table/function appear. JWT role=postgrest_test_author, secret reallyreallyreallyreallyverysafe. Mirrors OpenApiSpec.hs:217-223, 1015-1022"
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L217

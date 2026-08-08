@@ -12,4 +12,4 @@ expect:
     Content-Range: 0-4/5
   body_exact: ""
 notes: "Prefer count=exact on a SETOF proc returns an exact total in Content-Range (5 projects in fixture). HEAD returns headers only."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L84
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L87

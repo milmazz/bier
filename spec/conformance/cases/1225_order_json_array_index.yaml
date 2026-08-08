@@ -1,0 +1,20 @@
+id: 1225
+feature: ordering/json_path/array_index
+request:
+  method: GET
+  path: /arrays?select=id&order=numbers->0.desc
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{ "id": 1 }, { "id": 0 }]
+notes: >
+  orders by an array element addressed with a numeric json-path index. The column
+  is int[], not json/jsonb, so the field is wrapped: `to_jsonb(numbers)->0::int`
+  (SqlFragment pgFmtField cfToJson branch + pgFmtJsonPath JIdx, which appends the
+  ::int cast). Rows: id 0 = {1,2,3}, id 1 = {11,12,13}; desc on element 0 =>
+  11 before 1.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/JsonOperatorSpec.hs#L261

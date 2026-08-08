@@ -30,4 +30,4 @@ expect:
       },
     ]
 notes: "?columns=id,label_color parses only those keys; name and due_at not listed, so due_at takes the table DEFAULT isodate '2018-01-01' formatted as 2018-01-01T00:00:00Z and the bad due_at value is ignored. Mirrors InsertSpec.hs 'ignores json keys not included in ?columns; parses only the ones specified'."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L845
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L835

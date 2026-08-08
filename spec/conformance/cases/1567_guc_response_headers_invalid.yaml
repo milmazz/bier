@@ -15,5 +15,5 @@ expect:
     message: "response.headers guc must be a JSON array composed of objects with a single key and a string value"
     details: null
     hint: null
-notes: "Malformed response.headers GUC (object, not array) -> 500 PGRST111. Mirrors RpcSpec.hs:1048-1055."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1048
+notes: "Malformed response.headers GUC (object, not array) -> 500 PGRST111. Mirrors RpcSpec.hs:1051-1058."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1051

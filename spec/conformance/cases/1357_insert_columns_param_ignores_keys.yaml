@@ -19,5 +19,5 @@ notes: >-
   Single-object insert with ?columns=id,body: JSON keys not listed in ?columns
   (smth, other, fake_id) are ignored, not rejected. No ?select, so the full
   inserted row (including the defaulted owner) is returned. Mirrors
-  InsertSpec.hs#L440-L442.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/InsertSpec.hs#L440
+  InsertSpec.hs#L437-L439.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L437

@@ -1,0 +1,32 @@
+id: 1818
+feature: domain_representations/filter/text_parser_across_relations
+request:
+  method: GET
+  path: /datarep_next_two_todos?select=id,name,datarep_todos!datarep_next_two_todos_first_item_id_fkey(label_color,due_at)&datarep_todos.label_color=neq.000100&order=id
+  headers: { Accept: application/json }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    [
+      { "id": 1, "name": "school related", "datarep_todos": null },
+      {
+        "id": 2,
+        "name": "do these first",
+        "datarep_todos":
+          { "label_color": "#000000", "due_at": "2018-01-02T00:00:00Z" },
+      },
+    ]
+notes: >
+  The `text AS color` parser also runs for a filter targeting an EMBEDDED relation
+  (`datarep_todos.label_color=neq.000100`), not just top-level columns. Row 1's
+  first_item is todo 2 (#000100), which the filter excludes, so the to-one embed
+  collapses to null; row 2's first_item is todo 1 (#000000) and survives, still
+  formatted through the representation cast. The embed here carries no alias, so
+  the table-name target `datarep_todos.` is not affected by v16's aliased-target
+  deprecation. Mirrors QuerySpec.hs 'uses text parser on value for filter across
+  relations' (v16.0 request carries the explicit &order=id).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1649

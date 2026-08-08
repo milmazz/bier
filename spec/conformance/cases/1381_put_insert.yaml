@@ -18,5 +18,5 @@ expect:
   body_exact: [{ "name": "Go", "rank": 19 }]
 notes: >-
   PUT to a non-existent pk inserts the row -> 201. Upstream first asserts
-  GET /tiobe_pls?name=eq.Go returns [] then PUTs. Mirrors UpsertSpec.hs#L364-L375.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/UpsertSpec.hs#L375
+  GET /tiobe_pls?name=eq.Go returns [] then PUTs. Mirrors UpsertSpec.hs#L362-L373.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L373

@@ -22,4 +22,4 @@ notes: >
   top-level keys are treated as named params (A, B, C), which do not match, so the
   whole-body fallback (single unnamed json/jsonb parameter) is also searched and
   no match is found -> 404 PGRST202.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1155
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1158

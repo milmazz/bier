@@ -14,4 +14,4 @@ expect:
   headers:
     Preference-Applied: handling=lenient
 notes: "handling=lenient ignores the max-affected cap even with 14 rows -> 204; only handling=lenient echoed."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/PreferencesSpec.hs#L158
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/MaxAffectedSpec.hs#L48

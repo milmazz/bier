@@ -14,5 +14,5 @@ expect:
   headers:
     Content-Range: "0-1/*"
   body_exact: [{"id":1},{"id":2}]
-notes: "Acceptable closed Range 0-1 returns 2 rows, Content-Range '0-1/*', status 200 (no count). Mirrors RangeSpec.hs:414."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RangeSpec.hs#L414
+notes: "Acceptable closed Range 0-1 returns 2 rows, Content-Range '0-1/*', status 200 (no count). Mirrors RangeSpec.hs:413."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L413

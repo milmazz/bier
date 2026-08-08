@@ -21,4 +21,4 @@ notes: >
   parsed and defaults to HTTP 500. The envelope still carries the literal
   SQLSTATE as code, and details/hint are null. Mirrors RpcSpec.hs "defaults to
   status 500 if RAISE code is PT not followed by a number".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L776
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L779

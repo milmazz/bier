@@ -22,5 +22,5 @@ notes: >
   (SPECIAL "@/\#~_-) is a valid Accept-Profile value; the resolved schema is
   echoed verbatim in Content-Profile. The Accept-Profile / Content-Profile
   values are the raw schema name (double-quote, slash, backslash, hash, tilde
-  included). Mirrors the exact it-block at MultipleSchemaSpec.hs:82-92.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/MultipleSchemaSpec.hs#L82
+  included). Mirrors the exact it-block at MultipleSchemaSpec.hs:84-94.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/MultipleSchemaSpec.hs#L84

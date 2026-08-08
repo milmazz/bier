@@ -21,4 +21,4 @@ notes: >
   PGRST121 with HTTP 500, echoing the raw MESSAGE in details and the required
   shape in hint. Mirrors RpcSpec.hs "returns error for invalid JSON in the
   MESSAGE option of the RAISE statement".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1413
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1416

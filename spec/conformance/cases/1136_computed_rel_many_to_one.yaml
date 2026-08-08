@@ -15,5 +15,5 @@ notes: >
   A computed relationship defined by a SETOF-returning function with ROWS 1
   (computed_designers(test.videogames)) is embeddable as a many-to-one single
   object, aliased here as "designer"
-  (ComputedRelsSpec.hs:15, "can define a many-to-one relationship with SETOF and ROWS 1 and embed").
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/ComputedRelsSpec.hs#L15
+  (ComputedRelsSpec.hs:13, "can define a many-to-one relationship with SETOF and ROWS 1 and embed").
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ComputedRelsSpec.hs#L13

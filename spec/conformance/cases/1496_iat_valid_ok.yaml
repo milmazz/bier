@@ -1,0 +1,22 @@
+id: 1496
+feature: auth/claims/iat-valid
+request:
+  method: GET
+  path: /authors_only
+  headers: { Accept: application/json }
+  jwt:
+    sign_with: hs256_test_secret
+    payload: { "role": "postgrest_test_author", "iat": 1300819380 }
+schema: auth
+preconditions: []
+expect:
+  status: 200
+notes: >-
+  New in v16.0 (AuthSpec gained "succeeds with a valid iat claim in jwt"): a
+  numeric `iat` that is not in the future is accepted. Upstream signs
+  `iat = relativeSeconds 0` (now); this case uses a fixed past instant instead
+  so the expectation is time-independent — `iat` only fails validation when it
+  is in the future, i.e. when `now + 30s < iat`
+  (Auth/Jwt.hs#L60, #L64, #L69). The 30s allowance is PostgREST's clock skew
+  tolerance.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AuthSpec.hs#L87

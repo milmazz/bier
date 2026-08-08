@@ -1,0 +1,22 @@
+id: 11803
+feature: auth/role-claim-key/filter-equals
+request:
+  method: GET
+  path: /authors_only
+  headers: { Accept: application/json }
+  jwt:
+    sign_with: hs256_test_secret
+    payload:
+      realm_access: { "roles": ["other", "postgrest_test_author"] }
+schema: auth
+preconditions: []
+config:
+  jwt-role-claim-key: '$.realm_access.roles[?(@ == "postgrest_test_author")]'
+expect:
+  status: 200
+notes: >-
+  RFC 9535 filter selector over an array-of-roles claim (the Keycloak
+  `realm_access.roles` shape). When a filter matches several nodes PostgREST
+  takes the first (`evaluateJSPath ... V.!? 0`, Config/JSPath.hs#L51).
+  Upstream asserts the status only.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L155

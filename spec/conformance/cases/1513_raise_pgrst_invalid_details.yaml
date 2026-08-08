@@ -18,4 +18,4 @@ notes: >
   PGRST121 with HTTP 500, echoing the raw DETAIL in details and the required
   DETAIL shape in hint. Mirrors RpcSpec.hs "returns error for invalid JSON in
   the DETAIL option of the RAISE statement".
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Query/RpcSpec.hs#L1425
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1428

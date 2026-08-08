@@ -14,4 +14,4 @@ preconditions: []
 expect:
   status: 200
 notes: "With jwt-aud=youraudience, a string aud that matches -> 200."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v14.12/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L17
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Auth/AudienceJwtSecretSpec.hs#L23
