@@ -13,5 +13,10 @@ expect:
     X-Test: "key1=val1; someValue; key2=val2"
     X-Test-2: "key1=val1"
   body_exact: 1
-notes: "response.headers GUC (JSON array of single-key objects) becomes response headers. Mirrors RpcSpec.hs:1038-1043."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1030
+notes: >
+  response.headers GUC (JSON array of single-key objects) becomes response
+  headers. Mirrors the second of the three requests in the "succeeds setting
+  the headers" it-block (RpcSpec.hs:1031), namely
+  GET /rpc/get_int_and_guc_headers?num=1 with its assertions at
+  RpcSpec.hs:1038-1043.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1038

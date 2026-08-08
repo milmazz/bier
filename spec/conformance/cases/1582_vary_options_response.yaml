@@ -1,0 +1,34 @@
+id: 1582
+feature: headers/vary/non-read-responses
+request:
+  method: OPTIONS
+  path: /items
+schema: headers
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Vary: "Accept, Prefer, Range"
+  headers_present: [Allow]
+notes: >
+  NEW in PostgREST v16.0, companion to case 1575: the default
+  `Vary: Accept, Prefer, Range` is NOT read-specific. It is appended by App.hs'
+  `toWaiResponse`, the single funnel every non-error response passes through
+  (`Wai.responseLBS st (hdrs ++ serverTimingHeaders timing ++ warningHeaders
+  warnMsgs ++ [varyHeader | not $ varyHeaderPresent hdrs]) bod`,
+  src/library/PostgREST/App.hs#L253 with the value at #L259), so reads, writes,
+  RPC and OPTIONS all carry it. OPTIONS is the cleanest side-effect-free
+  witness: its response is built by `respondInfo`, whose header list is exactly
+  `[Content-Length, Access-Control-Allow-Origin, Allow]` with no Vary of its own
+  (src/library/PostgREST/Response.hs#L230-L233), so the `varyHeaderPresent`
+  guard cannot fire and the default is appended verbatim. The `Allow` value
+  itself is asserted by case 1019 and only asserted present here. Note the
+  request deliberately carries no `Origin`: `corsPolicy` returns Nothing without
+  one (src/library/PostgREST/Cors.hs#L27, #L43), so wai-cors passes the OPTIONS
+  through to the app instead of answering it as a preflight. Upstream's own
+  Vary it-block (HttpHeaderSpec.hs#L26-L34) exercises only GET, so this case is
+  derived from the source funnel rather than from an it-block — the docs state
+  the same unqualified rule ("PostgREST includes a ``Vary`` header of value
+  ``Accept, Prefer, Range`` in its responses",
+  docs/references/api/vary_header.rst#L6-L7).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L253
