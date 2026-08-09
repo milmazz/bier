@@ -3,20 +3,31 @@ defmodule Bier.Preferences do
   Parsing and validation of the `Prefer` request header for the **read** path
   (the write path's `Prefer` handling lives in `Bier.Mutation`).
 
-  Mirrors PostgREST's PreferencesSpec semantics:
+  Mirrors PostgREST v16.0's `ApiRequest.Preferences` semantics:
 
     * recognized preference keys are `handling`, `timezone`, `max-affected`,
       `return`, `resolution`, `count`, `missing`, `tx`;
     * `handling=strict` rejects the whole request (400 `PGRST122`) when ANY
-      supplied preference is invalid — an unrecognized token, or a `timezone`
-      whose value is not a valid Postgres time zone name. The error `details`
-      lists the offending tokens verbatim, comma-separated;
+      supplied preference is invalid. The error `details` lists the offending
+      tokens verbatim, comma-separated;
     * `handling=lenient` (or no handling) silently ignores invalid preferences;
-    * an applied `timezone=<name>` shifts `timestamptz` rendering and is echoed in
-      `Preference-Applied`.
+    * `timezone=<value>` is **never** an invalid preference. v16.0 dropped the
+      `pg_timezone_names` membership test that v14.12 applied
+      (`fromHeaders` lost its `TimezoneNames` argument along with
+      `isTimezonePrefAccepted`, `Preferences.hs#L129-L163`), so every value is
+      accepted as a preference and handed to PostgreSQL as the session
+      `TimeZone`. A value PostgreSQL rejects therefore surfaces as an ordinary
+      database error (SQLSTATE `22023` -> 400), not as a `PGRST122` — and
+      `handling` has nothing left to suppress, which is why the docs say
+      "handling=lenient is ignored for timezone. Invalid time zones always
+      return an error";
+    * the applied preferences are echoed in `Preference-Applied` in PostgREST's
+      canonical order (`handling` before `timezone`), never in request order.
 
-  `parse_read/2` runs the (cheap) timezone validity check against the given
-  Postgrex pool so the strict path can reject an invalid zone before any read.
+  Numeric UTC offsets (`+05:30`, `-4`) are consequently valid too: they are not
+  members of `pg_timezone_names` but PostgreSQL accepts them as a `TimeZone`,
+  and the echo carries the raw preference token rather than a normalized zone
+  name.
   """
 
   @recognized_keys ~w(handling timezone max-affected return resolution count missing tx)
@@ -26,34 +37,30 @@ defmodule Bier.Preferences do
 
   Returns:
 
-    * `{:ok, %{timezone: tz | nil, applied: [token]}}` — the timezone to apply
-      (nil when none/invalid-but-lenient) and the tokens to echo in
+    * `{:ok, %{timezone: tz | nil, applied: [token]}}` — the timezone to hand to
+      PostgreSQL (nil when none was requested) and the tokens to echo in
       `Preference-Applied`.
     * `{:error, {:invalid_prefs, details}}` — `handling=strict` with one or more
       invalid preferences; `details` is the `"Invalid preferences: a, b"` string.
   """
-  def parse_read(conn, pool) do
+  def parse_read(conn) do
     tokens =
       conn
       |> Plug.Conn.get_req_header("prefer")
       |> Enum.flat_map(&split/1)
 
     handling = handling(tokens)
-    timezone = timezone_value(tokens)
-
-    invalid = invalid_tokens(tokens, timezone, pool)
+    invalid = invalid_tokens(tokens)
 
     if handling == :strict and invalid != [] do
       {:error, {:invalid_prefs, "Invalid preferences: " <> Enum.join(invalid, ", ")}}
     else
-      # A valid timezone is applied (and echoed); an invalid one under lenient
-      # handling is dropped.
-      applied_tz = if timezone && valid_timezone?(timezone, pool), do: timezone, else: nil
+      timezone = timezone_value(tokens)
 
       {:ok,
        %{
-         timezone: applied_tz,
-         applied: applied_tokens(handling, applied_tz)
+         timezone: timezone,
+         applied: applied_tokens(handling, timezone)
        }}
     end
   end
@@ -73,38 +80,32 @@ defmodule Bier.Preferences do
     end)
   end
 
-  # Tokens that make a `handling=strict` request invalid: any unrecognized token,
-  # plus a `timezone` whose value is not a real Postgres time zone.
-  defp invalid_tokens(tokens, timezone, pool) do
-    unknown =
-      Enum.reject(tokens, fn token ->
-        token
-        |> String.split("=", parts: 2)
-        |> hd()
-        |> Kernel.in(@recognized_keys)
-      end)
-
-    bad_tz =
-      if timezone && not valid_timezone?(timezone, pool), do: ["timezone=#{timezone}"], else: []
-
-    unknown ++ bad_tz
+  # Tokens that make a `handling=strict` request invalid: any token whose key is
+  # not a recognized preference. A `timezone` token is always recognized in
+  # v16.0 regardless of its value — PostgreSQL, not PostgREST, judges it.
+  defp invalid_tokens(tokens) do
+    Enum.reject(tokens, fn token ->
+      token
+      |> String.split("=", parts: 2)
+      |> hd()
+      |> Kernel.in(@recognized_keys)
+    end)
   end
 
-  # Echo, in PostgREST's canonical order: handling, then timezone. (For reads
-  # only timezone is applied; handling is echoed only alongside an applied
-  # preference per the spec's strict-timezone case, but the single-timezone read
-  # case echoes just `timezone=...`.)
-  defp applied_tokens(_handling, nil), do: []
-  defp applied_tokens(_handling, tz), do: ["timezone=#{tz}"]
-
-  defp valid_timezone?(tz, pool) do
-    case Postgrex.query(pool, "SELECT EXISTS(SELECT 1 FROM pg_timezone_names WHERE name = $1)", [
-           tz
-         ]) do
-      {:ok, %Postgrex.Result{rows: [[exists]]}} -> exists
-      _ -> false
-    end
+  # Echo, in PostgREST's canonical order: handling, then timezone. Only
+  # preferences the read path actually applies are echoed, so `return=` and
+  # friends never appear here.
+  defp applied_tokens(handling, timezone) do
+    [handling_token(handling), timezone_token(timezone)]
+    |> Enum.reject(&is_nil/1)
   end
+
+  defp handling_token(:strict), do: "handling=strict"
+  defp handling_token(:lenient), do: "handling=lenient"
+  defp handling_token(nil), do: nil
+
+  defp timezone_token(nil), do: nil
+  defp timezone_token(tz), do: "timezone=#{tz}"
 
   defp split(value) do
     value

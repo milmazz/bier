@@ -35,6 +35,8 @@ defmodule Bier.RouterBuilder do
 
         plug(Bier.Plugs.Cors)
 
+        plug(Bier.Plugs.Vary)
+
         plug(Bier.Plugs.Observability)
 
         plug(Bier.Plugs.ReadBody)
