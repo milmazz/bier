@@ -13,31 +13,41 @@ that compatibility means, case by case, so it can be checked automatically.
 Everything here targets **PostgREST v16.0** (docs:
 [postgrest.org/en/v16](https://postgrest.org/en/v16/)). Every conformance case
 carries a `source:` URL pinned to the `v16.0` git tag with a `#L<line>` anchor,
-fetchable via `raw.githubusercontent.com`. All **735** cases are pinned to
+fetchable via `raw.githubusercontent.com`. All **740** cases are pinned to
 `v16.0` — verified on disk this pass by parsing each case's `source:` value and
-extracting its tag (`{'v16.0': 735}`, no other value). Sweeping every PostgREST
-URL across the 17 area models plus all 735 cases (**752** files, **every one**
-carrying at least one citation) with a prefix-aware pattern finds **1986**
-`raw…/v16.0/` links plus **3** `github.com/…/blob/v16.0/` links — **1989**
+extracting its tag (`{'v16.0': 740}`, no other value). Sweeping every PostgREST
+URL across the 17 area models plus all 740 cases (**757** files, **every one**
+carrying at least one citation) with a prefix-aware pattern finds **2031**
+`raw…/v16.0/` links plus **3** `github.com/…/blob/v16.0/` links — **2034**
 citations at a single tag — and **exactly one** URL at any other tag, described
 below. When bumping the target version, re-pin the sources and re-run the review
 pass.
 
-> **Correction to the previous revision, re-derived rather than carried over:
-> the `blob/v16.0` count is THREE, not two.** Enumerating *every*
-> `github.com/PostgREST/postgrest…` URL in the sweep scope (a host match, no tag
-> pattern at all) returns exactly **four** — three `blob/v16.0`
-> (`spec/domain_representations.yaml:44` and `spec/select.yaml:27`, both prose
-> notes about URL shape rather than citations, plus **`spec/rpc.yaml:564`**, which
-> is new: it is the *re-pinned* URL inside the now-RESOLVED provenance gap entry)
-> and the single `blob/v14.12` described below. Every other citation in the tree
-> uses the `raw.githubusercontent.com` host. The still-earlier "**71**
+> **The raw-link count grew 1986 → 2031 (+45) while the case count grew by only
+> five, and that ratio is the useful part.** The content_negotiation re-sync's
+> six new cases contributed a handful; the rest came from *within* existing files
+> — case **1622** alone gained five inline citations in its `notes:` (the fixture
+> declaration, both branches of the handler-discovery query, the built-in handler
+> map, and the status), because its audit found that the it-block it cites
+> asserts only `respBody == file` and therefore cannot carry the status or the
+> `Content-Type` the case also claims. **Citation density inside a case is a
+> defence against exactly that failure**, and it moves this number far more than
+> new cases do.
+
+> **The `blob/v16.0` count is THREE, re-derived rather than carried over.**
+> Enumerating *every* `github.com/PostgREST/postgrest…` URL in the sweep scope (a
+> host match, no tag pattern at all) returns exactly **four** — three
+> `blob/v16.0` (`spec/domain_representations.yaml:44` and `spec/select.yaml:27`,
+> both prose notes about URL shape rather than citations, plus
+> **`spec/rpc.yaml:564`**, the *re-pinned* URL inside the now-RESOLVED provenance
+> gap entry) and the single `blob/v14.12` described below. Every other citation in
+> the tree uses the `raw.githubusercontent.com` host. The still-earlier "**71**
 > `blob/v16.0` links" figure stays retired — do not carry it forward. The
 > invariant all three numbers were reaching for holds under every measurement:
 > **one tag among citations, zero exceptions.**
 
 > **A prior sweep of this file under-counted the raw links too, and the cause is
-> worth knowing.** It reported 1984 `raw…/v16.0/` + 1 blob instead of **1986 + 3**,
+> worth knowing.** It reported 1984 `raw…/v16.0/` + 1 blob instead of 1986 + 3,
 > because its regex required a leading `//` and so skipped every scheme-less URL.
 > That is the **third** distinct sweep-pattern defect this tree has recorded,
 > after the `blob/` infix and the `https://` anchor. Match
@@ -80,23 +90,32 @@ pass.
 > by accident rather than by construction. `COVERAGE.md` → follow-up 24 is
 > **CLOSED**, the first follow-up in this tree to close end to end.
 
-> **`v14.12` in prose is not a stale pin.** **116** bare `v14.12` occurrences
-> remain across the 17 area model files, re-derived at the 735-case state
+> **`v14.12` in prose is not a stale pin.** **117** bare `v14.12` occurrences
+> remain across the 17 area model files, re-derived at the 740-case state
 > (`url_grammar.md` 15,
 > `pagination.yaml` 14, `errors.yaml` 13, `observability.yaml` 12, `auth.yaml`
-> 10, `config.yaml` 9, `filters.yaml` / `ordering.yaml` / **`rpc.yaml`** 6 each,
+> 10, `config.yaml` 9, **`rpc.yaml` 7**, `filters.yaml` / `ordering.yaml` 6 each,
 > `content_negotiation.yaml` / `headers.yaml` 5 each, `mutations.yaml` 4,
 > `select.yaml` 4, `openapi.yaml` 3, `operators.yaml` 2,
-> `domain_representations.yaml` / **`representations.yaml`** 1 each), plus **26**
+> `domain_representations.yaml` / `representations.yaml` 1 each), plus **26**
 > occurrences across **25** case files. These are counted by *occurrence*, not by
 > line. Sampling them shows deliberate
 > v14.12→v16.0 change notes ("the block is byte-identical to v14.12, only the
 > `src/library/` path and line numbers move").
 >
-> **Two files moved this pass and they moved in opposite directions, which is the
-> part worth reading.** `rpc.yaml` went **7 → 6** for a purely editorial reason —
-> commit `75388d6` rewrote a gap entry — while `representations.yaml` held at
-> **1** but had that one occurrence **rewritten**: its re-sync note used to assert
+> **CORRECTION, and it is a correction to this document rather than to the tree:
+> `rpc.yaml` holds SEVEN occurrences, not six, and always did.** The previous
+> revision recorded it as 6 and inferred a "7 → 6" movement from commit
+> `75388d6`. Re-counting by occurrence on disk this pass — `rpc.yaml` lines 20
+> (×1), 21 (×1), 44, 444, 497, 573, 574 — gives **7**, and `rpc.yaml` is
+> **unmodified** in `git status`, so nothing moved. The tree total is therefore
+> **117**, not 116, and the file-count line 20–21 is the trap: two occurrences on
+> two adjacent lines, easy to collapse into one when counting by line. **Count by
+> occurrence and say which you counted.**
+>
+> **The lesson the retired "7 → 6" reading was reaching for still stands, and
+> `representations.yaml` is its better example.** That file held at **1** while
+> having its one occurrence **rewritten**: its re-sync note used to assert
 > "no behavior in this area changed" flatly, and now says so "re-verified by
 > diffing both pins rather than carried over", then itemizes what *did* move (the
 > four cited Feature specs shifted 1–3 lines from a harness signature change,
@@ -106,8 +125,9 @@ pass.
 > one `Preferences.hs` behavior change in its window — `Prefer: timezone` losing
 > the `TimezoneNames` schema-cache check — **together with why it is out of
 > scope**: it does not touch `return=`. **That is the shape a "nothing changed"
-> note should have.** The count is unchanged; the claim's checkability is not.
-> **Occurrence counts move for editorial reasons; never read them as research.**
+> note should have.** The count did not move; the claim's checkability did.
+> **Occurrence counts move for editorial reasons — and, as this correction shows,
+> for counting-method reasons. Never read them as research.**
 > (This count deliberately excludes `README.md`, `COVERAGE.md` and
 > `conformance/INDEX.md`, which the synthesis phase rewrites; counting files
 > against themselves is not a measurement.)
@@ -160,6 +180,36 @@ pass.
 > read passes, because the line supports *a* claim. Only reading the enclosing
 > `describe` catches it. **Verify the block, not the line.**
 
+> **The content_negotiation pass supplies an EIGHTH species, and it is the first
+> that is not about a `source:` at all: a defective FIXTURE transcription that
+> made a case's assertion unreachable.** `fixtures.sql` declared
+> `test.unnamed_bytea_param(bytea) RETURNS bytea`; upstream declares it
+> `returns "application/octet-stream"` — the mime-named **DOMAIN**
+> (`test/spec/fixtures/schema.sql#L2372`). Since a routine's **return type** is
+> the only thing that registers an octet-stream handler
+> (`SchemaCache.hs#L1016` ships json/csv/geo+json/`*/*` and nothing else), case
+> **1622**'s expected 200 could never have been produced by a faithful
+> implementation — it would have negotiated to 406/PGRST107. **Every mechanical
+> check in this tree passed on it**: the case validated, its pin was correct, its
+> citation was real, its filename matched its id — *and the case passed*, because
+> `lib/bier/rpc.ex:288` offers octet-stream for any scalar RPC result regardless
+> of return type. A green case over a wrong fixture is indistinguishable from a
+> green case over a right one. `content_negotiation.yaml` now carries a
+> **`fixture_notes:`** key recording, per object, exactly which fixture property
+> each case depends on and what breaks if it changes — the first such key in the
+> tree, and worth copying into every area whose cases depend on a *declaration*
+> rather than on seed data.
+>
+> **The same pass also weakened two claims to what their citations support**,
+> which is the ordinary form of this defect: "negotiateContent's body is
+> **byte-identical** to v14.12's" became identical *modulo whitespace* (v16.0
+> re-aligned the `case` alternatives), and "**NEW in v16.0**: the JSON plan
+> includes a Query Identifier field" became "upstream **added a test** at v16.0"
+> — the field comes from PostgreSQL's `EXPLAIN (VERBOSE, FORMAT JSON)` under
+> `compute_query_id`, so the old wording both over-claimed and contradicted the
+> model's own `version_delta.behavior_changes: []`. **"Byte-identical" is a
+> falsifiable claim; prefer the weaker true one.**
+
 > **Fixture provenance comments are mostly still on the old pin, and the set did
 > not shrink this pass.** **Six** files under `conformance/fixtures/` carry **43**
 > `v14.12` URLs in `--` provenance comments (re-counted on disk: `ordering.sql`
@@ -197,7 +247,7 @@ spec/
 ├── <area>.yaml | url_grammar.md   # 17 per-area behavior models (the "why")
 └── conformance/
     ├── INDEX.md               # area <-> id band <-> fixture cross-reference
-    ├── cases/NNNN_<slug>.yaml # 735 conformance cases (the "what", machine-checkable)
+    ├── cases/NNNN_<slug>.yaml # 740 conformance cases (the "what", machine-checkable)
     ├── fixtures.sql           # the authoritative merged DDL+seed set
     ├── fixtures_local.sql     # human-owned harness supplement
     └── fixtures/              # per-area fragments + write-channel deltas (see its README)
@@ -268,24 +318,39 @@ There are two layers:
    > first GETs a seeded row degenerates into the insert leg. Length still measures
    > nothing; **specificity** is the signal.
    >
-   > **Silence is no longer ambiguous — it is now a CHOICE, and two ✅ *pass*
-   > areas made it opposite ways in consecutive passes.** `operators.yaml` was
-   > audited and came back ✅ *pass* with **0 citation defects** while still
-   > carrying no gap list under any key; its two open findings and its
-   > five-column-type residual live only in `COVERAGE.md`. `representations.yaml`
-   > was audited to the same verdict and **wrote its first gap list**, so its
-   > residual is discoverable from the model it belongs to. The evidence favours
-   > writing it — `COVERAGE.md` is 3 000 lines and the model is the file a future
-   > author actually opens — and `COVERAGE.md` → follow-up 19 now recommends
-   > resolving to "an audited area writes its gaps into its model" and backfilling
-   > `operators.yaml`.
+   > **Silence is now purely a CHOICE, and the choice is being made
+   > inconsistently.** `operators.yaml` was audited (✅ *pass*, **0 citation
+   > defects**) and still carries no gap list under any key; its two open findings
+   > and its five-column-type residual live only in `COVERAGE.md`.
+   > `representations.yaml` was audited to the same verdict and **wrote its first
+   > gap list**, so its residual is discoverable from the model it belongs to. The
+   > evidence favours writing it — `COVERAGE.md` is 3 000 lines and the model is
+   > the file a future author actually opens — and `COVERAGE.md` → follow-up 19
+   > recommends resolving to "an audited area writes its gaps into its model" and
+   > backfilling `operators.yaml`.
    >
-   > **`content_negotiation.yaml` is the last model that is both silent AND
-   > un-audited**, which is still un-audited absence and is indistinguishable from
-   > never having been examined. It is the highest-priority remaining audit (see
-   > *Review status*).
+   > **`content_negotiation.yaml` has now been audited too — ⚠️ *revise*, SEVEN
+   > findings — and it STAYED silent, which settles two things at once.** First,
+   > the category "silent **and** un-audited" is now **empty**: the two remaining
+   > un-audited models (`openapi`, `domain_representations`) both carry gap lists
+   > (6 and 5 entries), so silence no longer hides an unexamined area anywhere in
+   > the tree. Second, it makes `operators` the *pattern* rather than the
+   > exception — **two audited areas, seven findings between them, and neither
+   > wrote a single gap entry**. Backfilling both is now the concrete form of
+   > follow-up 19.
+   >
+   > **What `content_negotiation.yaml` wrote instead is worth more than the gap
+   > list it skipped.** It added a top-level **`fixture_notes:`** key — three
+   > entries, each naming an object (`test.unnamed_bytea_param`,
+   > `public."application/octet-stream"`, `test.add_them`), the exact property its
+   > cases depend on, and what silently breaks if that property changes ("giving
+   > `add_them` a mime-named domain return would turn case 1623's 406 into a
+   > 200"). No other model in the tree records fixture dependencies at all, and
+   > this area is precisely where that gap bit: its own fixture defect made case
+   > 1622 unreachable while every mechanical check stayed green. **Copy the key;
+   > it is the only artifact in the tree that would have caught it.**
 
-2. **Conformance cases** — 735 YAML files under `conformance/cases/`. Each is one
+2. **Conformance cases** — 740 YAML files under `conformance/cases/`. Each is one
    concrete scenario: a request and the exact response (status, headers, body)
    PostgREST produces. These are the machine-checkable contract.
 
@@ -314,7 +379,7 @@ source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/...#L<n>
 
 The schema's `required` list is six keys — `id`, `feature`, `request`, `schema`,
 `expect`, `source` — but in practice `notes` is universal too: all seven are
-present on all **735** cases, verified mechanically this pass by intersecting key
+present on all **740** cases, verified mechanically this pass by intersecting key
 sets rather than by trusting the schema. The complete key vocabulary on disk is
 exactly those seven plus `preconditions` and `config`; nothing else appears.
 `preconditions` is present on **734** (case **1330** omits it);
@@ -334,7 +399,7 @@ establishing a convention nobody has written down (`COVERAGE.md` → follow-up 2
 
 Two request shapes are supported:
 
-- **HTTP** (the common case, **697** cases): `request.method` + `request.path`,
+- **HTTP** (the common case, **702** cases): `request.method` + `request.path`,
   with optional `request.headers` / `request.body` / `request.body_raw` /
   `request.body_json`. The **auth** area may add `request.jwt` to have the runner
   mint and send a signed token (32 cases do; case 11809 instead spells out a
@@ -363,7 +428,7 @@ the schema for the authoritative field list and descriptions.
 > **One request shape is entirely untested: a `HEAD` that errors.** Thirteen
 > cases use `HEAD` (1020, 1272, 1274, 1275, 1277, 1284, 1425, 1681, 1756, 1760,
 > 1761, 1762, 1771) and **every one expects a 2xx** — re-derived mechanically at
-> the 735-case state. The last **six** re-syncs added **67** cases between them
+> the 740-case state. The last **seven** re-syncs added **73** cases between them
 > without adding a single HEAD of any kind, erroring or not, so the blind spot's
 > denominator keeps growing while its numerator is frozen at 13.
 > `COVERAGE.md` → *Known gaps → errors* costs the fix at one case.
@@ -380,7 +445,7 @@ the schema for the authoritative field list and descriptions.
 > whose whole subject is a response with **no body** — 11400 (`PATCH` → 204 with
 > `Content-Range: 0-1/*` and both `Content-Type` and `Content-Length` absent) and
 > 11402 (`POST` → 201 with `Content-Length: 0`). Method coverage
-> across the whole tree, re-derived at **735**: GET **500**, POST **107**, CLI
+> across the whole tree, re-derived at **740**: GET **504**, POST **107**, CLI
 > **38**, PATCH **26**, DELETE **21**, PUT **18**, HEAD **13**, OPTIONS **12**.
 
 ## Fixtures
@@ -442,12 +507,34 @@ which file, and why `<area>.delta.sql` is the only write channel — are in
 **comment-only**, re-verified mechanically this pass (stripping comment and blank
 lines leaves zero lines in every one). Each holds a single
 `-- Folded into ../fixtures.sql on <date> (…); empty until the next delta.`
-provenance line and no DDL, i.e. empty as a write channel. Four carry the
-2026-08-08 date (`content_negotiation`, `headers`, `ordering`, `rpc`); three
-carry 2026-08-09 (`url_grammar`, `errors`, `operators`). **There is still no
-`mutations.delta.sql` and no `representations.delta.sql`** — the last three
-re-syncs added 28 cases between them and **zero** fixture objects, and
-`fixtures.sql` does not appear in `git status`.
+provenance line and no DDL, i.e. empty as a write channel. **Three** carry the
+2026-08-08 date (`headers`, `ordering`, `rpc`); **four** carry 2026-08-09
+(`content_negotiation`, `url_grammar`, `errors`, `operators`). **There is still
+no `mutations.delta.sql` and no `representations.delta.sql`.**
+
+> **`content_negotiation.delta.sql` is the first channel folded TWICE, and its
+> second fold is the first in the tree to CHANGE an existing object rather than
+> add one.** Every prior fold appended: a table, a domain, a routine, a computed
+> field. This one re-declared `test.unnamed_bytea_param(bytea)` in place —
+> `RETURNS bytea` → `RETURNS public."application/octet-stream"` — and added the
+> `public."application/octet-stream"` domain it now returns, because the return
+> type is the only thing that registers an octet-stream handler
+> (`SchemaCache.hs#L1016`). Under the old transcription case **1622** was
+> unreachable: it could only have answered 406/PGRST107.
+>
+> **Read the fold note in `fixtures.sql` before reading this as a fix.** It says
+> so itself: 1622 was *already* passing, because `lib/bier/rpc.ex:288` offers
+> octet-stream for any scalar RPC result regardless of return type — which is the
+> over-permissive behavior the **new** case 1623 exists to catch (1623 currently
+> fails with `42846 cannot cast type integer to bytea`, not the expected
+> 406/PGRST107). The fold is upstream-fidelity groundwork that keeps 1622
+> reachable once `lib/` narrows handler discovery to the return-type domain;
+> under the old fixture those two cases could not both be green. The fold
+> deliberately adds **no** aggregate over the new domain and **no** GRANT, which
+> is what keeps 1623 (scalar) and 1624 (`SETOF`, excluded by the discovery
+> query's `NOT proretset`) at 406. An A/B run of the whole suite against the
+> pre-fold file reported an **identical failing-case set** — same 96 ids, zero
+> regressions, zero flips.
 
 > **The mutations pass exposed a fixture property that turns out NOT to be
 > unique to it, and the correction matters before writing another write-flavored
@@ -533,7 +620,7 @@ the CI lint gate. The area models guide implementation; the cases are the
 pass/fail contract.
 
 > `CLAUDE.md` still says "532 cases". That is stale relative to this tree, which
-> holds **735**.
+> holds **740**.
 
 Everything under `spec/` and `test/` is **frozen ground truth** for
 implementation work: fix `lib/` to match the cases, never edit the cases to
@@ -557,10 +644,11 @@ print("OK" if not bad else f"{bad} errors")
 PY
 ```
 
-All **735** cases currently parse and validate, with **no duplicate ids** (735
-files, 735 distinct ids, and every `NNNN_` filename prefix equals the in-file
-`id:` — re-derived across all **three** 5-digit bands: operators' 102xx,
-mutations' 114xx and auth's 118xx). Toolchain: PyYAML +
+All **740** cases currently parse and validate, with **no duplicate ids** (740
+files, 740 distinct ids, and every `NNNN_` filename prefix equals the in-file
+`id:` — re-derived across all **four** 5-digit bands: operators' 102xx,
+mutations' 114xx, auth's 118xx and content_negotiation's new 124xx).
+Toolchain: PyYAML +
 jsonschema `Draft202012Validator`. Remember the caveat above: a clean
 run proves shape, not pin — the `source` pattern accepts any tag. The validator
 was proved live, not vacuous, by negative controls on a mutated copy of a
@@ -578,19 +666,48 @@ line and confirming it still asserts what the case claims — is summarized
 per area in [`COVERAGE.md`](COVERAGE.md), together with the open gaps and the
 machine-verification results for this pass.
 
-**Fourteen** areas carry a recorded v16.0 adversarial verdict so far, and **every
-one of the fourteen reports 0 citation defects** — no verdict has ever turned on a
-mis-cited line. Eleven are ⚠️ *revise*: **auth**, **headers**, **config**,
+**Fifteen** areas carry a recorded v16.0 adversarial verdict so far, and **every
+one of the fifteen reports 0 citation defects** — no verdict has ever turned on a
+mis-cited line. **Twelve** are ⚠️ *revise*: **auth**, **headers**, **config**,
 **select**, **filters**, **ordering**, **url_grammar**, **pagination**,
-**observability**, **rpc** and **mutations**, every finding a
-missing-coverage or mis-modelled-rule gap itemized in `COVERAGE.md` →
+**observability**, **rpc**, **mutations** and now **content_negotiation**, every
+finding a missing-coverage or mis-modelled-rule gap itemized in `COVERAGE.md` →
 *Known gaps*. **Three** are
-✅ *pass*: **errors**, **operators** and now **representations**, whose findings
-are all explicitly MINOR / non-blocking or were closed in-pass. The other **3**
-areas — `content_negotiation`, `openapi`, `domain_representations` — have not been
+✅ *pass*: **errors**, **operators** and **representations**, whose findings
+are all explicitly MINOR / non-blocking or were closed in-pass. The other **2**
+areas — `openapi` and `domain_representations` — have not been
 re-audited at this pin; run `bier-spec-audit` over them before treating their
-citations as verified. **Prioritize `content_negotiation`**: it is now the only
-model that is both silent (no gap list under any key) and never audited.
+citations as verified.
+
+> **The content_negotiation verdict is the one to read if you only read one, and
+> its lesson is not about citations.** It returned **seven** findings and **0
+> citation defects** — the second-largest finding count in the tree, after rpc's
+> five was surpassed — against the area whose model had been silent from the
+> start. Three of the seven are worth naming here because they are *classes*:
+>
+> - **A documented config gate with no case, declared in a key the harness never
+>   executes.** The model states twice that plan media types resolve only under
+>   `db-plan-enabled = true` (`Plan/Negotiate.hs#L74`). Five cases
+>   (**1625–1628**, **1643**) record that requirement in a `preconditions:`
+>   string — parsed, never run — and **nothing pins the 406** the default
+>   produces, which upstream asserts at `PlanSpec.hs#L544`. A declaration the
+>   harness ignores is not a test, and this is the tree's clearest instance.
+> - **A defective FIXTURE that made a case's assertion unreachable while every
+>   mechanical check stayed green.** See the eighth-species note above.
+> - **A modelled mechanism that was wrong at its root and survived because the
+>   fixtures made it *look* right.** The model described a custom media handler
+>   as an aggregate whose **stype** is the mime-named domain. Discovery keys on
+>   the **return type** (`proc.prorettype`, `SchemaCache.hs#L1062-L1071`), plus a
+>   second branch for plain non-set-returning functions (`#L1080-L1086`). stype
+>   coincides with the return type exactly when the aggregate has no finalfunc —
+>   true of every fixture in this tree, which is why no case could distinguish
+>   them. **An implementation built from the old rule registers a subtly
+>   different handler set**, and upstream's own docs phrase it loosely enough
+>   ("the return type of their transition or final functions") to mislead.
+>
+> Read together with the rpc verdict, the pattern is that **the areas this
+> workflow has already re-synced are not the areas it has verified**, and the two
+> largest finding counts both came from audits of areas that looked finished.
 
 > **The representations verdict is the argument against deprioritizing an area
 > you expect to pass.** It came back ✅ *pass* with **0 citation defects** — and
@@ -653,7 +770,7 @@ model that is both silent (no gap list under any key) and never audited.
 > gap will be recorded by one and closed by the other; check `COVERAGE.md`'s gap
 > sections against disk before assuming a listed gap is still open.
 
-> **Four verdicts should be read as warnings about the remaining three, and each
+> **Five verdicts should be read as warnings about the remaining two, and each
 > names a different way a model can be wrong.**
 >
 > The **mutations** finding is the mildest and the easiest to reproduce: an
@@ -687,33 +804,66 @@ model that is both silent (no gap list under any key) and never audited.
 > support the claim?" read. **Only reading the enclosing `describe` catches it.**
 > Note that this one surfaced in an area that came back ✅ *pass*: the verdict
 > grades the citations, not the model's reach.
+>
+> The **content_negotiation** finding is the one none of the four anticipated,
+> because it is not about a citation at all: **the FIXTURE was wrong.**
+> `test.unnamed_bytea_param` was transcribed as `RETURNS bytea` where upstream
+> returns the mime-named DOMAIN, so case 1622's asserted 200 was unreachable
+> against a faithful PostgREST. Pin, schema, filename, cited line and relation
+> existence all checked out — and the case *passed*, because `lib/` was
+> over-permissive in the matching direction. **The four warnings above all
+> concern what a model claims; this one concerns what the database actually is,
+> and nothing in this tree was checking that.** The same pass also found the
+> modelled handler-discovery mechanism keyed on the wrong catalog column
+> (`stype` rather than `proc.prorettype`), undetectable because every fixture
+> here has no finalfunc and so makes the two coincide. **Two areas remain
+> un-audited, and one of them — `domain_representations` — has *type
+> declarations* as its entire subject.**
 
 Note what "zero citation defects" does *not* mean: **53** cases anchor their
 `source:` at implementation code under `src/library/PostgREST/…` rather than at
 an upstream `it`-block, so their expected bodies are derived rather than
-transcribed. **The count MOVED this pass, 46 → 53 — its largest single-pass jump
-— and this revision withdraws the previous "flat, and apparently stopped"
-reading.** Its history is 36 → 42 → 46 → 46 → 46 → 46 → **53**. The seven are all
-representations cases — **1315**/**1317** (`Query/Statements.hs#L48`/`#L49`, the
-two Location suppressions), **1318** (`ApiRequest/Preferences.hs#L100`, duplicate
-`return=` resolves to the first token in *request* order), **1319**
-(`Plan.hs#L207`, an unknown value is ignored unless `handling=strict`),
-**1325**/**1326** (`Response.hs#L283`/`#L281`, `return=` not echoed on reads or
-RPC) and **1327** (`Preferences.hs#L179`, fixed `Preference-Applied` order) —
-and every one pins a rule **upstream never asserts black-box**, which each says
-in its `notes:`. Only case **1316** cites a Feature spec. The
-implementation-anchored *share* rose **6.3 % → 7.2 %** (53/735). Re-derived
-citation composition at the **735**-case state: **525** cases cite
-`test/spec/Feature/Query`, 44
-`test/spec/Feature/Auth`, 34 `test/spec/Feature/OpenApi`, **17**
-`test/spec/Feature/Query/Preferences`, 14 `test/spec/Feature`,
+transcribed. Its history is 36 → 42 → 46 → 46 → 46 → 46 → 53 → **53**.
+
+> **The total did not move this pass, and that is a COINCIDENCE — read the
+> composition, not the number.** Four separate motions cancelled exactly:
+> case **1600** moved *off* implementation code (`MediaType.hs#L69` →
+> `RawOutputTypesSpec.hs#L15`, because the audit found an it-block that asserts
+> the request, body *and* `Content-Type` this case had only derived); the old
+> case **1623** was *deleted* (it anchored at `MediaType.hs#L62`); and two
+> arrived — the **re-issued 1623** (`SchemaCache.hs#L1016`, that
+> `initialMediaHandlers` registers exactly four handlers and octet-stream is not
+> among them) and **1648** (`MediaType.hs#L127-L129`, the module **doctest** for
+> case-insensitive decoding, which is upstream ground truth of a different kind
+> rather than an absence of it). −2 +2. **A flat metric across a pass that
+> changed six cases is not evidence of stability.**
+
+The seven that produced the last real movement are all representations cases —
+**1315**/**1317** (`Query/Statements.hs#L48`/`#L49`, the two Location
+suppressions), **1318** (`ApiRequest/Preferences.hs#L100`, duplicate `return=`
+resolves to the first token in *request* order), **1319** (`Plan.hs#L207`, an
+unknown value is ignored unless `handling=strict`), **1325**/**1326**
+(`Response.hs#L283`/`#L281`, `return=` not echoed on reads or RPC) and **1327**
+(`Preferences.hs#L179`, fixed `Preference-Applied` order) — and every one pins a
+rule **upstream never asserts black-box**, which each says in its `notes:`. The
+implementation-anchored *share* is **7.2 %** (53/740), fractionally down from
+53/735 purely by denominator. Re-derived citation composition at the
+**740**-case state: **530** cases cite `test/spec/Feature/Query` (up from 525),
+**44** `test/spec/Feature/Auth`, **34** `test/spec/Feature/OpenApi`, **17**
+`test/spec/Feature/Query/Preferences`, **14** `test/spec/Feature`,
 **47** the `test/io` tree, **1** the documentation, and **53** implementation code.
 
-**The pattern behind the movement is more useful than the number.** The set grows
-whenever an audited area's subject is *response shape* (observability +4,
-representations **+7**) and stays flat when it is *query semantics* (operators,
-rpc, mutations all added zero). Three of the last six re-syncs grew it; none
-shrank it. Expect `content_negotiation` to grow it again.
+**The pattern the previous revision drew from this metric needs qualifying.** It
+predicted that `content_negotiation` — a *response-shape* area, like
+observability (+4) and representations (+7) — would grow the set again. It did
+not: the area added two implementation anchors and shed two, netting zero. What
+actually distinguishes the growing passes is narrower than "response shape": both
+were areas where upstream's black-box suite asserts *nothing at all* about the
+rule being pinned. content_negotiation's audit found the opposite problem — real
+upstream it-blocks (`PlanSpec.hs#L544`, `CustomMediaSpec.hs#L188/#L208/#L346/#L369`,
+`RpcSpec.hs#L1168`) that simply have no case. **Missing black-box coverage and
+implementation-anchored coverage are different failure modes, and this pass
+separated them.**
 
 **But "no anchor moved off implementation code" is not "no anchor moved."** The
 mutations pass moved one, **within** the test suite and to a different it-block:
@@ -734,6 +884,31 @@ Location-absence rule only for a view; case **1309** was rewritten with it.
 **Four directions now, each discovered by a different area's audit**, which is
 the real point: re-anchoring is a *finding*, not hygiene, and no two audits have
 found the same kind.
+
+**The content_negotiation pass adds a fifth, and it is the inverse of narrowing:
+SPLITTING one anchor into many.** Case **1622** kept its `source:`
+(`RpcSpec.hs#L1184`) but its audit found that the anchored it-block asserts only
+`respBody == file` — no status, no `Content-Type` — so the case had been
+attributing two assertions to a line that makes neither. Rather than move the
+anchor, the case now cites the rest **piece by piece in its `notes:`**: the
+fixture declaration that makes octet-stream negotiable at all
+(`schema.sql#L2372`), both branches of the handler-discovery query
+(`SchemaCache.hs#L1062`, `#L1080-L1086`), the built-in handler map that excludes
+octet-stream (`#L1016`), the sibling it-block that pins the 200
+(`RpcSpec.hs#L1257`) and the charset rule (`MediaType.hs#L62`). **One `source:`
+per case is a schema constraint, not an epistemic one** — when a case asserts
+more than its anchor proves, the fix is more citations, not a different anchor.
+Case **1600** in the same pass moved in the ordinary direction (off
+`MediaType.hs#L69` onto `RawOutputTypesSpec.hs#L15`), joining 1189/1016/1767.
+
+> **The same pass also did something no earlier pass has: it DELETED a case and
+> REUSED its id.** Old **1623** (`octet-stream/no-charset`, a 200) is gone; its
+> assertion was folded into 1622, and `1623` now names an unrelated **406**
+> negative. Compare the mutations pass, which deleted 11406 and deliberately left
+> the id vacant so the deletion stayed legible. **Two deletions, two opposite
+> conventions, and no rule on disk** — `COVERAGE.md` → follow-up 26. Until it is
+> settled, treat a case id quoted in any older document as a *label*, not a
+> handle: check the `feature:` line before trusting it.
 
 Separately, case **1279** is the tree's **first and only case
 anchored at the documentation** rather than at either the test suite or the source

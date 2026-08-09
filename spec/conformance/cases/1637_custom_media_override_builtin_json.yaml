@@ -14,9 +14,14 @@ expect:
     overridden: "true"
 notes: >-
   A non-vendored builtin media type (application/json) can be overridden for a
-  single table by defining an aggregate over that table whose stype is the
-  builtin's DOMAIN. Here ov_json's aggregate has no finalfunc and the table has
-  zero rows, so the aggregate returns its initcond verbatim. The response keeps
+  single table by defining an aggregate over that table that RETURNS the
+  builtin's DOMAIN. Here ov_json's aggregate is declared with
+  `stype = "application/json"` and no finalfunc, so its declared return type IS
+  that domain -- and the return type (`proc.prorettype`) is what the
+  mediaHandlers discovery query keys on, never stype
+  (https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/SchemaCache.hs#L1062-L1071).
+  With no finalfunc and zero rows in the table, the aggregate returns its
+  initcond verbatim. The response keeps
   the builtin Content-Type application/json; charset=utf-8 but the body is the
   handler's output. Mirrors CustomMediaSpec 'will override the application/json
   handler for a single table' (GET /ov_json).

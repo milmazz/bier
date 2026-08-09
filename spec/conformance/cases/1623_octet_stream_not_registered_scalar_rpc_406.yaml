@@ -1,0 +1,52 @@
+id: 1623
+feature: content_negotiation/octet-stream/not-registered-406
+request:
+  method: GET
+  path: /rpc/add_them?a=3&b=4
+  headers: { Accept: application/octet-stream }
+schema: test
+preconditions: []
+expect:
+  status: 406
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    code: PGRST107
+    details: null
+    hint: null
+    message: "None of these media types are available: application/octet-stream"
+notes: >-
+  application/octet-stream is NOT a built-in producer. The anchor is the
+  `initialMediaHandlers` definition (its signature at #L1016, its body at
+  #L1018-L1021), which is PostgREST's entire built-in handler map: exactly four
+  entries -- (anyelement, */*), (anyelement, application/json),
+  (anyelement, text/csv) and (anyelement, application/geo+json) -- with no
+  octet-stream among them. octet-stream only becomes negotiable through the
+  mediaHandlers discovery query, and BOTH of its branches key on a RETURN TYPE,
+  never on an aggregate's stype: a non-set-returning FUNCTION whose return type
+  is a DOMAIN named after the mime
+  (https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/SchemaCache.hs#L1080-L1086),
+  or a single-argument AGGREGATE over a relation reltype / anyelement whose own
+  `proc.prorettype` is that domain
+  (https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/SchemaCache.hs#L1062).
+  stype coincides with that return type only when the aggregate has no
+  finalfunc, which is why the upstream docs say "domain media types as the
+  return type of their transition or final functions"
+  (https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/media_type_handlers.rst#L77).
+  `test.add_them(int, int) RETURNS integer` has neither, so `lookupHandler`
+  misses on all three probes -- (RelId, MTAny), (RelId, MTOctetStream),
+  (RelAnyElement, MTOctetStream) -- `firstAcceptedPick` is Nothing and
+  negotiateContent returns MediaTypeError, rendered as 406 / PGRST107 with a
+  plain application/json body
+  (https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan/Negotiate.hs#L52).
+  Distinct from case 1624, and deliberately so: 1624 is the SETOF flavor
+  (`GET /rpc/get_lines`, mirroring CustomMediaSpec 'fails if doesn't have an
+  aggregate defined'), while this is the SCALAR flavor. The scalar shape is
+  the one an implementation is most likely to get wrong by attaching
+  octet-stream to every scalar-returning routine, which upstream never does --
+  a routine returning plain `bytea` is equally not negotiable (compare case
+  1622, which works only because upstream's fixture returns the
+  "application/octet-stream" DOMAIN, schema.sql#L2372). This case replaces the
+  earlier 1623, which re-asserted case 1622's Content-Type on the very same
+  request and was a pure duplicate.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/SchemaCache.hs#L1016

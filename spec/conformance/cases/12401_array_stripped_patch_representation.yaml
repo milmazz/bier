@@ -1,0 +1,29 @@
+id: 12401
+feature: content_negotiation/nulls-stripped/patch-representation
+request:
+  method: PATCH
+  path: /organizations?id=eq.3&select=*
+  headers:
+    Accept: application/vnd.pgrst.array+json;nulls=stripped
+    Content-Type: application/json
+    Prefer: return=representation
+  body_json: { "name": "John", "referee": null }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8
+  body_exact:
+    - { id: 3, name: "John", auditor: 2, manager_id: 3 }
+notes: >-
+  The PATCH counterpart of case 12400. Organization 3 starts with referee=1 and
+  auditor=2; the patch nulls out referee, so the stripped representation drops
+  the referee key entirely while auditor (still 2) and manager_id (still 3)
+  survive - i.e. stripping is applied to the POST-mutation row values, not to
+  the request payload. Mirrors the PATCH assertion inside NullsStripSpec's it
+  block "strips nulls when Accept:
+  application/vnd.pgrst.array+json;nulls=stripped". Verified against the
+  consolidated fixture DB, where test.organizations row 3 matches upstream's.
+  Allocated from this area's overflow band because 1600..1649 is fully taken.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/NullsStripSpec.hs#L37

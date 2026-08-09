@@ -175,6 +175,24 @@
 --   * No GRANTs added (section 9 untouched): the loader mirrors every `test`
 --       relation into the area schemas as views owned by the connecting role,
 --       which is how the operators area already reaches test.entities/ranges.
+--
+-- 2026-08-09  content_negotiation.delta.sql (second fold) — a CORRECTION, not an
+--             addition. The one object it touches already existed, so this is
+--             the first fold that changed an existing definition rather than
+--             appending a new one; no name collided, nothing was renamed:
+--   * public."application/octet-stream" domain (section 3c, alongside the other
+--       mime domains) — new object.
+--   * test.unnamed_bytea_param(bytea) (section 6, content_negotiation block)
+--       REPLACED IN PLACE: `RETURNS bytea` -> `RETURNS
+--       public."application/octet-stream"`. The old transcription made case 1622
+--       unreachable (no handler => 406/PGRST107); upstream declares the routine
+--       over the mime DOMAIN (schema.sql#L2372). Body/volatility otherwise
+--       unchanged. The delta shipped a `DROP FUNCTION IF EXISTS` guard so a
+--       blind append would also converge; that guard is dropped here because the
+--       definition is edited in place and this file loads into a fresh DB.
+--       Deliberately no aggregate over the new domain and no GRANT (the routine
+--       is exercised on the no-auth instance), which is what keeps cases 1623
+--       (test.add_them, scalar) and 1624 (test.get_lines, SETOF) at 406.
 -- ----------------------------------------------------------------------------
 
 BEGIN;
@@ -368,6 +386,17 @@ CREATE DOMAIN public."application/vnd.pgrst.object" AS json;
 -- the response Content-Type). Handled for ONE relation by test.tsv_agg in
 -- section 6 (content_negotiation.delta.sql, cases 1644/1646).
 CREATE DOMAIN public."text/tab-separated-values" AS text;
+
+-- application/octet-stream is NOT a built-in producer: PostgREST's
+-- initialMediaHandlers map ships json / csv / geo+json / "*/*" and nothing else
+-- (SchemaCache.hs#L1016). It becomes negotiable ONLY where a routine's RETURN
+-- TYPE is this domain — which is how upstream declares
+-- test.unnamed_bytea_param (schema.sql#L2372) and the sole reason case 1622
+-- gets 200 + a bare `application/octet-stream` instead of 406/PGRST107.
+-- Deliberately NOT wired to an aggregate: test.add_them (case 1623) and
+-- test.get_lines (case 1624) must keep answering 406, so no anyelement handler
+-- may exist for this mime.
+CREATE DOMAIN public."application/octet-stream" AS bytea;
 
 -- ===========================================================================
 -- 3d. tsvector DOMAINs in `test` (operators.delta.sql)
@@ -1198,8 +1227,13 @@ $$;
 
 -- ----------------------- test (content_negotiation.sql) --------------------
 -- getproject / getallprojects are consolidated below (shared with rpc.sql).
-CREATE OR REPLACE FUNCTION test.unnamed_bytea_param(bytea) RETURNS bytea AS $$
-  SELECT $1;
+-- Returns the public."application/octet-stream" DOMAIN (section 3c), NOT plain
+-- `bytea` — mirroring upstream's schema.sql#L2372. The return type is what
+-- registers the octet-stream handler for this one routine; with `RETURNS bytea`
+-- case 1622 would negotiate to 406/PGRST107. IMMUTABLE is upstream's.
+CREATE FUNCTION test.unnamed_bytea_param(bytea)
+  RETURNS public."application/octet-stream" AS $$
+  SELECT $1::public."application/octet-stream";
 $$ LANGUAGE sql IMMUTABLE;
 
 CREATE OR REPLACE FUNCTION test.get_lines() RETURNS SETOF test.lines AS $$
@@ -2059,4 +2093,34 @@ COMMIT;
 -- element -> 22P02; 10221/10223 jsonb auto-to_tsvector; 10228 computed-field
 -- resolution) are lib/ emission gaps, not fixture gaps: each fails with a
 -- Postgres error proving the relation resolved and was queried.
+--
+-- 2026-08-09 (content_negotiation delta fold, the octet-stream CORRECTION):
+-- re-verified end to end with `mix bier.fixtures.load` — drops/recreates
+-- bier_test, loads this file with `psql -v ON_ERROR_STOP=1 -f`, then mirrors
+-- the seven area schemas; clean, zero errors. Catalog checks on the loaded DB:
+-- test.unnamed_bytea_param now has prorettype = public."application/octet-stream"
+-- with provolatile='i' and proretset=false, and it echoes 'hello-bytes' back
+-- byte-identically (case 1622's body_raw). Running BOTH branches of upstream's
+-- mediaHandlers discovery over the loaded catalog, the ONLY octet-stream row in
+-- either is (test, unnamed_bytea_param) from the function-return-type branch;
+-- no AGGREGATE has an octet-stream prorettype, so no anyelement handler exists.
+-- The negatives hold structurally: test.add_them still RETURNS integer (case
+-- 1623) and test.get_lines still has proretset=true, excluded by that branch's
+-- `NOT proretset` predicate (case 1624).
+--
+-- Regression check (whole suite, A/B against the pre-fold file, same DB): the
+-- failing-case SET is IDENTICAL — the same 96 ids before and after; zero
+-- regressions and, notably, zero flips. The new `public` domain perturbs
+-- nothing that enumerates types (OpenAPI; the datarep cast lookup ignores it —
+-- it carries no CREATE CAST).
+--
+-- Recorded plainly because it would be easy to misread this fold as a fix:
+-- case 1622 was ALREADY passing before the correction. lib/bier/rpc.ex:288
+-- offers octet-stream for ANY scalar RPC result regardless of return type,
+-- which is exactly the over-permissive behavior case 1623 was written to catch
+-- (1623 fails with `42846 cannot cast type integer to bytea`, not the expected
+-- 406/PGRST107). This fold is upstream-fidelity groundwork, not a green-maker:
+-- it ensures that when lib/ narrows handler discovery to the return-type domain
+-- and 1623 flips to passing, 1622 stays reachable instead of breaking. Under
+-- the old `RETURNS bytea` transcription those two cases could not both be green.
 -- ============================================================================
