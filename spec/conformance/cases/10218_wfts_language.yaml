@@ -1,0 +1,19 @@
+id: 10218
+feature: operators/wfts/language
+request:
+  method: GET
+  path: /tsearch?text_search_vector=wfts(french).amusant%20impossible
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "text_search_vector": "'amus':5 'fair':7 'impossibl':9 'peu':4" }
+notes: >
+  wfts with a dictionary -> `@@ websearch_to_tsquery('french', 'amusant
+  impossible')`. Mirrors QuerySpec.hs 'finds matches with different
+  dictionaries' (wfts assertion).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L237

@@ -1,0 +1,19 @@
+id: 10212
+feature: operators/eq/array
+request:
+  method: GET
+  path: /entities?arr=eq.{1,2,3}&select=id
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 3 }
+notes: >
+  `arr = '{1,2,3}'` compares whole integer[] values (element order and length
+  included), not membership. Mirrors AndOrParamsSpec.hs 'can handle array
+  operators' (eq assertion).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L154

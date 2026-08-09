@@ -1,0 +1,20 @@
+id: 10226
+feature: operators/phfts/auto_tsvector/text
+request:
+  method: GET
+  path: /tsearch_to_tsvector?select=text_search&text_search=phfts.The%20Fat%20Cats
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "text_search": "Fat cats ate rats" }
+notes: >
+  phfts on a text column: `to_tsvector(text_search) @@ phraseto_tsquery('The
+  Fat Cats')`. Mirrors QuerySpec.hs context "text and json columns" ->
+  context "Use of the phraseto_tsquery function" -> it "finds matches"
+  (text_search assertion).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L461

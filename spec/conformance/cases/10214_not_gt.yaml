@@ -1,0 +1,20 @@
+id: 10214
+feature: operators/not/gt
+request:
+  method: GET
+  path: /items?id=not.gt.2&order=id.asc
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: 0-1/*
+  body_exact:
+    - { "id": 1 }
+    - { "id": 2 }
+notes: >
+  not.gt is <=; the NOT token is emitted before the field reference, giving
+  `NOT id > 2`. Mirrors QuerySpec.hs 'matches with inequality using not
+  operator' (second assertion; case 1052 covers the first, not.lt).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L60

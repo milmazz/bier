@@ -1,7 +1,7 @@
 # Conformance case index
 
-Cross-reference of the **670** conformance cases under `spec/conformance/cases/`.
-Pinned target: **PostgREST v16.0** (all 670 `source:` URLs).
+Cross-reference of the **707** conformance cases under `spec/conformance/cases/`.
+Pinned target: **PostgREST v16.0** (all 707 `source:` URLs).
 
 Each case is one YAML file `NNNN_<slug>.yaml` validated against
 [`../case.schema.json`](../case.schema.json). Cases are grouped into 17 feature
@@ -20,27 +20,39 @@ The first `/`-delimited segment of each case's `feature:` field is the
 **authoritative** area assignment. The id bands below are derived from what is on
 disk now; read the `feature:` prefix if a row ever looks ambiguous.
 
-> **Non-contiguous bands.** Two areas do not occupy a single contiguous range and
-> regenerating this file must preserve that rather than collapsing it:
+> **Non-contiguous bands.** **Three** areas do not occupy a single contiguous
+> range and regenerating this file must preserve that rather than collapsing it:
 >
 > - **auth** uses **11800–11818** on top of its full primary band **1450–1499**
->   (all 50 primary ids are in use). These 19 are the only 5-digit case ids in
->   the tree, and `11800` sorts immediately after `1180` in a *lexical* listing,
->   so they interleave with the filters area's 1180–1199 cases unless ids are
->   sorted **numerically** (`ls | sort -n`, not plain `ls`).
+>   (all 50 primary ids are in use). `11800` sorts immediately after `1180` in a
+>   *lexical* listing, so they interleave with the filters area's 1180–1199 cases
+>   unless ids are sorted **numerically**.
+> - **operators** uses **10200–10236** on top of its full primary band
+>   **1050–1099** (all 50 primary ids are in use) — **new this pass**, 37
+>   contiguous ids with no gaps, and **10237+ is free**. `10200` sorts immediately
+>   after `1020` lexically, so these 37 interleave with the *ordering* area's
+>   1200-block the same way auth's do with filters'.
 > - **representations** uses **1300–1314 + 1320–1324 + 1330–1333**; the 1315–1319
 >   and 1325–1329 gaps are deliberate per-sub-feature spacing (post/patch,
 >   delete, put).
 >
-> The `feature:` prefix remains authoritative — an id's numeric neighbourhood
-> never decides its area.
+> **There are now two 5-digit bands, so `ls spec/conformance/cases/` is actively
+> misleading — always `ls | sort -n`.** The `feature:` prefix remains
+> authoritative; an id's numeric neighbourhood never decides its area.
+>
+> **The two overflow bands follow different conventions, which is unsettled.**
+> `spec/filters.yaml` *declares* `[10600..10799]` as its area's closed overflow
+> range (and has used none of it); `spec/operators.yaml` declares nothing — its
+> band exists only as the ids on disk. See
+> [`../COVERAGE.md`](../COVERAGE.md) → follow-up 19 before a third area picks a
+> number ad hoc.
 
 ## Area <-> id band <-> fixture fragment
 
 | Area | Cases | Id band | Fixture fragment | `schema:` labels used |
 |------|------:|---------|------------------|-----------------------|
 | url_grammar | 36 | 1000–1035 | `fixtures/url_grammar.sql` + `fixtures/url_grammar.delta.sql` (case 1029's `test.pgrst_reserved_chars` and case 1035's `test."Server Today"`, both folded) | `multi`, `test`, `unicode`, `ordering` |
-| operators | 50 | 1050–1099 | `fixtures/operators.sql` | `operators` |
+| **operators** | **87** | **1050–1099, 10200–10236** | `fixtures/operators.sql` + `fixtures/operators.delta.sql` (`test.items_with_different_col_types`, `test.tsearch_to_tsvector`, the `test.tsvector_not_null`/`tsvector_not_empty` domains and the `test.text_search_vector(test.tsearch_to_tsvector)` computed field, all folded) | `operators` |
 | select | 50 | 1100–1149 | `fixtures/select.sql` | `test` |
 | filters | 50 | 1150–1199 | `fixtures/filters.sql` | `test` |
 | ordering | 33 | 1200–1232 | `fixtures/ordering.sql` | `ordering`, `mutations`, `test` |
@@ -57,14 +69,17 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | **observability** | **22** | **1750–1771** | `fixtures/observability.sql` (**no delta** — the v16.0 re-sync added two cases and zero fixture objects; its `.sql` change is a comment-only provenance re-pin) | `observability` |
 | domain_representations | 21 | 1800–1820 | `fixtures/domain_representations.sql` | `domain_representations` |
 
-Total: **670 cases**, **17 areas**, **17 fixture fragments**
-(plus **6** `*.delta.sql` write channels, all currently **comment-only** — each
+Total: **707 cases**, **17 areas**, **17 fixture fragments**
+(plus **7** `*.delta.sql` write channels, all currently **comment-only** — each
 carries a single `-- Folded into ../fixtures.sql on <date> …` provenance line
-and no DDL. Four are dated 2026-08-08; `url_grammar.delta.sql` and
-`errors.delta.sql` are dated 2026-08-09. See
+and no DDL. Four are dated 2026-08-08; `url_grammar.delta.sql`,
+`errors.delta.sql` and the new `operators.delta.sql` are dated 2026-08-09. See
 [`fixtures/README.md`](fixtures/README.md) for who may write which file).
-The last two re-syncs (pagination, observability) added **no** delta channel and
-no fixture object at all, so the six have not moved since 2026-08-09.
+The two re-syncs before this one (pagination, observability) added **no** delta
+channel and no fixture object at all; **the operators re-sync opened the seventh
+channel and is the first in three to add fixture objects** — two tables, two
+domains and one computed field, more fixture surface than the previous six passes
+combined.
 
 Each area's `feature:` prefix matches its area name exactly, so the area is
 recoverable directly from the case file:
@@ -183,14 +198,27 @@ spread). It belongs to `select`; see
 > two files — `COVERAGE.md` and this INDEX, i.e. only the documents recording
 > the gap. No case and no area model mentions either code.
 
-A third split needs the same care. The `in.( … )` **value grammar** is
-url_grammar's (its docs page owns the *Reserved characters* section), the `in`
-operator's **SQL rendering** is claimed by `operators.yaml:213`, and the
-`in.()` **empty set** was raised against `filters`. Two of the three
-`in.`-shaped gaps in [`../COVERAGE.md`](../COVERAGE.md) therefore have no
-settled owner: decide the band before authoring, and note that `filters`' primary
-band 1150–1199 is full (overflow `[10600..10799]`) while url_grammar's 1036+,
-ordering's 1233+, errors' 1527+ and pagination's 1289+ are free.
+A third split needed the same care and is **now half-resolved, by example.** The
+`in.( … )` **value grammar** is url_grammar's (its docs page owns the *Reserved
+characters* section), the `in` operator's **SQL rendering** is claimed by
+`operators.yaml`, and the `in.()` **empty set** was raised as a gap against
+`filters`. It was closed by **operators** — cases **10200–10205** in the new
+10200+ band, together with the folded `test.items_with_different_col_types`.
+
+That is the right resolution on the evidence: `operators.yaml` already modelled
+the `[""] -> "= ANY('{}')"` branch that *produces* the behavior, and the pass
+extended that model with the `lexeme` whitespace rule rather than duplicating it
+in filters. It also avoided filters' full primary band. **The general lesson is
+worth more than the outcome**: a gap in [`../COVERAGE.md`](../COVERAGE.md) is
+filed under the area that *noticed* it, which is not reliably the area that can
+close it. Check a gap against disk before costing it.
+
+What remains unsettled: url_grammar's **escaped-char** `in.( … )` values
+(`\"`, `\\`) and the general value grammar. Decide the band before authoring, and
+note that `filters`' primary band 1150–1199 is full (overflow `[10600..10799]`),
+`operators`' 1050–1099 is full (overflow 10237+ in use but undeclared), while
+url_grammar's 1036+, ordering's 1233+, errors' 1527+ and pagination's 1289+ are
+free.
 
 ## Per-area sub-feature breakdown
 
@@ -200,7 +228,7 @@ sub-features present per area (second segment, as on disk):
 | Area | Id band | Sub-features |
 |------|---------|--------------|
 | url_grammar | 1000–1035 | method (incl. the OPTIONS `Allow` matrix on a table 1019, a VOLATILE routine 1031, a STABLE routine 1032 and the root path 1033), path (incl. OPTIONS on an unknown relation -> 404, 1034), percent-encoding (incl. `%20` in both a relation and a column name, 1035), profile, reserved-params (`limit` **and** `offset` forbidden on PUT, 1016/1030), reserved-characters |
-| operators | 1050–1099 | eq, neq, lt/lte/gt/gte, in, is, like/ilike, match/imatch, fts/plfts/wfts/phfts, cs/cd/ov, sl/sr/nxl/nxr/adj, isdistinct, not, quantifier (any/all) |
+| **operators** | **1050–1099, 10200–10236** | eq (incl. whole-range and whole-array equality), neq (incl. the null-propagating array form), lt/lte/gt/gte, in (incl. the **empty set** `in.()` / `not.in.()` / whitespace-only / blank-element-400 group), is, like/ilike, match/imatch, fts/plfts/wfts/phfts (incl. the `(language)` modifier on all four, the **automatic `to_tsvector()` coercion** against text/jsonb/domain/recursive-domain/computed-field targets, and the tsquery `&`/`\|`/`!` and websearch `and`/`or`/`-` operand grammars), cs/cd/ov, sl/sr/nxl/nxr/adj, isdistinct (incl. range and array operands, and its null-safe contrast with neq), not (incl. three more logic-tree shapes), quantifier (any/all, incl. `gte(all)`/`lte(all)`) |
 | select | 1100–1149 | columns, alias, cast, alias-and-cast, json-path, composite, array, computed-column, computed-relationship, embed (incl. one-to-one, the v16 alias/legacy-target-name rules and the `table!fk` hint), spread, aggregate |
 | filters | 1150–1199 | horizontal, logical, not, json, quoting, embed |
 | ordering | 1200–1232 | direction, nulls (incl. alongside limits, 1229), json_path, computed_column, multi_column, composite, related (incl. computed relationships, 1227–1228), embed, mutation_representation (1230, `schema: mutations`), rpc (1231–1232), error |
@@ -219,9 +247,58 @@ sub-features present per area (second segment, as on disk):
 
 ### v16.0 additions worth knowing
 
-- **observability** grew its band to **1750–1771** (**22** cases, up from 20) —
-  the only area that moved since the previous synthesis, and the newest work in
-  the tree. Two ids are new, **six existing cases were rewritten**, and like the
+- **operators** grew from **50 to 87** cases — the largest single-area delta of
+  any re-sync, the only area that moved since the previous synthesis, and the
+  newest work in the tree. **37 ids are new (10200–10236, a second 5-digit band)
+  and zero existing cases were rewritten**, which is itself unusual: the four
+  passes before it each rewrote between two and eight. Its audit verdict is
+  **✅ pass** — the tree's second, after errors — with **0 citation defects**.
+  What it found was not a wrong rule but two *silences*:
+  - **The `IN`/`NOT IN` empty set — a gap this tree had filed under *filters*,
+    closed from the operators side.** Cases **10200–10202**
+    (`?int_data=in.()`, `?text_data=in.()`, `?bool_data=in.()` → `[]`),
+    **10203** (`?int_data=not.in.()` → **all** rows, NULLs included — `= ANY` over
+    a zero-element array is an empty OR, i.e. FALSE whatever the left operand, so
+    its negation needs no `IS NOT NULL` guard), **10204**
+    (`in.(    )`, whitespace consumed by `lexeme`) and **10205**
+    (`in.( ,3,4)` → **400** / `22P02`: a blank element alongside real ones is
+    *not* collapsed). This is the first time a re-sync closed a gap recorded
+    against a different area — see *Cross-area ownership caveat* above.
+  - **The automatic `to_tsvector()` coercion — an entire upstream `context` block
+    that existed at BOTH pins with zero coverage.** An fts/plfts/phfts/wfts filter
+    does **not** require a tsvector column: when the target field's *base* type is
+    anything else, `Plan.hs` tags it `ToTsVector lang` and `pgFmtField` emits
+    `to_tsvector(<lang>, <field>)` so `@@` type-checks. The exemption that clears
+    the tag when the base type is already `tsvector` is what keeps the
+    pre-existing cases (1067–1071, 1090) emitting a bare `@@` — without it they
+    would compile to `to_tsvector(<tsvector col>)`, which does not type-check at
+    all. Cases **10220–10227** cover text and jsonb targets and the four
+    operators; **10228** a tsvector-returning **computed field**; **10229** a
+    tsvector **domain**; **10230** a *recursive* domain (a domain over a domain),
+    which works because introspection resolves `base_type` transitively. New
+    model entry: `grammar.fts_auto_tsvector`.
+  - **10231–10236** pin that the fts operand is passed to
+    `to_tsquery`/`websearch_to_tsquery` **verbatim** — PostgREST parses no tsquery
+    syntax of its own — via the tsquery lexeme booleans (`&`, `|`, `!`) and the
+    websearch booleans (`and`, `or`, `-`).
+  - **10206–10219** fill in per-operator corners: `isdistinct` on range and array
+    operands and its null-safe contrast with `neq` (10206/10207/10213), whole-range
+    and whole-array `eq` (10211/10212), the `gte(all)`/`lte(all)` quantifiers
+    (10209/10210), and four more `not`-prefixed shapes including three inside logic
+    trees (10208, 10214–10216), plus the `(language)` modifier on `plfts`/`wfts`/
+    `phfts` (10217–10219), which only `fts` had (1071).
+  - It is the first re-sync in three to add fixture objects, through the new
+    **`operators.delta.sql`** — see the fixture table above. Every one of the 37
+    new cases anchors at an upstream `it`-block (29 `QuerySpec.hs`, 8
+    `AndOrParamsSpec.hs`), so the tree's implementation-anchored count did **not**
+    move.
+  - **Residual, recorded because nothing on disk says it otherwise**: upstream's
+    `describe "IN and NOT IN empty set"` sweeps **eight** column types and only
+    three are cased. `bytea`, `char`, `date`, `real` and `time` have no case even
+    though the folded table declares all eight columns. See
+    [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → operators*.
+- **observability** holds its band at **1750–1771** (**22** cases, up from 20).
+  Two ids are new, **six existing cases were rewritten**, and like the
   pagination pass before it this one **retracted a modelled rule** rather than
   only adding coverage:
   - **1757 / 1768 / 1769 lost their `headers_absent_in_value` assertion.** They
@@ -357,7 +434,7 @@ sub-features present per area (second segment, as on disk):
 
 ## Case file shapes
 
-Most cases are HTTP request/response (**632**). The **config** area additionally
+Most cases are HTTP request/response (**669**). The **config** area additionally
 uses a **CLI** shape (`request.kind: cli`, `request.flag: "--dump-config"`)
 asserting on `expect.exit_code`, `expect.dump_contains`,
 `expect.dump_reparse_stable`, and `expect.stderr_contains` rather than an HTTP
@@ -373,13 +450,11 @@ does not know.
 
 Any case may carry a `config:` block — **116** do (112 non-empty; 1705, 1719,
 1727 and 1743 carry an empty `config: {}`), spread over six areas: config 45,
-auth 33, observability 21, select 10, openapi 4, errors 3. **The count moved by
-one this pass**: the observability re-sync added case **1770** (the exact
-five-metric Server-Timing render), which declares
-`server-timing-enabled: true` — a restatement of what the shared instance
-already provides, so its assertion is safe. Note the pass's *other* new case,
-**1771**, deliberately carries **no** `config:` block: the `Server:` header is
-unconditional in `App.hs`, so declaring one would misrepresent the contract.
+auth 33, observability 21, select 10, openapi 4, errors 3. **The count did not
+move this pass**: not one of the operators re-sync's 37 new cases declares a
+`config:` block, because nothing in the area is config-gated — a useful contrast
+with `select`, whose ten config-carrying cases all need `db-aggregates-enabled`
+or `url-use-legacy-target-names` and none of which the harness honours.
 The harness boots a dedicated
 instance only for the ids listed in
 `@variant_case_ids` (`test/support/conformance_server.ex:58-59`, **18** ids:
@@ -401,7 +476,8 @@ assertions are log-level-independent statuses, so they still hold — see
 
 `preconditions:` is parsed but **never executed** by the harness — treat it as
 declarative documentation, never as setup a case may depend on. It is present on
-**669** of the 670 cases (case **1330** omits it, which the schema allows). The
+**706** of the 707 cases (case **1330** is still the only omission, which the
+schema allows; all 37 new operator cases carry `preconditions: []`). The
 sharpest illustration is in this area: pagination cases **1272, 1274 and 1275**
 declare `preconditions: ["ANALYZE …"]` for planner-estimate expectations and pass
 only because `mix bier.fixtures.load` happens to run a database-wide `ANALYZE`
@@ -415,7 +491,7 @@ deferral; `case.schema.json` itself has no `pending` field. (Earlier revisions o
 this file claimed 6 such cases, listing 1509, 1513 and 1514 as well — those three
 only *mention* `status_text` in `notes:` or in an expected `hint:` string and
 carry no `expect.status_text` key, so they run normally. Re-verified at the
-670-case state: still exactly three.)
+**707**-case state: still exactly three.)
 
 ## Looking up a case
 
@@ -426,6 +502,11 @@ grep -l '^feature: domain_representations/' spec/conformance/cases/*.yaml
 # the source citation for a case
 grep '^source:' spec/conformance/cases/1200_order_by_column_asc.yaml
 
-# list ids in numeric order (5-digit auth ids sort wrong otherwise)
+# list ids in numeric order — REQUIRED: the two 5-digit bands sort wrong
+# otherwise (operators 10200-10236 lands next to 1020*, auth 11800-11818
+# next to 1180*)
 ls spec/conformance/cases/ | sort -n
+
+# every case in an overflow band, by area
+ls spec/conformance/cases/ | sort -n | grep -E '^(102|118)[0-9]{2}_'
 ```
