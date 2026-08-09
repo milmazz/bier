@@ -1,0 +1,24 @@
+id: 10233
+feature: operators/fts/tsquery_operators/not
+request:
+  method: GET
+  path: /tsearch?text_search_vector=fts.fun%26!possible
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "text_search_vector": "'fun':5 'imposs':9 'kind':3" }
+notes: >
+  The tsquery negation operator `!` is sent literally (only `&` needs
+  percent-encoding) and reaches to_tsquery verbatim:
+  `text_search_vector @@ to_tsquery('fun&!possible')`
+  (SqlFragment.hs#L412). This is a tsquery-level negation INSIDE the value and
+  is unrelated to the URL-level `not.` prefix, which would instead emit a
+  leading SQL NOT before the field (SqlFragment.hs#L383). Mirrors QuerySpec.hs
+  it "can use lexeme boolean operators(&=%26, |=%7C, !) in to_tsquery"
+  (third assertion).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L198

@@ -1,0 +1,18 @@
+id: 10201
+feature: operators/in/empty_set
+request:
+  method: GET
+  path: /items_with_different_col_types?text_data=in.()
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: []
+notes: >
+  The empty `in.()` list is type-agnostic: `= ANY('{}')` is emitted for a text
+  column exactly as for an integer one, with no per-type coercion. Mirrors
+  QuerySpec.hs "IN and NOT IN empty set" / "works for text".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1365

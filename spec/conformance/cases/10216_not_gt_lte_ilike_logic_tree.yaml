@@ -1,0 +1,23 @@
+id: 10216
+feature: operators/not/logic_tree
+request:
+  method: GET
+  path: /entities?and=(name.not.ilike.*ITY2,or(id.not.gt.4,id.not.lte.1))&select=id
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 1 }
+    - { "id": 2 }
+    - { "id": 3 }
+notes: >
+  `not` negates gt, lte and ilike inside a nested logic tree; the `*` in the
+  ilike pattern is still rewritten to SQL `%` under the negation, giving
+  `NOT name ilike '%ITY2'`. Entity 4 is excluded because its name IS NULL, so
+  the negated ilike is NULL rather than TRUE. Mirrors AndOrParamsSpec.hs
+  'operators with not' / 'gt, lte, ilike can be negated'.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L193

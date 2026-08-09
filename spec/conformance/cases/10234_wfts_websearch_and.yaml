@@ -1,0 +1,22 @@
+id: 10234
+feature: operators/wfts/websearch_operators/and
+request:
+  method: GET
+  path: /tsearch?text_search_vector=wfts.fun%20and%20possible
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "text_search_vector": "'also':2 'fun':3 'possibl':8" }
+notes: >
+  websearch_to_tsquery's own boolean syntax passes through untouched: the
+  operand (spaces percent-encoded) is emitted as a bare unknownLiteral
+  (SqlFragment.hs#L412), giving `text_search_vector @@
+  websearch_to_tsquery('fun and possible')`. Note `and` is a websearch keyword,
+  NOT the PostgREST `and=()` logic tree. Mirrors QuerySpec.hs it "can use
+  boolean operators(and, or, -) in websearch_to_tsquery" (first assertion).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L213

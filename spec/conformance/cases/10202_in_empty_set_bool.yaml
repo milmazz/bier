@@ -1,0 +1,18 @@
+id: 10202
+feature: operators/in/empty_set
+request:
+  method: GET
+  path: /items_with_different_col_types?bool_data=in.()
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: []
+notes: >
+  Same `= ANY('{}')` emission for a boolean column; the empty list never
+  reaches a type parser, so no 22P02 is raised. Mirrors QuerySpec.hs
+  "IN and NOT IN empty set" / "works for bool".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1368

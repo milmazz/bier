@@ -150,6 +150,31 @@
 --   * test.infinite_recursion self-referential view (section 5, after its
 --       bootstrap base test.projects) -> SQLSTATE 42P17 -> 500. Case 1524.
 --       Carries no seed data.
+--
+-- 2026-08-09  operators.delta.sql -> the empty-`in.()` value-list table and the
+--             automatic-to_tsvector() relation. No name collided with an
+--             existing object, so nothing was renamed:
+--   * test.items_with_different_col_types (section 4) + its 1 upstream seed row
+--       (section 8) — one column per base type so `in.()` is exercised across
+--       every coercion. Cases 10200-10205.
+--   * test.tsvector_not_null and test.tsvector_not_empty domains (new section
+--       3d — these live in `test`, not `public` like 3b/3c, because upstream
+--       creates them unqualified under its `test` search_path).
+--   * test.tsearch_to_tsvector (section 4, right after the pre-existing and
+--       DISTINCT test.tsearch) + its 5 upstream seed rows and 3 derive-UPDATEs
+--       (section 8). Cases 10220-10227, 10229, 10230.
+--   * test.text_search_vector(test.tsearch_to_tsvector) computed field
+--       (section 6, new operators block). Case 10228. Its name intentionally
+--       matches the tsvector COLUMN on test.tsearch/test.entities — upstream's
+--       shape, and not a collision (attribute vs routine namespaces; the
+--       routine is reachable only through tsearch_to_tsvector's composite
+--       type, which has no column of that name).
+--       Upstream's test.get_tsearch_to_tsvector() was deliberately NOT folded:
+--       it is an /rpc target no operators case needs, and it would make the
+--       loader emit a wrapper into all seven mirrored area schemas for nothing.
+--   * No GRANTs added (section 9 untouched): the loader mirrors every `test`
+--       relation into the area schemas as views owned by the connecting role,
+--       which is how the operators area already reaches test.entities/ranges.
 -- ----------------------------------------------------------------------------
 
 BEGIN;
@@ -345,6 +370,22 @@ CREATE DOMAIN public."application/vnd.pgrst.object" AS json;
 CREATE DOMAIN public."text/tab-separated-values" AS text;
 
 -- ===========================================================================
+-- 3d. tsvector DOMAINs in `test` (operators.delta.sql)
+--     Unlike 3b/3c these live in `test`, not `public`: upstream creates them
+--     unqualified under its `test` search_path and test.tsearch_to_tsvector
+--     (section 4) types two of its columns with them. The second domain is
+--     defined OVER the first (a domain over a domain) on purpose — it is what
+--     makes cases 10229/10230 distinguish a tsvector domain from a *recursive*
+--     tsvector domain, both of which must be exempted from the automatic
+--     to_tsvector() coercion because their BASE type is already tsvector.
+-- ===========================================================================
+CREATE DOMAIN test.tsvector_not_null AS tsvector
+  CONSTRAINT "tsvector is required" CHECK (value IS NOT NULL);
+
+CREATE DOMAIN test.tsvector_not_empty AS test.tsvector_not_null
+  CONSTRAINT "tsvector is required and not empty" CHECK (value <> '');
+
+-- ===========================================================================
 -- 4. Tables + inline FKs (parents declared before children)
 -- ===========================================================================
 
@@ -450,9 +491,46 @@ CREATE TABLE test.chores (
   done bool
 );
 
+-- items_with_different_col_types (operators.delta.sql): one column per base
+-- type, so the EMPTY value list of `in.()` can be exercised across every
+-- coercion (cases 10200-10205). PostgREST never emits SQL `IN`; `in` compiles
+-- to `= ANY(...)` precisely so an empty list stays expressible as `= ANY('{}')`.
+-- Mirrors upstream test/spec/fixtures/schema.sql; seed (section 8) is
+-- upstream's single row with int_data = 1 and every other column NULL.
+CREATE TABLE test.items_with_different_col_types (
+  int_data integer,
+  text_data text,
+  bool_data bool,
+  bin_data bytea,
+  char_data character varying,
+  date_data date,
+  real_data real,
+  time_data time
+);
+
 -- tsearch (operators).
 CREATE TABLE test.tsearch (
   text_search_vector tsvector
+);
+
+-- tsearch_to_tsvector (operators.delta.sql): a SEPARATE relation from
+-- test.tsearch above — where tsearch stores ready-made tsvectors, this one
+-- stores the same five documents as text/jsonb/tsvector-domain/recursive-
+-- tsvector-domain, which is what exercises the automatic to_tsvector()
+-- coercion PostgREST applies when an fts/plfts/phfts/wfts filter targets a
+-- column whose BASE type is not tsvector (cases 10220-10230). Mirrors upstream
+-- test/spec/fixtures/schema.sql, schema-qualified for `test` (upstream relies
+-- on its search_path). The domain columns' defaults are upstream's and are
+-- load-bearing: '' satisfies tsvector_not_null and '.' satisfies
+-- tsvector_not_empty, so the INSERTs in section 8 (which name only
+-- text_search) do not trip either CHECK before the UPDATEs fill them in.
+-- The matching computed field test.text_search_vector(test.tsearch_to_tsvector)
+-- is in section 6.
+CREATE TABLE test.tsearch_to_tsvector (
+  text_search            text,
+  jsonb_search           jsonb,
+  text_search_domain     test.tsvector_not_null  default '',
+  text_search_rec_domain test.tsvector_not_empty default '.'
 );
 
 -- entities / child_entities / grandchild_entities. entities includes the
@@ -1454,6 +1532,21 @@ CREATE FUNCTION test.always_true(test.items) RETURNS boolean
   LANGUAGE sql IMMUTABLE
   AS $$ SELECT true $$;
 
+-- ------------------------- test (operators.delta.sql) ----------------------
+-- text_search_vector(test.tsearch_to_tsvector): a computed field returning a
+-- tsvector, so `?text_search_vector=fts(simple).of` must be exempted from the
+-- automatic to_tsvector() coercion the same way a real tsvector column is
+-- (case 10228). Mirrors upstream test/spec/fixtures/schema.sql.
+--
+-- The name is deliberately the same as the tsvector COLUMN on test.tsearch and
+-- test.entities (section 4). That is upstream's shape and is not a collision:
+-- attribute names and routine names live in separate namespaces, and this
+-- routine is only reachable through the composite type of
+-- test.tsearch_to_tsvector, which has no column of that name.
+CREATE FUNCTION test.text_search_vector(test.tsearch_to_tsvector) RETURNS tsvector AS $$
+  select to_tsvector('simple', $1.text_search)
+$$ LANGUAGE sql;
+
 -- ---------------------------- test (openapi.sql) ---------------------------
 CREATE FUNCTION test.varied_arguments_openapi(
   double double precision,
@@ -1645,6 +1738,29 @@ INSERT INTO test.tsearch VALUES (to_tsvector('But also fun to do what is possibl
 INSERT INTO test.tsearch VALUES (to_tsvector('Fat cats ate rats'));
 INSERT INTO test.tsearch VALUES (to_tsvector('french', 'C''est un peu amusant de faire l''impossible'));
 INSERT INTO test.tsearch VALUES (to_tsvector('german', 'Es ist eine Art Spaß, das Unmögliche zu machen'));
+
+-- test.tsearch_to_tsvector (operators.delta.sql) — the SAME five documents as
+-- test.tsearch above, but stored unconverted so the automatic to_tsvector()
+-- coercion is what does the work (cases 10220-10230). Mirrors upstream
+-- test/spec/fixtures/data.sql; upstream's leading `TRUNCATE TABLE
+-- tsearch_to_tsvector CASCADE;` is dropped because this file loads into a
+-- freshly created database. The two UPDATEs are upstream's and must run after
+-- the INSERTs: they derive the jsonb and the two domain columns from
+-- text_search rather than duplicating the literals.
+INSERT INTO test.tsearch_to_tsvector(text_search) VALUES ('It''s kind of fun to do the impossible');
+INSERT INTO test.tsearch_to_tsvector(text_search) VALUES ('But also fun to do what is possible');
+INSERT INTO test.tsearch_to_tsvector(text_search) VALUES ('Fat cats ate rats');
+INSERT INTO test.tsearch_to_tsvector(text_search) VALUES ('C''est un peu amusant de faire l''impossible');
+INSERT INTO test.tsearch_to_tsvector(text_search) VALUES ('Es ist eine Art Spaß, das Unmögliche zu machen');
+
+UPDATE test.tsearch_to_tsvector SET jsonb_search = jsonb_build_object('text_search', text_search);
+UPDATE test.tsearch_to_tsvector SET text_search_domain = to_tsvector('simple', text_search);
+UPDATE test.tsearch_to_tsvector SET text_search_rec_domain = to_tsvector('simple', text_search);
+
+-- test.items_with_different_col_types (operators.delta.sql) — upstream's single
+-- row: int_data = 1, every other column NULL (cases 10200-10205).
+INSERT INTO test.items_with_different_col_types
+VALUES (1, null, null, null, null, null, null, null);
 
 -- test.entities / child_entities / grandchild_entities (filters seed w/ tsvector)
 INSERT INTO test.entities VALUES (1, 'entity 1', '{1}', '''bar'':2 ''foo'':1');
@@ -1918,4 +2034,29 @@ COMMIT;
 -- from the v16.0 re-sync (fuzzy PGRST205 hints, verbosity=minimal, error
 -- envelope key order, plus the 3 known :pending status_text cases) and are
 -- unrelated to the fixtures.
+--
+-- 2026-08-09 (operators delta fold): re-verified end to end with
+-- `mix bier.fixtures.load` — drops/recreates bier_test, loads this file with
+-- `psql -v ON_ERROR_STOP=1 -f`, then mirrors the seven area schemas; clean,
+-- zero errors. The domain-over-a-domain (tsvector_not_empty OVER
+-- tsvector_not_null) and the two new relations mirror without incident, and
+-- test.text_search_vector(test.tsearch_to_tsvector) is picked up by the
+-- loader's computed-member-fn query and re-created in all 7 area schemas.
+-- The folded objects were spot-checked against their cases:
+-- items_with_different_col_types yields [] for `= ANY('{}')` (1020{0..2}) and
+-- the single int_data=1 row for its negation (10203); tsearch_to_tsvector's
+-- 5 rows carry non-null jsonb_search / text_search_domain /
+-- text_search_rec_domain after the derive-UPDATEs, and the two domain columns
+-- plus the computed field each return the case-10228/10229/10230 tsvector
+-- byte-identically.
+--
+-- Regression check (whole suite, same DB, only this file changed): failures
+-- went 99 -> 86. Thirteen cases flipped to passing (10200-10204, 10220, 10222,
+-- 10224-10227, 10229, 10230) and ZERO cases regressed — confirming the new
+-- `test` relations perturb nothing that enumerates the schema (OpenAPI docs,
+-- PGRST205 fuzzy hints: "projectx" is nowhere near the 0.75 threshold of the
+-- two new names). The 4 operators cases still failing (10205 blank `in.()`
+-- element -> 22P02; 10221/10223 jsonb auto-to_tsvector; 10228 computed-field
+-- resolution) are lib/ emission gaps, not fixture gaps: each fails with a
+-- Postgres error proving the relation resolved and was queried.
 -- ============================================================================

@@ -1,0 +1,25 @@
+id: 10221
+feature: operators/fts/auto_tsvector/jsonb
+request:
+  method: GET
+  path: /tsearch_to_tsvector?select=jsonb_search&jsonb_search=fts.impossible
+  headers: { Accept: application/json }
+schema: operators
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "jsonb_search": { "text_search": "It's kind of fun to do the impossible" } }
+    - { "jsonb_search": { "text_search": "C'est un peu amusant de faire l'impossible" } }
+notes: >
+  The same automatic to_tsvector() wrap applies to a jsonb column:
+  `to_tsvector(jsonb_search) @@ to_tsquery('impossible')` (Postgres has
+  to_tsvector(jsonb), which concatenates the string values). Note this is the
+  jsonb column ITSELF, not a `->>` json path, so cfJsonPath is empty and
+  pgFmtField emits the plain column inside the to_tsvector() call
+  (SqlFragment.hs#L248 over the `cfJsonPath=[]` branch). Mirrors QuerySpec.hs
+  context "text and json columns" -> it "finds matches with to_tsquery"
+  (jsonb_search assertion).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L324
