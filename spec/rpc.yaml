@@ -559,10 +559,20 @@ gaps:
     Note the two codes are distinct: PGRST124 = MaxAffectedViolationError
     (Error.hs#L168), PGRST128 = MaxAffectedRpcViolation (Error.hs#L172).
   - >
-    operator_action: spec/conformance/fixtures/rpc.sql#L15 still carries a
+    RESOLVED 2026-08-09 (commit 6b25f05) — kept as a record, no action left.
+    spec/conformance/fixtures/rpc.sql#L15 HAS BEEN re-pinned to
+    https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/fixtures/schema.sql
+    by the operator, after independently re-verifying that all 23 vendored
+    routines still exist upstream at v16.0 with unchanged argument signatures.
+    The header now also records that the local copy deliberately adds
+    IMMUTABLE/STABLE/VOLATILE markers upstream omits, because routine
+    volatility drives the OPTIONS `Allow` cases 1031/1032 — that divergence is
+    intentional and must survive future re-syncs.
+
+    The original finding, retained for provenance: rpc.sql#L15 carried a
     v14.12 provenance pin — "Upstream source:
     https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/fixtures/schema.sql"
-    — which is stale after this v16.0 re-sync. The file's CONTENT is correct at
+    — which was stale after this v16.0 re-sync. The file's CONTENT is correct at
     v16.0: all 23 routines it vendors (add_them, callcounter, getallprojects,
     getitemrange, getproject, many_out_params, multi_column_table_return,
     named_json_param, noparamsproc, overloaded, raise_pt402, ret_array,
