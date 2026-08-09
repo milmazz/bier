@@ -42,6 +42,44 @@ precedence:
   db_settings_fixture: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/db_config.sql#L5
   reloadable_key_list_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config/Database.hs#L45
   nonreloadable_fixture_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/db_config.sql#L39
+  # The in-db source is read only when db-config is true; with db-config=false
+  # readInDbConfig is never called, so pgrst.* role settings are invisible and
+  # the file/env value stands.
+  db_config_gate_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/CLI.hs#L55
+  # The reloadable set is exactly dbSettingsNames (Config/Database.hs#L47-L71),
+  # each looked up under the `pgrst.` prefix (#L41):
+  reloadable_keys:
+    - db_aggregates_enabled
+    - client_error_verbosity
+    - db_anon_role
+    - db_pre_config
+    - db_extra_search_path
+    - db_max_rows
+    - db_plan_enabled
+    - db_pre_request
+    - db_prepared_statements
+    - db_root_spec
+    - db_schemas
+    - db_tx_end
+    - db_hoisted_tx_settings
+    - jwt_aud
+    - jwt_role_claim_key
+    - jwt_secret
+    - jwt_secret_is_base64
+    - jwt_cache_max_lifetime
+    - openapi_mode
+    - openapi_security_active
+    - openapi_server_proxy_uri
+    - server_cors_allowed_origins
+    - server_trace_header
+    - server_timing_enabled
+    - url_use_legacy_target_names
+  reloadable_prefix_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config/Database.hs#L41
+  # QUIRK: the list carries `jwt_cache_max_lifetime`, which matches no parser
+  # key; there is no `jwt_cache_max_entries` entry, so the
+  # `pgrst.jwt_cache_max_entries` role setting in db_config.sql is silently
+  # inert (the expected golden happens to set the same value from the file).
+  reloadable_jwt_cache_quirk_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config/Database.hs#L64
 
 # ===========================================================================
 # --dump-config output shape
@@ -78,7 +116,11 @@ keys:
     # whether given alone or inside a comma list.
     rejected_values: ["pg_catalog", "information_schema"]
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L296
-    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L361
+    # The db-schema alias is resolved inside parseDbSchemas, not by the generic
+    # optWithAlias wiring used by the other alias pairs.
+    alias_resolution_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L363
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L370
+    strip_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L500
     rejected_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L366
     rejected_message_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L371
     rejected_test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_cli.py#L293
@@ -96,7 +138,7 @@ keys:
     type: comma-separated-emptyable
     # Emptyable: empty string -> [] (not ["public"]).
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L280
-    emptyable_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L502
+    emptyable_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L503
     default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/defaults.config#L11
 
   db-max-rows:
@@ -136,6 +178,9 @@ keys:
     # cited from defaults.config: that golden dumps db-config explicitly disabled
     # (db-config = false), which is the test harness's setting, not the default.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L297
+    # Gates whether the in-database source is consulted at all.
+    gate_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/CLI.hs#L55
+    disabled_in_golden_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/defaults.config#L2
 
   db-aggregates-enabled:
     default: false
@@ -197,10 +242,11 @@ keys:
     type: int
     alias: db-pool-timeout
     # NOTE: for this pair optWithAlias checks the DEPRECATED name first
-    # (db-pool-timeout), then db-pool-max-idletime — the reverse of every other
-    # alias pair. The dumped key is always db-pool-max-idletime.
-    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L288
-    alias_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L289
+    # (db-pool-timeout, L288), then db-pool-max-idletime (L289) — the reverse of
+    # every other alias pair. The dumped key is always db-pool-max-idletime.
+    # `source` anchors the canonical key, `alias_source` the deprecated alias.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L289
+    alias_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L288
     default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/defaults.config#L18
 
   db-pool-automatic-recovery:
@@ -213,8 +259,11 @@ keys:
     default: "commit"
     type: enum
     values: ["commit", "commit-allow-override", "rollback", "rollback-allow-override"]
-    # Maps to two booleans (rollbackAll, allowOverride). Invalid -> fatal.
-    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L413
+    # The key is read twice, once per boolean field: parseTxEnd "db-tx-end" snd
+    # yields allowOverride, parseTxEnd "db-tx-end" fst yields rollbackAll.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L299
+    # Maps to the (rollbackAll, allowOverride) pair; invalid -> fatal.
+    mapping_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L419
     default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/defaults.config#L25
     invalid_is_fatal_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L54
 
@@ -226,7 +275,7 @@ keys:
     # HTTP-observable: with "minimal", client error bodies carry only `code`
     # and `message` — `details` and `hint` are omitted entirely.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L275
-    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L335
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L339
     invalid_is_fatal_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L341
     invalid_test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_cli.py#L283
     http_behavior_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L230
@@ -260,7 +309,7 @@ keys:
     type: string-or-uri
     # If the value contains ':', it must be a valid RFC 3986 URI, else fatal.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L304
-    validation_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L447
+    validation_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L453
     invalid_uri_test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_cli.py#L263
     default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/defaults.config#L27
 
@@ -277,7 +326,7 @@ keys:
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L305
     parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L428
     default_value_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config/JSPath.hs#L33
-    grammar_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config/JSPath.hs#L59
+    grammar_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config/JSPath.hs#L58
     dump_escaping_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config/JSPath.hs#L43
     invalid_test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_cli.py#L216
     invalid_values_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L189
@@ -286,7 +335,10 @@ keys:
   jwt-cache-max-entries:
     default: 1000
     type: int
+    # <= 0 disables the JWT cache entirely (JwtNoCache).
+    zero_or_less_disables_cache: true
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L310
+    disable_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Auth/JwtCache.hs#L95
     default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/defaults.config#L28
 
   log-level:
@@ -295,7 +347,8 @@ keys:
     values: ["crit", "error", "warn", "info", "debug"]
     # Empty/missing -> error. Invalid -> fatal.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L311
-    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L402
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L405
+    values_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L406
     default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/defaults.config#L32
     invalid_is_fatal_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L49
 
@@ -310,7 +363,8 @@ keys:
     type: enum
     values: ["follow-privileges", "ignore-privileges", "disabled"]
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L313
-    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L386
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L389
+    values_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L390
     default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/defaults.config#L34
     invalid_test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_cli.py#L228
 
@@ -337,7 +391,7 @@ keys:
     type: comma-separated
     # Comma-split, each origin stripped. Empty string config -> allow all.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L316
-    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L430
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L433
     allow_all_when_empty_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Cors.hs#L31
     default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/defaults.config#L37
     # HTTP-observable: matching Origin echoed (+ Allow-Credentials on
@@ -346,6 +400,31 @@ keys:
     http_match_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/CorsSpec.hs#L74
     http_nomatch_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/CorsSpec.hs#L100
     http_empty_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/CorsSpec.hs#L113
+    # The rest of the CORS policy is fixed (not configurable) and applies
+    # whatever this key is set to. The policy is only installed when the
+    # request carries an Origin header.
+    policy:
+      only_with_origin_header_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Cors.hs#L27
+      methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"]
+      methods_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Cors.hs#L33
+      # "Authorization" plus every name listed in Access-Control-Request-Headers
+      # (comma-split, stripped).
+      request_headers_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Cors.hs#L34
+      request_headers_split_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Cors.hs#L47
+      exposed_headers: ["Content-Encoding", "Content-Location", "Content-Range", "Content-Type", "Date", "Location", "Server", "Transfer-Encoding", "Range-Unit"]
+      exposed_headers_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Cors.hs#L36
+      max_age_seconds: 86400
+      max_age_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Cors.hs#L38
+      vary_origin: false
+      require_origin: false
+      ignore_failures: true
+      flags_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Cors.hs#L39
+      # Observed wire values on a default-config preflight (Allow-Methods gains
+      # HEAD and Allow-Headers gains the CORS-simple request headers, both added
+      # by the wai-cors middleware on top of the lists above).
+      http_default_preflight_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/CorsSpec.hs#L15
+      http_default_expose_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/CorsSpec.hs#L30
+      http_default_config_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/SpecHelper.hs#L167
 
   server-host:
     default: "!4"   # special value: all IPv4
@@ -358,7 +437,7 @@ keys:
     default: 3000
     type: int
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L318
-    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L350
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L351
     default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/defaults.config#L39
 
   server-reuseport:
@@ -394,7 +473,11 @@ keys:
     # Must be valid octal in range 600..777, else fatal.
     range: ["600", "777"]
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L323
-    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L373
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L378
+    # Unset -> 432 decimal (0o660).
+    default_mode_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L376
+    # Bounds are checked in decimal: 384 (0o600) .. 511 (0o777).
+    range_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L382
     default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/defaults.config#L44
     invalid_not_octal_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L29
     invalid_below_range_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L34
@@ -403,14 +486,31 @@ keys:
   url-use-legacy-target-names:
     # NEW in v16.0. When true (default) an embedded resource that carries an
     # alias may still be referenced by its relation name in filters/orders/
-    # limits (deprecated, logged as a warning). When false that raises
-    # PGRST108.
+    # limits; the request succeeds and the response carries a deprecation
+    # `Warning` RESPONSE header (not merely a log line). When false the same
+    # request raises PGRST108.
     default: true
     type: bool
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L324
     plan_effect_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan.hs#L398
-    warning_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L215
+    # App.hs gates the deprecation on this flag (#L215), then builds
+    # warnHdrMsgs (#L246) and threads it through toWaiResponse (#L248/#L253)
+    # into warningHeaders, which emits a real response header:
+    #   Warning: 299 PostgRESTv<ver> "<msg> Update `<rel>` to `<alias>` in
+    #            query string filters, orders or limits."
+    # The observer log line (#L217-#L218) is in addition to, not instead of,
+    # the header.
+    warning_gate_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L215
+    warning_header_build_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L246
+    warning_header_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L270
+    # Default true -> 200 + Warning header. Asserted by case 1138 (select area,
+    # feature select/embed/alias/legacy-target-name-warning).
+    warning_http_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1183
+    # Set false -> PGRST108 400; upstream runs that it-block under
+    # baseCfg { configUrlUseLegacyTargetNames = False }.
+    disabled_config_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1696
     http_behavior_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1709
+    # --dump-config value is covered by case 1736.
     default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/defaults.config#L45
 
   admin-server-host:
@@ -425,7 +525,7 @@ keys:
     type: int
     # Must NOT equal server-port, else fatal.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L327
-    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L353
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L357
     default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/defaults.config#L2
     same_as_server_port_fatal_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_cli.py#L119
 
@@ -445,7 +545,7 @@ keys:
     type: octal-string
     range: ["600", "777"]
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L329
-    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L373
+    parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L378
     message_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L380
     default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/defaults.config#L4
     set_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/no-defaults-env.yaml#L48
@@ -488,22 +588,40 @@ aliases:
   server-host: admin-server-host   # admin-server-host falls back to server-host
   # optWithAlias tries its first argument, then the second; for every pair but
   # db-pool-* the first argument is the canonical key.
-  precedence_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L435
+  precedence_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L437
   test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/aliases.config#L1
 
 # ===========================================================================
 # Type coercion rules
 # ===========================================================================
 coercion:
-  # Booleans accept True/true/TRUE/"true" and numeric (>0 is true).
+  # Booleans accept True/true/TRUE/"true" (alpha chars filtered, title-cased,
+  # then `read`)...
   bool_accepts_text_and_numeric: true
-  bool_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L489
-  # Integers accept JSON numbers or numeric strings.
+  bool_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L493
+  # ...and fall back to a numeric reading where > 0 is true.
+  bool_numeric_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L496
+  # Goldens: "1"/"0"/"2" and "true"/"FALSE"/"\"true\"" both round-trip to the
+  # same dumped booleans.
+  bool_numeric_golden: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/boolean-numeric.config#L2
+  bool_string_golden: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/boolean-string.config#L2
+  bool_golden_expected: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/boolean-numeric.config#L22
+  # Integers accept JSON numbers...
   int_accepts_number_and_string: true
-  int_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L484
+  int_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L485
+  # ...or numeric strings.
+  int_string_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L486
   # A value of wrong type falls back to the default (does not abort).
   wrong_type_falls_back_to_default: true
   wrong_type_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/types.config#L10
+  # An unknown config-file key is ignored, not fatal (the golden file carries
+  # `not-existing = "should succeed"` and still dumps the defaults). The same
+  # holds for an unknown `pgrst.*` role setting.
+  unknown_keys_ignored: true
+  unknown_key_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/defaults.config#L4
+  unknown_db_setting_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/db_config.sql#L22
+  # Config files are read as UTF-8 (comments and values may carry non-ASCII).
+  utf8_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/utf-8.config#L1
   # Empty string for an optString key is treated as absent (mfilter (/= "")).
   empty_string_is_absent: true
   empty_string_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L442
@@ -597,6 +715,11 @@ cli:
     flag: "--example"
     # Prints the example config file template.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L677
+    # NOTE: the v16.0 template is stale for one key — it still shows the v14.12
+    # leading-dot JSPath (jwt-role-claim-key = ".role"), which the RFC 9535
+    # parser now rejects. The template is printed verbatim and never parsed, so
+    # this is a doc bug, not a behavior: do not derive the default from it.
+    stale_role_claim_key_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L753
   nonexistent_config_file_fatal:
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/fixtures/fixtures.yaml#L22
 
@@ -611,7 +734,31 @@ gaps:
   - "log-query HTTP-observable effect (Config.hs#L312) is logged to stderr only; covered by test_io.py log tests, not assertable as an HTTP response in this harness."
   - "server-unix-socket / server-unix-socket-mode and the v16.0 admin-server-unix-socket / admin-server-unix-socket-mode runtime socket binding are not exercisable through the HTTP conformance runner (requires a unix socket transport). Only their --dump-config values and the octal validation are covered."
   - "server-reuseport (Config.hs#L319) only changes how the listening socket is bound (App.hs#L313); no HTTP-observable difference, so only its --dump-config value is covered."
-  - "url-use-legacy-target-names=true emits a deprecation WARNING via the observer (App.hs#L215-L218); it is a log line, not a response header, so it is not assertable in this HTTP harness."
   - "DROPPED from v14.12: internal-schema-cache-load-sleep and internal-schema-cache-relationship-load-sleep no longer exist (replaced by internal-schema-cache-query-sleep-before-queries, Config.hs#L332). No case referenced them."
   - "DROPPED from v14.12: the JSPath filter-expression extensions ^==, ==^, *== for jwt-role-claim-key were removed with the move to RFC 9535 JSONPath (fixtures.yaml roleclaims no longer lists them). No config-area case referenced them; the auth area owns role-claim evaluation."
+  - "DROPPED from v14.12: the hard-coded socket-mode failure texts ('Invalid server-unix-socket-mode: ...', v14.12 Config.hs#L335/#L338) no longer exist as fixed strings; v16.0 builds them from the key (Config.hs#L380/#L383). Cases 1714/1715 keep the same expected text only because the key name happens to be identical; the new admin-server variant is covered by case 1738."
+  - "db-uri '@filename' (Config.hs#L567) is exercised upstream only by starting a server with PGRST_DB_URI=@/dev/stdin (test_io.py#L54); the CLI conformance runner has no stdin/temp-file channel for the db-uri value, so only the model records it."
+  - "jwt-cache-max-entries <= 0 disabling the cache (Auth/JwtCache.hs#L95) has no HTTP-observable difference (a cached and an uncached verification return the same response), so only the config value is modeled; the auth area owns the cache behavior."
+  - "server-port = 0 binds a random free port (test_io.py#L134-L138); the conformance runner asserts on --dump-config output and on requests to a fixed port, so it cannot observe the bound port."
+  - "In-db config RELOAD (SIGUSR2 / NOTIFY 'reload config', test_io.py#L284-L344) re-reads pgrst.* role settings into a running server. The CLI runner performs a single --dump-config invocation and the HTTP runner has no signal channel, so only the startup-time read is covered (cases 1724/1725/1739+)."
   - "needed_assertion: --dump-config output is now sorted alphabetically (Config.hs#L161). `dump_contains` can only assert membership, not order; asserting the sort would need a `dump_lines_exact` (full golden document) or `dump_sorted: true` assertion key."
+  - "needed_assertion: the --example template is a fixed document (Config.hs#L678-L798) whose exact text — including the stale `jwt-role-claim-key = \".role\"` line — is part of the CLI surface. `dump_contains` only asserts membership; pinning the template byte-for-byte would need a `stdout_exact` assertion key."
+  - >
+      needed_assertion: the runner must honour `config` on HTTP cases. Case 1742
+      (config/server-cors-allowed-origins/default-preflight) IS expressible in
+      the case shape — spec/case.schema.json already has a `config` key, and the
+      case declares the `server-cors-allowed-origins: ""` that upstream's
+      `baseCfg` carries
+      (https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/SpecHelper.hs#L167)
+      — but the frozen harness only honours `config` for `kind: cli` cases and
+      for the fixed per-case instance list in test/support/conformance_server.ex
+      (`@variant_case_ids`, which contains 1703 but not 1742). Every other HTTP
+      case runs against a shared instance whose
+      `server_cors_allowed_origins` is "http://example.com, http://example2.com",
+      and 1742's path "/" routes it to the shared auth instance, so the response
+      echoes the Origin plus Access-Control-Allow-Credentials instead of the
+      permissive "*" — the case fails for the wrong reason. Needed: a runner
+      that can boot/reconfigure an instance per `config` block (or, via the
+      human harness gate, a `@variant_case_ids` entry for 1742). The expectation
+      itself is correct and holds only under the EMPTY origin list; the
+      populated-allowlist counterpart is case 1702.

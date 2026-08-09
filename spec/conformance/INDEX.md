@@ -1,7 +1,7 @@
 # Conformance case index
 
-Cross-reference of the **614** conformance cases under `spec/conformance/cases/`.
-Pinned target: **PostgREST v16.0** (all 614 `source:` URLs).
+Cross-reference of the **620** conformance cases under `spec/conformance/cases/`.
+Pinned target: **PostgREST v16.0** (all 620 `source:` URLs).
 
 Each case is one YAML file `NNNN_<slug>.yaml` validated against
 [`../case.schema.json`](../case.schema.json). Cases are grouped into 17 feature
@@ -53,13 +53,15 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | headers | 35 | 1550–1584 | `fixtures/headers.sql` | `headers`, `test` |
 | content_negotiation | 47 | 1600–1646 | `fixtures/content_negotiation.sql` | `test` |
 | openapi | 33 | 1650–1682 | `fixtures/openapi.sql` | `openapi`, `openapi_no_schema_comment`, `openapi_variadic` |
-| config | 39 | 1700–1738 | `fixtures/config.sql` | `config` |
+| config | 45 | 1700–1744 | `fixtures/config.sql` | `config` |
 | observability | 20 | 1750–1769 | `fixtures/observability.sql` | `observability` |
 | domain_representations | 21 | 1800–1820 | `fixtures/domain_representations.sql` | `domain_representations` |
 
-Total: **614 cases**, **17 areas**, **17 fixture fragments**
-(plus 5 `*.delta.sql` write channels, all currently empty — see
-[`fixtures/README.md`](fixtures/README.md) for who may write which file).
+Total: **620 cases**, **17 areas**, **17 fixture fragments**
+(plus 5 `*.delta.sql` write channels, all currently **comment-only** — each
+carries a single `-- Folded into ../fixtures.sql on 2026-08-08 …` provenance
+line and no DDL; see [`fixtures/README.md`](fixtures/README.md) for who may
+write which file).
 
 Each area's `feature:` prefix matches its area name exactly, so the area is
 recoverable directly from the case file:
@@ -119,7 +121,7 @@ sub-features present per area (second segment, as on disk):
 | headers | 1550–1584 | prefer, profile, location, content-location, guc, vary |
 | content_negotiation | 1600–1646 | json, csv, geojson, octet-stream, singular, nulls-stripped, plan, openapi, precedence, error, custom-media-handler |
 | openapi | 1650–1682 | root, defaults, comments, table, types, rpc, mode, security |
-| config | 1700–1738 | dump-config, sources, aliases, validation, coercion, precedence, db-max-rows, db-tx-end, db-extra-search-path, app-settings, server-cors-allowed-origins, cli, client-error-verbosity, server-reuseport, url-use-legacy-target-names, admin-server-unix-socket |
+| config | 1700–1744 | dump-config, sources, aliases, validation, coercion, **parsing**, precedence, db-max-rows, db-tx-end, db-extra-search-path, app-settings, server-cors-allowed-origins, cli, client-error-verbosity, server-reuseport, url-use-legacy-target-names, admin-server-unix-socket |
 | observability | 1750–1769 | server-timing, trace-header, log-level |
 | domain_representations | 1800–1820 | read, write, filter, default |
 
@@ -137,13 +139,18 @@ sub-features present per area (second segment, as on disk):
   derived from App.hs' `toWaiResponse` funnel
   (`src/library/PostgREST/App.hs#L253`), which errors bypass. The third path — a
   CORS *preflight*, answered by the wai-cors middleware before `toWaiResponse` —
-  is **not** pinned; it is an open gap against the existing preflight cases
-  1702/1703 in the config band (see [`../COVERAGE.md`](../COVERAGE.md) →
+  is **not** pinned; it is an open gap against the preflight cases 1702/1703/1742
+  in the config band (see [`../COVERAGE.md`](../COVERAGE.md) →
   *Known gaps → headers*).
-- **config** gained four v16 keys: `client-error-verbosity` (1731–1732),
-  `server-reuseport` (1735), `url-use-legacy-target-names` (1736), and
-  `admin-server-unix-socket` (1737–1738), plus `db-schemas` rejecting
-  `pg_catalog` / `information_schema` (1733–1734).
+- **config** grew to **1700–1744 (45 cases)**. v16 keys added earlier in the
+  pass: `client-error-verbosity` (1731–1732), `server-reuseport` (1735),
+  `url-use-legacy-target-names` (1736), `admin-server-unix-socket` (1737–1738),
+  plus `db-schemas` rejecting `pg_catalog` / `information_schema` (1733–1734).
+  Six ids are newer still: **1739** (`config/parsing/unknown-key-ignored`, a new
+  sub-feature), **1740–1741** (`coerceBool` from numeric and from text strings),
+  **1742–1743** (the CORS default-preflight and the hard-coded
+  `Access-Control-Expose-Headers` list — both **HTTP**, not CLI), and **1744**
+  (`db-config = false` ignores `ALTER ROLE … SET pgrst.*`).
 - **select/filters/ordering/url_grammar** gained the embed **alias vs. legacy
   target name** rules (1028, 1138–1141, 1188–1190, 1224).
 - **auth** grew from 45 to 69 cases; the 19 that did not fit the full 1450–1499
@@ -151,23 +158,39 @@ sub-features present per area (second segment, as on disk):
 
 ## Case file shapes
 
-Most cases are HTTP request/response (**580**). The **config** area additionally
+Most cases are HTTP request/response (**582**). The **config** area additionally
 uses a **CLI** shape (`request.kind: cli`, `request.flag: "--dump-config"`)
 asserting on `expect.exit_code`, `expect.dump_contains`,
 `expect.dump_reparse_stable`, and `expect.stderr_contains` rather than an HTTP
-status — **34** cases, ids 1705–1738. The **auth** area uses `request.jwt` to
-have the runner mint a signed token (case 11809 is the exception: it carries a
-literal `Authorization` header, because it needs a token signed with a secret the
-harness deliberately does not know). Any case may carry a `config:` block; the
-harness boots a dedicated instance for the ids it lists in `@variant_case_ids`.
+status — **38** cases, ids **1705–1741 plus 1744**. Note the CLI ids are *not*
+one contiguous run: **1742 and 1743 are HTTP** CORS cases sitting inside the
+config band, so `1705–1744` is the band, not the CLI set.
+
+The **auth** area uses `request.jwt` to have the runner mint a signed token —
+**32** cases do (1460–1464, 1468–1474, 1496–1499, 11800–11808, 11810–11812,
+11815–11818); case 11809 is the exception, carrying a literal `Authorization`
+header because it needs a token signed with a secret the harness deliberately
+does not know.
+
+Any case may carry a `config:` block — **107** do — but the harness boots a
+dedicated instance only for the ids listed in `@variant_case_ids`
+(`test/support/conformance_server.ex`, **18** ids: 1467–1473, 1491, 1493, 1654,
+1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764) plus every `kind: cli` case.
+On any other HTTP case the `config:` block is **inert** — it documents the
+upstream configuration the assertion depends on, but the case still runs against
+a shared instance. Case 1742 is the live instance of that mismatch; see
+[`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → config*.
 
 `preconditions:` is parsed but **never executed** by the harness — treat it as
 declarative documentation, never as setup a case may depend on.
 
-**6** cases assert `expect.status_text` (1508–1511, 1513–1514) and are tagged
+**3** cases assert `expect.status_text` (**1508, 1510, 1511**) and are tagged
 `:pending` / excluded by `test/conformance/conformance_test.exs`, because `Req`
 does not expose the HTTP reason phrase. That is the harness's only remaining
-deferral; `case.schema.json` itself has no `pending` field.
+deferral; `case.schema.json` itself has no `pending` field. (Earlier revisions of
+this file claimed 6 such cases, listing 1509, 1513 and 1514 as well — those three
+only *mention* `status_text` in `notes:` or in an expected `hint:` string and
+carry no `expect.status_text` key, so they run normally.)
 
 ## Looking up a case
 

@@ -8,7 +8,7 @@ section and its **API** sub-pages.
 A docs page with no covering case (and not explicitly scoped out below) is
 flagged **GAP**.
 
-Pinned target: **PostgREST v16.0**. Total cases: **614** across 17 areas
+Pinned target: **PostgREST v16.0**. Total cases: **620** across 17 areas
 (counted on disk this pass, not carried over).
 
 ## References → API sub-pages
@@ -28,8 +28,8 @@ Pinned target: **PostgREST v16.0**. Total cases: **614** across 17 areas
 | `openapi` (OpenAPI) | 1650–1682 (openapi), 1619–1621, 1645 (content_negotiation openapi) | Root spec, comments→summary/description, type mapping, modes, security, `db-root-spec`. |
 | `preferences` (Prefer Header) | 1550–1556, 1577–1581, 1584 (headers prefer), 1302–1304, 1313–1314, 1322, 1324, 1332–1333 (return=minimal / headers-only), 1390–1392 (max-affected), 1551–1552 (handling), 1553–1554, 1577–1581, 1584 (timezone) | Prefer: return, handling=strict/lenient, timezone (incl. ± offsets, leap seconds, invalid under default/lenient/strict, and the single- vs two-token `Preference-Applied` echo in 1553/1584), max-affected, missing-defaults via `columns`. **Partial** — every `handling` and `max-affected` case is table-flavored; the RPC flavor of both preferences (incl. PGRST128) has no case. See **Known gaps → headers**. |
 | `vary_header` (Vary Header) | 1575 (default `Vary: Accept, Prefer, Range` on a read), 1576 (`response.headers` GUC override replaces it verbatim), 1582 (the default is appended by `toWaiResponse` for every non-error response, witnessed on OPTIONS), 1583 (error responses carry no `Vary` — they bypass `toWaiResponse`) | **NEW page in v16** — covered. 1582/1583 match the modelled entries `headers.vary.non_read_responses` / `headers.vary.absent_on_errors`. The one remaining leg — a *CORS preflight* answered by the wai-cors middleware, which never reaches `toWaiResponse` — is a gap; see **Known gaps → headers**. |
-| `cors` (CORS) | 1702–1704 (config CORS) | Allowed-origin echo, empty config allows all, non-matching origin. **Partial** — the preflight cases assert no `Vary`-absence, the third leg of the v16 `Vary` rule. See **Known gaps → headers**. |
-| `options` (OPTIONS method) | 1019 (url_grammar OPTIONS Allow), 1757, 1768–1769 (observability OPTIONS server-timing on table / rpc / root) | OPTIONS Allow header; OPTIONS Server-Timing subset. Partial — no dedicated `Allow`-body assertions beyond 1019. |
+| `cors` (CORS) | 1702 (allowed-origin echo), 1703 (empty config allows all), 1704 (non-matching origin → no header), 1742 (default/empty origin list answers a preflight permissively), 1743 (the fixed `Access-Control-Expose-Headers` list on a plain `Origin` request) | 1742/1743 are new this pass and are **HTTP** cases inside the config band. **Partial** — none of the preflight cases asserts `Vary`-absence, the third leg of the v16 `Vary` rule (**Known gaps → headers**), and 1742 does not yet run under the config it declares (**Known gaps → config**). |
+| `options` (OPTIONS method) | 1019 (url_grammar OPTIONS Allow), 1757, 1768–1769 (observability OPTIONS server-timing on table / rpc / root), 1742 (OPTIONS preflight) | OPTIONS Allow header; OPTIONS Server-Timing subset; CORS preflight. Partial — no dedicated `Allow`-body assertions beyond 1019. |
 | `url_grammar` (URL Grammar) | 1000–1029 (url_grammar) | Path/method resolution, reserved query params (incl. the legacy embed target name, 1028), %-encoding, `+`→space, double-quoting reserved characters in filter values and in quoted identifiers (1025–1027, 1029). |
 
 ## References → top-level pages
@@ -37,12 +37,12 @@ Pinned target: **PostgREST v16.0**. Total cases: **614** across 17 areas
 | Docs page (`references/...`) | Covering case ids | Notes |
 |------------------------------|-------------------|-------|
 | `auth` (Authentication) | 1450–1499 + 11800–11818 (auth) | JWT validation/claims, HS256 (incl. binary/base64 secret) and RS256 (JWK and JWKS), roles, role-claim-key JSON Path, anonymous, audience, pre-request, GUC claims, login-token minting, clock-skew errors. Partial — see **Known gaps**. |
-| `cli` (CLI) | 1705–1738 (all 34 `request.kind: cli` cases) | `--dump-config`, `--example`, validation, env/file/db precedence, coercion, aliases. Driven in-process by `Bier.CliCase`. |
+| `cli` (CLI) | 1705–1741 + 1744 (all 38 `request.kind: cli` cases) | `--dump-config`, `--example`, validation, env/file/db precedence, coercion, unknown-key tolerance (1739), aliases. Driven in-process by `Bier.CliCase`. Note 1742/1743 sit inside the band but are HTTP, so the CLI set is not contiguous. |
 | `transactions` (Transactions) | 1387–1392 (safe-update/delete, max-affected), 1713, 1722 (db-tx-end validation + enum mapping), 1759 (transaction timing) | Tx-scoped GUCs, safe-update/safe-delete (rollback on missing WHERE), db-tx-end. Partial — no explicit characteristics/isolation-level case. |
 | `connection_pool` (Connection Pool) | — (OUT OF SCOPE) | Pool sizing/acquisition behavior is operational and not observable as deterministic black-box HTTP. See **Scope decisions**. |
 | `schema_cache` (Schema Cache) | — (DEFERRED) | Schema-cache reload (`NOTIFY pgrst, 'reload schema'` / SIGUSR1) needs a reload-signal harness. See **Scope decisions**. |
 | `errors` (Errors) | 1500–1518 (errors), 1432–1434 (rpc errors), 1002, 1024, 1185 (not-found / invalid path), 1455–1464 + 11809–11814 (auth JWT errors), 1506, 1515–1516, 1518 (Proxy-Status envelope) | SQLSTATE→HTTP mapping, PGRST error codes, RAISE PGRST full control, 4xx/5xx envelopes, `Proxy-Status`, client-error-verbosity=minimal. |
-| `configuration` (Configuration) | 1700–1738 (config) | Sources (env/file/db-role-settings), aliases, validation, coercion, precedence, app-settings, plus the v16 keys `client-error-verbosity` (1731–1732), `server-reuseport` (1735), `url-use-legacy-target-names` (1736), `admin-server-unix-socket` (1737–1738). |
+| `configuration` (Configuration) | 1700–1744 (config) | Sources (env/file/db-role-settings, incl. `db-config = false` disabling the in-db source, 1744), aliases, validation, coercion (incl. `coerceBool` from numeric/text strings, 1740–1741), unknown-key tolerance (1739), precedence, app-settings, CORS keys (1702–1704, 1742–1743), plus the v16 keys `client-error-verbosity` (1731–1732), `server-reuseport` (1735), `url-use-legacy-target-names` (1736), `admin-server-unix-socket` (1737–1738). **Partial** — the page's *In-Database Configuration* section documents `db-pre-config` as the recommended mechanism and its *App Settings* section documents `current_setting('app.settings.*')`; neither has a case. See **Known gaps → config**. |
 | `observability` (Observability) | 1750–1769 (observability), 1497 (JWT-cache Server-Timing), 1625–1628, 1643 (execution plan), 1506/1515/1516/1518/1002 (Proxy-Status) | Server-Timing, Trace header, log-level→status logging, execution plan, Proxy-Status. Partial — see **Known gaps** (Metrics, SQL query logs, Server version header). |
 | `admin_server` (Admin Server) | 1717 (admin-port = server-port fatal), 1737 (`admin-server-unix-socket` dump), 1738 (admin socket-mode validation) | Config-surface validation via the CLI harness; `/live` and `/ready` covered by ExUnit (`test/bier/admin_server_test.exs`). Partial — `/metrics` and `/schema_cache` have no case. |
 | `http_server` (HTTP Server) | — (OUT OF SCOPE, new page in v16) | The page documents exactly one behavior: Warp's graceful shutdown on `SIGTERM`. See **Scope decisions**. |
@@ -101,17 +101,28 @@ old claim and what replaced it.
 - **`cli` (config CLI cases) — COVERED. UPDATED (v16.0):** the previous entry
   described the band as 1705–1730 with 15 passing cases and a per-case
   `pending_reason` taxonomy (`:cli_parity`, `:unmodeled_key`, `:db_config`).
-  Neither half survives contact with the tree: the CLI band is now
-  **1705–1738 (34 cases)**, and **no spec case carries `pending` or
+  Neither half survives contact with the tree: the CLI set is now
+  **1705–1741 plus 1744 (38 cases)**, and **no spec case carries `pending` or
   `pending_reason`** — those are not properties of `case.schema.json`; they were
   harness-side tags. The harness's only remaining deferral is `:status_text`
-  (`test/conformance/conformance_test.exs`), which excludes the **6** cases that
-  assert `expect.status_text` (1508–1511, 1513–1514) because `Req` does not
+  (`test/conformance/conformance_test.exs`), which excludes the **3** cases that
+  assert `expect.status_text` (**1508, 1510, 1511**) because `Req` does not
   expose the HTTP reason phrase. The `:db_config` deferrals were retired when the
   in-database config source landed. `Bier.CLI` provides the standalone,
   drop-in PostgREST-compatible CLI (`PGRST_*` env, kebab config file,
   `--dump-config`); standalone packaging (`mix release` + Dockerfile) is tracked
   in #45.
+
+  > **CORRECTIONS THIS PASS (both were wrong on disk).** This bullet previously
+  > read "the CLI band is now **1705–1738 (34 cases)**" and "excludes the **6**
+  > cases that assert `expect.status_text` (1508–1511, 1513–1514)".
+  > (1) The CLI set grew to 38 and is **no longer contiguous**: 1739–1741 and
+  > 1744 are CLI, but **1742/1743 are HTTP** CORS cases sitting inside the config
+  > band. (2) Only **3** cases carry an `expect.status_text` key. 1509, 1513 and
+  > 1514 merely *mention* `status_text` — in `notes:` (1509) or inside the
+  > expected `hint:` string "DETAIL must be a JSON object with obligatory keys:
+  > 'status', 'headers' and optional key: 'status_text'." (1513/1514) — so they
+  > are not excluded and do run. This matches `CLAUDE.md`, which already said 3.
 
 ## Coverage summary
 
@@ -127,12 +138,12 @@ old claim and what replaced it.
 Two pages are new in v16 relative to the previous pass: `api/vary_header`
 (covered, 1575–1576 and 1582–1583) and `http_server` (scoped out — see above).
 
-Seven pages are marked **Partial** in the notes above (`options`,
-`transactions`, `admin_server`, `observability`, `auth`, and — new from this
-pass's headers audit — `preferences` and `cors`): they have covering cases but
-not the full breadth of the docs page. These are soft gaps, itemized next.
-`vary_header` stays **covered** but carries one itemized gap (the preflight
-leg).
+**Eight** pages are marked **Partial** in the notes above (`options`,
+`transactions`, `admin_server`, `observability`, `auth`, `preferences`, `cors`,
+and — new from this pass's config audit — `configuration`): they have covering
+cases but not the full breadth of the docs page. These are soft gaps, itemized
+next. `vary_header` stays **covered** but carries one itemized gap (the
+preflight leg).
 
 ## Known gaps
 
@@ -145,9 +156,68 @@ prioritizing:
   sequences, signals, timing). Most of the *auth* and *observability* entries.
   These stay open until the harness or upstream changes.
 - **Citable but uncovered** — upstream *does* assert the behavior at v16.0 with
-  a fetchable it-block, and the case shape can express it; nobody wrote the
-  case. **All three *headers* entries are of this kind**, so they are the
-  actionable ones. Each is labelled below.
+  a fetchable it-block or golden file, and the case shape can express it; nobody
+  wrote the case. **All three *headers* entries and both *config* entries are of
+  this kind**, so they are the actionable ones. Each is labelled below.
+
+### config (adversarial review verdict: **revise** — findings are *citable but uncovered*)
+
+Two missing-coverage findings, **0 citation defects**.
+
+- **`db-pre-config` / In-Database Configuration via a pre-config function — no
+  case, and the v16 docs make this the *recommended* mechanism.**
+  [`references/configuration.html#in-database-configuration`](https://postgrest.org/en/v16/references/configuration.html#in-database-configuration)
+  explicitly demotes the `ALTER ROLE … SET pgrst.*` path to "backwards
+  compatibility … no longer recommended as it requires SUPERUSER", yet the
+  tree's only in-db-config cases — **1724**, **1725**, **1744** — exercise
+  exactly that deprecated path. The recommended path is **dump-observable**, so
+  this fits the existing CLI case shape: `PGRST_DB_CONFIG=true` +
+  `PGRST_DB_PRE_CONFIG=<fn>` with a function calling
+  `set_config('pgrst.db_max_rows','500',true)` must make `--dump-config` emit
+  `db-max-rows = 500`. Upstream golden:
+  [`test/io/configs/expected/no-defaults-with-db-other-authenticator.config`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/expected/no-defaults-with-db-other-authenticator.config),
+  driven from
+  [`test/io/test_cli.py#L165`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_cli.py#L165).
+  `spec/config.yaml` does record a `db-pre-config` gap, but it understates the
+  situation — it says "a runtime HTTP assertion was not located in v16.0
+  test/spec", which is true and beside the point: the behavior is assertable
+  today through the **CLI** shape. **Actionable**: needs a `preconditions_sql`
+  channel (or a fixture-side pre-config function) plus one CLI case; the case
+  shape itself is already sufficient.
+
+- **`app.settings.*` reaching SQL as a GUC — no case anywhere in `spec/`, and
+  until now no gap entry either.** Case **1729**
+  (`config/app-settings/from-env`) pins only the `--dump-config` surface: that
+  `PGRST_APP_SETTINGS_<NAME>` normalizes to `app-settings.<name>`. But the
+  entire documented purpose of the parameter
+  ([`references/configuration.html#app-settings`](https://postgrest.org/en/v16/references/configuration.html#app-settings))
+  is that the value is readable from PostgreSQL functions via
+  `current_setting('app.settings.<name>')`. Upstream asserts exactly that over
+  HTTP: the it-block *"app settings available"* POSTs `/rpc/get_guc_value` with
+  `{"name":"app.settings.app_host"}` and expects `"localhost"`
+  ([`RpcSpec.hs#L914`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L914)),
+  with `configAppSettings = [("app.settings.app_host","localhost"),
+  ("app.settings.external_api_secret","0123456789abcdef")]` in `baseCfg`.
+  **Actionable and cheap**: `test.get_guc_value(name text)` already exists in
+  `fixtures.sql:982` and already backs the auth-area GUC cases (1478–1485), so
+  this needs only a case file — plus a harness that honours the case's `config:`
+  block (see the next bullet).
+
+- **Harness constraint that blocks one already-written case (not a spec gap, but
+  it belongs here).** Case **1742**
+  (`config/server-cors-allowed-origins/default-preflight`) is correct as written
+  and declares the `server-cors-allowed-origins: ""` that upstream's `baseCfg`
+  carries, but the frozen harness honours a `config:` block only for
+  `kind: cli` cases and for the fixed `@variant_case_ids` list in
+  `test/support/conformance_server.ex` (18 ids — 1467–1473, 1491, 1493, 1654,
+  1677, 1678, 1680, 1682, **1703**, 1758, 1763, 1764 — which contains 1703 but
+  **not 1742**). Every other HTTP case runs against a shared instance whose
+  `server_cors_allowed_origins` is `"http://example.com, http://example2.com"`,
+  so 1742 will echo the Origin instead of returning the permissive `*` and will
+  **fail for the wrong reason**. Closing it is a harness decision (per-`config`
+  instance booting, or a `@variant_case_ids` entry for 1742) behind the human
+  harness gate, not a spec edit. 107 of the 620 cases carry a `config:` block;
+  1742 is the one where the block is load-bearing and unhonoured.
 
 ### auth (adversarial review verdict: **revise** — all findings informational)
 
@@ -236,12 +306,12 @@ sources during this synthesis rather than carried over from the review summary.
   and the wai-cors middleware answers the OPTIONS itself, so the response never
   reaches `toWaiResponse`; `corsVaryOrigin = False` (`Cors.hs#L39`) means it
   does not even gain a `Vary: Origin`. The preflight cases **already exist**
-  (1702/1703, in the config band) and would only need `headers_absent: [Vary]`
-  added — but they are frozen ground truth, and the id band is `config`'s, so
-  the fix is an authoring decision (extend 1702/1703 vs. add a headers-band
-  case) rather than a mechanical edit. Note case 1582 deliberately sends **no**
-  `Origin` precisely so its OPTIONS is *not* treated as a preflight, which is
-  why the two rules do not collide.
+  (1702/1703, and now 1742, all in the config band) and would only need
+  `headers_absent: [Vary]` added — but they are frozen ground truth, and the id
+  band is `config`'s, so the fix is an authoring decision (extend the existing
+  preflight cases vs. add a headers-band case) rather than a mechanical edit.
+  Note case 1582 deliberately sends **no** `Origin` precisely so its OPTIONS is
+  *not* treated as a preflight, which is why the two rules do not collide.
 
 ### observability
 
@@ -265,36 +335,47 @@ sources during this synthesis rather than carried over from the review summary.
 
 ## Validation status
 
-Machine-verified on **2026-08-08** at commit **`6d38e68`**
-("spec(auth): re-sync to PostgREST v16.0 (area 1/17)"), with the working tree
-**dirty mid-re-sync**: 9 modified spec files plus 3 untracked new cases
-(1582/1583/1584). The checks cover the on-disk state *including* those; no
+Machine-verified on **2026-08-08** at commit **`00a7083`**
+("spec(headers): re-sync to PostgREST v16.0 (area 2/17)"), against the tree as
+it stood **before** this synthesis rewrote `README.md` / `conformance/INDEX.md` /
+`COVERAGE.md`: **dirty mid-re-sync**, 14 entries — 8 modified (`spec/config.yaml`
+and cases 1700–1704, 1725, 1728) plus 6 untracked new config cases
+(**1739–1744**). The checks cover the on-disk state *including* those; no
 repository file was modified by the verification, whose scripts live in a
-scratchpad. **Every check below passed.**
+scratchpad. **Every check below passed**, and the one substantive finding is
+recorded under *Open verification finding*.
 
-- **Fixture load: OK.** `mix bier.fixtures.load` exited **0**, reporting the
-  mirrored area schemas (`operators, ordering, pagination, representations,
-  mutations, config, domain_representations`). Post-load sanity: **23**
-  non-system schemas present — `SPECIAL "@/\#~_-`, `auth`, `config`,
-  `domain_representations`, `geotest`, `headers`, `headers_private`, `jwt`,
-  `mutations`, `observability`, `openapi_no_comment`, `operators`, `ordering`,
-  `pagination`, `postgrest`, `private`, `public`, `representations`, `rpc`,
-  `test`, `v1`, `v2`, `تست` — holding **605** relations
-  (`relkind in ('r','v','m','f','p')`).
-- **Case count: 614** — `ls spec/conformance/cases/*.yaml | wc -l` and the
-  validator agree (614 files, 614 parsed). Includes the 3 untracked new cases.
-- All **614** cases parse as YAML. **0** parse errors.
-- All **614** cases validate against `case.schema.json` (`jsonschema`
-  Draft 2020-12, Python 3.14) — **0** invalid cases.
-- **614** files, **614** distinct ids — **no duplicate ids**
-  (`grep -h '^id:' … | sort | uniq -d` is empty).
+- **Fixture load: OK.** `mix bier.fixtures.load` exited **0** (run twice, at the
+  start and the end of the pass, with byte-identical output; no `psql` fallback
+  needed), reporting the mirrored area schemas: `operators, ordering,
+  pagination, representations, mutations, config, domain_representations`. The
+  loaded DB holds **618** relations (`relkind in ('r','v','m','f','p')`,
+  excluding `pg_catalog`/`information_schema`) and **1027** functions.
+- **Case count: 620** — `ls spec/conformance/cases/*.yaml | wc -l` and the
+  validator agree (620 files, 620 parsed). Includes the 6 untracked new cases.
+  Confirmed no case YAMLs live outside `spec/conformance/cases/`: a `find` over
+  `spec/` turns up only the 16 area `.yaml` models besides the case files.
+- All **620** cases parse as YAML. **0** parse errors.
+- All **620** cases validate against `case.schema.json` (`jsonschema` 4.26.0,
+  Draft 2020-12, Python 3.14, PyYAML 6.0.3) — **0** invalid cases. The validator
+  was **negative-controlled** so that "0 invalid" is meaningful rather than a
+  silent pass: a known-good case yields 0 errors, while a mutated `source:` host,
+  a bad `id` + missing `feature`, and an extra unknown key each produce the
+  expected errors. Because the schema *requires* `source` and constrains it to
+  `^https://raw\.githubusercontent\.com/PostgREST/postgrest/.+#L[0-9]+$`, the
+  clean run also proves every case carries a raw-host citation with a line
+  anchor.
+- **620** files, **620** distinct ids — **no duplicate ids**, and every `NNNN_`
+  filename prefix equals the in-file `id:` (**0** mismatches).
 - **Source pins: clean, single tag.** A regex sweep of every PostgREST
   `github`/`raw.githubusercontent` URL across `spec/*.yaml`, `spec/*.md` and
   `spec/conformance/cases/*.yaml` (in `source:` fields and in `notes:` prose
-  alike) found **1548** references and **exactly one tag: `v16.0`**. Zero stale
-  pins. Every case file carries exactly one `source:` (614 total).
-  `conformance/INDEX.md` and `conformance/fixtures/README.md` contain no
-  PostgREST version references at all.
+  alike), extracting the ref from both the `raw.githubusercontent.com/…/<ref>/`
+  and the `github.com/…/blob/<ref>/` forms, found **1664** references and
+  **exactly one tag: `v16.0`**. Zero stale pins. (An earlier draft of this
+  section flagged 69 lines in `spec/mutations.yaml`; those are
+  `github.com/…/blob/v16.0/…` prose links — correct version, just not the raw
+  host — and are not stale pins.)
 - **Noted, out of scope (unchanged):** three frozen fixture-provenance files
   still carry `v14.12` URLs in comments — `fixtures/ordering.sql`,
   `fixtures/auth.sql`, `fixtures/config.sql`. Per
@@ -306,77 +387,77 @@ scratchpad. **Every check below passed.**
   non-contiguous and must stay that way: **representations** (1300–1314,
   1320–1324, 1330–1333 — the gaps are deliberate sub-feature spacing) and
   **auth** (1450–1499 **+ 11800–11818** — the overflow band, the only 5-digit
-  ids in the tree).
-- **Relation coverage: no genuine gaps.** A first-path-segment check against the
-  loaded fixtures — run **alias-aware**, resolving each case's `schema:` *label*
-  the way the real harness does (`test/support/conformance_server.ex`
-  `db_schemas`/`db_schema_aliases`/`db_profile_default` and
-  `lib/bier/plugs/action_controller.ex` `resolve_profile/2`: `null`/`public`/
-  `test` → `test`, `unicode` → `تست`, `multi` → `{v1, v2, SPECIAL "@/\#~_-"}`,
-  `headers` → `headers` plus the multi set, case 1654 → `openapi_no_comment`) —
-  **skipped 76** cases that target no relation (the 34 CLI invocations plus the
-  root-`/` requests), **checked 538**, and found **11** whose relation/function
-  does not exist:
+  ids in the tree). Separately, the *config band* 1700–1744 is contiguous but
+  **mixes shapes**: 1742/1743 are HTTP cases embedded in an otherwise CLI run
+  of ids (see `conformance/INDEX.md` → *Case file shapes*).
+- **Relation coverage: one finding, no 2xx breakage.** A first-path-segment
+  check against the loaded fixtures — run **alias-aware**, resolving each case's
+  `schema:` *label* the way the real harness does (read out of
+  `test/support/conformance_server.ex`: `null`/`public`/`test` → `test`,
+  `unicode` → `تست`, `multi` → the `v1`/`v2` pair with `db_profile_default`
+  `v1`, case 1654 → `openapi_no_comment`, and an explicit
+  `Accept-Profile`/`Content-Profile` request header overriding the label) —
+  **skipped 81** cases that target no relation (the 38 CLI invocations plus the
+  root-`/` requests), **checked 539**, and found **16** whose relation/function
+  does not exist. **15 are intentional negatives and are correct as written:**
 
-  | Case | Target | Expected | Why it is intentional |
-  |------|--------|----------|-----------------------|
-  | 1001 | `test.first` | 404 | `invalid_resource_path` |
-  | 1002 | `test.invalid` | 404 | `invalid_path_proxy_status` |
-  | 1360 | `mutations.garlic` | 404 | `insert_columns_unknown_table_precedence` |
-  | 1368 | `mutations.fake` | 404 | `update_table_not_found` |
-  | 1373 | `mutations.foozle` | 404 | `delete_table_not_found` |
+  | Case(s) | Target(s) | Expected | Why it is intentional |
+  |---------|-----------|----------|-----------------------|
+  | 1001, 1002 | `test.first`, `test.invalid` | 404 | `invalid_resource_path`, `invalid_path_proxy_status` |
+  | 1024 | `v1.another_table` | 404 | exists only in `v2` — that is the point of the case |
+  | 1360, 1368, 1373 | `mutations.garlic` / `.fake` / `.foozle` | 404 | unknown-table precedence on insert/update/delete |
   | 1432 | `rpc.fake` (function) | 404 | `rpc_unknown_proc_404` |
-  | 1515 | `test.non_existent_table` | 404 | `table_not_found_pgrst205` |
-  | 1516 | `test.invalid` | 404 | `invalid_path_pgrst125` |
-  | 1517 | `test.itemsx` | 404 | `client_error_verbosity_minimal` |
+  | 1515, 1516, 1517 | `test.non_existent_table`, `test.invalid`, `test.itemsx` | 404 | PGRST205 / PGRST125 / client-error-verbosity=minimal |
   | 1765 | `observability.unknown` | 404 | `log_level_404_status` |
-  | 1652 | `openapi.entities` | 406 | `openapi_nonroot_406` — `Accept: application/openapi+json` on a non-root path fails negotiation *before* relation resolution, so `entities` is never looked up (it does exist in 8 other schemas) |
+  | 1010, 1012, 1560, 1583 | (any) under `Accept-Profile: unknown` | 406 | the deliberately bogus profile is the assertion |
 
-  **Zero** case whose expected status is 2xx/3xx targets a missing relation.
-  (This pass's checker resolves labels more faithfully than the previous one,
-  which reported 15 missing over 535 checked; 1010, 1012, 1024 and 1560 now
-  resolve correctly and are no longer listed. The set of *genuine* gaps is
-  unchanged: still zero.)
-- **All five `*.delta.sql` write channels are empty** — the fixture
-  Consolidator folded them into `fixtures.sql`.
+  **Zero** case whose expected status is 2xx/3xx targets a missing relation. The
+  sixteenth is substantive and is written up next.
 
 ### Open verification finding (carry into the conformance run)
 
-**Re-confirmed this pass, unchanged.** None of the three `openapi`-area
-fixture-set labels names a schema that exists in the loaded DB, and the labels
-are inert. All 33 openapi cases carry one of `openapi` (31),
-`openapi_no_schema_comment` (1654) or `openapi_variadic` (1672).
+**Case 1652 (`openapi.entities`) may pass for the wrong reason — and the whole
+`openapi` label family is inert.** Re-confirmed this pass with one new detail.
+
+None of the three `openapi`-area fixture-set labels names a schema that exists in
+the loaded DB. All 33 openapi cases carry one of `openapi` (31),
+`openapi_no_schema_comment` (1654) or `openapi_variadic` (1672);
 `test/support/http_case.ex` turns each into an `Accept-Profile: <label>` request
 header, yet `mix bier.fixtures.load` creates none of them — confirmed directly
 against the loaded DB: `select nspname from pg_namespace where nspname like
-'openapi%'` returns only `openapi_no_comment`. The area's objects live in schema
-`test` (`spec/conformance/fixtures/openapi.sql:24–41`: `CREATE SCHEMA IF NOT
-EXISTS test; CREATE TABLE test.entities …`), and the loader deliberately does
-**not** mirror `openapi` (`lib/mix/tasks/bier.fixtures.load.ex:29` —
-"Function-heavy areas (rpc, openapi, headers) are intentionally NOT mirrored").
+'openapi%'` returns only `openapi_no_comment`, and `fixtures.sql` only ever does
+`CREATE SCHEMA IF NOT EXISTS openapi_no_comment` (line 187). The area's objects
+live in schema `test` (`spec/conformance/fixtures/openapi.sql:24–41`), and the
+loader deliberately does **not** mirror `openapi`
+(`lib/mix/tasks/bier.fixtures.load.ex:29` — "Function-heavy areas (rpc, openapi,
+headers) are intentionally NOT mirrored").
 
-Why it is currently harmless, and why that is itself worth recording:
+Why it is currently harmless for 32 of the 33:
 `Bier.Plugs.ActionController.dispatch/3` routes the root path (`conn.path_info
 == []`) straight to `dispatch_root/2` **without** calling `resolve_profile/2`,
 and `build_openapi_document/2` selects `hd(config.db_schemas)`. The root document
 is therefore always generated from the *first* configured schema (`test` on the
 shared instance; `openapi_no_comment` on the 1654 variant), and the
-`Accept-Profile` header these 32 root cases send is ignored end to end. The
-labels assert nothing today, and they would break the moment root-path profile
-resolution is implemented. Case 1652 (`GET /entities` under `Accept-Profile:
-openapi`, expects 406) is the only openapi case that reaches relation dispatch;
-`reject_openapi_media/1` runs before relation resolution
-(`action_controller.ex:329–341`), so its 406 is plausibly reached for the right
-reason, but it is the one to re-check first.
+`Accept-Profile` header those root cases send is ignored end to end. The labels
+assert nothing today, and they would break the moment root-path profile
+resolution is implemented.
 
-A second, related harness observation from this pass, **inert but worth
-recording**: the shared conformance instance lists `openapi` in its `db_schemas`
-(`test/support/conformance_server.ex:170`) even though no `openapi` namespace
-exists in the loaded DB (`select count(*) from pg_namespace where
-nspname='openapi'` → 0). It is harmless for the same reason as above — all 31
-`openapi`-label cases request the root `/` document except 1652, the 406
-negotiation case — but it is the second symptom of the same underlying
-label/schema mismatch and should be fixed together with it.
+**The exception is case 1652** — `GET /entities` under `Accept-Profile: openapi`,
+expecting **406**. It is the only openapi case that reaches relation dispatch,
+and its stated intent (`OpenApiSpec.hs:30`) is "`application/openapi+json` on a
+non-root path is 406". But because the `openapi` profile does not exist, the same
+request can 406 as **PGRST106 (unknown schema)** instead — i.e. it can pass
+without ever exercising the media-type rule it was written for.
+`reject_openapi_media/1` does run before relation resolution
+(`action_controller.ex:320`, defined at `:335`), so the intended path is
+plausible, but the two
+are indistinguishable from the outside at the current expectation strength. This
+is the case to re-check first in the conformance run.
+
+A second, related harness observation, **inert but worth recording**: the shared
+conformance instance lists `openapi` in its `db_schemas`
+(`test/support/conformance_server.ex:171`) even though no `openapi` namespace
+exists in the loaded DB. Same root cause; fix it together.
 
 Resolving this belongs to the harness/fixture owner — `test/**` is frozen to
 spec work, and `fixtures/openapi.sql` is frozen provenance (its header still
@@ -384,31 +465,56 @@ reads "Derived from PostgREST v14.12 test/spec/fixtures/schema.sql"; the live
 artifact `fixtures.sql` is what actually loads). Note this is **not** a v16.0
 regression: the same mismatch existed at the previous pin and simply was not
 surfaced, because the relation check only inspects the first path segment and
-these cases request `/`.
+the other 32 cases request `/`.
+
+### Fixture write channels
+
+All five `*.delta.sql` files are **comment-only** — each holds a single
+`-- Folded into ../fixtures.sql on 2026-08-08 (…); empty until the next delta.`
+provenance line and no DDL, i.e. the write channel is empty and the folds are
+recorded: `content_negotiation` (the `application/vnd.pgrst.object` /
+`text/tab-separated-values` domains and their handlers), `headers`
+(`test.get_vary_header_override()` + GRANT), `ordering` (`test.arrays` + seeds),
+`rpc` (`test."true"()` + GRANT), `url_grammar` (`test.pgrst_reserved_chars` +
+seeds).
 
 ## Review status
 
 The v16.0 re-sync re-pinned **every** case `source:` from `v14.12` to `v16.0`, so
 the per-area audit verdicts recorded by the v14.12 pass no longer describe the
 citations on disk and are not carried forward. All 17 area behavior models are
-marked `version: v16.0` and each closes with an explicit `gaps:` list.
+marked with the v16.0 pin and each closes with an explicit `gaps:` list. (The
+pin's *key spelling* is not uniform — 10 models use `version: v16.0`, five use
+`version: PostgREST v16.0` (`errors`, `filters`, `observability`, `operators`,
+`ordering`), `pagination.yaml` uses `postgrest_version: v16.0`, and
+`url_grammar.md` states it in prose. Do not grep for a single spelling.)
 
-Adversarial review summaries recorded so far cover **auth** and **headers**:
+Adversarial review summaries recorded so far cover **auth**, **headers** and
+**config**:
 
 | Area | v16.0 audit result | Nature of findings |
 |------|--------------------|--------------------|
 | auth | ⚠️ revise | 4 informational gaps, **0 citation defects** — the reviewer independently re-verified each gap's justification against v16.0 sources and confirmed all four are correct. See **Known gaps → auth**. |
-| headers | ⚠️ revise | 3 missing-coverage findings, **0 citation defects** — RPC-flavored `max-affected` (incl. the wholly-uncovered PGRST128), RPC-flavored `handling`, and the CORS-preflight leg of the `Vary` rule. All three are *citable but uncovered* (upstream asserts them at v16.0 and the case shape fits), so unlike the auth findings they are actionable now. Each was re-fetched from the v16.0 sources during this synthesis and confirmed. See **Known gaps → headers**. |
-| the other 15 areas | not re-audited in the input to this pass | Citations are self-reported at the v16.0 pin. |
+| headers | ⚠️ revise | 3 missing-coverage findings, **0 citation defects** — RPC-flavored `max-affected` (incl. the wholly-uncovered PGRST128), RPC-flavored `handling`, and the CORS-preflight leg of the `Vary` rule. All three are *citable but uncovered*. See **Known gaps → headers**. |
+| config | ⚠️ revise | 2 missing-coverage findings, **0 citation defects** — `db-pre-config` (the v16-*recommended* in-database config mechanism, dump-observable, while cases 1724/1725/1744 cover only the deprecated `ALTER ROLE` path) and `app.settings.*` reaching SQL as a GUC (1729 pins only the dump surface). Both *citable but uncovered*. See **Known gaps → config**. |
+| the other 14 areas | not re-audited in the input to this pass | Citations are self-reported at the v16.0 pin. |
 
 Open follow-ups:
 
-1. Run `bier-spec-audit` over the **15** areas without a recorded v16.0
+1. Run `bier-spec-audit` over the **14** areas without a recorded v16.0
    adversarial verdict.
-2. Re-check the `openapi` label finding above (both symptoms) before trusting
-   that area's results.
-3. Close the three headers gaps. Two need only case files
-   (RPC `handling`; the preflight `Vary` assertion); the RPC `max-affected` /
-   PGRST128 gap additionally needs `delete_items_returns_setof` /
-   `_returns_table` / `_returns_void` fixtures, so it is a fixture-delta
-   decision, not a spec-only edit.
+2. Re-check the `openapi` label finding above — specifically whether case **1652**
+   returns 406 for the media-type reason or for the unknown-schema reason —
+   before trusting that area's results.
+3. Close the two config gaps: one CLI case for `db-pre-config` (needs a
+   pre-config function reachable at startup) and one HTTP case for
+   `app.settings.*` via `/rpc/get_guc_value` (the fixture function already
+   exists).
+4. Close the three headers gaps. Two need only case files (RPC `handling`; the
+   preflight `Vary` assertion); the RPC `max-affected` / PGRST128 gap
+   additionally needs `delete_items_returns_setof` / `_returns_table` /
+   `_returns_void` fixtures, so it is a fixture-delta decision, not a spec-only
+   edit.
+5. Decide the harness question behind case **1742** (per-`config` instance
+   booting vs. a `@variant_case_ids` entry) — until then it fails for the wrong
+   reason.

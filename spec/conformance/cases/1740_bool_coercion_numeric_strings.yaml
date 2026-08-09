@@ -1,0 +1,27 @@
+id: 1740
+feature: config/coercion/bool-from-numeric-string
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  file:
+    db-channel-enabled: "1"
+    db-prepared-statements: "0"
+    jwt-secret-is-base64: "2"
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'db-channel-enabled = true'
+    - 'db-prepared-statements = false'
+    - 'jwt-secret-is-base64 = true'
+notes: >
+  coerceBool first tries to `read` the alpha characters of the value as a
+  Haskell Bool; when that fails it falls back to reading the value as an
+  Integer and takes `> 0` (Config.hs#L493-#L496). So "1" and "2" are true and
+  "0" is false. This mirrors configs/boolean-numeric.config verbatim; the
+  expected dump is configs/expected/boolean-numeric.config
+  (db-channel-enabled = true, db-prepared-statements = false,
+  jwt-secret-is-base64 = true).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/boolean-numeric.config#L2

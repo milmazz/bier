@@ -6,8 +6,7 @@ request:
   headers: { Accept: application/json, Range-Unit: items, Range: "0-0" }
 schema: config
 config:
-  db-schemas: test
-  db-anon-role: postgrest_test_anonymous
+  # Same single override as case 1700 (QueryLimitedSpec.hs#L14).
   db-max-rows: 2
 preconditions: []
 expect:
