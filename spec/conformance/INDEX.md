@@ -1,7 +1,7 @@
 # Conformance case index
 
-Cross-reference of the **620** conformance cases under `spec/conformance/cases/`.
-Pinned target: **PostgREST v16.0** (all 620 `source:` URLs).
+Cross-reference of the **628** conformance cases under `spec/conformance/cases/`.
+Pinned target: **PostgREST v16.0** (all 628 `source:` URLs).
 
 Each case is one YAML file `NNNN_<slug>.yaml` validated against
 [`../case.schema.json`](../case.schema.json). Cases are grouped into 17 feature
@@ -11,10 +11,10 @@ fragment in [`fixtures/`](fixtures/).
 The `schema:` field inside a case is a **fixture-set label, not a filename**:
 the frozen harness (`test/support/http_case.ex`) sends any label other than
 `null`/`public`/`test` as an `Accept-Profile: <label>` header, so the label must
-name a schema the shared conformance server exposes. Some labels resolve through
-aliases configured in `test/support/conformance_server.ex` — `unicode` → `تست`,
-`multi` → the `v1`/`v2` profile pair — and are therefore not schema names on
-disk. See the **Label caveats** section below.
+name a schema the shared conformance server exposes *or* resolve through one of
+its aliases / profile lists. Several labels are not schema names on disk —
+`unicode` → `تست`, `multi` → the `v1`/`v2` pair — and one (`headers`) is
+overridden by an explicit header. See the **Label caveats** section below.
 
 The first `/`-delimited segment of each case's `feature:` field is the
 **authoritative** area assignment. The id bands below are derived from what is on
@@ -41,7 +41,7 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 |------|------:|---------|------------------|-----------------------|
 | url_grammar | 30 | 1000–1029 | `fixtures/url_grammar.sql` | `multi`, `test`, `unicode`, `ordering` |
 | operators | 50 | 1050–1099 | `fixtures/operators.sql` | `operators` |
-| select | 42 | 1100–1141 | `fixtures/select.sql` | `test` |
+| select | 50 | 1100–1149 | `fixtures/select.sql` | `test` |
 | filters | 41 | 1150–1190 | `fixtures/filters.sql` | `test` |
 | ordering | 27 | 1200–1226 | `fixtures/ordering.sql` | `ordering` |
 | pagination | 28 | 1250–1277 | `fixtures/pagination.sql` | `pagination` |
@@ -57,7 +57,7 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | observability | 20 | 1750–1769 | `fixtures/observability.sql` | `observability` |
 | domain_representations | 21 | 1800–1820 | `fixtures/domain_representations.sql` | `domain_representations` |
 
-Total: **620 cases**, **17 areas**, **17 fixture fragments**
+Total: **628 cases**, **17 areas**, **17 fixture fragments**
 (plus 5 `*.delta.sql` write channels, all currently **comment-only** — each
 carries a single `-- Folded into ../fixtures.sql on 2026-08-08 …` provenance
 line and no DDL; see [`fixtures/README.md`](fixtures/README.md) for who may
@@ -80,9 +80,19 @@ grep -h '^feature:' spec/conformance/cases/1800_format_single_domain_column.yaml
   and the document is built from `hd(db_schemas)`. Flagged as an open finding in
   [`../COVERAGE.md`](../COVERAGE.md) → *Open verification finding*.
 - **`multi`** is not a schema either — it stands for the `v1`/`v2` profile pair
-  routed by `db_profile_default` / `db_profile_schemas`.
-- **`unicode`** aliases the schema `تست`; **`test`**, `public` and `null`
+  routed by `db_profile_default` / `db_profile_schemas`
+  (`test/support/conformance_server.ex:184-185`, resolved in
+  `lib/bier/plugs/action_controller.ex:477-506`). All the relations these cases
+  target (`parents`, `children`, `get_parents_below`) exist in both `v1` and
+  `v2`; case 1024 deliberately targets one that exists only in `v2`.
+- **`unicode`** aliases the schema `تست` via `db_schema_aliases`
+  (`test/support/conformance_server.ex:181`); **`test`**, `public` and `null`
   suppress the `Accept-Profile` header entirely.
+- **`headers` is never actually applied on case 1574.** The harness sets
+  `Accept-Profile` with `Map.put_new` (`test/support/http_case.ex:69`), so a case
+  that spells the header out itself wins over its label. 1574 sends
+  `Accept-Profile: SPECIAL "@/\#~_-` explicitly, and relation `names` exists in
+  that schema.
 - **`ordering` appears under `url_grammar`** (case 1028, the legacy embed
   target-name case, reuses the ordering fixture set), and **`test` appears under
   `rpc`** (case 1440) and **under `headers`** (case 1576).
@@ -100,6 +110,10 @@ handling=strict") appears nowhere in the tree. Recorded in
 [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → headers*; when closing it,
 decide the owning band first so the delegation stops being circular.
 
+The same pattern applies to **`PGRST127`** (aggregates rejected inside a to-many
+spread): it appears nowhere in any band or area model. It belongs to `select`;
+see [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → select*.
+
 ## Per-area sub-feature breakdown
 
 The `feature:` field is a slash-delimited path `<area>/<sub-feature>/...`. The
@@ -109,7 +123,7 @@ sub-features present per area (second segment, as on disk):
 |------|---------|--------------|
 | url_grammar | 1000–1029 | method, path, percent-encoding, profile, reserved-params, reserved-characters |
 | operators | 1050–1099 | eq, neq, lt/lte/gt/gte, in, is, like/ilike, match/imatch, fts/plfts/wfts/phfts, cs/cd/ov, sl/sr/nxl/nxr/adj, isdistinct, not, quantifier (any/all) |
-| select | 1100–1141 | columns, alias, cast, alias-and-cast, json-path, computed-column, computed-relationship, embed (incl. one-to-one and the v16 alias/legacy-target-name rules), spread, aggregate |
+| select | 1100–1149 | columns, alias, cast, alias-and-cast, json-path, **composite**, **array**, computed-column, computed-relationship, embed (incl. one-to-one, the v16 alias/legacy-target-name rules and the `table!fk` hint), spread, aggregate |
 | filters | 1150–1190 | horizontal, logical, not, json, quoting, embed |
 | ordering | 1200–1226 | direction, nulls, json_path, computed_column, multi_column, composite, related, embed, error |
 | pagination | 1250–1277 | limit_offset, range_header, count, embedded |
@@ -121,12 +135,25 @@ sub-features present per area (second segment, as on disk):
 | headers | 1550–1584 | prefer, profile, location, content-location, guc, vary |
 | content_negotiation | 1600–1646 | json, csv, geojson, octet-stream, singular, nulls-stripped, plan, openapi, precedence, error, custom-media-handler |
 | openapi | 1650–1682 | root, defaults, comments, table, types, rpc, mode, security |
-| config | 1700–1744 | dump-config, sources, aliases, validation, coercion, **parsing**, precedence, db-max-rows, db-tx-end, db-extra-search-path, app-settings, server-cors-allowed-origins, cli, client-error-verbosity, server-reuseport, url-use-legacy-target-names, admin-server-unix-socket |
+| config | 1700–1744 | dump-config, sources, aliases, validation, coercion, parsing, precedence, db-max-rows, db-tx-end, db-extra-search-path, app-settings, server-cors-allowed-origins, cli, client-error-verbosity, server-reuseport, url-use-legacy-target-names, admin-server-unix-socket |
 | observability | 1750–1769 | server-timing, trace-header, log-level |
 | domain_representations | 1800–1820 | read, write, filter, default |
 
 ### v16.0 additions worth knowing
 
+- **select** grew its band to **1100–1149** (50 cases, up from 42). Eight ids are
+  new since the last synthesis, and they introduce two new sub-features:
+  **1142** (`select/embed/hint-table-bang-fk`, disambiguation via `table!fk`,
+  `EmbedDisambiguationSpec.hs#L244`); **1143–1144** (`select/composite/arrow` and
+  `arrow-text` — `num->i` / `num->>i` on a *composite* column,
+  `JsonOperatorSpec.hs#L150`); **1145–1146** (`select/array/item-arrow` and
+  `item-arrow-text` — `numbers->0`, `numbers_mult->1->>2` on `int[]`/`int[][]`,
+  `JsonOperatorSpec.hs#L158`); **1147–1149** (`select/aggregate` — cast of the
+  aggregated column, alias + input cast + result cast, and group-by across an
+  embed, `AggregateFunctionsSpec.hs#L83/#L86/#L92`). 1143 and 1145 go through
+  `to_jsonb(col)`, so the terminal-`->` rule on an actual *json/jsonb* column is
+  still uncased — see [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps →
+  select*.
 - **headers** grew its band to **1550–1584** (35 cases). Three ids are new in
   this pass: **1582** and **1583** (see below) and **1584**
   (`headers/prefer/timezone`, the two-token `Preference-Applied:
@@ -158,7 +185,7 @@ sub-features present per area (second segment, as on disk):
 
 ## Case file shapes
 
-Most cases are HTTP request/response (**582**). The **config** area additionally
+Most cases are HTTP request/response (**590**). The **config** area additionally
 uses a **CLI** shape (`request.kind: cli`, `request.flag: "--dump-config"`)
 asserting on `expect.exit_code`, `expect.dump_contains`,
 `expect.dump_reparse_stable`, and `expect.stderr_contains` rather than an HTTP
@@ -172,17 +199,20 @@ The **auth** area uses `request.jwt` to have the runner mint a signed token —
 header because it needs a token signed with a secret the harness deliberately
 does not know.
 
-Any case may carry a `config:` block — **107** do — but the harness boots a
-dedicated instance only for the ids listed in `@variant_case_ids`
-(`test/support/conformance_server.ex`, **18** ids: 1467–1473, 1491, 1493, 1654,
-1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764) plus every `kind: cli` case.
-On any other HTTP case the `config:` block is **inert** — it documents the
+Any case may carry a `config:` block — **114** do (110 non-empty; 1705, 1719,
+1727 and 1743 carry an empty `config: {}`) — but the harness boots a dedicated
+instance only for the ids listed in `@variant_case_ids`
+(`test/support/conformance_server.ex:58-59`, **18** ids: 1467–1473, 1491, 1493,
+1654, 1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764) plus every `kind: cli`
+case. On any other HTTP case the `config:` block is **inert** — it documents the
 upstream configuration the assertion depends on, but the case still runs against
-a shared instance. Case 1742 is the live instance of that mismatch; see
+a shared instance. The live instances of that mismatch are case **1742** and the
+ten select cases **1129–1133, 1139, 1140, 1147–1149**; see
 [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → config*.
 
 `preconditions:` is parsed but **never executed** by the harness — treat it as
-declarative documentation, never as setup a case may depend on.
+declarative documentation, never as setup a case may depend on. It is present on
+627 of the 628 cases (case **1330** omits it, which the schema allows).
 
 **3** cases assert `expect.status_text` (**1508, 1510, 1511**) and are tagged
 `:pending` / excluded by `test/conformance/conformance_test.exs`, because `Req`

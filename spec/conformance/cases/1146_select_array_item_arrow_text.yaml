@@ -1,0 +1,22 @@
+id: 1146
+feature: select/array/item-arrow-text
+request:
+  method: GET
+  path: /arrays?select=a:numbers->>0,b:numbers->>1,c:numbers_mult->0->>0,d:numbers_mult->1->>2
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - {"a":"1","b":"2","c":"1","d":"6"}
+    - {"a":"11","b":"12","c":"11","d":"16"}
+notes: >
+  "obtains an array item" (JsonOperatorSpec.hs:158, second request): the `->>`
+  form of case 1145 returns the same elements as text. Note the mixed path in
+  `c`/`d` — only the final segment uses `->>`, the intermediate dimension keeps
+  `->`. Verified live against bier_test with
+  `select to_jsonb(numbers)->>0, to_jsonb(numbers_mult)->1->>2 from test.arrays`.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/JsonOperatorSpec.hs#L158

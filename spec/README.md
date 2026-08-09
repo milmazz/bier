@@ -13,11 +13,20 @@ that compatibility means, case by case, so it can be checked automatically.
 Everything here targets **PostgREST v16.0** (docs:
 [postgrest.org/en/v16](https://postgrest.org/en/v16/)). Every conformance case
 carries a `source:` URL pinned to the `v16.0` git tag with a `#L<line>` anchor,
-fetchable via `raw.githubusercontent.com`. All **620** cases are pinned to
+fetchable via `raw.githubusercontent.com`. All **628** cases are pinned to
 `v16.0` — verified on disk this pass (a sweep of every PostgREST URL across
-`spec/*.yaml`, `spec/*.md` and the case files found **1664** references and
+`spec/*.yaml`, `spec/*.md` and the case files found **1686** references and
 exactly one tag). When bumping the target version, re-pin the sources and re-run
 the review pass.
+
+> **Fixture provenance comments are still on the old pin.** Eight files under
+> `conformance/fixtures/` carry **51** `v14.12` URLs in `--` provenance comments
+> (`ordering.sql` 27, `observability.sql` 7, `errors.sql` 5, `auth.sql` 4,
+> `mutations.sql` 3, `config.sql` 2, `filters.sql` 2, `rpc.sql` 1). Those files
+> are historical provenance and explicitly non-authoritative (the live artifact
+> is `conformance/fixtures.sql`), so the re-sync left them alone — but do not
+> read "single tag" above as covering `*.sql`. See `COVERAGE.md` →
+> *Validation status*.
 
 > **v16 source-layout note.** v16 moved the library sources from
 > `src/PostgREST/…` to `src/library/PostgREST/…` (a new `src/executable/` tree
@@ -35,7 +44,7 @@ spec/
 ├── <area>.yaml | url_grammar.md   # 17 per-area behavior models (the "why")
 └── conformance/
     ├── INDEX.md               # area <-> id band <-> fixture cross-reference
-    ├── cases/NNNN_<slug>.yaml # 620 conformance cases (the "what", machine-checkable)
+    ├── cases/NNNN_<slug>.yaml # 628 conformance cases (the "what", machine-checkable)
     ├── fixtures.sql           # the authoritative merged DDL+seed set
     ├── fixtures_local.sql     # human-owned harness supplement
     └── fixtures/              # per-area fragments + write-channel deltas (see its README)
@@ -58,7 +67,7 @@ There are two layers:
    states it in prose ("Version pinned: **PostgREST v16.0**"). Do not grep for
    a single spelling.
 
-2. **Conformance cases** — 620 YAML files under `conformance/cases/`. Each is one
+2. **Conformance cases** — 628 YAML files under `conformance/cases/`. Each is one
    concrete scenario: a request and the exact response (status, headers, body)
    PostgREST produces. These are the machine-checkable contract.
 
@@ -85,13 +94,19 @@ notes: "..."                   # rationale, references the upstream it-block
 source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/...#L<n>
 ```
 
+`id`, `feature`, `request`, `schema`, `expect`, `notes` and `source` are present
+on all 628 cases. `preconditions` is present on 627 (case **1330** omits it);
+`config` is present on **114** (four of those — 1705, 1719, 1727, 1743 — are the
+empty `config: {}`).
+
 Two request shapes are supported:
 
-- **HTTP** (the common case, 582 cases): `request.method` + `request.path`, with
-  optional `request.headers` / `request.body` / `request.body_raw`. The **auth**
-  area may add `request.jwt` to have the runner mint and send a signed token
-  (32 cases do; case 11809 instead spells out a literal `Authorization` header,
-  because it needs a token signed with a secret the harness does not know).
+- **HTTP** (the common case, 590 cases): `request.method` + `request.path`, with
+  optional `request.headers` / `request.body` / `request.body_raw` /
+  `request.body_json`. The **auth** area may add `request.jwt` to have the runner
+  mint and send a signed token (32 cases do; case 11809 instead spells out a
+  literal `Authorization` header, because it needs a token signed with a secret
+  the harness does not know).
 - **CLI** (config startup behavior, 38 cases — all of them in `config`,
   ids **1705–1741 plus 1744**; the band is *not* contiguous, because 1742/1743
   are HTTP CORS cases sitting inside it): `request.kind: cli` with
@@ -116,14 +131,17 @@ The conformance database is built by `mix bier.fixtures.load` from
 `conformance/fixtures_local.sql`, followed by area-schema mirroring. A case's
 `schema:` field is a **fixture-set label, not a filename**: the harness sends
 any label other than `null`/`public`/`test` as an `Accept-Profile: <label>`
-request header, so the label must name a schema the conformance server exposes.
-Several labels resolve through aliases (`unicode` → `تست`, `multi` → the
-`v1`/`v2` profile pair).
+request header, so the label must name a schema the conformance server exposes
+*or* resolve through one of the server's aliases/profile lists (`unicode` →
+`تست`; `multi` → the `v1`/`v2` profile pair). The harness sets the header with
+`Map.put_new`, so a case that spells out its own `Accept-Profile` wins over the
+label (case 1574 is the one that does).
 
 Ownership rules for everything under `conformance/fixtures/` — who may write
 which file, and why `<area>.delta.sql` is the only write channel — are in
-[`conformance/fixtures/README.md`](conformance/fixtures/README.md). All five
-`*.delta.sql` files are currently **comment-only** — each holds a single
+[`conformance/fixtures/README.md`](conformance/fixtures/README.md). There are
+**17** per-area fragments and **5** `*.delta.sql` write channels; all five deltas
+are currently **comment-only** — each holds a single
 `-- Folded into ../fixtures.sql on 2026-08-08 (…); empty until the next delta.`
 provenance line and no DDL, i.e. empty as a write channel.
 
@@ -162,7 +180,7 @@ print("OK" if not bad else f"{bad} errors")
 PY
 ```
 
-All **620** cases currently parse and validate, with **no duplicate ids** (and
+All **628** cases currently parse and validate, with **no duplicate ids** (and
 every `NNNN_` filename prefix equals the in-file `id:`).
 
 ## Review status
@@ -173,9 +191,9 @@ line and confirming it still asserts what the case claims — is summarized
 per area in [`COVERAGE.md`](COVERAGE.md), together with the open gaps and the
 machine-verification results for this pass.
 
-Three areas carry a recorded v16.0 adversarial verdict so far — **auth**,
-**headers** and **config**, all three ⚠️ *revise* with **zero citation
-defects** (every finding is a missing-coverage gap, now itemized in
-`COVERAGE.md` → *Known gaps*). The other **14** areas have not been re-audited
+Four areas carry a recorded v16.0 adversarial verdict so far — **auth**,
+**headers**, **config** and **select**, all four ⚠️ *revise* with **zero
+citation defects** (every finding is a missing-coverage gap, now itemized in
+`COVERAGE.md` → *Known gaps*). The other **13** areas have not been re-audited
 at this pin; run `bier-spec-audit` over them before treating their citations as
 verified.

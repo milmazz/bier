@@ -16,11 +16,15 @@ expect:
 notes: >
   The other side of the v16.0 deprecation boundary (case 1138): addressing an
   aliased embed by its ALIAS is the supported form and emits no `Warning`
-  header. `readPlanWarning` only fires for a node whose
+  header. The cited it-block, QuerySpec.hs:1159 ("ordering embeded entities
+  with alias"), issues exactly this request and asserts exactly this body;
+  v16.0 rewrote it from `tasks.order` to `the_tasks.order` precisely because of
+  this deprecation.
+
+  Mechanism reference for the `headers_absent: [Warning]` half:
+  https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan.hs#L167
+  — `readPlanWarning` only emits a `Warning` for a node whose
   `relIsLegacyTargetNameMatch` is True, and `updateLegacyAttrs` sets that flag
   only when the addressed name equals the relation name AND differs from the
   alias (Plan.hs L1032-L1036), so an alias reference never marks the node.
-  Upstream's positive assertion for the alias form is QuerySpec.hs:1159
-  ("ordering embeded entities with alias"), which v16.0 rewrote from
-  `tasks.order` to `the_tasks.order` precisely because of this deprecation.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan.hs#L167
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1159
