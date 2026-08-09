@@ -1,0 +1,25 @@
+id: 11408
+feature: mutations/upsert/put/composite-pk-insert
+request:
+  method: PUT
+  path: /car_models?name=eq.Supra&year=eq.2021
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation
+  body: [{ "name": "Supra", "year": 2021 }]
+schema: mutations
+preconditions: []
+expect:
+  status: 201
+  body_exact: [{ "name": "Supra", "year": 2021 }]
+notes: >-
+  PUT addresses a composite-pk resource with one eq filter per pk column; when
+  no such row exists the request inserts it and returns 201. Mirrors
+  UpsertSpec.hs#L388-L399 ("succeeds on a partitioned table with composite pk"),
+  which PUTs {"name":"Supra","year":2021} to
+  /car_models?name=eq.Supra&year=eq.2021. Upstream's `car_models` carries a
+  third column `car_brand_name` (asserted null in the response); the
+  consolidated fixture's `test.car_models` is (name, year) with PRIMARY KEY
+  (name, year) and seeds no rows, so the representation is the two-column row
+  and the insert leg always applies.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L394

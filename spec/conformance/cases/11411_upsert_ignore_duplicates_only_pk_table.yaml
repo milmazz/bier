@@ -1,0 +1,33 @@
+id: 11411
+feature: mutations/upsert/post/ignore-duplicates-only-pk-table
+request:
+  method: POST
+  path: /only_pk
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation, resolution=ignore-duplicates
+  body:
+    - { "id": 1 }
+    - { "id": 2 }
+    - { "id": 3 }
+schema: mutations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: resolution=ignore-duplicates, return=representation
+  body_exact:
+    - { "id": 3 }
+notes: >-
+  Counterpart of case 11410 on the SAME degenerate relation: under
+  resolution=ignore-duplicates the conflict is resolved with DO NOTHING, so the
+  conflicting rows are absent from the RETURNING set and only the newly
+  inserted row is echoed — [{ "id": 3 }], not the whole payload. Verbatim mirror
+  of UpsertSpec.hs#L271-L278 ("succeeds if the table has only PK cols and no
+  other cols", inside the ignore-duplicates context), including the
+  Preference-Applied value; `only_pk` is seeded with ids 1 and 2 in the
+  consolidated fixture, exactly as upstream. The status stays 201 because one
+  row was created (contrast case 11404, where nothing is created and
+  ignore-duplicates still answers 201 with []).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L275

@@ -1,0 +1,20 @@
+id: 1398
+feature: mutations/insert/error/empty-body
+request:
+  method: POST
+  path: /simple_pk
+  headers: { Content-Type: application/json }
+  body_raw: ""
+schema: mutations
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: { "message": "Empty or invalid json", "code": "PGRST102", "details": null, "hint": null }
+notes: >-
+  A POST with a completely empty body is rejected with the same PGRST102
+  envelope as malformed JSON (case 1355). Mirrors InsertSpec.hs#L293-L300
+  (context "with no payload", `post "/simple_pk" ""`), which asserts the
+  four-key envelope, status 400 and matchContentTypeJson.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L295

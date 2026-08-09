@@ -1,0 +1,24 @@
+id: 11403
+feature: mutations/insert/insignificant-whitespace
+request:
+  method: POST
+  path: /json_table
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation
+  body_raw: "\t \n \r { \"data\": { \"foo\":\"bar\" } }\t \n \r "
+schema: mutations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "data": { "foo": "bar" } }
+notes: >-
+  Leading and trailing insignificant whitespace (tab / newline / carriage
+  return / space) around the JSON body is ignored rather than making the payload
+  invalid. Verbatim mirror of InsertSpec.hs#L403-L410 (context "insignificant
+  whitespace"), which POSTs this exact padded payload to /json_table with
+  return=representation and asserts 201 with [{"data":{"foo":"bar"}}].
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L407

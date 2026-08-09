@@ -1,7 +1,7 @@
 # Conformance case index
 
-Cross-reference of the **710** conformance cases under `spec/conformance/cases/`.
-Pinned target: **PostgREST v16.0** (all 710 `source:` URLs).
+Cross-reference of the **727** conformance cases under `spec/conformance/cases/`.
+Pinned target: **PostgREST v16.0** (all 727 `source:` URLs).
 
 Each case is one YAML file `NNNN_<slug>.yaml` validated against
 [`../case.schema.json`](../case.schema.json). Cases are grouped into 17 feature
@@ -20,7 +20,7 @@ The first `/`-delimited segment of each case's `feature:` field is the
 **authoritative** area assignment. The id bands below are derived from what is on
 disk now; read the `feature:` prefix if a row ever looks ambiguous.
 
-> **Non-contiguous bands.** **Three** areas do not occupy a single contiguous
+> **Non-contiguous bands.** **Four** areas do not occupy a single contiguous
 > range and regenerating this file must preserve that rather than collapsing it:
 >
 > - **auth** uses **11800–11818** on top of its full primary band **1450–1499**
@@ -32,22 +32,40 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 >   gaps, and **10237+ is free**. `10200` sorts immediately after `1020`
 >   lexically, so these 37 interleave with the *ordering* area's 1200-block the
 >   same way auth's do with filters'.
+> - **mutations** (new this pass) uses **11400–11405 + 11407–11415** on top of its
+>   now-full primary band **1350–1399** (all 50 primary ids are in use; 1398 and
+>   1399 took the last two). **11406 is absent on purpose** — see below —
+>   and **11416+ is free**. `11400` sorts immediately after `1140` lexically, so
+>   these 15 interleave with the *select* area's 1140–1149 block.
 > - **representations** uses **1300–1314 + 1320–1324 + 1330–1333**; the 1315–1319
 >   and 1325–1329 gaps are deliberate per-sub-feature spacing (post/patch,
 >   delete, put).
 >
-> **There are two 5-digit bands, so `ls spec/conformance/cases/` is actively
+> **There are now three 5-digit bands, so `ls spec/conformance/cases/` is actively
 > misleading — always `ls | sort -n`.** The `feature:` prefix remains
 > authoritative; an id's numeric neighbourhood never decides its area.
 >
-> **The two overflow bands follow different conventions, which is unsettled —
-> and a third area now needs a band.** `spec/filters.yaml` *declares*
-> `[10600..10799]` as its area's closed overflow range (and has used none of it);
-> `spec/operators.yaml` declares nothing — its band exists only as the ids on
-> disk. **`rpc` extended to 1400–1443 this pass and has only 1444–1449 free**
+> **The internal gap at 11406 is a different kind of hole from every other gap on
+> this page and must not be closed up.** Representations' 1315–1319 / 1325–1329
+> gaps are sub-feature spacing. **11406 marks a case that was written and then
+> deleted**: it would have asserted PUT + `Prefer: return=minimal`
+> (`UpsertSpec.hs#L543`), and it was dropped on discovering that representations
+> case **1332** already mirrors that it-block with strictly stronger assertions
+> (it also asserts the empty body). `spec/mutations.yaml`'s gaps record the
+> deletion and re-aim the entry at what genuinely is uncovered — the
+> **case-sensitive-identifier** flavor, upstream's quoted `/UnitTest` relation,
+> which the fixture DB does not have.
+>
+> **The three overflow bands follow three different conventions, which is still
+> unsettled — and this pass is the event follow-up 19 was written to prevent.**
+> `spec/filters.yaml` *declares* `[10600..10799]` as its area's closed overflow
+> range (and has used none of it); `spec/operators.yaml` declares nothing — its
+> band exists only as the ids on disk; **`spec/mutations.yaml` likewise declares
+> nothing** and chose 11400+, which lands numerically *between* operators' and
+> auth's ranges. **`rpc` still holds 1400–1443 with only 1444–1449 free**
 > before auth starts at 1450, while its audit left **five** open findings that
 > need more than six cases. See [`../COVERAGE.md`](../COVERAGE.md) → follow-up 19
-> before anyone picks a number ad hoc.
+> before anyone picks a number ad hoc — a fourth time.
 
 ## Area <-> id band <-> fixture fragment
 
@@ -60,7 +78,7 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | ordering | 33 | 1200–1232 | `fixtures/ordering.sql` | `ordering` (30), `test` (2), `mutations` (1) |
 | pagination | 39 | 1250–1288 | `fixtures/pagination.sql` (**no delta** — the v16.0 re-sync added eleven cases and zero fixture objects) | `pagination` (39) |
 | representations | 24 | 1300–1314, 1320–1324, 1330–1333 | `fixtures/representations.sql` | `representations` (24) |
-| mutations | 48 | 1350–1397 | `fixtures/mutations.sql` | `mutations` (48) |
+| **mutations** | **65** | **1350–1399, 11400–11405, 11407–11415** | `fixtures/mutations.sql` (**no delta** — the v16.0 re-sync added seventeen cases and zero fixture objects) | `mutations` (65) |
 | **rpc** | **44** | **1400–1443** | `fixtures/rpc.sql` + `fixtures/rpc.delta.sql` (`test."true"()`, folded — the v16.0 re-sync's three later cases 1441–1443 needed **no** new objects, and `fixtures.sql` was not modified at all) | `rpc` (40), `test` (4) |
 | auth | 69 | 1450–1499 **+ 11800–11818** | `fixtures/auth.sql` | `auth` (69) |
 | errors | 27 | 1500–1526 | `fixtures/errors.sql` + `fixtures/errors.delta.sql` (cases 1523/1524's `test.infinite_inserts` + `test.infinite_recursion`, folded) | `test` (27) |
@@ -71,14 +89,35 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | observability | 22 | 1750–1771 | `fixtures/observability.sql` (**no delta** — the v16.0 re-sync added two cases and zero fixture objects; its `.sql` change is a comment-only provenance re-pin) | `observability` (22) |
 | domain_representations | 21 | 1800–1820 | `fixtures/domain_representations.sql` | `domain_representations` (21) |
 
-Total: **710 cases**, **17 areas**, **17 fixture fragments**
+Total: **727 cases**, **17 areas**, **17 fixture fragments**
 (plus **7** `*.delta.sql` write channels, all currently **comment-only** —
 re-verified mechanically this pass: stripping comment and blank lines leaves zero
 lines in every one of the seven. Each carries a single
 `-- Folded into ../fixtures.sql on <date> …` provenance line and no DDL. Four are
 dated 2026-08-08 (`content_negotiation`, `headers`, `ordering`, `rpc`); three are
-dated 2026-08-09 (`url_grammar`, `errors`, `operators`). See
+dated 2026-08-09 (`url_grammar`, `errors`, `operators`). **There is still no
+`mutations.delta.sql`.** See
 [`fixtures/README.md`](fixtures/README.md) for who may write which file).
+
+**The mutations re-sync added no channel and no fixture object either**, and its
+band is where that constraint bites hardest. `fixtures.sql` does not appear in
+`git status`. All 17 new cases run against relations the consolidated fixture
+already had — but **the `mutations` schema is a view mirror of `test` except for
+ten relations** the loader replaces with independent real tables (`items`,
+`articles`, `complex_items`, `tiobe_pls`, `simple_pk`, `no_pk`, `single_unique`,
+`compound_unique`, `safe_update_items`, `safe_delete_items`;
+`isolate_mutations/1`, `lib/mix/tasks/bier.fixtures.load.ex:541-544`, a
+**hard-coded** list that no fixtures delta can extend). Ten of the seventeen new
+cases target relations outside it — `menagerie` (11402), `json_table` (11403),
+`car_models` (11408, 11409, 11414), `only_pk` (11410, 11411), `tasks`/`projects`
+(11412), `students`/`students_info` (11413), `users` (11415) — so nine of them
+write through auto-updatable views onto the shared `test.*` tables and are
+contained only by the conformance server's `db_tx_end: :rollback`
+(`test/support/conformance_server.ex:194`); 11409 expects a 405 and never reaches
+the database. **Read that before adding a mutations case**: the dependency is
+inherited silently, and the area's remaining gaps mostly need relations that must
+be *real tables* under `mutations`, which is a loader change rather than a delta.
+See [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → mutations*.
 
 **The rpc re-sync added no channel and no fixture object.** `fixtures.sql` does
 not appear in `git status`; `rpc.delta.sql` is unchanged from the `test."true"()`
@@ -88,6 +127,14 @@ shared with 1415/1416) — or, for 1443, against the deliberate *absence* of
 `test.sayhell` beside the present `test.sayhello`. Its audit's three
 fixture-blocked findings were left **open and recorded** rather than
 approximated; see [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → rpc*.
+
+> **Fixture provenance, changed since the last revision.**
+> `fixtures/rpc.sql` was re-pinned from `blob/v14.12` to `blob/v16.0` (commit
+> `6b25f05`, comment-only, after re-verifying all 23 vendored routines at v16.0).
+> It is the **second** fragment re-pinned, after `observability.sql`. **Six**
+> fragments still carry **43** `v14.12` provenance URLs — `ordering.sql` 27,
+> `errors.sql` 5, `auth.sql` 4, `mutations.sql` 3, `config.sql` 2, `filters.sql`
+> 2. See [`../COVERAGE.md`](../COVERAGE.md) → follow-ups 14 and 24.
 
 Each area's `feature:` prefix matches its area name exactly, so the area is
 recoverable directly from the case file:
@@ -130,7 +177,7 @@ grep -h '^feature:' spec/conformance/cases/1800_format_single_domain_column.yaml
   > spelling out **`Accept-Profile`** itself — spelling out `Content-Profile` is
   > not enough. Of the fourteen `multi` cases, **1005, 1006, 1007, 1008, 1011 and
   > 1012** receive `Accept-Profile: multi` (re-derived mechanically at the
-  > 710-case state). Three of the six expect success (**1005**/**1008** → 200,
+  > 727-case state). Three of the six expect success (**1005**/**1008** → 200,
   > **1011** → 201) and so depend on the allowlist. Recorded in
   > [`../COVERAGE.md`](../COVERAGE.md) → *Open verification findings*: a genuine
   > finding, not a bookkeeping note, because 1008's own `notes:` claim "no
@@ -221,7 +268,7 @@ spread), which — unlike PGRST128 — really is asserted by no case and modelle
 no area file. It belongs to `select`; see
 [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → select*.
 
-> Re-checked at the 710-case state: `grep -rl PGRST128 spec/` matches
+> Re-checked at the 727-case state: `grep -rl PGRST128 spec/` matches
 > `rpc.yaml` (entry `rpc.prefer.max_affected.returns_single`),
 > `conformance/cases/1441_rpc_max_affected_returns_single.yaml`, this INDEX and
 > `COVERAGE.md`. `grep -rl PGRST127 spec/` still matches exactly two files —
@@ -250,6 +297,32 @@ note that `filters`' primary band 1150–1199 is full (overflow `[10600..10799]`
 **`rpc`'s 1400–1443 is now nearly full (only 1444–1449 free)**, while
 url_grammar's 1036+, ordering's 1233+, errors' 1527+ and pagination's 1289+ are
 free.
+
+### A fifth split, opened by the mutations pass — and it points both ways
+
+The PGRST114 rule "limit/offset querystring parameters are not allowed for PUT"
+is now asserted **four times across two areas, from the same two upstream
+it-blocks**:
+
+| Rule | url_grammar | mutations | Upstream |
+|------|-------------|-----------|----------|
+| `limit` on PUT | **1016** (`schema: test`) | **1383** (`schema: mutations`) | `UpsertSpec.hs#L295` |
+| `offset` on PUT | **1030** (`schema: test`) | **1399** (`schema: mutations`) | `UpsertSpec.hs#L302`/`#L303` |
+
+All four issue the *identical* request (`PUT
+/tiobe_pls?name=eq.Javascript&{limit,offset}=1`) and expect the *identical*
+four-key envelope. They differ only in the `schema:` label and in how much
+mechanism their `notes:` explain — 1016/1030 cite `ApiRequest.hs#L178`,
+`Error.hs#L111/#L158/#L185` and `QueryParams.hs#L152`'s `offset`→`limit` rewrite;
+1383/1399 do not.
+
+**The mutations pass did not create this, but it completed it** — 1383 already
+twinned 1016 — and it did so in the same diff in which it **deleted** case
+**11406** for duplicating representations case 1332. Two opposite calls, twenty
+ids apart, with no rule on disk distinguishing them. Settle it once
+([`../COVERAGE.md`](../COVERAGE.md) → follow-up 26): either one it-block means one
+case owned by the area that models the rule, or per-label duplication is
+deliberate fixture-set coverage and both models should say so.
 
 ### A fourth ownership question, opened by the rpc audit
 
@@ -280,7 +353,7 @@ sub-features present per area (second segment, as on disk):
 | ordering | 1200–1232 | direction, nulls (incl. alongside limits, 1229), json_path, computed_column, multi_column, composite, related (incl. computed relationships, 1227–1228), embed, mutation_representation (1230, `schema: mutations`), rpc (1231–1232), error |
 | pagination | 1250–1288 | limit_offset (incl. HEAD 1277 and the POST-`/rpc/`-with-query-params flavor 1281), range_header (incl. past-the-last-item with count 1278, open-ended non-zero offset 1279, the GET-`/rpc/` flavor 1280, the **method scoping** pair 1284/1285 and the **intersection-not-override** case 1287), count (incl. `count=planned` on an RPC yielding no total 1283, `Preference-Applied` echoed 1286, and `count=none` rejected under `handling=strict` 1288), embedded (**limit only** — `.offset` has no case; see [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → pagination*), content_range (1282, the empty-window envelope on an RPC) |
 | representations | 1300–1333 | post, patch, delete, put |
-| mutations | 1350–1397 | insert, update, delete, upsert, columns-param, missing-default, safe-update, safe-delete, max-affected |
+| **mutations** | **1350–1399, 11400–11405, 11407–11415** | insert (incl. the `x-www-form-urlencoded` body 11402, insignificant whitespace 11403, the empty-body PGRST102 1398 and the unique-violation 409/`23505` 11401), update (incl. the multi-row 204 + `Content-Range` 11400 and the one-to-one / m2m **resource-embedding** representations 11413/11415), delete (incl. the to-one parent embed 11412), upsert (incl. the only-pk-table merge/ignore pair 11410/11411, composite-pk POST/PUT 11414/11408, the partial-composite-pk PGRST105 11409, `PUT` ignoring `Range` 11407, ignore-duplicates-with-nothing-created 11404 and the PUT-`offset` PGRST114 1399), columns-param (**POST and PATCH only** — the PUT claim was withdrawn as uncited), missing-default, safe-update, safe-delete, max-affected (incl. the UPDATE flavor 11405). **No new sub-feature was minted**: the four review-driven embedding cases live under `update` and `delete` rather than an `embed` sub-feature |
 | **rpc** | **1400–1443** | return, setof, args (incl. the form-urlencoded variadic POST 1442), method, content-negotiation, count, shape, error (incl. the closest-proc PGRST202 hint 1443, the byte-length-pinned complement of the bare-404 probe 1432), overloaded, single-unnamed-param (**json flavor only** — text and xml have no case), name, **prefer** (**1441**, the RPC-only PGRST128 rule — the tree's only assertion of that code). **No sub-feature exists for untyped (`record` / `SETOF record`) returns, non-variadic array parameters, or resource embedding through a table-valued function**; see [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → rpc* |
 | auth | 1450–1499, 11800–11818 | anonymous, claims, role, role-claim-key, role-switching, jwt, audience, pre-request, guc, rpc |
 | errors | 1500–1526 | sqlstate (incl. the two 5xx paths 1523/1524), pgrst_code (incl. the PGRST205 fuzzy-hint pair 1520/1521), raise, headers (incl. the `Proxy-Status` custom-code case 1519), verbosity (incl. the inline-416 case 1522), envelope (1525, byte-exact key emission order), proxy_status (1526, absent on the inline 416) |
@@ -293,6 +366,42 @@ sub-features present per area (second segment, as on disk):
 
 ### v16.0 additions worth knowing
 
+- **mutations** grew from **48 to 65** cases, opening the tree's **third** 5-digit
+  band at **11400–11415** after 1398/1399 filled the primary 1350–1399. **One
+  case was rewritten (1352), seventeen added, one authored and deleted (11406),
+  and no fixture object created.** Three things about this pass are worth
+  carrying forward:
+  - **Its audit was partly closed inside the pass.** Four cases —
+    **11412** (`DELETE /tasks?id=eq.8&select=id,name,project:projects(id)` → the
+    to-one parent, `DeleteSpec.hs#L71`), **11413** (`PATCH
+    /students?id=eq.1&select=name,students_info(address)` → one-to-one,
+    `UpdateSpec.hs#L579`) and **11415** (`PATCH
+    /users?id=eq.1&select=name,tasks(name,project:projects(name))` →
+    many-to-many with a nested parent, `UpdateSpec.hs#L539`), plus the pre-existing
+    representations case 1300 for POST — exist because the review asked for the
+    **mutation flavor of resource embedding**, which no case covered. They
+    transcribe upstream's exact seed values with no derivation.
+  - **A modelled rule was WITHDRAWN, not corrected.** `mutations.yaml` had claimed
+    `?columns=` applies to **PUT**. Nothing at v16.0 asserts it — every
+    `columns=` in `UpsertSpec.hs` is a POST, and the PUT docs say the opposite
+    ("All the columns must be specified in the request body, including the primary
+    key columns", `tables_views.rst#L689`). `applies_to` now reads
+    `[POST, PATCH]`. **Note the failure mode**: this was not a stale-version
+    claim, so no pin sweep could have found it — an unexercised model entry is
+    unverified by construction.
+  - **One `source:` anchor moved sideways**: case **1352** from
+    `InsertSpec.hs#L218` (the *single-object* no-pk it-block) to **`#L268`**
+    (`context "with bulk insert"` / `it "returns 201 but no location header"`),
+    because 1352 is a bulk insert and had been citing an assertion about a
+    different request shape. The old anchor was real, fetchable and correctly
+    pinned — which is why nothing mechanical had caught it.
+  - Its **gap list nearly doubled, 6 → 11**, and the new entries are
+    relation-blocked rather than un-researched: `foo` (GENERATED ALWAYS, the
+    area's one genuine v14.12→v16.0 behavior change), `UnitTest` (case-sensitive
+    identifier), `employees`, `web_content`, `artists`/`albums`, the three
+    `surr_*_upsert` tables, and a dozen more. Several must be **real tables**
+    under `mutations`, which the loader's hard-coded `isolate_mutations/1` list
+    controls — so a fixtures delta alone cannot close them.
 - **rpc** grew from **41 to 44** cases, extending its band to **1400–1443**
   without a fixture object — `rpc.delta.sql` stays a comment-only placeholder
   after `test."true"()` (case 1440) was folded, and `fixtures.sql` was not
@@ -512,7 +621,7 @@ sub-features present per area (second segment, as on disk):
 
 ## Case file shapes
 
-Most cases are HTTP request/response (**672**). The **config** area additionally
+Most cases are HTTP request/response (**689**). The **config** area additionally
 uses a **CLI** shape (`request.kind: cli`, `request.flag: "--dump-config"`)
 asserting on `expect.exit_code`, `expect.dump_contains`,
 `expect.dump_reparse_stable`, and `expect.stderr_contains` rather than an HTTP
@@ -529,8 +638,9 @@ does not know.
 Any case may carry a `config:` block — **116** do (112 non-empty; 1705, 1719,
 1727 and 1743 carry an empty `config: {}`), spread over six areas: config 45,
 auth 33, observability 21, select 10, openapi 4, errors 3. **The count did not
-move for a second consecutive pass**: neither the operators re-sync's 37 new
-cases nor the rpc re-sync's 3 declares a `config:` block, because neither area is
+move for a third consecutive pass**: none of the operators re-sync's 37 new
+cases, the rpc re-sync's 3 or the mutations re-sync's 17 declares a `config:`
+block, because none of those areas is
 config-gated — a useful contrast with `select`, whose ten config-carrying cases
 all need `db-aggregates-enabled` or `url-use-legacy-target-names` and none of
 which the harness honours. The harness boots a dedicated instance only for the
@@ -541,7 +651,12 @@ case. On any other HTTP case the `config:` block is **inert** — it documents t
 upstream configuration the assertion depends on, but the case still runs against
 a shared instance. Mechanically, **60** HTTP cases carry a non-empty `config:`
 outside `@variant_case_ids` (re-derived on disk this pass against the harness's
-live 18-id list); most simply restate what the shared instance already provides.
+live 18-id list), now out of **689** HTTP cases; most simply restate what the
+shared instance already provides. **The mutations band adds a dependency of a
+different kind**: it declares no `config:` at all, yet ten of its seventeen new
+cases rely on the shared instance's `db_tx_end: :rollback` to contain writes
+through un-isolated view mirrors — an *undeclared* dependency, which is worse
+than an ignored one because nothing mechanical can surface it.
 The instances where the declared config *diverges* from the shared instance, and
 the assertion therefore depends on it, are case **1742**, the ten select cases
 **1129–1133, 1139, 1140, 1147–1149**, the three errors cases **1517, 1518, 1522**
@@ -554,8 +669,10 @@ assertions are log-level-independent statuses, so they still hold — see
 
 `preconditions:` is parsed but **never executed** by the harness — treat it as
 declarative documentation, never as setup a case may depend on. It is present on
-**709** of the 710 cases (case **1330** is still the only omission, which the
-schema allows; all three new rpc cases carry `preconditions: []`). The sharpest
+**726** of the 727 cases (case **1330** is still the only omission, which the
+schema allows), and **44** of those carry a *non-empty* list — **25 of the 44 in
+the mutations area alone**, which makes it by far the heaviest user of a key that
+does nothing. All 17 new mutations cases correctly carry `preconditions: []`. The sharpest
 illustration is in the pagination area: cases **1272, 1274 and 1275** declare
 `preconditions: ["ANALYZE …"]` for planner-estimate expectations and pass only
 because `mix bier.fixtures.load` happens to run a database-wide `ANALYZE`
@@ -569,13 +686,16 @@ deferral; `case.schema.json` itself has no `pending` field. (Earlier revisions o
 this file claimed 6 such cases, listing 1509, 1513 and 1514 as well — those three
 only *mention* `status_text` in `notes:` or in an expected `hint:` string and
 carry no `expect.status_text` key, so they run normally. Re-verified at the
-**710**-case state: still exactly three.)
+**727**-case state: still exactly three.)
 
 **13** cases use the HTTP `HEAD` method (1020, 1272, 1274, 1275, 1277, 1284,
 1425, 1681, 1756, 1760, 1761, 1762, 1771) and **every one expects a 2xx** —
-re-derived mechanically at the 710-case state. No case in the tree issues a HEAD
+re-derived mechanically at the 727-case state. No case in the tree issues a HEAD
 request that errors, which is the tree's only *request-shape* blind spot; see
-[`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → errors*.
+[`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → errors*. The count has not
+moved in five re-syncs while the tree grew by 59 cases. Full method
+distribution at 727: GET **499**, POST **100**, CLI **38**, PATCH **26**,
+DELETE **21**, PUT **18**, HEAD **13**, OPTIONS **12**.
 
 ## Looking up a case
 
@@ -586,11 +706,11 @@ grep -l '^feature: domain_representations/' spec/conformance/cases/*.yaml
 # the source citation for a case
 grep '^source:' spec/conformance/cases/1200_order_by_column_asc.yaml
 
-# list ids in numeric order — REQUIRED: the two 5-digit bands sort wrong
-# otherwise (operators 10200-10236 lands next to 1020*, auth 11800-11818
-# next to 1180*)
+# list ids in numeric order — REQUIRED: the three 5-digit bands sort wrong
+# otherwise (operators 10200-10236 lands next to 1020*, mutations
+# 11400-11415 next to 1140*, auth 11800-11818 next to 1180*)
 ls spec/conformance/cases/ | sort -n
 
 # every case in an overflow band, by area
-ls spec/conformance/cases/ | sort -n | grep -E '^(102|118)[0-9]{2}_'
+ls spec/conformance/cases/ | sort -n | grep -E '^(102|114|118)[0-9]{2}_'
 ```

@@ -1,0 +1,44 @@
+id: 11414
+feature: mutations/upsert/post/merge-duplicates-composite-pk
+request:
+  method: POST
+  path: /car_models
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation, resolution=merge-duplicates
+  body:
+    - { "name": "Murcielago", "year": 2001 }
+    - { "name": "Roma", "year": 2021 }
+schema: mutations
+# No setup needed: test.car_models is (name text, year integer) PRIMARY KEY
+# (name, year) and seeds ZERO rows, so both payload rows insert and the assertion
+# below holds regardless of run order. The conformance server runs every request
+# with db-tx-end=rollback, so the inserts never persist.
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: resolution=merge-duplicates, return=representation
+  body_exact:
+    - { "name": "Murcielago", "year": 2001 }
+    - { "name": "Roma", "year": 2021 }
+notes: >-
+  resolution=merge-duplicates resolves the conflict target from a COMPOSITE
+  primary key (name + year), not just a single-column pk: the generated
+  INSERT ... ON CONFLICT (name, year) DO UPDATE returns every payload row in
+  payload order, and the status is 201 because at least one row was inserted.
+  Mirrors the it-block "INSERTs and UPDATEs rows on composite pk conflict for
+  partitioned tables" (UpsertSpec.hs#L62-L73), which posts the same two rows to
+  /car_models with the same two Prefer values and asserts 201 +
+  Preference-Applied "resolution=merge-duplicates, return=representation".
+  Two derivations from upstream, both narrowing rather than widening the claim:
+  (1) upstream's car_models carries a third column `car_brand_name` (null for
+  Murcielago, "Ferrari" for Roma) which the consolidated fixture's table does not
+  have, so the representation is the two-column row; (2) upstream's table is
+  partitioned and pre-seeded, so its Murcielago/2001 row is an UPDATE while here
+  both rows are INSERTs -- the asserted status, headers and returning-set are
+  identical either way, since merge-duplicates puts updated and inserted rows
+  alike in the RETURNING set. The conflicting-row leg is NOT derivable here and
+  is recorded under gaps.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L62
