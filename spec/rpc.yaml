@@ -7,8 +7,15 @@
 # Ground-truth priority: PostgREST tests > source > docs.
 # Every entry carries a `source` URL with a line anchor.
 #
-# Fixture: spec/conformance/fixtures/rpc.sql (schema `test`), plus
-# spec/conformance/fixtures/rpc.delta.sql for objects added at the v16.0 re-sync.
+# Fixture: spec/conformance/fixtures/rpc.sql (authored against `test`, mirrored
+# into the `rpc` profile schema by the loader). The one object this re-sync
+# needed — test."true"() and its GRANT, for rpc.name.reserved_word — went in via
+# spec/conformance/fixtures/rpc.delta.sql and has since been folded into
+# fixtures.sql, so the delta file is an empty placeholder again. The three other
+# cases added this pass (1441, 1442, 1443) need no new objects: 1441/1442 reuse
+# `ret_void` and `variadic_param`, already in the `rpc` profile, and 1443 probes
+# a name that does not exist, resolving its hint against `test.sayhello`
+# (fixtures.sql#L1292).
 #
 # Re-synced v14.12 -> v16.0. Diff worked with
 # `git diff v14.12..v16.0 -- test/spec/ src/`:
@@ -23,8 +30,38 @@
 #     modeled below as rpc.name.reserved_word.
 #   * The `Prefer: handling` and `Prefer: max-affected` RPC tests moved out of
 #     PreferencesSpec.hs into Preferences/HandlingSpec.hs and
-#     Preferences/MaxAffectedSpec.hs; both preferences are owned by the
-#     headers/mutations areas, not by this one.
+#     Preferences/MaxAffectedSpec.hs. The generic (table) forms of both
+#     preferences are owned by the headers/mutations areas; the one
+#     RPC-*specific* rule — PGRST128 for a routine that does not return
+#     SETOF/TABLE — is modeled here (rpc.prefer.max_affected.returns_single),
+#     because it is decided in callReadPlan, not in the mutation path.
+#   * `Statements.mainCall` gained `maxRows`/`range` parameters at v16.0 (the
+#     "count=exact no longer does a double count" optimization, CHANGELOG 16.0).
+#     Verified NOT wire-visible: when neither db-max-rows nor a range/limit is in
+#     play, `countF` now reuses the page-count select instead of running a second
+#     aggregate, and `pageCountSelectF (Just rout)` keeps the pre-existing
+#     `funcReturnsSingle -> 1` rule, so Content-Range is byte-identical to
+#     v14.12 for every case modeled here (0-0/1 for a scalar, 0-4/5 for
+#     getallprojects). See
+#     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Query/SqlFragment.hs#L482
+#
+# Reporting schema in PGRST202 (no deviation): PostgREST qualifies the message,
+# the details AND the hint of a "function not found" envelope with the
+# *requested* schema — `func = schema <> "." <> procName` at Error.hs#L249
+# (message) and #L269 (details), and `("Perhaps you meant to call the function "
+# <> schema <> ".") <>` at #L372 (hint):
+# https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L249
+# Most RPC cases below run under the `rpc` fixture-set label, a view/function
+# mirror of `test` (spec/conformance/fixtures/README.md) that the frozen harness
+# sends as `Accept-Profile: rpc` (test/support/http_case.ex build_headers), so a
+# PGRST202 raised under that label reads `rpc.<fn>(…)`. The two cases that assert
+# a PGRST202 body verbatim from upstream — 1433 (add_them) and 1439
+# (named_json_param) — therefore carry `schema: test` instead, which the harness
+# suppresses as the default schema; both functions exist in `test` in the loaded
+# bier_test, exactly once each, so upstream's text is literally correct on the
+# wire. Case 1440 already took this route. An earlier pass instead kept the
+# `test.` text under `schema: rpc`; that was a spec defect, not upstream
+# behavior, and is corrected here.
 
 version: v16.0
 area: rpc
@@ -112,6 +149,11 @@ entries:
     claim: >
       Named arguments are bound by name; e.g. add_them(a,b) takes a and b from
       the query string or body (add_them?a=3&b=4 -> 7).
+      Anchor caveat: L101-L104 is the "includes exact count of 1 …" it-block and
+      its request carries `[("Prefer", "count=exact")]` (L103). It is the only
+      `GET /rpc/add_them` in RpcSpec.hs and its #L104 assertion proves the
+      ?a=3&b=4 -> 7 binding; the Prefer-LESS request shape used by case 1402 is
+      not itself asserted upstream (case 1403 carries the header verbatim).
     source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L101
     source_line: 101
 
@@ -154,6 +196,12 @@ entries:
     claim: >
       A function returning a single scalar (int/text/etc.) responds with the bare
       JSON scalar (not wrapped in an array). add_them?a=3&b=4 returns 7.
+      Anchor caveat: same as rpc.args.named — the anchored it-block's request
+      carries `Prefer: count=exact` (L103); the bare-scalar body is asserted at
+      L104 and the Prefer-less shape (case 1402) is inferred, not asserted.
+      rpc.return.text (POST /rpc/sayhello, L408-L411) asserts a bare scalar body
+      with no Prefer header at all and is the un-caveated witness for the
+      not-array-wrapped half of this rule.
     source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L101
     source_line: 101
 
@@ -271,6 +319,19 @@ entries:
     source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L312
     source_line: 312
 
+  - id: rpc.setof.range_header
+    claim: >
+      The `Range` request header paginates a SETOF proc result on GET exactly as
+      it does on a table: `Range: 1-1` on getitemrange(min=2,max=4) — whose full
+      result is [{"id":3},{"id":4}] per rpc.return.setof_table — yields 200 with
+      the single row [{"id":4}] and `Content-Range: 1-1/*` (no total, because no
+      Prefer count was requested). Distinct from rpc.shape.limit, which is the
+      limit/offset query-parameter form of the same windowing
+      ("returns paginated results" context at L24, "using the Range header"
+      it-block at L25, the GET at L26-27, Content-Range assertion at L30).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L25
+    source_line: 25
+
   - id: rpc.count.exact_setof
     claim: >
       Prefer count=exact on a SETOF proc returns an exact total in Content-Range
@@ -291,8 +352,19 @@ entries:
     claim: >
       An unknown proc name returns 404 with code PGRST202 and a message of the
       form "Could not find the function <schema>.<name> without parameters in the
-      schema cache" (sayhell -> hint "Perhaps you meant to call the function
-      test.sayhello").
+      schema cache" (the " without parameters" branch is taken when argumentKeys
+      is empty, Error.hs#L246-L252; details mirror it as "Searched for the
+      function <schema>.<name> without parameters, but no matches were found in
+      the schema cache.", Error.hs#L259-L272). The `hint` key is NOT
+      unconditional: `noRpcHint` emits "Perhaps you meant to call the function
+      <schema>.<closest>" only when some proc of the requested schema clears a
+      0.75 minimum fuzzy similarity score (`getFuzzyHint HintProcedure =
+      Fuzzy.getOneWithMinScore 0.75`, Error.hs#L397-L403, prefix at
+      Error.hs#L372). Upstream pins both halves with two probes against the same
+      schema: /rpc/fake -> bare 404, no body asserted (L209, case 1432);
+      /rpc/sayhell -> the full envelope above with hint
+      "Perhaps you meant to call the function test.sayhello" and
+      Content-Length 291 (L211-L221, case 1443).
     source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L211
     source_line: 211
 
@@ -356,18 +428,71 @@ entries:
 
   - id: rpc.name.reserved_word
     claim: >
-      NEW IN v16.0. A routine whose name is a PostgreSQL reserved word is
-      reachable at /rpc/<name> and is invoked normally — the name must be quoted
-      when the call is emitted, not rejected or mangled. GET /rpc/true on the
-      fixture function test."true"() (schema.sql: `create or replace function
-      "true"() returns boolean as $_$ select true; $_$ language sql`) responds
-      200. The routine returns a single scalar, so by rpc.return.scalar the body
-      is the bare JSON scalar `true` (asJsonF's returnsScalar branch renders
+      A routine whose name is a PostgreSQL reserved word is reachable at
+      /rpc/<name> and is invoked normally — the name must be quoted when the call
+      is emitted, not rejected or mangled. GET /rpc/true on the fixture function
+      test."true"() (schema.sql: `create or replace function "true"() returns
+      boolean as $_$ select true; $_$ language sql`) responds 200. The routine
+      returns a single scalar, so by rpc.return.scalar the body is the bare JSON
+      scalar `true` (asJsonF's returnsScalar branch renders
       `coalesce(json_agg(_postgrest_t.pgrst_scalar)->0, 'null')`).
+      NEWLY ASSERTED in v16.0, not new behavior: the it-block and the "true"()
+      fixture are both v16.0 additions (the only appended hunk in RpcSpec.hs
+      between the pins), but the underlying fix shipped in 14.1 — "Fix
+      db-pre-config function failing when function names are pg reserved words",
+      https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/CHANGELOG.md#L214
+      — i.e. before the v14.12 pin. Upstream's block runs
+      under `withConfig baseCfg { configDbPreConfig = Just $ QualifiedIdentifier
+      "test" "true" }`, so it covers db-pre-config quoting *and* the RPC path;
+      only the RPC half (GET /rpc/true -> 200) is asserted on the wire and
+      modeled here. db-pre-config itself belongs to the config area.
     source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1497
     source_line: 1497
 
+  - id: rpc.args.post_form_urlencoded
+    claim: >
+      With POST and Content-Type application/x-www-form-urlencoded, arguments
+      come from the form body rather than from JSON: the args case is
+      `(Inv, MTUrlEncoded) -> DirectArgs $ maybe mempty (toRpcParams proc .
+      payArray) iPayload` (Plan.hs L222), the same DirectArgs path GET uses. Form
+      keys bind by name and repeat exactly like query params, so a VARIADIC param
+      posted as "v=hi&v=there" yields ["hi", "there"] and an empty form body
+      falls back to the DEFAULT (RpcSpec.hs "works with POST and repeated params
+      from html form", n=0 at L732, n>1 at L746).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan.hs#L222
+    source_line: 222
+
+  - id: rpc.prefer.max_affected.returns_single
+    claim: >
+      `Prefer: max-affected=<n>` combined with `handling=strict` on a routine
+      that does NOT return SETOF/TABLE is rejected before execution with 400 and
+      the envelope {"code":"PGRST128","message":"Function must return SETOF or
+      TABLE when max-affected preference is used with handling=strict",
+      "details":null,"hint":null}. The check is RPC-specific and lives in
+      callReadPlan — `failMaxAffectedRpcReturnsSingle (Just (PreferMaxAffected
+      _), Just Strict) rout = if funcReturnsSingle rout then Left $ ApiRequestErr
+      MaxAffectedRpcViolation` (Plan.hs L238); `funcReturnsSingle` is true for
+      every non-set return type including `void` (Routine.hs L102-105, with
+      `void` a Single Scalar per funcReturnsVoid L122-124). Status, code and
+      message come from Error.hs (status400 L125, PGRST128 L172, message L198).
+      Upstream
+      asserts it on the void-returning /rpc/delete_items_returns_void.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/MaxAffectedSpec.hs#L122
+    source_line: 122
+
 gaps:
+  - >
+    needed_assertion: "executes the proc exactly once per request" cannot be
+    expressed with the current case shape. Upstream proves it with a *sequence*:
+    POST /rpc/reset_sequence under `Prefer: tx=commit` to make the reset survive
+    the rollback, then two POSTs to the volatile /rpc/callcounter asserting the
+    bodies 1 and 2 in order —
+    https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L632
+    A case carries exactly one request and the harness rolls each request back,
+    so neither the ordering nor the committed reset can be stated. Expressing it
+    needs a multi-request case shape (an ordered list of request/expect pairs
+    sharing one transaction policy). Omitted rather than approximated: asserting
+    only the first call's body would not test the "exactly once" claim at all.
   - >
     Prefer: params=single-object — NOT covered. Neither v14.12 nor v16.0 has any
     test or source line referencing "params=single-object"/"single-object"
@@ -385,8 +510,15 @@ gaps:
     Single-row enforcement via Accept: application/vnd.pgrst.object+json
     (PGRST116 "Cannot coerce the result to a single JSON object") for RPC is
     tested under SingularSpec, not RpcSpec; left to the singular/content-
-    negotiation area to avoid duplicate ownership. See
-    https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/SingularSpec.hs#L72
+    negotiation area to avoid duplicate ownership. The RPC block is the
+    `context "when calling a stored proc"` at
+    https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/SingularSpec.hs#L268
+    — zero rows -> 406 PGRST116 "The result contains 0 rows" (L269-276), a
+    scalar result succeeding with 200 (L280), a single object rendered with the
+    singular content type (L285), and multiple rows -> 406 PGRST116 "The result
+    contains 5 rows" (L292-299). (A previous pass cited SingularSpec.hs#L72 for
+    this; that anchor is inside `request methodPatch "/addresses"`, a table
+    mutation, and did not support the claim.)
     The plain single-row behavior of OUT-param and composite-returning procs IS
     covered here (rpc.return.out_single, rpc.return.composite).
   - >
@@ -411,11 +543,38 @@ gaps:
     duplicated across every rpc case; no rpc case asserts Vary's absence.
   - >
     The RPC-flavored `Prefer: handling=strict|lenient` (PGRST122 on
-    /rpc/overloaded_unnamed_param) and `Prefer: max-affected` (PGRST124 /
-    MaxAffectedRpcViolation on set-returning and void routines) tests exist at
-    both pins; v16.0 only MOVED them out of PreferencesSpec.hs into
-    https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/HandlingSpec.hs#L35
-    and
-    https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/MaxAffectedSpec.hs#L85
-    Both preferences are modeled by the headers/mutations areas (cases 1390-1392,
+    /rpc/overloaded_unnamed_param,
+    https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/HandlingSpec.hs#L35)
+    and the *count* form of `Prefer: max-affected` (PGRST124 "Query result
+    exceeds max-affected preference constraint" when a set-returning routine
+    affects more rows than requested,
+    https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/MaxAffectedSpec.hs#L86)
+    exist at both pins; v16.0 only MOVED them out of PreferencesSpec.hs. Their
+    generic forms are modeled by the headers/mutations areas (cases 1390-1392,
     1551, 1555-1556), so they stay out of this area to avoid duplicate ownership.
+    Only the RPC-specific PGRST128 rule (a routine that does not return
+    SETOF/TABLE, MaxAffectedSpec.hs#L122) is modeled here, as
+    rpc.prefer.max_affected.returns_single / case 1441 — no other area covers it
+    (`grep -rl PGRST128 spec/conformance/cases` was empty before this pass).
+    Note the two codes are distinct: PGRST124 = MaxAffectedViolationError
+    (Error.hs#L168), PGRST128 = MaxAffectedRpcViolation (Error.hs#L172).
+  - >
+    operator_action: spec/conformance/fixtures/rpc.sql#L15 still carries a
+    v14.12 provenance pin — "Upstream source:
+    https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/fixtures/schema.sql"
+    — which is stale after this v16.0 re-sync. The file's CONTENT is correct at
+    v16.0: all 23 routines it vendors (add_them, callcounter, getallprojects,
+    getitemrange, getproject, many_out_params, multi_column_table_return,
+    named_json_param, noparamsproc, overloaded, raise_pt402, ret_array,
+    ret_point_2d, ret_setof_integers, ret_void, sayhello,
+    single_column_table_return, single_inout_param, single_out_param,
+    test_empty_rowset, three_defaults, unnamed_json_param, variadic_param) are
+    still defined in
+    https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql
+    (re-fetched and checked name-by-name this pass), and the one v16.0-new routine this area
+    needs, `"true"()` at schema.sql#L3881, shipped via rpc.delta.sql instead
+    because rpc.sql is off-limits. Only the comment's pin is wrong. rpc.sql is a
+    HUMAN-OWNED live loader input (spec/conformance/fixtures/README.md), so no
+    workflow agent may edit it — flagged here for the operator to re-pin the
+    comment to .../blob/v16.0/... in a reviewed commit. Not a behavior gap; no
+    case is affected.

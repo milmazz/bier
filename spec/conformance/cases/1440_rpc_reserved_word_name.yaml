@@ -12,10 +12,20 @@ expect:
     Content-Type: application/json; charset=utf-8
   body_exact: true
 notes: >
-  New in PostgREST v16.0 ("should not fail when function name is a pg reserved
-  word"): a routine whose name is a PostgreSQL reserved word is reachable at
-  /rpc/<name> — the identifier must be quoted when the call is emitted, not
-  rejected or mangled. Upstream asserts only `shouldRespondWith 200`; the body
+  Newly asserted in PostgREST v16.0 ("should not fail when function name is a pg
+  reserved word"): a routine whose name is a PostgreSQL reserved word is
+  reachable at /rpc/<name> — the identifier must be quoted when the call is
+  emitted, not rejected or mangled. The it-block and the `"true"()` fixture are
+  both v16.0 additions, but the behavior is not: the fix it guards shipped in
+  14.1 ("Fix db-pre-config function failing when function names are pg reserved
+  words",
+  https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/CHANGELOG.md#L214),
+  before the previous v14.12 pin. Upstream runs the
+  block under `withConfig baseCfg { configDbPreConfig = Just $
+  QualifiedIdentifier "test" "true" }`, so it exercises db-pre-config quoting as
+  well; only the wire-visible half (GET /rpc/true -> 200) is modeled here, and
+  db-pre-config stays with the config area. Upstream asserts only
+  `shouldRespondWith 200`; the body
   follows from the fixture definition (`create or replace function "true"()
   returns boolean as $_$ select true; $_$`, schema.sql#L3881, in schema `test`
   per the SET search_path at schema.sql#L988) plus the already-modeled scalar
