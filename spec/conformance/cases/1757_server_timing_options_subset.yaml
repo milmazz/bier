@@ -1,5 +1,5 @@
 id: 1757
-feature: observability/server-timing/options-subset
+feature: observability/server-timing/options-table
 request:
   method: OPTIONS
   path: /organizations
@@ -13,13 +13,24 @@ expect:
   headers_present: [Server-Timing]
   headers_match:
     Server-Timing: "jwt;dur=[0-9]+\\.[0-9]+.*parse;dur=[0-9]+\\.[0-9]+.*response;dur=[0-9]+\\.[0-9]+"
-  headers_absent_in_value:
-    Server-Timing: [plan, transaction]
   body_exact: null
 notes: >
-  OPTIONS responses carry only jwt, parse, response timing metrics; plan and
-  transaction are absent (no query plan / DB transaction runs). Same holds for
-  OPTIONS on /rpc/<fn> and on /. headers_absent_in_value asserts the named
-  substrings do NOT appear in the Server-Timing value. Mirrors
-  ServerTimingSpec.hs:87-111.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ServerTimingSpec.hs#L87
+  OPTIONS on a table carries a Server-Timing header. Upstream asserts ONLY the
+  presence of jwt, parse and response
+  (test/spec/Feature/Query/ServerTimingSpec.hs#L88-L95, via
+  matchServerTimingHasTiming, a presence-only regex — SpecHelper.hs#L76-L82,
+  which never asserts absence), so this case asserts exactly that and nothing
+  more.
+  DO NOT assert that plan and transaction are absent: they are PRESENT. The
+  anchored line wraps the transaction stage in `withTiming`, and `withTiming`
+  (App.hs#L272-L279) branches only on configServerTimingEnabled — never on the
+  action — so the plan stage (App.hs#L210) and the transaction stage are timed
+  on OPTIONS too. `Plan.actionPlan` returns `NoDb (RelInfoPlan …)`
+  (Plan.hs#L173) and `MainTx.mainTx` returns `NoDbTx` (MainTx.hs#L87): no plan
+  is built and no DB transaction is opened, but both stages still produce a
+  `Just t`, so a real v16.0 response reads
+  `jwt;dur=…, parse;dur=…, plan;dur=…, transaction;dur=…, response;dur=…`.
+  An earlier pass of this case carried
+  `headers_absent_in_value: {Server-Timing: [plan, transaction]}`; that pinned
+  behavior PostgREST does not have and has been removed.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L225

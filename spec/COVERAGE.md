@@ -10,22 +10,27 @@ counted through its sub-pages).
 A docs page with no covering case (and not explicitly scoped out below) is
 flagged **GAP**.
 
-Pinned target: **PostgREST v16.0**. Total cases: **668** across 17 areas
+Pinned target: **PostgREST v16.0**. Total cases: **670** across 17 areas
 (counted on disk this pass, not carried over). The page set is unchanged from
 the previous pass — `references.html` lists 12 entries (11 pages plus
 the `api` parent: Authentication, API, CLI, Transactions, Connection Pool, Schema
 Cache, Errors, Configuration, Observability, Admin Server, HTTP Server, Listener)
 and `references/api.html` lists 16 sub-pages, matching the tables below entry for
-entry. Both were re-fetched and re-enumerated rather than carried over.
+entry. Both were **re-fetched live this pass** (not carried over) and
+re-enumerated; the API sub-page order on the live site is Tables and Views,
+Functions as RPC, Schemas, Computed Fields, Domain Representations, Pagination and
+Count, Resource Embedding, Resource Representation, Media Type Handlers, Aggregate
+Functions, OpenAPI, Prefer Header, Vary Header, CORS, OPTIONS method, URL Grammar.
 
-State of the tree when this file was written: **HEAD `e3fb77e`**
-("spec(errors): re-sync to PostgREST v16.0 (area 8/17) — FIRST AREA TO PASS
-REVIEW") with an **uncommitted pagination re-sync in the working tree**:
-`spec/pagination.yaml` and eight cases (**1258, 1261, 1264, 1266, 1267, 1268,
-1269, 1275**) modified, eleven cases (**1278–1288**) untracked. Every count here
-describes that on-disk state, including the uncommitted files. The previous
-revision of this file was written at `dcebc66` + an uncommitted errors re-sync,
-with **657** cases; the whole delta is the pagination area (28 → 39 cases).
+State of the tree when this file was written: **HEAD `e29d342`**
+("spec(pagination): re-sync to PostgREST v16.0 (area 9/17)") with an
+**uncommitted observability re-sync in the working tree**: `spec/observability.yaml`,
+`spec/conformance/fixtures/observability.sql` and six cases (**1757, 1765, 1766,
+1767, 1768, 1769**) modified, two cases (**1770, 1771**) untracked. Every count
+here describes that on-disk state, including the uncommitted files. The previous
+revision of this file was written at `e3fb77e` + an uncommitted pagination
+re-sync, with **668** cases; the whole delta is the observability area
+(20 → 22 cases).
 
 ## References → API sub-pages
 
@@ -45,7 +50,7 @@ with **657** cases; the whole delta is the pagination area (28 → 39 cases).
 | `preferences` (Prefer Header) | 1550–1556, 1577–1581, 1584 (headers prefer), 1302–1304, 1313–1314, 1322, 1324, 1332–1333 (return=minimal / headers-only), 1390–1392 (max-affected), **1267–1268, 1286, 1288** (pagination: `Preference-Applied` echoed for `count=exact`, absent for the unparsed `count=none`, and `count=none` rejected under `handling=strict`) | Prefer: return, handling=strict/lenient, timezone (incl. ± offsets, leap seconds, invalid under default/lenient/strict, and the single- vs two-token `Preference-Applied` echo in 1553/1584), max-affected, missing-defaults via `columns`, count. **Partial** — every `handling` and `max-affected` case is table- or read-flavored; the RPC flavor of both preferences (incl. PGRST128) has no case. See **Known gaps → headers**. |
 | `vary_header` (Vary Header) | 1575 (default `Vary: Accept, Prefer, Range` on a read), 1576 (`response.headers` GUC override replaces it verbatim), 1582 (the default is appended by `toWaiResponse` for every non-error response, witnessed on OPTIONS), 1583 (error responses carry no `Vary` — they bypass `toWaiResponse`) | **NEW page in v16** — covered. 1582/1583 match the modelled entries `headers.vary.non_read_responses` / `headers.vary.absent_on_errors`. The one remaining leg — a *CORS preflight* answered by the wai-cors middleware, which never reaches `toWaiResponse` — is a gap; see **Known gaps → headers**. |
 | `cors` (CORS) | 1702 (allowed-origin echo), 1703 (empty config allows all), 1704 (non-matching origin → no header), 1742 (default/empty origin list answers a preflight permissively), 1743 (the fixed `Access-Control-Expose-Headers` list on a plain `Origin` request) | 1742/1743 are **HTTP** cases inside the config band. **Partial** — none of the preflight cases asserts `Vary`-absence, the third leg of the v16 `Vary` rule (**Known gaps → headers**), and 1742 does not yet run under the config it declares (**Known gaps → config**). |
-| `options` (OPTIONS method) | 1019 (table `Allow`), 1031 (VOLATILE routine), 1032 (STABLE routine), 1033 (root path), 1034 (unknown relation → 404), 1757, 1768–1769 (observability OPTIONS server-timing on table / rpc / root), 1742 (OPTIONS preflight), 1582 (`Vary` present on an OPTIONS response) | The url_grammar re-sync covered three of upstream `OptionsSpec.hs`' four `Allow` shapes (`#L84`, `#L90`, `#L103`) plus the not-found path (`#L22`). **Still Partial** — the updatability-driven variants (auto-updatable views, trigger-backed views, partitioned tables, `OptionsSpec.hs#L24-L80`) remain uncased; see **Known gaps → options / transactions**. |
+| `options` (OPTIONS method) | 1019 (table `Allow`), 1031 (VOLATILE routine), 1032 (STABLE routine), 1033 (root path), 1034 (unknown relation → 404), 1757, 1768–1769 (observability OPTIONS server-timing on table / rpc / root — presence of jwt/parse/response only; `plan` and `transaction` are emitted too, see `spec/observability.yaml` → `observability.server_timing.options_subset`), 1742 (OPTIONS preflight), 1582 (`Vary` present on an OPTIONS response) | The url_grammar re-sync covered three of upstream `OptionsSpec.hs`' four `Allow` shapes (`#L84`, `#L90`, `#L103`) plus the not-found path (`#L22`). **Still Partial** — the updatability-driven variants (auto-updatable views, trigger-backed views, partitioned tables, `OptionsSpec.hs#L24-L80`) remain uncased; see **Known gaps → options / transactions**. |
 | `url_grammar` (URL Grammar) | 1000–1035 (url_grammar) | Path/method resolution, reserved query params (incl. the legacy embed target name 1028, and `limit`/`offset` forbidden on PUT 1016/1030), %-encoding (incl. `%20` in a relation *and* a column name, 1035), `+`→space, double-quoting reserved characters in filter values and in quoted identifiers (1025–1027, 1029). **Partial** — the page's *Reserved characters* section documents backslash escaping inside `in.( … )` (`\"` for a literal quote, `\\` for a literal backslash) and no case in any band exercises it; see **Known gaps → url_grammar**. |
 
 ## References → top-level pages
@@ -59,7 +64,7 @@ with **657** cases; the whole delta is the pagination area (28 → 39 cases).
 | `schema_cache` (Schema Cache) | — (DEFERRED) | Schema-cache reload (`NOTIFY pgrst, 'reload schema'` / SIGUSR1) needs a reload-signal harness. See **Scope decisions**. |
 | `errors` (Errors) | **1500–1526 (errors)**, 1432–1434 (rpc errors), 1002, 1024, 1185 (not-found / invalid path), 1455–1464 + 11809–11814 (auth JWT errors), **1288** (PGRST122 from an invalid preference under `handling=strict`) | SQLSTATE→HTTP mapping (incl. the two 5xx paths 1523/1524), PGRST error codes, the PGRST205 fuzzy hint (1520/1521), RAISE PGRST full control, RAISE PT custom status, 4xx/5xx envelopes and their byte-exact key order (1525), `Proxy-Status` (1506, 1515–1516, 1519, and its documented *absence* on the inline 416, 1526), client-error-verbosity=minimal (1517, 1518, 1522). **Still Partial** — **PGRST127** and **PGRST128** appear nowhere in the tree (see **Known gaps → select / headers**), and no case in the tree issues a HEAD request that errors (see **Known gaps → errors**). |
 | `configuration` (Configuration) | 1700–1744 (config) | Sources (env/file/db-role-settings, incl. `db-config = false` disabling the in-db source, 1744), aliases, validation, coercion (incl. `coerceBool` from numeric/text strings, 1740–1741), unknown-key tolerance (1739), precedence, app-settings, CORS keys (1702–1704, 1742–1743), plus the v16 keys `client-error-verbosity` (1731–1732), `server-reuseport` (1735), `url-use-legacy-target-names` (1736), `admin-server-unix-socket` (1737–1738). **Partial** — the page's *In-Database Configuration* section documents `db-pre-config` as the recommended mechanism and its *App Settings* section documents `current_setting('app.settings.*')`; neither has a case. See **Known gaps → config**. |
-| `observability` (Observability) | 1750–1769 (observability), 1497 (JWT-cache Server-Timing), 1625–1628, 1643 (execution plan), 1506/1515/1516/1519/1526/1002 (Proxy-Status, present and absent) | Server-Timing, Trace header, log-level→status logging, execution plan, Proxy-Status. Partial — see **Known gaps** (Metrics, SQL query logs, Server version header, and `Proxy-Status` on a HEAD request). |
+| `observability` (Observability) | **1750–1771** (observability, **22** cases), 1497 (JWT-cache Server-Timing), 1625–1628, 1643 (execution plan), 1506/1515/1516/1519/1526/1002 (Proxy-Status, present and absent) | The live page has three top-level sections — **Logs** (SQL Query Logs, Database Logs), **Metrics** (Schema Cache / Connection Pool / JWT Cache / GHC Runtime), **Traces** (Server Version Header, Trace Header, Proxy-Status Header, Server-Timing Header, Content-Length Header, Execution plan). Covered: Server-Timing, Trace header, log-level→status signal, execution plan, Proxy-Status, and — **new this pass** — the **Server Version Header** (1771, `HEAD /` asserting the `Server: postgrest/…` prefix, which closes a gap this file listed last pass). **1770 is not a second copy of 1750**: 1750 uses the loose upstream-style presence regex (any separator, any number of decimals, mirroring `matchServerTimingHasTiming`), while 1770 pins the **exact wire render** in the doctest form — `\A` / `\z`-anchored, `", "` separators, exactly one fractional digit per metric, all five metrics in the fixed order (`Response/Performance.hs#L29`). **Partial** — the whole **Metrics** section and the whole **Logs** section have no case, and three further legs are uncovered; see **Known gaps → observability**. |
 | `admin_server` (Admin Server) | 1717 (admin-port = server-port fatal), 1737 (`admin-server-unix-socket` dump), 1738 (admin socket-mode validation) | Config-surface validation via the CLI harness; `/live` and `/ready` covered by ExUnit (`test/bier/admin_server_test.exs`). Partial — `/metrics` and `/schema_cache` have no case. |
 | `http_server` (HTTP Server) | — (OUT OF SCOPE, new page in v16) | The page documents exactly one behavior: Warp's graceful shutdown on `SIGTERM`. See **Scope decisions**. |
 | `listener` (Listener) | — (DEFERRED) | LISTEN/NOTIFY channel (`db-channel`) reload trigger needs the same reload-signal harness. See **Scope decisions**. |
@@ -193,12 +198,31 @@ the `pagination_count`, `functions`, `resource_embedding`, `preferences` and
 fixture object. **Nothing in this section was rewritten**; only this note was
 appended, and `case.schema.json` was again left alone as the Tester's file.)*
 
+*(Re-verified a **seventh** time at the **670**-case state, fact by fact against
+disk: `domain_representations` is 1800–1820 = **21** cases; **1707** is a live
+`kind: cli` / `--dump-config` case; `grep -c pending spec/case.schema.json` →
+**0**; the CLI set is **1705–1741 + 1744 = 38** (the observability re-sync added
+no CLI case); `expect.status_text` on exactly **1508/1510/1511**. The
+observability re-sync — the only change since — added two cases (**1770**,
+**1771**), rewrote six (1757, 1765–1769) and re-pinned the provenance comments in
+`fixtures/observability.sql`, all on the `observability` page plus the `options`
+page (1757/1768/1769); none of those is scoped out. It did **not** touch
+`connection_pool`, `schema_cache`, `listener` or `http_server`, and it added no
+fixture object. One scoped-out page is worth re-reading in its light:
+`admin_server` stays out of case coverage, and the observability review's
+**Metrics** finding is the same wall from the other side — the metric families
+live behind the admin server, so both need a `request.kind: admin` shape the
+frozen harness does not have. **Nothing in this section was rewritten**; only this
+note was appended, and `case.schema.json` was again left alone as the Tester's
+file.)*
+
 ## Coverage summary
 
 - Docs pages enumerated: **27** — 16 API sub-pages + 11 top-level reference
   pages (the `references/api` parent page is counted once, through its
-  sub-pages; `url_grammar` is counted once). Re-fetched from
-  postgrest.org/en/v16 this pass; the page set is unchanged.
+  sub-pages; `url_grammar` is counted once). **Re-fetched live from
+  postgrest.org/en/v16 this pass** (both `references.html` and
+  `references/api.html`); the page set is unchanged, entry for entry.
 - Pages with at least one covering case: **23**.
 - Pages explicitly scoped: **4** — `connection_pool` (out of scope),
   `http_server` (out of scope, new in v16), `schema_cache` (deferred),
@@ -214,14 +238,24 @@ Two pages are new in v16 relative to the pre-re-sync state: `api/vary_header`
 `tables_views`, `url_grammar` and `functions`): they have covering cases but not
 the full breadth of the docs page. These are soft gaps, itemized next.
 `vary_header` stays **covered** but carries one itemized gap (the preflight leg).
-**`pagination_count` moves from covered-with-one-gap to explicitly Partial this
-pass**, on the strength of the embedded-`.offset` finding below — the first
-pagination gap that is a *documented request parameter with zero coverage*
-rather than a derived edge case.
+`pagination_count` is explicitly Partial on the strength of the
+embedded-`.offset` finding below — the first pagination gap that is a
+*documented request parameter with zero coverage* rather than a derived edge
+case.
 
-The pagination pass is worth separating from the itemized gaps, because unlike
-the last four re-syncs it did not only *add* coverage — it **corrected a modelled
-rule**:
+**`observability` keeps its Partial mark this pass but for a sharper reason.**
+The re-sync closed one of its four listed gaps (Server Version Header → case
+**1771**) and the adversarial review then re-drew the rest against the live page
+structure: **two of the page's three top-level sections — Logs and Metrics — have
+no conformance case at all**, and neither is closable without a new assertion
+shape (`expect.stdout_matches` for Logs, `request.kind: admin` for Metrics). This
+is the largest *structural* hole in the tree — a whole docs section rather than a
+rule inside one — and it is the one gap class that no amount of case authoring
+can close on its own. See **Known gaps → observability**.
+
+The pagination pass remains worth separating from the itemized gaps, because
+unlike the surrounding re-syncs it did not only *add* coverage — it **corrected a
+modelled rule**:
 
 - **The Range-header/limit-offset relationship was modelled backwards.**
   `pagination.yaml` previously stated "Range headers override limit/offset query
@@ -235,7 +269,22 @@ rule**:
   discriminate. New case **1287** (`?limit=2` + `Range: 0-5`) is the
   discriminating shape. **The lesson generalizes past this area**: an
   upstream-transcribed case is evidence for the assertion it makes, not for the
-  rule the model wraps around it, and eight areas still have no v16.0 audit.
+  rule the model wraps around it, and **seven** areas still have no v16.0 audit.
+
+The observability pass produced the same shape of result and is the second
+consecutive re-sync to **retract** a modelled rule rather than only add cases:
+
+- **The OPTIONS Server-Timing "subset" rule did not exist.** Cases
+  1757/1768/1769 asserted `headers_absent_in_value: {Server-Timing: [plan,
+  transaction]}`. `withTiming` branches only on `configServerTimingEnabled`
+  (`App.hs#L272`), never on the action, so a real `OPTIONS /organizations`
+  carries all five metrics; `Plan.actionPlan` returns `NoDb …` and `MainTx.mainTx`
+  returns `NoDbTx`, but both stages are still wrapped and still produce a
+  duration. The claim was false at **both** pins, so it was an inherited
+  authoring error rather than a v16.0 behavior change — and, unlike the
+  pagination correction, it had a live consequence: `lib/` implements the
+  invented behavior (`lib/bier/plugs/observability.ex:159` emits a three-metric
+  OPTIONS header) and must be fixed by the conformance pass.
 
 `tables_views` remains the densest page in the tree (seven areas, **291** cases
 feed it) and still misses the page's opening rule on combining filters. Density
@@ -244,8 +293,10 @@ ordering audit found a **named docs section** with a worked example
 (*Order in spread to-many*) and zero assertions, and the pagination audit found a
 **worked example on the same page** — `&actors.limit=10&actors.offset=2` — whose
 two halves have 1 case and 0 cases respectively. `url_grammar` makes it a third
-time, and the errors pass a fourth: the tree's **12 HEAD cases all expect 2xx**,
-so a HEAD that errors is untested across 668 cases.
+time, and the errors pass a fourth: the tree's **13 HEAD cases all expect 2xx**,
+so a HEAD that errors is untested across 670 cases. The observability pass added
+the thirteenth (**1771**, `HEAD /` for the `Server:` header) without closing it —
+the same pattern the pagination pass showed with the twelfth.
 
 ## Known gaps
 
@@ -264,6 +315,21 @@ prioritizing:
   one *url_grammar* entry, the one *pagination* entry and two of the three
   *errors* entries are of this kind**, so they are the actionable ones. Each is
   labelled below.
+
+> **The observability audit added a third kind, and it should not be filed under
+> either heading above.** Its four findings split 3/1: three (Metrics, access-log
+> line emission, the trace-header empty echo) are **blocked on something other
+> than authoring effort** — an assertion style the schema does not have
+> (`expect.stdout_matches`), a request shape the harness cannot issue
+> (`request.kind: admin`), or a direct conflict with an existing frozen case
+> (1573's `headers_no_blank` on the shared instance). Upstream *does* assert all
+> three, so they are not uncitable in the auth sense — the citation exists and is
+> verified; the **harness** is what is missing. The fourth
+> (`server_timing.success_path_only`) is the mirror image: black-box observable
+> and trivially expressible, deliberately left uncased because **upstream never
+> asserts it** and this tree does not pin behavior upstream does not check. It is
+> promotable on an operator's say-so, and it is the only observability item that
+> is.
 
 A third axis cuts across both kinds and is what actually decides effort:
 **what does closing it cost?** Of the nineteen citable-but-uncovered entries:
@@ -383,14 +449,15 @@ filed below with the config-area constraint it shares a root cause with.
   changed.
 
   > These two findings share one root, worth stating once because it is bigger
-  > than the errors area: **the tree contains 12 HEAD cases (1020, 1272, 1274,
-  > 1275, 1277, 1284, 1425, 1681, 1756, 1760, 1761, 1762) and every one expects a
-  > 2xx.** No case anywhere in 668 issues a HEAD request that produces an error.
-  > The pagination pass added the twelfth (**1284**, HEAD with a Range header
-  > that is ignored → 200) without closing the hole, which is the point: HEAD
-  > coverage keeps growing on the success side only. Any future HEAD-plus-error
-  > behavior will land in the same blind spot, so the cheap fix is to close it
-  > once, in this band, rather than per-finding.
+  > than the errors area: **the tree contains 13 HEAD cases (1020, 1272, 1274,
+  > 1275, 1277, 1284, 1425, 1681, 1756, 1760, 1761, 1762, 1771) and every one
+  > expects a 2xx.** No case anywhere in 670 issues a HEAD request that produces
+  > an error. The pagination pass added the twelfth (**1284**, HEAD with a Range
+  > header that is ignored → 200) and the observability pass the thirteenth
+  > (**1771**, `HEAD /` for the `Server:` header) without closing the hole, which
+  > is the point: HEAD coverage keeps growing on the success side only. Any future
+  > HEAD-plus-error behavior will land in the same blind spot, so the cheap fix is
+  > to close it once, in this band, rather than per-finding.
 
 - **The 42883 `function xmlagg(` → 406 special case has no case in any area.**
   MINOR, non-blocking, and **accepted as-is rather than filed as work.**
@@ -756,9 +823,12 @@ Two missing-coverage findings, **0 citation defects**.
 
   Closing any of these is a harness decision (per-`config` instance booting, or
   `@variant_case_ids` entries) behind the human harness gate, not a spec edit.
-  **115** of the 668 cases carry a `config:` key (111 non-empty) — **unchanged
-  this pass**: the pagination re-sync added eleven cases and no `config:` block,
-  so it neither grew nor shrank this constraint.
+  **116** of the 670 cases carry a `config:` key (112 non-empty). The count moved
+  by exactly one this pass: the observability re-sync's case **1770** declares
+  `server-timing-enabled: true`, a restatement of what the shared instance
+  already provides, so it adds no new divergence. Case **1771** deliberately
+  carries **no** `config:` block at all — the `Server:` header is unconditional
+  in `App.hs`, gated by no key.
 
 - **Same constraint, select area — ten cases.** `spec/select.yaml`'s
   `harness_exposure` gap lists **1129–1133, 1139, 1140, 1147, 1148, 1149**;
@@ -873,23 +943,133 @@ express them, so all three are actionable.
   Note case 1582 deliberately sends **no** `Origin` precisely so its OPTIONS is
   *not* treated as a preflight, which is why the two rules do not collide.
 
-### observability
+### observability (adversarial review verdict: **revise** — four missing-coverage findings, **0 citation defects**)
 
-- **Metrics** (`/metrics`, plus the schema-cache / connection-pool / JWT-cache /
-  GHC runtime metric families) — no case; the admin `/metrics` endpoint is not
-  implemented.
-- **SQL query logs** (`log-query`) — documented in v16, implemented in Bier
-  (`log-query` CLI config key), but no conformance case pins it.
-- **Server version header** — no case asserts the `Server: postgrest/<version>`
-  response header.
+The verdict is *revise*, and unusually for this tree **none of the four findings
+is closable by writing a case alone** except the last, which is deliberately left
+open. Read them against the live docs page, whose three top-level sections are
+**Logs**, **Metrics** and **Traces**: the tree covers most of *Traces* and
+**nothing** of *Logs* or *Metrics*.
+
+- **The entire Metrics section has no case — the largest structural hole in the
+  tree.** The admin `/metrics` endpoint and every family the page documents —
+  `pgrst_schema_cache_query_time_seconds`, `pgrst_schema_cache_loads_total`,
+  `pgrst_db_pool_timeouts_total` / `_available` / `_waiting` / `_max`,
+  `pgrst_jwt_cache_requests_total` / `_hits_total` / `_evictions_total`, and the
+  `ghc_*` runtime family — are asserted by no conformance case. This is **not**
+  an oversight: `spec/observability.yaml` models it in **five** entries and its
+  `gaps:` names the blocker precisely — the metrics live on the admin server
+  (`admin-server-port`), the harness knows only the main API base URL, and a case
+  would need a `request.kind: admin` shape plus a Prometheus-text body matcher
+  that `case.schema.json` does not have (`needed_assertion:
+  admin_endpoint_request`). The reviewer verified the citation against
+  [`test_admin.py#L132`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_admin.py#L132).
+  **Cross-listed with `admin_server` below — they are the same wall from two
+  sides**, and closing either closes both.
+
+- **The Logs section has no case either, in both its halves.**
+  - *Access-log line emission* (docs L15–L48): the Apache-combined format, the
+    `-` placeholders for the user and byte-count fields, and the per-level line
+    counts are asserted by **nothing**. Cases **1764–1767** assert only the status
+    the level filter keys on, never a log line — and 1765/1766/1767's `config:`
+    blocks are **inert** (see the next bullet), so even the level they name is not
+    in force. Justified by the missing `expect.stdout_matches` assertion style,
+    not by absence of upstream ground truth.
+  - *SQL query logs* (`log-query`, docs L50–L74): no case. The model entry
+    `observability.log_query.emits_sql` is **source-accurate** — the reviewer
+    confirmed the gate at `App.hs#L223` and the rendering at `Logger.hs#L192-195`
+    — but the SQL goes to **stderr**, so there is no request/response signal. The
+    gap is justified. Worth flagging to the implementation side: Bier *has*
+    the `log-query` CLI config key, so this is implemented-but-unpinned rather
+    than absent.
+
+- **`log-level` is not actually exercised by any case.** 1765/1766/1767 declare
+  `log-level: warn|info|crit`, but the harness only boots variant instances for
+  the ids in `@variant_case_ids` (`test/support/conformance_server.ex:58`, which
+  carries 1758/1763/1764 from this band — re-verified on disk this pass), so those
+  blocks are inert and the cases run at the shared `log_level: :error`. They
+  assert log-level-independent statuses, so they remain sound — just narrower than
+  their names, and each case's `notes:` now says so in as many words. Closing this
+  needs **both** `needed_assertion: log_capture` and harness-owned changes to
+  `@variant_case_ids`.
+
+- **`server-trace-header` empty echo has no case, and is *blocked*, not merely
+  unwritten.** PostgREST echoes the configured trace header with an **empty
+  value** when the request omits it
+  ([`App.hs#L289`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L289)).
+  A case cannot be added under the frozen harness: the shared conformance
+  instances set `server_trace_header`, and case **1573** (headers area) asserts
+  `headers_no_blank: true` against that same instance, so the two assertions would
+  contradict each other on the wire. It needs its own variant instance, i.e. an
+  `@variant_case_ids` entry — frozen harness code. Listed under *issues* rather
+  than *authoring*.
+
+- **`Server-Timing` absent on error responses — uncovered *deliberately*, and the
+  only promotable item here.** The model entry
+  `observability.server_timing.success_path_only` derives it from the App.hs
+  control flow: errors are rendered by `Error.errorResponseFor`
+  ([`App.hs#L154`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L154))
+  and never reach `toWaiResponse` (`App.hs#L253`), which is where the header is
+  attached. It is **black-box observable and cheap to express** — unlike every
+  other entry in this section. It is left uncased because **upstream asserts it
+  nowhere**, and this tree's rule is not to pin behavior PostgREST does not check.
+  Promote it to a case if the operator wants it enforced; that is a policy call,
+  not a research one.
+
 - **`Proxy-Status` on a HEAD request** — the docs' stated motivation for the
   header, exercised by no case. Cross-listed from **Known gaps → errors**; the
-  behavior is method-independent in `errorResponseFor`, so it is MINOR.
+  behavior is method-independent in `errorResponseFor`, so it is MINOR. Note the
+  observability pass added a thirteenth HEAD case (**1771**) that still expects
+  2xx, so the tree-wide "no HEAD case ever errors" blind spot is untouched.
+
+- **Closed this pass: the Server version header.** The previous revision listed
+  "no case asserts the `Server: postgrest/<version>` response header" as a gap.
+  Case **1771** (`HEAD /`, `headers_present: [Server]` +
+  `headers_match: {Server: "^postgrest/.+"}`) closes it. Only the **prefix** is
+  asserted, matching upstream, which derives the version from the header rather
+  than hard-coding it (`test_io.py:1065`); the version component is
+  `prettyVersion` (`Version.hs:23-26`), so pinning digits would assert the release
+  number rather than the wire contract. This is the tree's first `Server:`
+  assertion — an earlier revision of `spec/observability.yaml` wrongly delegated
+  the header to the *headers* area, which carries no entry for it.
+
+- **`Server-Timing` on OPTIONS — corrected this pass, and `lib/` is wrong.**
+  Cases 1757/1768/1769 previously asserted
+  `headers_absent_in_value: {Server-Timing: [plan, transaction]}`. PostgREST has
+  no such behavior at v16.0 (nor at v14.12): `withTiming` branches only on
+  `configServerTimingEnabled`
+  ([`App.hs#L272`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L272)),
+  so the plan (`App.hs#L210`) and transaction (`App.hs#L225`) stages are timed
+  on OPTIONS too — `Plan.actionPlan` returns `NoDb …` and `MainTx.mainTx`
+  returns `NoDbTx`, but both are still wrapped. A real `OPTIONS /organizations`
+  response carries all five metrics. The absence assertions are gone; the three
+  cases now assert only what upstream asserts (presence of jwt/parse/response,
+  `ServerTimingSpec.hs#L87-L111`, whose matcher is presence-only). **Action for
+  the conformance pass**: `lib/bier/plugs/observability.ex:159` still emits the
+  three-metric OPTIONS header and must be fixed. Note the shape of this one — it
+  is the only finding in the file where a *spec* error and a *`lib/`* error
+  matched each other, so the suite was green on an invented behavior. No case
+  pins the true five-metric OPTIONS shape either, because upstream asserts only
+  presence of jwt/parse/response (`ServerTimingSpec.hs#L87-L111`) and this area
+  does not pin what upstream does not check.
+
+  > **One more docs sub-section under *Traces* is worth naming before someone
+  > re-derives it as a gap: *Content-Length Header*.** It is not listed above
+  > because it is covered from the pagination and errors bands rather than this
+  > one — case **1282** asserts `Content-Length: 2` on the empty-window envelope,
+  > and the errors model's `inline_416_content_length_suppressed_on_head` flag
+  > (uncased, see **Known gaps → errors**) is the one leg still open. Recorded
+  > here so the cross-band ownership is explicit.
 
 ### admin_server
 
 - `/metrics` and `/schema_cache` endpoints have no case (`/live` and `/ready`
-  are covered by ExUnit, not by the conformance suite).
+  are covered by ExUnit, not by the conformance suite). **Same blocker as
+  *Known gaps → observability → Metrics*** — the harness has no request shape
+  that targets the admin server (`needed_assertion: admin_endpoint_request`).
+  This page and the observability page's Metrics section should be closed
+  together or not at all; counting them as two independent gaps overstates the
+  work.
 
 ### options / transactions
 
@@ -909,52 +1089,63 @@ express them, so all three are actionable.
 
 ## Validation status
 
-Machine-verified on **2026-08-09** at commit **`e3fb77e`**
-("spec(errors): re-sync to PostgREST v16.0 (area 8/17)"), against a tree
-**dirty mid-re-sync**: the uncommitted pagination re-sync (`spec/pagination.yaml`
-+ 8 modified cases, 11 untracked cases, plus the two synthesis documents). The
+Machine-verified on **2026-08-09** at commit **`e29d342`**
+("spec(pagination): re-sync to PostgREST v16.0 (area 9/17)"), against a tree
+**dirty mid-re-sync**: the uncommitted observability re-sync (`spec/observability.yaml`,
+`spec/conformance/fixtures/observability.sql`, 6 modified cases, 2 untracked
+cases, plus the two synthesis documents — 9 modified + 2 untracked in total). The
 checks cover the on-disk state *including* those. No repository file was modified
-by the verification — its scripts live in a scratchpad outside the repo, and
-`git status --porcelain | wc -l` read **22** both before and after.
-**All six checks ran for real**; the substantive findings are recorded under
-*Open verification findings* below.
+by the verification — its scripts live in a scratchpad outside the repo.
+**All six checks ran for real, and all six passed**; the substantive findings are
+recorded under *Open verification findings* below.
 
-- **Fixture load: OK.** `mix bier.fixtures.load` exited **0**, reporting the
-  mirrored area schemas: `operators, ordering, pagination, representations,
-  mutations, config, domain_representations`.
+- **Fixture load: OK.** `mix bier.fixtures.load` exited **0** against
+  `bier_test` (localhost:5432), reporting the mirrored area schemas:
+  `operators, ordering, pagination, representations, mutations, config,
+  domain_representations`. No `psql` fallback was needed.
 
-  > **Post-load counts, and an honest note about which number to trust.** The
-  > verification recorded "22 non-system schemas, 640 relations, 783 functions".
-  > Re-querying the same loaded database during synthesis gives **23** schemas,
-  > **640** relations (`relkind in ('r','v','m','f','p')`, excluding
-  > `pg_catalog`/`information_schema`/`pg_toast`) and **1026** functions
-  > excluding only `pg_catalog`/`information_schema` (of which **993** are
-  > `prokind='f'`). The relation count agrees exactly; the schema and function
-  > counts differ purely by exclusion set, and this document deliberately does
-  > **not** reconcile them by picking one — the divergence is the useful signal.
-  > The schema list itself is stable and is what actually matters:
+  > **Post-load counts, and an honest note about which number to trust.** This
+  > pass's verification did not re-report schema/relation/function totals, so the
+  > figures below are **carried over from the previous pass and are not fresh
+  > measurements**: 22–23 non-system schemas (the spread is an exclusion-set
+  > artifact, deliberately not reconciled), **640** relations
+  > (`relkind in ('r','v','m','f','p')`) and 783–1026 functions depending on the
+  > exclusion set. What *was* re-derived this pass is the catalog dump the
+  > relation check ran against, and it confirms the schema list is unchanged:
   > `SPECIAL "@/\#~_-`, `auth`, `config`, `domain_representations`, `geotest`,
   > `headers`, `headers_private`, `jwt`, `mutations`, `observability`,
   > `openapi_no_comment`, `operators`, `ordering`, `pagination`, `postgrest`,
   > `private`, `public`, `representations`, `rpc`, `test`, `v1`, `v2`, `تست` —
-  > identical to the previous four passes. The pagination re-sync added **no**
-  > fixture object, so nothing here could have moved. **No case depends on any of
-  > these counts; do not cite them as evidence of anything.**
-- **Case count: 668** — `ls -1 spec/conformance/cases/*.yaml | wc -l` and the
-  validator agree (668 files, 668 parsed). **11** of the 668 (1278–1288) were
-  untracked at verification time and **8** more were modified.
-- All **668** cases parse as YAML. **0** parse errors, **0** non-mapping roots.
-- All **668** cases validate against `case.schema.json` (`jsonschema` 4.26.0,
-  Draft 2020-12 with `FormatChecker`, PyYAML) — **0** invalid cases. The
-  validator was proved **live rather than vacuous** by negative controls on a
-  mutated copy of pristine case 1000: pristine → 0 errors; an unknown key → 1
-  error (`additionalProperties: false` enforced); a dropped `source` → 1 error
-  (`required` enforced); a wrong-typed `id` → 1 error (`type` enforced); a
-  malformed `source` shape → 1 error (`pattern` enforced).
+  > identical to the previous five passes. The observability re-sync added **no**
+  > fixture object (its `.sql` change is comment-only), so nothing here could have
+  > moved. **No case depends on any of these counts; do not cite them as evidence
+  > of anything.**
+- **Case count: 670** — `ls spec/conformance/cases/*.yaml | wc -l` and the
+  validator agree (670 files, 670 parsed). **2** of the 670 (**1770**, **1771**)
+  were untracked at verification time and **6** more (1757, 1765–1769) were
+  modified.
+- All **670** cases parse as YAML. **0** parse errors.
+- All **670** cases validate against `case.schema.json` — **0** invalid cases.
+  Toolchain: python3 **3.14**, PyYAML **6.0.3**, jsonschema **4.26.0**,
+  `Draft202012Validator` over every `spec/conformance/cases/*.yaml`. The schema
+  itself was checked first: `Draft202012Validator.check_schema(...)` →
+  "case.schema.json: valid draft 2020-12 schema". Script tail:
+  `validated docs: 670 | invalid: 0 | dupes: 0 | stale: 0`.
+
+  > **The negative-control battery is NOT re-run every pass.** The controls
+  > described below (unknown key, dropped `required` key, wrong-typed `id`,
+  > malformed `source`) were run in an **earlier** pass on a mutated copy of
+  > pristine case 1000 and proved the validator live rather than vacuous. This
+  > pass ran the schema check itself plus `check_schema`, not the controls. The
+  > distinction matters because the one control that **failed** — the stale-pin
+  > rewrite — is what justifies the separate URL sweep, and that failure is a
+  > property of the schema's pattern, which has not changed.
 - **Every case carries all seven keys** — `id`, `feature`, `request`, `schema`,
-  `expect`, `notes`, `source` present on all 668, checked by intersecting the key
-  sets rather than by trusting the schema's `required` list (which names only
-  six: `notes` is not required by the schema but is universal in practice).
+  `expect`, `notes`, `source` present on all 670, re-checked during synthesis by
+  intersecting the key sets rather than by trusting the schema's `required` list
+  (which names only six: `notes` is not required by the schema but is universal in
+  practice). The full key vocabulary on disk is exactly those seven plus
+  `preconditions` and `config` — no case carries anything else.
   **Every `NNNN_` filename prefix equals the in-file `id:`** (0 mismatches).
 
   > **FAILURE OF THE NEGATIVE CONTROL, recorded honestly and unchanged: the
@@ -968,19 +1159,33 @@ by the verification — its scripts live in a scratchpad outside the repo, and
   > do not substitute the schema run for it. (`case.schema.json` is the Tester's
   > file and was deliberately not edited here; tightening the pattern to the
   > pinned tag would be a Tester-side change.)
-- **668** files, **668** distinct ids — **no duplicate ids**.
-- **Source pins: clean, single tag.** The verification's prefix-aware sweep over
-  its mandated scope (`spec/*.yaml` + `spec/*.md` + `spec/conformance/cases/*.yaml`
-  — 687 files, of which 687 contain a PostgREST URL) found **1851** references
-  and **exactly one tag: `v16.0`**. Widening the same sweep to include
-  `spec/conformance/*.md` during synthesis gives **1857**, still a single tag.
-  Doc links resolve to `postgrest.org/en/v16` (19 hits, no other version). This
-  is the **only** check that enforces the pin — see the schema-validation caveat
-  above.
+- **670** files, **670** distinct ids — **no duplicate ids**. Cross-checked two
+  independent ways: the validator's own dupe counter (`dupes: 0`) and
+  `grep -h '^id:' spec/conformance/cases/*.yaml | sort | uniq | wc -l` → **670**
+  against `ls spec/conformance/cases/*.yaml | wc -l` → **670**.
+- **Source pins: clean, single tag.** The verification's sweep over its mandated
+  scope (`spec/*.yaml` + `spec/*.md` + `spec/conformance/cases/*.yaml`) found
+  **1801** references and **exactly one tag: `v16.0`**; its per-file tally
+  recorded `{"v16.0": 689}`, i.e. 689 in-scope files carry a tag and not one
+  carries a second. **670/670 cases carry a `source:` line.** A residual grep for
+  any `source:` line not matching `postgrest/v16.0/` returned only
+  `github.com/.../blob/v16.0/` URLs (still v16.0) plus one prose line in
+  `mutations.yaml` stating that no source URL applies. **Zero** references to any
+  tag other than v16.0.
 
-  > Both figures are reported rather than reconciled: a synthesis document that
-  > cites sources necessarily changes the count it is reporting. The invariant
-  > that matters (**one tag, zero exceptions**) holds at both.
+  > **Two reference counts appear in this file and neither is wrong.** The
+  > verification's pattern
+  > (`postgrest/(v[0-9]+\.[0-9]+(\.[0-9]+)?|main|master|[0-9a-f]{7,40})/`) counts
+  > **1801**; the synthesis re-ran a *prefix-aware* pattern
+  > (`postgrest/(raw/|blob/|tree/)?<tag>/`) over the same scope and counts
+  > **1874**, of which **1837** lie outside the three synthesis documents. The
+  > difference is entirely `blob/`- and `tree/`-prefixed links the narrower
+  > pattern skips — and a synthesis document that cites sources necessarily
+  > changes the count it is reporting. Both are reported rather than reconciled.
+  > The invariant that matters (**one tag, zero exceptions**) holds under both
+  > patterns, and the sweep is the **only** check that enforces the pin — see the
+  > schema-validation caveat above. Doc links resolve to `postgrest.org/en/v16`
+  > (19 hits, no other version).
 
   > **Use a prefix-aware pattern.** A naive `grep -vE 'postgrest/v16\.0/'`
   > reports false stale hits: `github.com/PostgREST/postgrest/blob/v16.0/…`
@@ -996,37 +1201,45 @@ by the verification — its scripts live in a scratchpad outside the repo, and
   > `^https://raw\.githubusercontent\.com/PostgREST/postgrest/.+#L[0-9]+$` quoted
   > in `README.md` and in this file. Both are pattern text.
 
-  > **Bare `v14.12` occurrences are prose, not citations.** **104** remain across
+  > **Bare `v14.12` occurrences are prose, not citations.** **110** remain across
   > the 17 area model files (`url_grammar.md` 15, **`pagination.yaml` 14**,
-  > `errors.yaml` 13, `auth.yaml` 10, `config.yaml` 9, `filters.yaml` /
-  > `observability.yaml` / `ordering.yaml` 6 each, `content_negotiation.yaml` /
-  > `headers.yaml` 5 each, `select.yaml` 4, `openapi.yaml` / `rpc.yaml` 3 each,
+  > `errors.yaml` 13, **`observability.yaml` 12**, `auth.yaml` 10,
+  > `config.yaml` 9, `filters.yaml` / `ordering.yaml` 6 each,
+  > `content_negotiation.yaml` / `headers.yaml` 5 each, `select.yaml` 4,
+  > `openapi.yaml` / `rpc.yaml` 3 each,
   > `mutations.yaml` 2, `domain_representations.yaml` / `operators.yaml` /
   > `representations.yaml` 1 each), plus **25** across 24 case files.
-  > `pagination.yaml` is this pass's mover (6 → 14), all of it in the expanded
-  > re-sync note documenting exactly which header lines shifted in
-  > `RangeSpec.hs`, `RpcSpec.hs` and `QueryLimitedSpec.hs`. Verified
+  > `observability.yaml` is this pass's mover (6 → 12), all of it in the
+  > correction note explaining that the "OPTIONS omits `plan`/`transaction`"
+  > claim was false at BOTH pins (identical `withTiming` control flow), so it is
+  > an inherited authoring error rather than a v16.0 behavior change. Verified
   > mechanically: **zero** files in `spec/*.yaml`, `spec/*.md` or
   > `spec/conformance/cases/*.yaml` contain a `v14.12` *URL*. **Not** counted as
   > stale pins. (This count excludes `README.md`, `COVERAGE.md` and
   > `conformance/INDEX.md`, which the synthesis phase rewrites.)
   >
-  > **But "prose, not a citation" is not the same as "correct".** Three of these
+  > **But "prose, not a citation" is not the same as "correct".** Four of these
   > comparative notes have been found **false** and fixed, one per re-sync: case
   > **1029**'s "byte-identical parser" claim; case **1016**'s claim that v16.0
-  > had no Feature-spec line for the PUT-`limit` rule; and, this pass,
+  > had no Feature-spec line for the PUT-`limit` rule;
   > `pagination.yaml`'s opening "no pagination behavior changed between the
   > pins", now narrowed to "no *asserted* pagination behavior changed" — the
   > re-sync found four traceable-but-unmodeled behaviors and one mis-modelled
-  > rule behind that sentence. Three false claims out of ~129 prose occurrences
+  > rule behind that sentence; and, this pass, `observability.yaml`'s
+  > "the OPTIONS subset ... UNCHANGED on the wire from v14.12" — the *unchanged*
+  > half was true, the *subset* half was false at **both** pins (see
+  > **Known gaps → observability**). Four false claims out of ~135 prose
+  > occurrences
   > is a low rate, but the sweep above cannot detect any of them — it checks
   > tags, not truth. Treat every one of these mentions as unaudited.
-- **Stale pins outside the checked globs — 51 `v14.12` URLs, unchanged.**
-  Re-counted this pass with the prefix-aware pattern: **eight** files, **51**
+- **Stale pins outside the checked globs — 44 `v14.12` URLs, down 7.**
+  Re-counted this pass with the prefix-aware pattern: **seven** files, **44**
   URLs, all in `--` provenance comments under `spec/conformance/fixtures/`:
-  `ordering.sql` **27**, `observability.sql` **7**, `errors.sql` **5**,
-  `auth.sql` **4**, `mutations.sql` **3**, `config.sql` **2**, `filters.sql`
-  **2**, `rpc.sql` **1**. Per `conformance/fixtures/README.md` these files are
+  `ordering.sql` **27**, `errors.sql` **5**, `auth.sql` **4**, `mutations.sql`
+  **3**, `config.sql` **2**, `filters.sql` **2**, `rpc.sql` **1**.
+  `observability.sql` (**7** last pass) is now **zero** — the observability
+  re-sync re-pinned its whole header block to `v16.0` raw URLs, and all seven
+  anchored line numbers were confirmed unchanged between the pins. Per `conformance/fixtures/README.md` these files are
   historical provenance and explicitly **not authoritative** (the live artifact
   is `fixtures.sql`), and `.sql` is outside the pin check's declared globs — so
   this is **not** an in-scope failure. It is nonetheless real leftover pin drift
@@ -1035,27 +1248,44 @@ by the verification — its scripts live in a scratchpad outside the repo, and
   *without* a `v14.12` URL — though `spec/pagination.yaml`'s own gaps list
   records that it still carries a "PostgREST v14.12 parity" label in its header
   comment, left alone because existing `fixtures/*.sql` are off-limits.
-- **Citation composition (not a check — an honesty note).** Grouping all **668**
-  `source:` lines by directory: **472** cite `test/spec/Feature/Query`, 44
+- **Citation composition (not a check — an honesty note).** Grouping all **670**
+  `source:` lines by directory: **469** cite `test/spec/Feature/Query`, 44
   `test/spec/Feature/Auth`, 34 `test/spec/Feature/OpenApi`, 15
-  `test/spec/Feature/Query/Preferences`, 14 `test/spec/Feature`, **46** the
-  `test/io` tree (20 fixtures, 16 top-level, 5 `configs`, 5 `configs/expected`),
-  **1** the documentation itself — and **42** cite implementation code under
-  `src/library/PostgREST/…` rather than an upstream assertion (32 directly under
-  `src/library/PostgREST`, 7 under `.../ApiRequest`, 2 under `.../Response`, 1
-  under `.../Config`). Those 42 expected bodies are *derived from reading the
+  `test/spec/Feature/Query/Preferences`, 14 `test/spec/Feature`, **47** the
+  `test/io` tree (20 fixtures, 17 top-level, 5 `configs`, 5 `configs/expected`),
+  **1** the documentation itself — and **46** cite implementation code under
+  `src/library/PostgREST/…` rather than an upstream assertion (35 directly under
+  `src/library/PostgREST`, 7 under `.../ApiRequest`, 3 under `.../Response`, 1
+  under `.../Config`). Those 46 expected bodies are *derived from reading the
   implementation*, not transcribed from an it-block, which is a weaker form of
   ground truth even though it is not a citation defect.
 
-  The count moved 36 → **42** this pass — the largest single-pass increase so
-  far, all of it pagination (**1283–1288**). Each of the six states in its
-  `notes:` that PostgREST's own suite never issues the shape (count=planned on
-  an RPC; a Range header on HEAD or on POST /rpc; a limit/Range combination that
-  discriminates intersection from override; `Preference-Applied` on a plain
-  read; `count=none` under `handling=strict`), and several are *deliberately*
-  derived because the upstream gap is the point of the case — 1287 exists
-  precisely because the only upstream it-block cannot discriminate the rule.
-  That is a defensible use of priority-2 ground truth, but it is worth watching:
+  **The count moved 42 → 46, and for the first time the movement was mostly
+  *backwards*.** Previous passes reported cases migrating *off* implementation
+  code onto it-blocks (1189, 1016). This pass produced net +4 from four separate
+  motions, and three of them went the other way:
+  - **1757, 1768, 1769 were re-anchored FROM `ServerTimingSpec.hs#L87/#L96/#L104`
+    ONTO `App.hs#L225` / `Plan.hs#L174` / `Plan.hs#L177`.** This is not a
+    downgrade of evidence: the upstream it-blocks are still cited in each case's
+    `notes:` for the presence assertion they do make, and the anchors moved
+    because the *retracted* claim (plan/transaction absent on OPTIONS) could only
+    be refuted at the control flow, not at a spec line that never asserted it.
+    Still, three of the four are now priority-2 ground truth where they were
+    priority-1.
+  - **1767 moved the other way**, off `Logger.hs#L63` onto `test_io.py#L523`,
+    joining 1765/1766 on the parametrized upstream test.
+  - **1770 and 1771 are new and both implementation-anchored** — 1770 at
+    `Response/Performance.hs#L29` (the module **doctest**, which is the only place
+    upstream pins the exact wire rendering; the Feature-spec matcher
+    `matchServerTimingHasTiming` accepts any separator and any number of decimals)
+    and 1771 at `App.hs#L143` (`setServerName`), with `test_io.py:1065` cited in
+    `notes:` as the request shape it mirrors.
+
+  The previous pass's caution stands and now applies twice over: the
+  implementation-anchored set grew fastest in the last two passes. It is a
+  defensible use of priority-2 ground truth when the case's whole point is a
+  behavior upstream does not assert — but the direction of travel is worth
+  watching, because
   a sixth of the increase in implementation-anchored cases since the tree was
   built came from one area in one pass.
 
@@ -1066,14 +1296,17 @@ by the verification — its scripts live in a scratchpad outside the repo, and
   citation class that neither `case.schema.json` nor any prior pass anticipated.
   Note it and decide whether it should be normalized.
 
-  Against all that, **each of the last four area re-syncs found exactly one case
-  in the implementation-anchored set that did not belong there**: filters moved
-  **1189** (`Plan.hs#L855` → `QuerySpec.hs#L1187`), url_grammar moved **1016**
-  (`ApiRequest.hs#L178` → `UpsertSpec.hs#L295`), errors' own new cases went the
-  other way with explicit justification, and pagination re-anchored **1268**
-  (`RangeSpec.hs#L160` → `#L163`) and **1269** (`#L152` → `#L153`) onto the
-  actual assertion lines rather than their enclosing `context` lines. The
-  remaining 42 should be re-read during their areas' audits — follow-up 10.
+  Against all that, **every one of the last five area re-syncs moved at least one
+  anchor**: filters moved **1189** (`Plan.hs#L855` → `QuerySpec.hs#L1187`),
+  url_grammar moved **1016** (`ApiRequest.hs#L178` → `UpsertSpec.hs#L295`),
+  errors' own new cases went the other way with explicit justification,
+  pagination re-anchored **1268** (`RangeSpec.hs#L160` → `#L163`) and **1269**
+  (`#L152` → `#L153`) onto the actual assertion lines rather than their enclosing
+  `context` lines, and observability moved **four** (1757/1768/1769 onto
+  implementation code, 1767 off it). That the motion is now bidirectional is the
+  useful signal: re-anchoring is a *finding*, not hygiene, and it happens in both
+  directions. The remaining 46 should be re-read during their areas' audits —
+  follow-up 10.
 - **Id bands.** Fifteen areas each occupy one contiguous band; two areas are
   non-contiguous and must stay that way: **representations** (1300–1314,
   1320–1324, 1330–1333 — the gaps are deliberate sub-feature spacing) and
@@ -1085,38 +1318,70 @@ by the verification — its scripts live in a scratchpad outside the repo, and
   `[10600..10799]` as the area's closed overflow range for future cases.
   **ordering** (1200–1232), **url_grammar** (1000–1035) and **errors**
   (1500–1526) remain contiguous with room — 1233+, 1036–1049 and 1527–1549
-  respectively. New this pass: **pagination** grew to **1250–1288**, still
-  contiguous, with **1289–1299** free before representations starts at 1300 —
-  11 slots, enough for the embedded-`.offset` gap below.
-- **Referenced relations: 20 flagged, 20 deliberate negatives, 0 unexplained.**
-  The check resolved the first path segment of each HTTP case (percent-decoded;
-  `/rpc/<fn>` → function `<fn>`; the 44 bare-`/` cases and the 38 `kind: cli`
-  cases have no relation and were skipped, leaving **586** resolved) against
-  `pg_class`/`pg_proc` on the freshly loaded DB, mirroring the frozen harness's
-  schema resolution: `null`/`public`/`test` → `test`; `unicode` → `تست`;
-  `multi` → `v1`/`v2`; `openapi_no_schema_comment` → `openapi_no_comment` (the
-  1654 variant); and an explicit `Accept-Profile`/`Content-Profile` on the case
-  wins over the label. **All 20 are cases that intentionally target a
-  nonexistent relation/function/schema** to assert a 404 (PGRST125 / PGRST202 /
-  PGRST205) or a 406: 1001, 1002, 1010, 1012, 1024, 1034, 1360, 1368, 1373,
-  1432, 1515, 1516, 1517, 1520, 1521, 1525, 1560, 1583, 1652, 1765. **Zero**
-  case whose expected status is 2xx targets a missing relation.
+  respectively. **pagination** holds **1250–1288**, still contiguous, with
+  **1289–1299** free before representations starts at 1300 — 11 slots, enough for
+  the embedded-`.offset` gap below. New this pass: **observability** grew to
+  **1750–1771** (22 cases), still contiguous, with the whole of **1772–1799**
+  free — by a wide margin the roomiest band in the tree, which matters because
+  every one of its open gaps needs *new cases* once the harness gains the
+  assertion shapes they wait on.
+- **Referenced relations: 16 flagged, 15 deliberate negatives, 1 real finding,
+  0 unexplained.** The check resolved the first path segment of each HTTP case
+  (percent-decoded; `/rpc/<fn>` → function `<fn>`; the bare-`/` cases and the 38
+  `kind: cli` cases have no relation and were skipped, leaving **587** targets)
+  against a `pg_class`/`pg_proc` dump of the freshly loaded DB, mirroring the
+  frozen harness's schema resolution: `test`/`public`/`null` → `test`; `unicode`
+  → `تست`; `multi` → the `v1`/`v2` pair; and an explicit
+  `Accept-Profile`/`Content-Profile` on the case wins over the label (which is
+  what makes case **1574**'s `SPECIAL "@/\#~_-`.names resolve).
 
-  > **Do not read 25 → 20 as a fix.** The previous pass flagged 25 and promoted
-  > three (**1005**, **1008**, **1011**, all `schema: multi`) as a real finding.
-  > This pass's script resolves `multi` to the `v1`/`v2` pair *itself*, so those
-  > three — and the 405 pair 1006/1007 — simply stop being flagged. **The
-  > underlying finding is unchanged and still open**; it rests on
-  > `lib/bier/plugs/action_controller.ex:479`, not on this count. See *Open
-  > verification findings → 1*. A checking script that resolves a label the way
-  > the harness *intends* cannot detect that production code is what makes the
-  > label resolve.
+  > **The resolver was audited for leniency, and it is effectively strict.** 571
+  > targets resolved in the **primary** labeled schema, **1** only via a fallback
+  > schema (1652), and **0** via a cross-kind relation↔function fallback. So the
+  > 16 below are genuinely absent from the loaded DB rather than artifacts of a
+  > loose resolver — a distinction earlier passes did not establish.
 
-  The pagination re-sync's eleven new cases all resolve: **1278, 1279, 1284,
-  1286, 1287, 1288** target `pagination.items`; **1280, 1281, 1282, 1283, 1285**
-  target the function `pagination.getitemrange`. The re-sync also **repaired**
-  four pre-existing cases whose path pointed at the wrong table — see *Fixture
-  write channels* below.
+  **Fifteen of the sixteen are deliberate negative cases whose expected status is
+  404** (PGRST205, "Could not find the table …"): their relations are *supposed*
+  to be absent. Verified per case — e.g. **1024** expects
+  `Could not find the table 'v1.another_table' in the schema cache`, and
+  `another_table` does exist, in `v2` only. The fifteen: **1001** (`test.first`),
+  **1002** (`test.invalid`), **1024** (`v1.another_table`), **1034**
+  (`test.unknown`), **1360** (`mutations.garlic`), **1368** (`mutations.fake`),
+  **1373** (`mutations.foozle`), **1432** (`rpc.fake`, a function), **1515**
+  (`test.non_existent_table`), **1516** (`test.invalid`), **1517**
+  (`test.itemsx`), **1520** (`test.projectx`), **1521**/**1525**
+  (`test.projxxxx`), **1765** (`observability.unknown`). **These are not fixture
+  gaps.** **Zero** case whose expected status is 2xx targets a missing relation.
+
+  **The sixteenth is 1652 and it is the one to act on** — see *Open verification
+  findings → 2*. It expects **406** (`Accept: application/openapi+json` on a
+  non-root path), not 404, so the missing-relation flag is not explained by
+  negativity. `select count(*) from pg_namespace where nspname='openapi'` returns
+  **0**: no `openapi` namespace exists in the loaded fixture DB even though
+  `test/support/conformance_server.ex` lists `"openapi"` in `db_schemas`.
+  `entities` exists in `test` and in each mirrored area schema. **31** cases carry
+  `schema: openapi`; 30 of them target `/`, so only 1652 surfaces it — and because
+  406 negotiation precedes relation resolution, this is a **latent label/fixture
+  mismatch rather than a live failure**. The verifier flagged it and correctly
+  declined to change anything: it is the harness owner's call.
+
+  > **Do not read 25 → 20 → 16 as two fixes.** The flagged *set* has changed three
+  > times while the tree's labels have not. The previous pass promoted **1005**,
+  > **1008**, **1011** (all `schema: multi`) as a real finding, then stopped
+  > flagging them once its script resolved `multi` to `v1`/`v2` itself; this pass
+  > additionally stops flagging 1010, 1012, 1560 and 1583, whose explicit profile
+  > headers it now honours. **The underlying `multi` finding is unchanged and
+  > still open** — it rests on `lib/bier/plugs/action_controller.ex:479`, not on
+  > any count (*Open verification findings → 1*). A checking script that resolves
+  > a label the way the harness *intends* cannot detect that production code is
+  > what makes the label resolve, and each generation of the script has been
+  > better at intending.
+
+  The observability re-sync's two new cases resolve: **1770** targets
+  `observability.organizations` and **1771** targets the root path `/` (no
+  relation). Case **1765** targets `observability.unknown` by design — it is one
+  of the fifteen negatives above.
 
 ### Open verification findings (carry into the conformance run)
 
@@ -1185,16 +1450,19 @@ the loaded DB, so it would resolve through the ordinary `profile in
 config.db_schemas` branch even if the allowlist were removed. Only `multi` is
 load-bearing.)*
 
-#### 2. Case 1652 (`openapi.entities`) may pass for the wrong reason — CARRIED OVER, and independently re-flagged
+#### 2. Case 1652 (`openapi.entities`) may pass for the wrong reason — CARRIED OVER, and re-flagged for a THIRD consecutive pass
 
-Still open, and **this pass's machine check surfaced the same root cause from a
-different direction**: it recorded that the fixture-set label `openapi` — used by
-**31** cases — has no matching schema in the loaded DB
-(`select nspname from pg_namespace where nspname ~ 'openapi'` returns only
-`openapi_no_comment`), because `fixtures.sql` folds `openapi.sql`'s objects into
-`test` while `conformance_server.ex:171` still lists `openapi` in `db_schemas`.
-The verification correctly declined to call this a proven failure; it is the same
-inertness described below.
+Still open. **This pass's machine check hit it head-on rather than incidentally**:
+1652 is the *only* one of the 16 flagged relation targets that is not a deliberate
+404 negative, and the check confirmed by direct catalog query that
+`select count(*) from pg_namespace where nspname='openapi'` returns **0** — the
+fixture-set label `openapi`, carried by **31** cases, has no matching schema in
+the loaded DB, because `fixtures.sql` folds `openapi.sql`'s objects into `test`
+while `conformance_server.ex:171` still lists `openapi` in `db_schemas`. The
+verification again correctly declined to call this a proven failure, on the
+grounds that 406 negotiation runs before relation resolution; it is the same
+inertness described below. Three passes have now surfaced it by three different
+routes, which is itself the argument for closing it.
 
 The empirical data point (1652 **passes**, `mix test --only area:openapi` →
 32/33) is **carried over from an earlier pass, not re-run here** — this pass ran
@@ -1251,10 +1519,24 @@ handlers), `headers` (`test.get_vary_header_override()` + GRANT), `ordering`
 seed rows) and `errors` (`test.infinite_inserts` + `test.infinite_recursion`),
 both dated 2026-08-09.
 
-**The pagination re-sync added no seventh channel and no fixture object at all.**
-`pagination.delta.sql` does not exist. Eleven new cases, three of them on
-`/rpc/` paths, all ran against relations and functions the consolidated fixture
-already had (`pagination.items`, `pagination.getitemrange`).
+**Neither the pagination nor the observability re-sync added a seventh channel,
+and neither added a fixture object.** `pagination.delta.sql` and
+`observability.delta.sql` do not exist. Pagination's eleven new cases, three of
+them on `/rpc/` paths, all ran against relations and functions the consolidated
+fixture already had (`pagination.items`, `pagination.getitemrange`);
+observability's two new cases ran against `observability.organizations` (1770) and
+the root path (1771).
+
+**The observability re-sync did touch `fixtures/observability.sql`, and it is
+worth being precise about how**, because that file is otherwise off-limits: the
+change is **comment-only**. It re-pinned the header's provenance URLs from
+`github.com/.../blob/v14.12/…` to `raw.githubusercontent.com/.../v16.0/…` — all
+seven anchored line numbers confirmed unchanged between the pins — and added two
+missing provenance lines for objects the file already created (`projects`,
+`tiobe_pls`). No DDL, no seed row, and no object was added, removed or altered;
+`git diff` on the file is entirely `--` comment lines. It is the first fixture
+fragment in the tree to be re-pinned to v16.0, which is why the stale-pin count
+above dropped from 51 to 44 across seven files rather than eight.
 
 Instead it produced a different kind of fixture-related change, and this one is
 worth flagging to the conformance run because it changes four *request paths*:
@@ -1292,21 +1574,23 @@ use `version: v16.0`, five use `version: PostgREST v16.0` (`errors`, `filters`,
 `observability`, `operators`, `ordering`), `pagination.yaml` uses
 `postgrest_version: v16.0`, and `url_grammar.md` states it in prose.)
 
-> **Nor is the gap-list shape uniform, and this pass found the previous
-> description of it understated.** Earlier revisions said only `errors.yaml`
-> lacks a `gaps:` key. On disk **four** of the 17 models have no `gaps:` key
-> anywhere: `errors.yaml` (which records coverage under `coverage:` plus a
-> `harness_gate:` key) and — the part that was missed —
+> **Nor is the gap-list shape uniform.** Re-counted on disk this pass: **four**
+> of the 17 models have no `gaps:` key anywhere — `errors.yaml` (which records
+> coverage under `coverage:` plus a `harness_gate:` key) and
 > **`content_negotiation.yaml`, `operators.yaml` and `representations.yaml`,
 > which record no gap list at all, under any key.** `url_grammar.md` uses a
-> `## Gaps` markdown section. All three silent models are among the eight areas
-> with no recorded v16.0 verdict, so their silence is not evidence of
-> completeness — it is un-audited absence, and it should raise their audit
-> priority rather than lower it.
+> `## Gaps` markdown section (line 519). All three silent models are among the
+> **seven** areas with no recorded v16.0 verdict, so their silence is not evidence
+> of completeness — it is un-audited absence, and it should raise their audit
+> priority rather than lower it. `observability.yaml`, by contrast, carries the
+> tree's longest `gaps:` list (**16** entries, including two `needed_assertion:`
+> entries that name missing harness capabilities rather than missing cases), which
+> is why its audit produced findings that are mostly *blocked* rather than
+> *unwritten*.
 
 Adversarial review summaries recorded so far cover **auth**, **headers**,
-**config**, **select**, **filters**, **ordering**, **url_grammar**, **errors**
-and **pagination** — **9 of 17** areas:
+**config**, **select**, **filters**, **ordering**, **url_grammar**, **errors**,
+**pagination** and **observability** — **10 of 17** areas:
 
 | Area | v16.0 audit result | Nature of findings |
 |------|--------------------|--------------------|
@@ -1319,16 +1603,18 @@ and **pagination** — **9 of 17** areas:
 | url_grammar | ⚠️ revise | 1 missing-coverage finding, **0 citation defects** — backslash / escaped-double-quote values inside `in.( … )`, a named part of the area's own docs page with three upstream `it`-blocks (plus one in the adjacent describe) and **no case anywhere in `spec/`**. *Citable but uncovered*, and **partly case-only**. The pass also produced two case repairs that are *not* review findings but belong on the record — **1016** re-anchored off implementation code onto `UpsertSpec.hs#L295` (retiring a false "no Feature spec line exists" claim) and **1029**'s overstated "byte-identical parser" note corrected. See **Known gaps → url_grammar**. |
 | errors | **✅ pass** | **The tree's only pass verdict.** 3 findings, **all explicitly MINOR / non-blocking**, **0 citation defects** — no `Proxy-Status` assertion on a HEAD request (the docs' stated motivation, but the behavior is method-independent in `errorResponseFor`), the modelled `inline_416_content_length_suppressed_on_head` flag that no case exercises (the one genuinely method-dependent behavior, and case-only to close), and the 42883 `xmlagg` → 406 special case (effectively unreachable black-box, accepted as-is). The pass additionally confirmed by reproduction in a scratch DB that cases **1523/1524**'s fixtures behave as asserted, and flagged a **harness gate** (1517/1518/1522 need `@variant_case_ids` entries) that is Bier-side wiring, not a spec defect. See **Known gaps → errors**. |
 | **pagination** | ⚠️ **revise** | 1 missing-coverage finding, **0 citation defects** — embedded **`<embed_path>.offset` has zero cases anywhere in the tree**, while `<embed>.limit` has one (1276); the model names both parameters and cites the docs example for the offset half, and its `constraints:` only justify omitting a *deeper-nested* offset case, never the single-level one both `resource_embedding.rst#L919` and `QueryLimitedSpec.hs#L42` exercise. *Citable but uncovered*, **case-only**, and now the cheapest open item in this file. The pass is also the tree's most substantial **model correction** to date: the Range header was documented as *overriding* limit/offset when `getRanges` **intersects** them (new discriminating case 1287), four traceable-but-unmodeled behaviors were added (PAG-025..PAG-028), four cases were retargeted off a fixture name collision (`/menagerie` → `/menagerie_empty`), and two `source:` anchors were moved onto their actual assertion lines (1268, 1269). See **Known gaps → pagination**. |
-| the other 8 areas | not re-audited at this pin | Citations are self-reported at the v16.0 pin. Three of them (`content_negotiation`, `operators`, `representations`) additionally record **no gap list at all**. |
+| **observability** | ⚠️ **revise** | 4 missing-coverage findings, **0 citation defects** — and unusually, **three of the four are blocked on the harness rather than on authoring effort**: the entire docs **Metrics** section (admin `/metrics`, `pgrst_db_pool_*`, `pgrst_schema_cache_*`, `pgrst_jwt_cache_*`, `ghc_*`; modelled in 5 entries, needs `request.kind: admin`, verified against `test_io/test_admin.py#L132`), **access-log line emission** (docs L15–L48: Apache-combined format, `-` placeholders, per-level line counts; needs `expect.stdout_matches`, and cases 1764–1767 assert only the status the filter keys on), and the **`server-trace-header` empty echo** (`App.hs#L289`, blocked by a direct conflict with case 1573's `headers_no_blank` on the shared instance). The fourth — **`Server-Timing` absent on error responses** (`App.hs#L154` vs `#L253`) — is black-box observable and cheap, left uncased *deliberately* because upstream never asserts it; promotable on request. Separately confirmed source-accurate: the **SQL query log** entry (`log-query`, gate at `App.hs#L223`, rendering at `Logger.hs#L192-195`), stderr-only, gap justified. The pass also **retracted a modelled rule** — the OPTIONS Server-Timing "subset" never existed at either pin — and **closed one gap**, the Server version header (case 1771). See **Known gaps → observability**. |
+| the other 7 areas | not re-audited at this pin | Citations are self-reported at the v16.0 pin. Three of them (`content_negotiation`, `operators`, `representations`) additionally record **no gap list at all**. |
 
 Open follow-ups:
 
-1. Run `bier-spec-audit` over the **8** areas without a recorded v16.0
+1. Run `bier-spec-audit` over the **7** areas without a recorded v16.0
    adversarial verdict: `operators`, `representations`, `mutations`, `rpc`,
-   `content_negotiation`, `openapi`, `observability`, `domain_representations`.
+   `content_negotiation`, `openapi`, `domain_representations`.
    **Prioritize `operators`, `representations` and `content_negotiation`**: they
    are the three models with no gap list under any key, so nothing on disk
-   distinguishes "audited and complete" from "never examined".
+   distinguishes "audited and complete" from "never examined". (`observability`
+   came off this list this pass, with a *revise* verdict.)
 2. **Close the pagination gap — now the cheapest open work in this file.** One
    case in the free **1289–1299** slice: an embedded `<embed>.offset`, either the
    docs' to-many shape
@@ -1379,21 +1665,29 @@ Open follow-ups:
    exists).
 9. Decide the harness question behind **all** the unhonoured `config:` blocks —
    case **1742** (config band), the ten select cases
-   1129–1133/1139/1140/1147–1149, and the three errors cases 1517/1518/1522.
-   Until then 1742 fails for the wrong reason, the eight aggregate cases run with
-   `db-aggregates-enabled` at its `False` default, and the three verbosity cases
-   run verbose. The count is stable at **115** cases carrying `config:` (111
-   non-empty); pagination added none.
-10. Review the **42** cases whose `source:` anchors implementation code rather
+   1129–1133/1139/1140/1147–1149, the three errors cases 1517/1518/1522, and
+   the three observability cases **1765/1766/1767**. Until then 1742 fails for
+   the wrong reason, the eight aggregate cases run with `db-aggregates-enabled`
+   at its `False` default, the three verbosity cases run verbose, and the three
+   log-level cases run at the shared instance's `:error`. **116** cases carry
+   `config:` (112 non-empty); **60** HTTP cases carry a non-empty block outside
+   `@variant_case_ids`, of which those seventeen are the ones whose assertion
+   actually diverges from the shared instance. Observability added one
+   (case 1770), which restates what the shared instance already provides and so
+   changes nothing.
+10. Review the **46** cases whose `source:` anchors implementation code rather
     than an upstream assertion, plus **case 1279**, the tree's only
-    docs-anchored citation. **Every one of the last four re-syncs produced
-    movement here** — 1189 (filters) and 1016 (url_grammar) moved *off*
-    implementation code, errors added two with explicit justification, and
-    pagination added six and re-anchored two (1268, 1269) onto their actual
-    assertion lines. Each remaining one should either follow 1189/1016, or say
-    in `notes:` why no upstream it-block exists — several already do. Treat this
-    as a real defect source, not hygiene, and note the set grew fastest this
-    pass.
+    docs-anchored citation. **Every one of the last five re-syncs produced
+    movement here, and it now runs in both directions** — 1189 (filters) and
+    1016 (url_grammar) moved *off* implementation code, errors added two with
+    explicit justification, pagination added six and re-anchored two (1268,
+    1269) onto their actual assertion lines, and observability moved **1757,
+    1768, 1769 onto** implementation code while moving **1767 off** it and adding
+    two new implementation-anchored cases (1770, 1771). Each remaining one should
+    either follow 1189/1016, or say in `notes:` why no upstream it-block exists —
+    several already do, and observability's four all do. Treat this as a real
+    defect source, not hygiene, and note the set has grown in each of the last
+    two passes.
 11. Close the two ordering gaps — both case-only, both landing in the free 1233+
     slice, both running on relations the loaded DB already has: one case for
     *Order in spread to-many* on `ordering.projects` → `ordering.tasks`, and one
@@ -1420,21 +1714,51 @@ Open follow-ups:
     which would be the filters area's first fixture delta. Note this collides
     with item 12: three separate gaps are about `in.( … )` and they are spread
     over three areas. Settle ownership once.
-14. Decide whether to re-pin the **51** `v14.12` provenance URLs in the eight
-    `spec/conformance/fixtures/*.sql` files, or to state in
+14. Decide whether to re-pin the remaining **44** `v14.12` provenance URLs in the
+    **seven** `spec/conformance/fixtures/*.sql` files, or to state in
     `conformance/fixtures/README.md` that they are frozen at the pin they were
-    derived from. Note neither the errors nor the pagination re-sync added to the
-    count, but `fixtures/pagination.sql` still carries a "PostgREST v14.12
-    parity" **label** in its header comment (recorded in `pagination.yaml`'s
-    gaps, left alone because existing fixture fragments are off-limits).
+    derived from. **The observability re-sync answered this question by example
+    and the precedent should be made explicit**: it re-pinned
+    `fixtures/observability.sql`'s whole header block to `v16.0` raw URLs
+    (7 URLs → 0), a comment-only change with every anchored line number verified
+    unchanged across the pins. Either bless that as the pattern for the other
+    seven or say why observability was special. `fixtures/pagination.sql` still
+    carries a "PostgREST v14.12 parity" **label** in its header comment (recorded
+    in `pagination.yaml`'s gaps, left alone because existing fixture fragments are
+    off-limits).
 15. Consider asking the Tester to tighten `case.schema.json`'s `source` pattern
     from `.../postgrest/.+#L[0-9]+$` to the pinned tag. As written, schema
-    validation cannot catch a stale pin (re-proved by negative control this
-    pass), so the pin is enforced only by an ad-hoc grep sweep that lives in this
-    document rather than in CI. While there, decide whether a **docs**-anchored
+    validation cannot catch a stale pin (proved by negative control in an earlier
+    pass and unchanged since, since the pattern has not changed), so the pin is
+    enforced only by an ad-hoc grep sweep that lives in this document rather than
+    in CI. While there, decide whether a **docs**-anchored
     `source:` (case 1279, the pattern's first) should be allowed explicitly
     rather than by accident — the current pattern requires a
     `raw.githubusercontent.com/PostgREST/postgrest/…#L<n>` URL, which a docs file
     satisfies, so the third citation class is currently indistinguishable from
     the other two. `case.schema.json` is the Tester's file and was deliberately
     not edited here.
+16. **Fix `lib/bier/plugs/observability.ex:159`** — a conformance-pass item, not
+    a spec one, recorded here because the spec is what changed under it. Cases
+    1757/1768/1769 no longer assert that OPTIONS omits the `plan` and
+    `transaction` Server-Timing metrics, because PostgREST does not omit them at
+    either pin; `lib/` implements the retracted behavior. This is the one place in
+    this document where a green suite was green on an invented rule, and it is the
+    strongest available argument for finishing the remaining seven audits.
+17. **Decide whether to promote `observability.server_timing.success_path_only`
+    to a case.** It is the only observability gap that is black-box observable,
+    expressible today, and blocked on nothing but policy — the tree's rule is not
+    to pin behavior upstream never asserts. An operator's call, not a
+    researcher's.
+18. **Give the harness the two assertion shapes the observability area is waiting
+    on**, or accept that two of the docs page's three top-level sections stay
+    uncovered indefinitely: `expect.stdout_matches` / `expect.stderr_matches`
+    (a regex list plus a line-count bound, evaluated against the instance's
+    captured output for the duration of the request) unlocks the whole Logs
+    section and the `log-level` cases' inert `config:` blocks;
+    `request.kind: admin` plus a Prometheus-text body matcher unlocks the Metrics
+    section **and** the `admin_server` page's `/metrics` and `/schema_cache`
+    entries. Both are named in `spec/observability.yaml`'s `gaps:` as
+    `needed_assertion:` entries. This is the single highest-leverage harness
+    change in this document: two capabilities close two docs sections and one
+    scoped page.

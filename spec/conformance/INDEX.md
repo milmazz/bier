@@ -1,7 +1,7 @@
 # Conformance case index
 
-Cross-reference of the **668** conformance cases under `spec/conformance/cases/`.
-Pinned target: **PostgREST v16.0** (all 668 `source:` URLs).
+Cross-reference of the **670** conformance cases under `spec/conformance/cases/`.
+Pinned target: **PostgREST v16.0** (all 670 `source:` URLs).
 
 Each case is one YAML file `NNNN_<slug>.yaml` validated against
 [`../case.schema.json`](../case.schema.json). Cases are grouped into 17 feature
@@ -54,15 +54,17 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | content_negotiation | 47 | 1600–1646 | `fixtures/content_negotiation.sql` + `fixtures/content_negotiation.delta.sql` (the vendored media-type domains + handlers, folded) | `test` |
 | openapi | 33 | 1650–1682 | `fixtures/openapi.sql` | `openapi`, `openapi_no_schema_comment`, `openapi_variadic` |
 | config | 45 | 1700–1744 | `fixtures/config.sql` | `config` |
-| observability | 20 | 1750–1769 | `fixtures/observability.sql` | `observability` |
+| **observability** | **22** | **1750–1771** | `fixtures/observability.sql` (**no delta** — the v16.0 re-sync added two cases and zero fixture objects; its `.sql` change is a comment-only provenance re-pin) | `observability` |
 | domain_representations | 21 | 1800–1820 | `fixtures/domain_representations.sql` | `domain_representations` |
 
-Total: **668 cases**, **17 areas**, **17 fixture fragments**
+Total: **670 cases**, **17 areas**, **17 fixture fragments**
 (plus **6** `*.delta.sql` write channels, all currently **comment-only** — each
 carries a single `-- Folded into ../fixtures.sql on <date> …` provenance line
 and no DDL. Four are dated 2026-08-08; `url_grammar.delta.sql` and
 `errors.delta.sql` are dated 2026-08-09. See
 [`fixtures/README.md`](fixtures/README.md) for who may write which file).
+The last two re-syncs (pagination, observability) added **no** delta channel and
+no fixture object at all, so the six have not moved since 2026-08-09.
 
 Each area's `feature:` prefix matches its area name exactly, so the area is
 recoverable directly from the case file:
@@ -212,16 +214,60 @@ sub-features present per area (second segment, as on disk):
 | content_negotiation | 1600–1646 | json, csv, geojson, octet-stream, singular, nulls-stripped, plan, openapi, precedence, error, custom-media-handler |
 | openapi | 1650–1682 | root, defaults, comments, table, types, rpc, mode, security |
 | config | 1700–1744 | dump-config, sources, aliases, validation, coercion, parsing, precedence, db-max-rows, db-tx-end, db-extra-search-path, app-settings, server-cors-allowed-origins, cli, client-error-verbosity, server-reuseport, url-use-legacy-target-names, admin-server-unix-socket |
-| observability | 1750–1769 | server-timing, trace-header, log-level |
+| **observability** | **1750–1771** | server-timing (incl. **1770**, the exact five-metric render), trace-header, log-level, **server** (**1771**, the `Server: postgrest/…` version header — a new sub-feature and the tree's only `Server:` assertion) |
 | domain_representations | 1800–1820 | read, write, filter, default |
 
 ### v16.0 additions worth knowing
 
-- **pagination** grew its band to **1250–1288** (**39** cases, up from 28) — the
-  only area that moved since the previous synthesis, and the newest work in the
-  tree. Eleven ids are new, **eight existing cases were rewritten**, and the pass
-  is unusual in that it also **corrected a modelled rule** rather than only
-  adding coverage:
+- **observability** grew its band to **1750–1771** (**22** cases, up from 20) —
+  the only area that moved since the previous synthesis, and the newest work in
+  the tree. Two ids are new, **six existing cases were rewritten**, and like the
+  pagination pass before it this one **retracted a modelled rule** rather than
+  only adding coverage:
+  - **1757 / 1768 / 1769 lost their `headers_absent_in_value` assertion.** They
+    previously claimed `OPTIONS` responses omit the `plan` and `transaction`
+    Server-Timing metrics. PostgREST has no such behavior at v16.0 **and had none
+    at v14.12**: `withTiming` branches only on `configServerTimingEnabled`
+    (`App.hs#L272`), never on the action, so all five metrics are emitted.
+    `Plan.actionPlan` returns `NoDb …` and `MainTx.mainTx` returns `NoDbTx`, but
+    both stages are still wrapped and still produce a duration. The three cases
+    now assert only what upstream asserts — presence of `jwt`/`parse`/`response`,
+    `ServerTimingSpec.hs#L87-L111`, whose matcher is presence-only — and their
+    `source:` anchors moved from `ServerTimingSpec.hs#L87/#L96/#L104` onto
+    `App.hs#L225` / `Plan.hs#L174` / `Plan.hs#L177`, because a claim about control
+    flow cannot be refuted at a spec line that never made it.
+    **`lib/bier/plugs/observability.ex:159` still implements the retracted
+    behavior** and must be fixed by the conformance pass — see
+    [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → observability*.
+  - **1770** (`server-timing/render-format`) pins the **exact wire render** that
+    1750 leaves loose: `\A`/`\z`-anchored, `", "` separators, exactly one
+    fractional digit per metric (`showFFloat (Just 1)`), all five metrics in the
+    fixed order jwt, parse, plan, transaction, response. Its ground truth is the
+    `Response/Performance.hs#L29` module **doctest** — the only place upstream
+    pins the rendering at all, since `matchServerTimingHasTiming`
+    (`SpecHelper.hs#L79`) accepts any separator and any number of decimals.
+  - **1771** (`server/version-header`) is a **new sub-feature** and the tree's
+    first `Server:` header assertion: `HEAD /` → `headers_present: [Server]` plus
+    `headers_match: {Server: "^postgrest/.+"}`. Only the prefix is asserted,
+    mirroring upstream, which *derives* the version from the header rather than
+    hard-coding it (`test_io.py:1065`). It carries **no `config:` block** — the
+    header is unconditional in `App.hs#L143` (`setServerName`), gated by no key.
+    It is also the tree's **13th HEAD case, and the 13th to expect a 2xx**.
+  - **1765/1766/1767** were rewritten to state in their own `notes:` that their
+    `config: {log-level: …}` blocks are **inert** — `@variant_case_ids` carries
+    only 1758/1763/1764 from this band, so all three run at the shared instance's
+    `log_level: :error` and assert only a log-level-independent status. 1767's
+    `source:` also moved *off* implementation code (`Logger.hs#L63`) onto
+    `test_io.py#L523`, joining 1765/1766 on the parametrized upstream test.
+  - The pass added **no fixture object**. Its change to
+    `fixtures/observability.sql` is **comment-only**: the header provenance URLs
+    were re-pinned from `blob/v14.12` to `raw/v16.0` (all seven anchored line
+    numbers verified unchanged) and two missing lines were added for objects the
+    file already created. It is the first fixture fragment in the tree re-pinned
+    to v16.0.
+- **pagination** holds its band at **1250–1288** (**39** cases, up from 28 in the
+  pass before). Eleven ids were new, **eight existing cases were rewritten**, and
+  the pass **corrected a modelled rule** rather than only adding coverage:
   - **1287** (`range_header/intersects_limit`) is the pass's headline. The model
     previously claimed "Range headers override limit/offset query params",
     citing the upstream it-block titled *"headers override get parameters"*
@@ -311,7 +357,7 @@ sub-features present per area (second segment, as on disk):
 
 ## Case file shapes
 
-Most cases are HTTP request/response (**630**). The **config** area additionally
+Most cases are HTTP request/response (**632**). The **config** area additionally
 uses a **CLI** shape (`request.kind: cli`, `request.flag: "--dump-config"`)
 asserting on `expect.exit_code`, `expect.dump_contains`,
 `expect.dump_reparse_stable`, and `expect.stderr_contains` rather than an HTTP
@@ -325,28 +371,37 @@ The **auth** area uses `request.jwt` to have the runner mint a signed token —
 header because it needs a token signed with a secret the harness deliberately
 does not know.
 
-Any case may carry a `config:` block — **115** do (111 non-empty; 1705, 1719,
+Any case may carry a `config:` block — **116** do (112 non-empty; 1705, 1719,
 1727 and 1743 carry an empty `config: {}`), spread over six areas: config 45,
-auth 33, observability 20, select 10, openapi 4, errors 3. **The count did not
-move this pass**: the pagination re-sync added eleven cases and not one of them
-declares a `config:` block, which is why its assertions are safe on the shared
-instance. The harness boots a dedicated instance only for the ids listed in
+auth 33, observability 21, select 10, openapi 4, errors 3. **The count moved by
+one this pass**: the observability re-sync added case **1770** (the exact
+five-metric Server-Timing render), which declares
+`server-timing-enabled: true` — a restatement of what the shared instance
+already provides, so its assertion is safe. Note the pass's *other* new case,
+**1771**, deliberately carries **no** `config:` block: the `Server:` header is
+unconditional in `App.hs`, so declaring one would misrepresent the contract.
+The harness boots a dedicated
+instance only for the ids listed in
 `@variant_case_ids` (`test/support/conformance_server.ex:58-59`, **18** ids:
 1467–1473, 1491, 1493, 1654, 1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764)
 plus every `kind: cli` case. On any other HTTP case the `config:` block is
 **inert** — it documents the upstream configuration the assertion depends on,
-but the case still runs against a shared instance. Mechanically, **59** HTTP
+but the case still runs against a shared instance. Mechanically, **60** HTTP
 cases carry a non-empty `config:` outside `@variant_case_ids`; most simply
 restate what the shared instance already provides. The instances where the
 declared config *diverges* from the shared instance, and the assertion therefore
 depends on it, are case **1742**, the ten select cases **1129–1133, 1139, 1140,
-1147–1149**, and the three errors cases **1517, 1518, 1522** (which
-`spec/errors.yaml`'s own `harness_gate:` key names explicitly). See
+1147–1149**, the three errors cases **1517, 1518, 1522** (which
+`spec/errors.yaml`'s own `harness_gate:` key names explicitly), and the three
+observability cases **1765, 1766, 1767** (which declare `log-level:
+warn|info|crit` against a shared instance pinned to `log_level: :error`; their
+assertions are log-level-independent statuses, so they still hold — see
+`spec/observability.yaml` → gaps). See
 [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → config*.
 
 `preconditions:` is parsed but **never executed** by the harness — treat it as
 declarative documentation, never as setup a case may depend on. It is present on
-**667** of the 668 cases (case **1330** omits it, which the schema allows). The
+**669** of the 670 cases (case **1330** omits it, which the schema allows). The
 sharpest illustration is in this area: pagination cases **1272, 1274 and 1275**
 declare `preconditions: ["ANALYZE …"]` for planner-estimate expectations and pass
 only because `mix bier.fixtures.load` happens to run a database-wide `ANALYZE`
@@ -360,7 +415,7 @@ deferral; `case.schema.json` itself has no `pending` field. (Earlier revisions o
 this file claimed 6 such cases, listing 1509, 1513 and 1514 as well — those three
 only *mention* `status_text` in `notes:` or in an expected `hint:` string and
 carry no `expect.status_text` key, so they run normally. Re-verified at the
-668-case state: still exactly three.)
+670-case state: still exactly three.)
 
 ## Looking up a case
 

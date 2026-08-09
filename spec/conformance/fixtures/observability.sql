@@ -10,21 +10,26 @@
 -- PostgREST `db-schemas` for these cases). All cases run with
 -- server-timing-enabled=true and server-trace-header="X-Request-Id".
 --
--- Sources:
---   organizations columns/keys:
---     https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/fixtures/schema.sql#L1466
+-- Sources (re-pinned to v16.0; every one of these line numbers is unchanged
+-- from the v14.12 pass — the definitions themselves did not move):
+--   organizations columns/keys (test.organizations):
+--     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L1466
 --   organizations row 6 (Oscorp):
---     https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/fixtures/data.sql#L435
+--     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/data.sql#L435
 --   items:
---     https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/fixtures/schema.sql#L126
+--     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L126
 --   no_pk:
---     https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/fixtures/schema.sql#L688
+--     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L688
+--   projects:
+--     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L719
+--   tiobe_pls (test.tiobe_pls):
+--     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L1437
 --   add_them:
---     https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/fixtures/schema.sql#L1862
---   ret_point_overloaded:
---     https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/fixtures/schema.sql#L1109
---   getallprojects:
---     https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/fixtures/schema.sql#L1037
+--     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L1862
+--   ret_point_overloaded (test.ret_point_overloaded(x int, y int)):
+--     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L1109
+--   getallprojects (test.getallprojects):
+--     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L1037
 
 DROP SCHEMA IF EXISTS observability CASCADE;
 CREATE SCHEMA observability;

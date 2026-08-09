@@ -1,5 +1,5 @@
 id: 1766
-feature: observability/log-level/200-logged-at-info
+feature: observability/log-level/200-status-signal
 request:
   method: GET
   path: /
@@ -11,8 +11,18 @@ preconditions: []
 expect:
   status: 200
 notes: >
-  Drives the log-level filter: at info (and debug) every response is logged,
-  including a 200 root request (which would NOT be logged at warn/error).
-  Asserts the 200 status the filter keys on; stdout emission verified at io
-  level. Mirrors test_io.py:561-570 (test_log_level, info branch).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_io.py#L561
+  Upstream `test_log_level` (the anchored parametrized test): at info (and
+  debug) every response is logged, so the successful `GET /` 200 IS logged
+  (test_io.py#L561-L570, 3 lines) whereas at warn/error it is not
+  (test_io.py#L546-L560).
+  WHAT THIS CASE ACTUALLY ASSERTS: only the 200 status that the filter keys on.
+  It does NOT exercise log-level at all, for two reasons: (a) the harness has no
+  stdout capture (see observability.yaml gaps, `needed_assertion: log_capture`),
+  and (b) the `config:` block below is INERT — `Bier.ConformanceServer`'s
+  `@variant_case_ids` (test/support/conformance_server.ex:58) lists only 1758,
+  1763 and 1764 from the 1750-1799 band, so this case runs against the shared
+  instance's `log_level: :error`, not info. The `config:` block is retained as a
+  record of the upstream configuration the log-line assertion would need. The
+  asserted 200 is independent of log-level, so the case is sound as written —
+  it is simply narrower than its feature name suggests.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_io.py#L523

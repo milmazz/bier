@@ -13,13 +13,21 @@ expect:
   headers_present: [Server-Timing]
   headers_match:
     Server-Timing: "jwt;dur=[0-9]+\\.[0-9]+.*parse;dur=[0-9]+\\.[0-9]+.*response;dur=[0-9]+\\.[0-9]+"
-  headers_absent_in_value:
-    Server-Timing: [plan, transaction]
   body_exact: null
 notes: >
-  OPTIONS on an RPC endpoint carries only the jwt, parse and response timing
-  metrics; plan and transaction are absent because no query plan is built and
-  no database transaction is opened. Second assertion of the same upstream
-  it-block that case 1757 covers for a table. Mirrors
-  ServerTimingSpec.hs:96-103.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ServerTimingSpec.hs#L96
+  OPTIONS on an RPC endpoint carries a Server-Timing header. Upstream asserts
+  ONLY the presence of jwt, parse and response
+  (test/spec/Feature/Query/ServerTimingSpec.hs#L96-L103, via the presence-only
+  matchServerTimingHasTiming, SpecHelper.hs#L76-L82) — second leg of the same
+  upstream it-block that case 1757 covers for a table.
+  DO NOT assert that plan and transaction are absent. The anchored line is the
+  `ActRoutineInfo` arm of `Plan.actionPlan`: it returns
+  `NoDb (RoutineInfoPlan …)`, so no read plan is built and `MainTx.mainTx`
+  yields `NoDbTx` (MainTx.hs#L87) — but both stages are still wrapped in
+  `withTiming` (App.hs#L210, App.hs#L225), which branches only on
+  configServerTimingEnabled (App.hs#L272-L279). A real v16.0
+  `OPTIONS /rpc/getallprojects` response therefore contains `plan;dur=` and
+  `transaction;dur=`. An earlier pass of this case carried
+  `headers_absent_in_value: {Server-Timing: [plan, transaction]}`; that pinned
+  behavior PostgREST does not have and has been removed.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan.hs#L174
