@@ -1,0 +1,55 @@
+id: 1195
+feature: filters/embed/or_across_embeds
+request:
+  method: GET
+  path: /projects?select=name,clients(),tasks()&clients.name=eq.Apple&tasks.name=eq.Design w7&or=(clients.not.is.null,tasks.not.is.null)
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "name": "Windows 7" }
+    - { "name": "IOS" }
+    - { "name": "OSX" }
+notes: >
+  Embedded null filters may sit INSIDE a logic tree, so two different embeds
+  can be OR-ed against each other: a parent survives if at least one of its
+  (independently filtered) embeds is non-null. `addNullEmbedFilters` recurses
+  through `CoercibleExpr` before it rewrites leaves (Plan.hs#L967-L968), so
+  each `<embed>.not.is.null` leaf inside the `or=(...)` group becomes a
+  `CoercibleFilterNullEmbed` over that embed's aggregate alias
+  (Plan.hs#L972), rendered as `<agg> IS NOT DISTINCT FROM NULL` /
+  `IS DISTINCT FROM NULL` (SqlFragment.hs#L381). Because each embed's own
+  filter lives inside its LEFT JOIN LATERAL, a filtered-out embed aggregates
+  to NULL rather than removing the parent — that is what makes the OR
+  meaningful.
+
+  Mirrors RelatedQueriesSpec "related conditions through null operator on
+  embed" > "can do an or across embeds" (v16.0 L225-L233), whose request is
+  `/client?select=*,clientinfo(),contact()&clientinfo.other=ilike.*main*&contact.name=ilike.*tabby*&or=(clientinfo.not.is.null,contact.not.is.null)`
+  -> Walmart + Target. Upstream's `client`/`clientinfo`/`contact` tables are
+  not in the consolidated fixture DB and cannot be added under those names
+  (`fixtures.sql` L477 renames test.projects' FK constraint to `client`, which
+  case 1122 relies on as an FK-name hint), so the SHAPE is reproduced on the
+  existing projects -> clients (many-to-one) + projects -> tasks (one-to-many)
+  relations, the same adaptation this area already applies in cases 1150,
+  1151, 1185 and 1189.
+
+  The two embedded filters were chosen so the OR is not a tautology, matching
+  upstream's Walmart-via-clientinfo / Target-via-contact split: with
+  `clients.name=eq.Apple` only projects 3 (IOS) and 4 (OSX) have a non-null
+  clients aggregate, and with `tasks.name=eq.Design w7` only project 1
+  (Windows 7) has a non-empty tasks aggregate. So project 1 enters through the
+  tasks branch ALONE, projects 3 and 4 through the clients branch ALONE,
+  project 2 (Windows 10, client Microsoft, task "Design w10") satisfies
+  neither branch and is dropped, and project 5 (Orphan, client_id NULL, no
+  tasks) is dropped. Verified against a freshly loaded bier_test: projects
+  (1,Windows 7,1) (2,Windows 10,1) (3,IOS,2) (4,OSX,2) (5,Orphan,NULL);
+  clients (1,Microsoft) (2,Apple); tasks 1..8 named Design/Code w7, w10, IOS,
+  OSX over project_ids 1,1,2,2,3,3,4,4. Both embeds are projected empty so the
+  related arrays/objects stay out of the body; row order is the projects
+  physical order (1,3,4), as in every other null-filtering case in this band.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L225

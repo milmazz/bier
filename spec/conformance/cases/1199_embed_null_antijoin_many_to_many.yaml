@@ -1,0 +1,30 @@
+id: 1199
+feature: filters/embed/null_filtering
+request:
+  method: GET
+  path: /users?select=name,tasks()&tasks.id=eq.1&tasks=is.null
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "name": "Michael Scott" }
+notes: >
+  The anti-join half of the many-to-many null filter (case 1198 is the
+  not.is.null half). It is the sharpest statement of the ordering between an
+  embedded filter and an embedded null filter: the anti-join is evaluated
+  AFTER `tasks.id=eq.1` has been applied inside the embed's lateral, so it
+  keeps users whose FILTERED tasks aggregate is null — users who do not own
+  task 1 — not merely users with no tasks at all. Michael Scott owns tasks
+  5,6,7 and still qualifies.
+
+  Mirrors RelatedQueriesSpec "related conditions through null operator on
+  embed" > "works on a many-to-many relationship" (is.null branch,
+  v16.0 L209-L215) verbatim: same request, same body. Verified against a
+  freshly loaded bier_test — test.users_tasks seeds (1,1) (1,2) (1,3) (1,4)
+  (2,5) (2,6) (2,7) (3,1) (3,5) as (user_id, task_id), so only user 2
+  (Michael Scott) lacks task 1.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L209

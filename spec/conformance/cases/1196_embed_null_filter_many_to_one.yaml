@@ -1,0 +1,39 @@
+id: 1196
+feature: filters/embed/null_filtering
+request:
+  method: GET
+  path: /projects?select=name,clients()&clients=not.is.null
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "name": "Windows 7" }
+    - { "name": "Windows 10" }
+    - { "name": "IOS" }
+    - { "name": "OSX" }
+notes: >
+  Null filtering on a MANY-TO-ONE embed. This is a distinct upstream it-block
+  from the one-to-many one already asserted by cases 1186/1187, and it
+  exercises a different render path: the embed aggregates to a single json
+  OBJECT (to-one) rather than a json array, so `clients=not.is.null` filters
+  on a row aggregate, not on an aggregated array. `addNullEmbedFilters`
+  rewrites the filter to a `CoercibleFilterNullEmbed False <relAggAlias>`
+  (Plan.hs#L972), rendered as `<agg> IS DISTINCT FROM NULL`
+  (SqlFragment.hs#L381) — the to-one analogue of `!inner`, keeping only
+  parents that HAVE a related row.
+
+  Mirrors RelatedQueriesSpec "related conditions through null operator on
+  embed" > "works on a many-to-one relationship" (not.is.null branch,
+  v16.0 L153-L162) verbatim: same request, same body. Verified against a
+  freshly loaded bier_test — test.projects seeds (1,Windows 7,client_id 1),
+  (2,Windows 10,1), (3,IOS,2), (4,OSX,2), (5,Orphan,NULL), so exactly the
+  first four have a client. The single FK test.projects.client_id ->
+  test.clients.id (renamed to constraint name `client` at fixtures.sql L477)
+  makes `clients` resolve unambiguously by relation name. The empty embed
+  projection `clients()` keeps the related object out of the body; row order
+  is the projects physical order.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L152

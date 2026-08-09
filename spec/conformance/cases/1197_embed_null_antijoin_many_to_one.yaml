@@ -1,0 +1,27 @@
+id: 1197
+feature: filters/embed/null_filtering
+request:
+  method: GET
+  path: /projects?select=name,clients()&clients=is.null
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "name": "Orphan" }
+notes: >
+  The anti-join half of the many-to-one null filter (case 1196 is the
+  not.is.null half): `clients=is.null` keeps only PARENT rows with no related
+  row. `addNullEmbedFilters` produces `CoercibleFilterNullEmbed True
+  <relAggAlias>` (Plan.hs#L972), rendered as
+  `<agg> IS NOT DISTINCT FROM NULL` (SqlFragment.hs#L381).
+
+  Mirrors RelatedQueriesSpec "related conditions through null operator on
+  embed" > "works on a many-to-one relationship" (is.null branch,
+  v16.0 L163-L167) verbatim: same request, same body. Verified against a
+  freshly loaded bier_test — project 5 "Orphan" is the only test.projects row
+  with a NULL client_id (fixtures.sql seeds projects 1-4 with client_id 1,1,2,2).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L163
