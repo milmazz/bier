@@ -3,47 +3,57 @@
 Maps every page of the PostgREST **v16** documentation
 ([postgrest.org/en/v16](https://postgrest.org/en/v16/)) to the conformance case
 ids that cover it. The docs-page list follows the v16 site's **References**
-section and its **API** sub-pages, re-enumerated from the live site this pass
+section and its **API** sub-pages, **re-fetched from the live site this pass**
 (16 API sub-pages; 12 top-level References entries, of which `api` is the parent
 counted through its sub-pages).
 
 A docs page with no covering case (and not explicitly scoped out below) is
 flagged **GAP**.
 
-Pinned target: **PostgREST v16.0**. Total cases: **649** across 17 areas
+Pinned target: **PostgREST v16.0**. Total cases: **657** across 17 areas
 (counted on disk this pass, not carried over). The page set is unchanged from
 the previous pass — `references.html` lists 12 entries (11 pages plus
 the `api` parent: Authentication, API, CLI, Transactions, Connection Pool, Schema
 Cache, Errors, Configuration, Observability, Admin Server, HTTP Server, Listener)
 and `references/api.html` lists 16 sub-pages, matching the tables below entry for
-entry.
+entry. Both were re-fetched and re-enumerated rather than carried over.
 
-State of the tree when this file was written: **HEAD `9bfeca4`**
-("spec(ordering): re-sync to PostgREST v16.0 (area 6/17)") with an **uncommitted
-url_grammar re-sync in the working tree** — `spec/url_grammar.md`, this file,
-`conformance/INDEX.md`, `conformance/fixtures.sql` and
-`conformance/fixtures/url_grammar.delta.sql` modified, cases **1016** and
-**1029** rewritten, cases **1030–1035** untracked. Every count here describes
+State of the tree when this file was written: **HEAD `dcebc66`**
+("spec(url_grammar): re-sync to PostgREST v16.0 (area 7/17)") with an
+**uncommitted errors re-sync in the working tree** — `spec/errors.yaml` and
+`conformance/fixtures.sql` modified, cases **1519–1526** and
+`conformance/fixtures/errors.delta.sql` untracked. Every count here describes
 that on-disk state, including the uncommitted files. The previous revision of
-this file was written at `4705810` + an uncommitted ordering re-sync, with
-**643** cases; the whole delta is the url_grammar area (35 → 36 cases, plus two
-rewrites).
+this file was written at `9bfeca4` + an uncommitted url_grammar re-sync, with
+**649** cases; the whole delta is the errors area (19 → 27 cases).
 
-The re-sync is **6 of 17 areas committed** (auth, headers, config, select,
-filters, ordering) with url_grammar in the working tree — treat every "not
-re-audited" note below as describing that mid-flight state, not a finished pass.
+The re-sync is **7 of 17 areas committed** (auth, headers, config, select,
+filters, ordering, url_grammar) with errors in the working tree — treat every
+"not re-audited" note below as describing that mid-flight state, not a finished
+pass.
+
+> **Concurrency note, recorded rather than smoothed over.** The errors re-sync
+> was written into this checkout by another process *while* the verification
+> phase was running. That phase discarded its first run and re-ran everything
+> against a stable snapshot; this synthesis was written against the same
+> snapshot, confirmed identical by hash
+> (`find spec -type f | sort | xargs shasum | shasum` →
+> `a7ec05e2fe259484b1891fa33d59c983ef494e80`, matching before verification, after
+> verification, and at the start of synthesis). Every number below therefore
+> describes one consistent set of bytes. If that hash no longer matches the tree
+> you are reading, re-run the checks rather than trusting these counts.
 
 ## References → API sub-pages
 
 | Docs page (`references/api/...`) | Covering case ids | Notes |
 |----------------------------------|-------------------|-------|
-| `tables_views` (Tables and Views) | 1000–1035 (url_grammar, incl. the new `%20`-in-identifier case 1035), 1050–1099 (operators), 1100–1149 (select, incl. the new composite/array JSON-operator cases 1143–1146), 1150–1199 (filters), 1200–1232 (ordering), 1300–1333 (representations), 1350–1397 (mutations) | Read/write of tables & views: path resolution, horizontal/logical filters, operators, vertical filtering (select), JSON/composite/array column access, ordering, insert/update/delete/upsert. **Partial** — three behaviors the page and its upstream spec assert have no case: the `IN`/`NOT IN` empty set, an empty filter *value*, and the implicit AND of two plain filters (the page's very first rule). See **Known gaps → filters**. |
-| `functions` (Functions as RPC) | 1400–1440 (rpc), 1005–1007 (url_grammar /rpc paths), 1023 (rpc profile), 1031–1032 (OPTIONS `Allow` on a VOLATILE vs. a STABLE routine), 1231–1232 (ordering of an RPC result), 1271 (count envelope on an ordered RPC), 1489–1490 (auth rpc), 1570 (rpc status GUC) | GET/POST RPC, scalar/setof/composite/void returns, args, variadic, volatility, overloaded functions, single unnamed JSON parameter, reserved-word function name (1440), the page's "filters, order and limits inline into a function" rule (`functions.rst` L283/L290) via 1231–1232, and the volatility→`Allow` rule new to this pass (1031/1032: VOLATILE → `OPTIONS,POST`; STABLE → `OPTIONS,GET,HEAD,POST`). **Partial** — the RPC flavor of `Prefer: handling` / `max-affected` (incl. PGRST128) is asserted by no case in any band; see **Known gaps → headers**. |
+| `tables_views` (Tables and Views) | 1000–1035 (url_grammar), 1050–1099 (operators), 1100–1149 (select), 1150–1199 (filters), 1200–1232 (ordering), 1300–1333 (representations), 1350–1397 (mutations) | Read/write of tables & views: path resolution, horizontal/logical filters, operators, vertical filtering (select), JSON/composite/array column access, ordering, insert/update/delete/upsert. **Partial** — three behaviors the page and its upstream spec assert have no case: the `IN`/`NOT IN` empty set, an empty filter *value*, and the implicit AND of two plain filters (the page's very first rule). See **Known gaps → filters**. |
+| `functions` (Functions as RPC) | 1400–1440 (rpc), 1005–1007 (url_grammar /rpc paths), 1023 (rpc profile), 1031–1032 (OPTIONS `Allow` on a VOLATILE vs. a STABLE routine), 1231–1232 (ordering of an RPC result), 1271 (count envelope on an ordered RPC), 1489–1490 (auth rpc), 1570 (rpc status GUC), 1502–1503, 1505, 1507–1514 (errors raised from inside a routine) | GET/POST RPC, scalar/setof/composite/void returns, args, variadic, volatility, overloaded functions, single unnamed JSON parameter, reserved-word function name (1440), the page's "filters, order and limits inline into a function" rule (`functions.rst` L283/L290) via 1231–1232, and the volatility→`Allow` rule (1031/1032). **Partial** — the RPC flavor of `Prefer: handling` / `max-affected` (incl. PGRST128) is asserted by no case in any band; see **Known gaps → headers**. |
 | `schemas` (Schemas) | 1008–1012, 1022–1024 (url_grammar profile), 1557–1560, 1574 (headers profile), 1730 (`db-schema` singular alias), 1733–1734 (`db-schemas` rejects `pg_catalog` / `information_schema`) | Accept-Profile / Content-Profile, multi-schema routing, unacceptable schema, restricted system schemas (new in v16). |
 | `computed_fields` (Computed Fields) | 1128 (select computed-column), 1208 (ordering computed), 1806 (domain rep. via view + computed column) | Computed (virtual) columns in select and order. |
 | `domain_representations` (Domain Representations) | 1800–1820 (domain_representations) | **COVERED**: CREATE DOMAIN cast representations — read (format cast shapes output, incl. implicit `select=*` and through-embed), write (parser cast applied to bodies, `columns=` param), filter (domain-typed predicates, `in`/`not.in`, across relations), default (no cast → base type), error paths (1819–1820). |
-| `pagination_count` (Pagination and Count) | 1250–1277 (pagination), 1431 (rpc Range header), 1700–1701 (db-max-rows) | limit/offset, Range header, exact/planned/estimated count, db-max-rows. |
-| `resource_embedding` (Resource Embedding) | 1112–1127, 1133–1142 (select embed/spread/one-to-one/computed rels/aliases/`!fk` hints), 1181–1199 (filters embed, incl. the nine new 1191–1199), 1211–1224, 1227–1229 (ordering embed/related, incl. computed-relationship related orders 1227–1228 and the nulls-order-alongside-limits regression 1229), 1276 (nested limit), 1028 (legacy embed target name), 1736 (`url-use-legacy-target-names` dump) | Many-to-one/one-to-many/many-to-many, one-to-one (pk-as-fk, unique FK), computed relationships, nested, inner/left, disambiguation (incl. the `table!fk` hint, 1142), spread, and the v16 target-name→alias migration (1028, 1138–1141, 1188–1190, 1224). The filters re-sync added third-level embed filters (1191), two-level and direct-only inner joins (1192–1193), the many-to-one / many-to-many / nested `is.null` + `not.is.null` antijoin matrix (1194, 1196–1199) and `or=` across two embeds (1195). **Partial** — Foreign Key Joins on Views / Chains of Views, Spread To-Many, and FK Joins on Partitioned Tables have no case (**Known gaps → select**), and the page's *Order in spread to-many* section — a named section with its own example, `films.order=year` — has no case in any band (**Known gaps → ordering**). |
+| `pagination_count` (Pagination and Count) | 1250–1277 (pagination), 1431 (rpc Range header), 1700–1701 (db-max-rows), 1522, 1526 (the inline 416 body's verbosity and header set) | limit/offset, Range header, exact/planned/estimated count, db-max-rows, and — new this pass — the two properties of the **inline** out-of-range 416 that `errorResponseFor` never sees. **Partial** — the modelled suppression of `Content-Length` on a **HEAD** 416 has no case; see **Known gaps → errors**. |
+| `resource_embedding` (Resource Embedding) | 1112–1127, 1133–1142 (select embed/spread/one-to-one/computed rels/aliases/`!fk` hints), 1181–1199 (filters embed), 1211–1224, 1227–1229 (ordering embed/related), 1276 (nested limit), 1028 (legacy embed target name), 1736 (`url-use-legacy-target-names` dump) | Many-to-one/one-to-many/many-to-many, one-to-one (pk-as-fk, unique FK), computed relationships, nested, inner/left, disambiguation (incl. the `table!fk` hint, 1142), spread, and the v16 target-name→alias migration (1028, 1138–1141, 1188–1190, 1224). **Partial** — Foreign Key Joins on Views / Chains of Views, Spread To-Many, and FK Joins on Partitioned Tables have no case (**Known gaps → select**), and the page's *Order in spread to-many* section — a named section with its own example, `films.order=year` — has no case in any band (**Known gaps → ordering**). |
 | `resource_representation` (Resource Representation) | 1300–1333 (representations), 1230 (order applied to a PATCH's returned representation), 1550–1556 (Prefer), 1610–1615, 1629 (singular), 1630–1635 (nulls-stripped) | Prefer: return=representation/minimal/headers-only, singular object, vnd.pgrst.object, stripped nulls. |
 | `media_type_handlers` (Media Type Handlers) | 1600–1646 (content_negotiation, incl. 1636–1638/1642/1644/1646 custom-media-handler), 1426 (rpc csv) | JSON/CSV/GeoJSON/octet-stream/text, Accept negotiation and precedence (1639–1641, 1645), custom media handlers (anyelement, override-builtin, any-handler, vendored-not-overridable, table aggregate, default-select requirement), plan output. |
 | `aggregate_functions` (Aggregate Functions) | 1129–1133, 1147–1149 (select aggregate), 1644 (aggregate through a custom media handler) | count/sum/group-by/alias+cast, cast of the aggregated column and of the result (1147–1148), group-by across an embed (1149), agg in embed. **Partial** — *Aggregates in To-One Spreads* and the PGRST127 to-many-spread rejection have no case; see **Known gaps → select**. |
@@ -51,7 +61,7 @@ re-audited" note below as describing that mid-flight state, not a finished pass.
 | `preferences` (Prefer Header) | 1550–1556, 1577–1581, 1584 (headers prefer), 1302–1304, 1313–1314, 1322, 1324, 1332–1333 (return=minimal / headers-only), 1390–1392 (max-affected), 1551–1552 (handling), 1553–1554, 1577–1581, 1584 (timezone) | Prefer: return, handling=strict/lenient, timezone (incl. ± offsets, leap seconds, invalid under default/lenient/strict, and the single- vs two-token `Preference-Applied` echo in 1553/1584), max-affected, missing-defaults via `columns`. **Partial** — every `handling` and `max-affected` case is table-flavored; the RPC flavor of both preferences (incl. PGRST128) has no case. See **Known gaps → headers**. |
 | `vary_header` (Vary Header) | 1575 (default `Vary: Accept, Prefer, Range` on a read), 1576 (`response.headers` GUC override replaces it verbatim), 1582 (the default is appended by `toWaiResponse` for every non-error response, witnessed on OPTIONS), 1583 (error responses carry no `Vary` — they bypass `toWaiResponse`) | **NEW page in v16** — covered. 1582/1583 match the modelled entries `headers.vary.non_read_responses` / `headers.vary.absent_on_errors`. The one remaining leg — a *CORS preflight* answered by the wai-cors middleware, which never reaches `toWaiResponse` — is a gap; see **Known gaps → headers**. |
 | `cors` (CORS) | 1702 (allowed-origin echo), 1703 (empty config allows all), 1704 (non-matching origin → no header), 1742 (default/empty origin list answers a preflight permissively), 1743 (the fixed `Access-Control-Expose-Headers` list on a plain `Origin` request) | 1742/1743 are **HTTP** cases inside the config band. **Partial** — none of the preflight cases asserts `Vary`-absence, the third leg of the v16 `Vary` rule (**Known gaps → headers**), and 1742 does not yet run under the config it declares (**Known gaps → config**). |
-| `options` (OPTIONS method) | 1019 (table `Allow`), **1031** (VOLATILE routine), **1032** (STABLE routine), **1033** (root path), **1034** (unknown relation → 404), 1757, 1768–1769 (observability OPTIONS server-timing on table / rpc / root), 1742 (OPTIONS preflight), 1582 (`Vary` present on an OPTIONS response) | **Materially improved this pass.** The previous revision noted "no dedicated `Allow`-body assertions beyond 1019"; the url_grammar re-sync added four, covering three of upstream `OptionsSpec.hs`' four `Allow` shapes (`#L84`, `#L90`, `#L103`) plus the not-found path (`#L22`). **Still Partial** — the updatability-driven variants (auto-updatable views, trigger-backed views, partitioned tables, `OptionsSpec.hs#L24-L80`) remain uncased; see **Known gaps → options / transactions**. |
+| `options` (OPTIONS method) | 1019 (table `Allow`), 1031 (VOLATILE routine), 1032 (STABLE routine), 1033 (root path), 1034 (unknown relation → 404), 1757, 1768–1769 (observability OPTIONS server-timing on table / rpc / root), 1742 (OPTIONS preflight), 1582 (`Vary` present on an OPTIONS response) | The url_grammar re-sync covered three of upstream `OptionsSpec.hs`' four `Allow` shapes (`#L84`, `#L90`, `#L103`) plus the not-found path (`#L22`). **Still Partial** — the updatability-driven variants (auto-updatable views, trigger-backed views, partitioned tables, `OptionsSpec.hs#L24-L80`) remain uncased; see **Known gaps → options / transactions**. |
 | `url_grammar` (URL Grammar) | 1000–1035 (url_grammar) | Path/method resolution, reserved query params (incl. the legacy embed target name 1028, and `limit`/`offset` forbidden on PUT 1016/1030), %-encoding (incl. `%20` in a relation *and* a column name, 1035), `+`→space, double-quoting reserved characters in filter values and in quoted identifiers (1025–1027, 1029). **Partial** — the page's *Reserved characters* section documents backslash escaping inside `in.( … )` (`\"` for a literal quote, `\\` for a literal backslash) and no case in any band exercises it; see **Known gaps → url_grammar**. |
 
 ## References → top-level pages
@@ -60,12 +70,12 @@ re-audited" note below as describing that mid-flight state, not a finished pass.
 |------------------------------|-------------------|-------|
 | `auth` (Authentication) | 1450–1499 + 11800–11818 (auth) | JWT validation/claims, HS256 (incl. binary/base64 secret) and RS256 (JWK and JWKS), roles, role-claim-key JSON Path, anonymous, audience, pre-request, GUC claims, login-token minting, clock-skew errors. Partial — see **Known gaps**. |
 | `cli` (CLI) | 1705–1741 + 1744 (all 38 `request.kind: cli` cases) | `--dump-config`, `--example`, validation, env/file/db precedence, coercion, unknown-key tolerance (1739), aliases. Driven in-process by `Bier.CliCase`. Note 1742/1743 sit inside the band but are HTTP, so the CLI set is not contiguous. |
-| `transactions` (Transactions) | 1387–1392 (safe-update/delete, max-affected), 1713, 1722 (db-tx-end validation + enum mapping), 1759 (transaction timing) | Tx-scoped GUCs, safe-update/safe-delete (rollback on missing WHERE), db-tx-end. Partial — no explicit characteristics/isolation-level case. |
+| `transactions` (Transactions) | 1387–1392 (safe-update/delete, max-affected), 1713, 1722 (db-tx-end validation + enum mapping), 1759 (transaction timing), 1523 (a trigger cascade aborted by the statement-depth limit) | Tx-scoped GUCs, safe-update/safe-delete (rollback on missing WHERE), db-tx-end. Partial — no explicit characteristics/isolation-level case. |
 | `connection_pool` (Connection Pool) | — (OUT OF SCOPE) | Pool sizing/acquisition behavior is operational and not observable as deterministic black-box HTTP. See **Scope decisions**. |
 | `schema_cache` (Schema Cache) | — (DEFERRED) | Schema-cache reload (`NOTIFY pgrst, 'reload schema'` / SIGUSR1) needs a reload-signal harness. See **Scope decisions**. |
-| `errors` (Errors) | 1500–1518 (errors), 1432–1434 (rpc errors), 1002, 1024, 1185 (not-found / invalid path), 1455–1464 + 11809–11814 (auth JWT errors), 1506, 1515–1516, 1518 (Proxy-Status envelope) | SQLSTATE→HTTP mapping, PGRST error codes, RAISE PGRST full control, 4xx/5xx envelopes, `Proxy-Status`, client-error-verbosity=minimal. Partial — **PGRST127** and **PGRST128** appear nowhere in the tree (see **Known gaps → select / headers**). |
+| `errors` (Errors) | **1500–1526 (errors)**, 1432–1434 (rpc errors), 1002, 1024, 1185 (not-found / invalid path), 1455–1464 + 11809–11814 (auth JWT errors) | SQLSTATE→HTTP mapping (incl. the two new 5xx paths 1523/1524), PGRST error codes, the PGRST205 fuzzy hint (1520/1521), RAISE PGRST full control, RAISE PT custom status, 4xx/5xx envelopes and their byte-exact key order (1525), `Proxy-Status` (1506, 1515–1516, 1519, and its documented *absence* on the inline 416, 1526), client-error-verbosity=minimal (1517, 1518, 1522). **Materially improved this pass** — the area grew 19 → 27 cases and gained two sub-features. **Still Partial** — **PGRST127** and **PGRST128** appear nowhere in the tree (see **Known gaps → select / headers**), and no case in the tree issues a HEAD request that errors (see **Known gaps → errors**). |
 | `configuration` (Configuration) | 1700–1744 (config) | Sources (env/file/db-role-settings, incl. `db-config = false` disabling the in-db source, 1744), aliases, validation, coercion (incl. `coerceBool` from numeric/text strings, 1740–1741), unknown-key tolerance (1739), precedence, app-settings, CORS keys (1702–1704, 1742–1743), plus the v16 keys `client-error-verbosity` (1731–1732), `server-reuseport` (1735), `url-use-legacy-target-names` (1736), `admin-server-unix-socket` (1737–1738). **Partial** — the page's *In-Database Configuration* section documents `db-pre-config` as the recommended mechanism and its *App Settings* section documents `current_setting('app.settings.*')`; neither has a case. See **Known gaps → config**. |
-| `observability` (Observability) | 1750–1769 (observability), 1497 (JWT-cache Server-Timing), 1625–1628, 1643 (execution plan), 1506/1515/1516/1518/1002 (Proxy-Status) | Server-Timing, Trace header, log-level→status logging, execution plan, Proxy-Status. Partial — see **Known gaps** (Metrics, SQL query logs, Server version header). |
+| `observability` (Observability) | 1750–1769 (observability), 1497 (JWT-cache Server-Timing), 1625–1628, 1643 (execution plan), 1506/1515/1516/1519/1526/1002 (Proxy-Status, present and absent) | Server-Timing, Trace header, log-level→status logging, execution plan, Proxy-Status. Partial — see **Known gaps** (Metrics, SQL query logs, Server version header, and `Proxy-Status` on a HEAD request). |
 | `admin_server` (Admin Server) | 1717 (admin-port = server-port fatal), 1737 (`admin-server-unix-socket` dump), 1738 (admin socket-mode validation) | Config-surface validation via the CLI harness; `/live` and `/ready` covered by ExUnit (`test/bier/admin_server_test.exs`). Partial — `/metrics` and `/schema_cache` have no case. |
 | `http_server` (HTTP Server) | — (OUT OF SCOPE, new page in v16) | The page documents exactly one behavior: Warp's graceful shutdown on `SIGTERM`. See **Scope decisions**. |
 | `listener` (Listener) | — (DEFERRED) | LISTEN/NOTIFY channel (`db-channel`) reload trigger needs the same reload-signal harness. See **Scope decisions**. |
@@ -175,11 +185,23 @@ scoped out. **Nothing in this section was rewritten**; only this note was
 appended. `case.schema.json` was likewise **not** touched: it exists, it is the
 Tester's file, and the synthesis step leaves it alone.)*
 
+*(Re-verified a **fifth** time at the **657**-case state, fact by fact against
+disk rather than carried over: `domain_representations` is 1800–1820 = **21**
+cases; **1707** is a live `kind: cli` / `--dump-config` case;
+`grep -c pending spec/case.schema.json` → **0**; the CLI set is 1705–1741 + 1744
+= **38**; `expect.status_text` on exactly **1508/1510/1511**. The errors re-sync
+— the only change since — added eight cases and two fixture objects, all on the
+`errors`, `pagination_count`, `functions`, `transactions` and `observability`
+pages, none of which is scoped out. In particular it did **not** touch
+`connection_pool`, `schema_cache`, `listener` or `http_server`. **Nothing in
+this section was rewritten**; only this note was appended, and
+`case.schema.json` was again left alone as the Tester's file.)*
+
 ## Coverage summary
 
 - Docs pages enumerated: **27** — 16 API sub-pages + 11 top-level reference
   pages (the `references/api` parent page is counted once, through its
-  sub-pages; `url_grammar` is counted once). Re-enumerated from
+  sub-pages; `url_grammar` is counted once). Re-fetched from
   postgrest.org/en/v16 this pass; the page set is unchanged.
 - Pages with at least one covering case: **23**.
 - Pages explicitly scoped: **4** — `connection_pool` (out of scope),
@@ -187,41 +209,41 @@ Tester's file, and the synthesis step leaves it alone.)*
   `listener` (deferred).
 - Pages flagged **GAP** (no covering case and not scoped out): **0**.
 
-Two pages are new in v16 relative to the previous pass: `api/vary_header`
+Two pages are new in v16 relative to the pre-re-sync state: `api/vary_header`
 (covered, 1575–1576 and 1582–1583) and `http_server` (scoped out — see above).
 
 **Fourteen** pages are marked **Partial** in the notes above (`options`,
 `transactions`, `admin_server`, `observability`, `auth`, `preferences`, `cors`,
 `configuration`, `resource_embedding`, `aggregate_functions`, `errors`,
-`tables_views` — from the filters audit — and, new from the url_grammar audit,
-**`url_grammar`** and **`functions`**): they have covering cases but not the full
-breadth of the docs page. These are soft gaps, itemized next. `vary_header`
-stays **covered** but carries one itemized gap (the preflight leg).
+`tables_views`, `url_grammar` and `functions`): they have covering cases but not
+the full breadth of the docs page. These are soft gaps, itemized next.
+`vary_header` stays **covered** but carries one itemized gap (the preflight leg).
+`pagination_count` gains its first itemized gap this pass (the HEAD-416
+`Content-Length` suppression) while staying covered.
 
-Two of the url_grammar pass's movements are worth separating, because they run in
-opposite directions:
+The errors pass moved the tree in one direction only, and it is worth separating
+from the itemized gaps below:
 
-- **`options` got materially better.** It was Partial on the strength of a single
-  case (1019) and now carries five, covering three of upstream's four `Allow`
-  shapes plus the 404 path. It stays Partial only for the updatability variants.
-- **`url_grammar` and `functions` are newly Partial** — not because they
-  regressed, but because the audit found gaps that no previous pass had looked
-  for. `url_grammar` acquired a Partial on the `in.( … )` escaping rule; the
-  `functions` Partial is a *re-homing*, not a new finding — the RPC-flavored
-  `Prefer` gap was already recorded under headers and simply was not reflected on
-  the page it belongs to.
+- **`errors` got materially better and stayed Partial for reasons outside its
+  own area.** It grew 19 → 27 cases and closed the four coverage holes its own
+  model had recorded — the PGRST205 fuzzy hint, `Proxy-Status` on a custom RAISE
+  code, the byte-exact envelope key order, and the two 5xx SQLSTATE paths that
+  needed fixtures. What keeps its page Partial is **PGRST127/PGRST128**, which
+  belong to `select` and `headers` respectively, plus the HEAD-shaped gaps
+  itemized below. An area can be audited clean and still leave its docs page
+  Partial; that is the normal case, not a defect.
 
 `tables_views` remains the notable one: it is the single densest page in the tree
-(seven areas, **291** cases feed it after the url_grammar pass), and it still
-misses the page's opening rule on combining filters — that two plain filters on
-one request are ANDed. Density is not coverage. `resource_embedding` makes the
-same point from the other direction: the ordering audit found a **named docs
-section** with its own worked example (*Order in spread to-many*) and zero
-assertions anywhere in `spec/`, sitting next to 60+ cases that cover the rest of
-the page. `url_grammar` makes it a third time: the area carries 36 cases across the
-10 numbered sections of `spec/url_grammar.md`, and the rule with **zero** cases
-is a paragraph of the docs page's own *Reserved characters* section — sitting
-directly below the paragraph that case 1166 does cover.
+(seven areas, **291** cases feed it), and it still misses the page's opening rule
+on combining filters — that two plain filters on one request are ANDed. Density
+is not coverage. `resource_embedding` makes the same point from the other
+direction: the ordering audit found a **named docs section** with its own worked
+example (*Order in spread to-many*) and zero assertions anywhere in `spec/`,
+sitting next to 60+ cases that cover the rest of the page. `url_grammar` makes it
+a third time. The errors pass adds a fourth variant of the same lesson: the
+tree's **11 HEAD cases all expect 2xx**, so an entire *request shape* — a HEAD
+that errors — is untested across 657 cases, and two separate documented
+behaviors fall into that hole at once.
 
 ## Known gaps
 
@@ -236,18 +258,19 @@ prioritizing:
 - **Citable but uncovered** — upstream *does* assert the behavior at v16.0 with
   a fetchable it-block or golden file, and the case shape can express it; nobody
   wrote the case. **All five *select* entries, all three *filters* entries, all
-  three *headers* entries, both *config* entries, both *ordering* entries and
-  the one *url_grammar* entry are of this kind**, so they are the actionable
-  ones. Each is labelled below.
+  three *headers* entries, both *config* entries, both *ordering* entries, the
+  one *url_grammar* entry and two of the three *errors* entries are of this
+  kind**, so they are the actionable ones. Each is labelled below.
 
 A third axis cuts across both kinds and is what actually decides effort:
-**what does closing it cost?** Of the sixteen citable-but-uncovered entries:
+**what does closing it cost?** Of the eighteen citable-but-uncovered entries:
 
-- **nine are case-only** — select's spread-to-many and terminal-`->`; filters'
+- **eleven are case-only** — select's spread-to-many and terminal-`->`; filters'
   `in.()` (its core assertion; only the eight-column-type sweep needs a fixture)
   and the implicit AND; headers' RPC `handling` and the preflight `Vary`
   assertion; ordering's order-in-spread-to-many and its aliased-relation
-  PGRST118 (both mintable on relations the loaded DB already has); and
+  PGRST118 (both mintable on relations the loaded DB already has); **both new
+  errors entries** (a HEAD against `test.items`, which already exists); and
   **url_grammar's escaped-char `in.( … )` value, but only in part** — see the
   next bullet;
 - **four need fixture objects the consolidated DB does not have** — select's FK
@@ -261,12 +284,67 @@ A third axis cuts across both kinds and is what actually decides effort:
 - **one, config's `db-pre-config`, needs a pre-config function reachable at
   startup**, which is a fixture *and* harness decision.
 
-The case-only entries are the whole of the low-cost work available. The two
-ordering entries and the url_grammar escaped-char case are the cheapest of them:
-the first two reuse the `ordering.projects` → `ordering.tasks` graph that case
-1229 already drives, and the third reuses a row `fixtures.sql:1699` already
-seeds. All three land in free slices of their own areas' bands (1233+ and
-1036+), so none needs a band decision first.
+The case-only entries are the whole of the low-cost work available. **The two
+errors entries are now the cheapest of them**: both are a single HEAD request
+against relations the loaded DB already has, both land in the free 1527+ slice of
+the errors band, and one of them (the HEAD-416 `Content-Length` suppression) is
+the only case that would exercise a property the area model already asserts as
+`true`. The two ordering entries and the url_grammar escaped-char case follow.
+
+### errors (adversarial review verdict: **pass** — all three findings MINOR / non-blocking)
+
+The tree's **first ✅ pass verdict**. Three findings, **0 citation defects**, and
+every one explicitly marked non-blocking by the reviewer. Two are *citable but
+uncovered* and case-only; the third is acceptable-as-is and recorded only so it
+is not rediscovered. A fourth item is not a spec gap at all but a harness gate,
+filed below with the config-area constraint it shares a root cause with.
+
+- **No case asserts `Proxy-Status` on a HEAD request — the docs' own stated
+  motivation for the header.** MINOR, non-blocking.
+  [`errors.rst#L461`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/errors.rst#L461)
+  introduces the header as "useful when doing HEAD requests where the HTTP
+  status is not descriptive enough" — i.e. HEAD is the motivating use, and it is
+  the one shape no case exercises. The tree pins `Proxy-Status` on GET
+  (1506, 1515, 1516, 1519) and its absence on the inline 416 (1526), all
+  GET-flavored. **Why this is non-blocking rather than actionable**: the header
+  is emitted method-independently inside `errorResponseFor`
+  ([`Error.hs#L88`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L88)),
+  with no HEAD branch anywhere on the path, so a HEAD case would assert the same
+  code path the five existing cases already cover. Recorded for completeness, not
+  prioritized.
+
+- **`envelope.inline_416_content_length_suppressed_on_head: true` is modelled but
+  exercised by no case.** MINOR, non-blocking, and the **more actionable of the
+  two** — this one pins a behavior that genuinely differs by method.
+  `spec/errors.yaml:154` asserts the flag and cites
+  [`Response.hs#L62`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L62)
+  (relation read) and
+  [`#L185`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L185)
+  (RPC read): `cLHeader = if headersOnly then mempty else [contentLengthHeader
+  bod]`, where `headersOnly` is the HEAD flag off `WrappedReadPlan`. So on a HEAD
+  whose Range is out of bounds, the inline 416 carries **no** `Content-Length` —
+  a real, method-dependent divergence that nothing in the tree checks. The model
+  asserts it; no case does. **Case-only**: `HEAD /items?offset=100` with
+  `headers_absent: [Content-Length]`, in the free 1527+ slice, against a relation
+  the loaded DB already has — the same request as case 1522/1526 with the method
+  changed.
+
+  > These two findings share one root, worth stating once because it is bigger
+  > than the errors area: **the tree contains 11 HEAD cases (1020, 1272, 1274,
+  > 1275, 1277, 1425, 1681, 1756, 1760, 1761, 1762) and every one expects a 2xx.**
+  > No case anywhere in 657 issues a HEAD request that produces an error. Any
+  > future HEAD-plus-error behavior will land in the same blind spot, so the
+  > cheap fix is to close it once, in this band, rather than per-finding.
+
+- **The 42883 `function xmlagg(` → 406 special case has no case in any area.**
+  MINOR, non-blocking, and **accepted as-is rather than filed as work.**
+  [`Error.hs#L584`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L584)
+  maps the `undefined_function` SQLSTATE to a 406 when the message names
+  `xmlagg`, which is PostgREST's way of turning "you asked for a media type whose
+  handler does not exist" into a negotiation error. It is effectively
+  **unreachable black-box** through the request shapes `case.schema.json`
+  expresses, so there is nothing to write. Recorded so a later audit does not
+  re-derive it as a gap.
 
 ### select (adversarial review verdict: **revise** — findings are *citable but uncovered*)
 
@@ -348,8 +426,8 @@ Three missing-coverage findings, **0 citation defects**. The filters re-sync
 that produced cases 1191–1199 closed a different set of gaps (embed
 null-filtering, third-level filters, or-across-embeds) and did **not** touch
 these three; all three remain open on disk. Each upstream anchor below was
-re-fetched and read this pass, so the line numbers are verified, not carried
-over.
+re-fetched and read during that pass, so the line numbers are verified, not
+carried over.
 
 - **`IN` / `NOT IN` with an empty set — an entire upstream `describe` block with
   no entry, no case, and until now no gap.** Upstream
@@ -371,11 +449,7 @@ over.
   `:221–222` pin the `[""] -> "= ANY('{}')"` line
   ([`SqlFragment.hs#L409`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Query/SqlFragment.hs#L409)).
   So the rule is *modelled in prose in the wrong area and asserted nowhere*:
-  **no case in the whole tree issues an `in.()` request** (re-run this pass:
-  `grep -rn 'in\.()' spec/` matches 12 lines, 7 of which are this file's own gap
-  text; outside it, exactly five — a parser comment at `operators.yaml:70` and
-  the `notes:` of cases 1025, 1026, 1027 and 1053, every one of which uses a
-  *non-empty* list).
+  **no case in the whole tree issues an `in.()` request**.
   **Actionable, mostly case-only.** The empty-set semantics are type-independent
   — one branch on the parsed value, before any type is involved — so the
   primary assertion reproduces on relations `bier_test` already has
@@ -434,9 +508,9 @@ over.
 Two missing-coverage findings, **0 citation defects**. Both were raised against
 the tree *after* the six new cases 1227–1232 landed, so neither is closed by
 them. Both are **case-only** and both reproduce on relations the loaded
-`bier_test` already has — the two cheapest open entries in this file. Unlike
-filters, the ordering primary band is **not full**: 1200–1232 is in use, so
-**1233+** is available without an overflow-range decision.
+`bier_test` already has. Unlike filters, the ordering primary band is **not
+full**: 1200–1232 is in use, so **1233+** is available without an overflow-range
+decision.
 
 - **Order in spread to-many — a *named section* of the v16 docs with zero
   assertions anywhere in `spec/`.**
@@ -461,18 +535,18 @@ filters, the ordering primary band is **not full**: 1200–1232 is in use, so
   verified — but the *behavior* is not tied to them: an order inside a spread
   to-many reproduces directly on `ordering.projects` → `ordering.tasks`
   (`/projects?select=name,...tasks(task_names:name)&tasks.order=name`), the exact
-  graph case **1229** already drives, and both relations exist in the loaded DB
-  (checked this pass). Reproducing an upstream *shape* on local relations when
-  the upstream fixture is missing is a pattern this tree already sanctions — the
-  select area does it in cases **1124** and **1140**, by their own `notes:`.
+  graph case **1229** already drives, and both relations exist in the loaded DB.
+  Reproducing an upstream *shape* on local relations when the upstream fixture is
+  missing is a pattern this tree already sanctions — the select area does it in
+  cases **1124** and **1140**, by their own `notes:`.
   **Actionable with no fixture work**: either write the case in the 1233+ band or
   rewrite the gap text to stop resting on a fixture argument that the local graph
   defeats.
 
   > **Anchor caveat, recorded rather than smoothed over.** Two independent reads
   > of `resource_embedding.rst` placed the section differently — the adversarial
-  > reviewer at **L1215–L1227** with the nested twin at **L1280–L1281**, this
-  > pass's re-fetch at roughly **L1280–L1310**. Both agree on the section title
+  > reviewer at **L1215–L1227** with the nested twin at **L1280–L1281**, a later
+  > re-fetch at roughly **L1280–L1310**. Both agree on the section title
   > and on the example text quoted above, which is what the claim rests on.
   > Re-confirm the exact `#L` anchor against the raw file when the case is
   > authored; do not copy either range on trust.
@@ -497,7 +571,7 @@ filters, the ordering primary band is **not full**: 1200–1232 is in use, so
   **Minor but genuinely uncovered, and case-only**: `ordering.clients` and
   `ordering.projects` both exist in the loaded DB, so one case in the 1233+ band
   closes it with no fixture work. Same anchor caveat as above — the reviewer
-  cites `#L118–L127`, this pass's re-fetch placed the aliased it-block at roughly
+  cites `#L118–L127`, a later re-fetch placed the aliased it-block at roughly
   `#L113–L120`; both agree it is the block immediately following `#L107`.
 
 ### url_grammar (adversarial review verdict: **revise** — finding is *citable but uncovered*)
@@ -540,17 +614,17 @@ no overflow-range decision.
   consolidated fixture. That is **true for three of them and false for the
   fourth**: `#L1334` asserts only that escaping any character yields that
   character, and its expected row is **`David White`**, which
-  `fixtures.sql:1699` already seeds. One case file in the 1036+ band closes it
+  `fixtures.sql` already seeds. One case file in the 1036+ band closes it
   with no delta. Either write it, or rewrite the gap text so it stops resting on
   an absence that does not apply to the cheapest of the four.
 
   > **Two anchor corrections, recorded rather than smoothed over.** The
   > adversarial reviewer cited the it-blocks as `QuerySpec.hs#L1323-L1340` and
-  > the docs as `url_grammar.rst#L68-L74`; both were re-fetched this pass and
-  > both are off. The `escaped chars` context runs **L1320–L1337** (L1323 is a
-  > body line inside the first `it`, not its start), and the escaping paragraph
-  > plus its example are at **L77–L81** — `L68-L74` is the *preceding* example,
-  > the plain `%22`-quoted `in.(…)` form that case 1166 already covers.
+  > the docs as `url_grammar.rst#L68-L74`; both were re-fetched and both are off.
+  > The `escaped chars` context runs **L1320–L1337** (L1323 is a body line inside
+  > the first `it`, not its start), and the escaping paragraph plus its example
+  > are at **L77–L81** — `L68-L74` is the *preceding* example, the plain
+  > `%22`-quoted `in.(…)` form that case 1166 already covers.
   > Re-confirm both anchors against the raw files when authoring; do not copy
   > the reviewer's ranges on trust. The *content* of the finding survives both
   > corrections intact.
@@ -594,27 +668,39 @@ Two missing-coverage findings, **0 citation defects**.
   with `configAppSettings = [("app.settings.app_host","localhost"),
   ("app.settings.external_api_secret","0123456789abcdef")]` in `baseCfg`.
   **Actionable and cheap**: `test.get_guc_value(name text)` already exists in
-  `fixtures.sql:982` and already backs the auth-area GUC cases (1478–1485), so
+  `fixtures.sql` and already backs the auth-area GUC cases (1478–1485), so
   this needs only a case file — plus a harness that honours the case's `config:`
   block (see the next bullet).
 
 - **Harness constraint that blocks already-written cases (not a spec gap, but it
-  belongs here).** Case **1742**
-  (`config/server-cors-allowed-origins/default-preflight`) is correct as written
-  and declares the `server-cors-allowed-origins: ""` that upstream's `baseCfg`
-  carries, but the frozen harness honours a `config:` block only for
-  `kind: cli` cases and for the fixed `@variant_case_ids` list in
-  `test/support/conformance_server.ex` (18 ids — 1467–1473, 1491, 1493, 1654,
-  1677, 1678, 1680, 1682, **1703**, 1758, 1763, 1764 — which contains 1703 but
-  **not 1742**). Every other HTTP case runs against a shared instance whose
-  `server_cors_allowed_origins` is `"http://example.com, http://example2.com"`,
-  so 1742 will echo the Origin instead of returning the permissive `*` and will
-  **fail for the wrong reason**. Closing it is a harness decision (per-`config`
-  instance booting, or a `@variant_case_ids` entry for 1742) behind the human
-  harness gate, not a spec edit. **114** of the 649 cases carry a `config:` key
-  (110 non-empty); 1742 is the one where the block is load-bearing and
-  unhonoured for a *config*-area assertion, and the select area contributes ten
-  more (see the next bullet).
+  belongs here) — and it grew this pass.** The frozen harness honours a
+  `config:` block only for `kind: cli` cases and for the fixed
+  `@variant_case_ids` list in `test/support/conformance_server.ex` (**18** ids —
+  1467–1473, 1491, 1493, 1654, 1677, 1678, 1680, 1682, **1703**, 1758, 1763,
+  1764). Every other HTTP case runs against a shared instance. Mechanically,
+  **59** HTTP cases carry a non-empty `config:` outside that list; most simply
+  restate what the shared instance already provides, so the interesting set is
+  the cases whose declared config **diverges**:
+  - **1742** (`config/server-cors-allowed-origins/default-preflight`) declares
+    `server-cors-allowed-origins: ""` as upstream's `baseCfg` carries, but the
+    shared instance is `"http://example.com, http://example2.com"`, so 1742 will
+    echo the Origin instead of returning the permissive `*` and will **fail for
+    the wrong reason**.
+  - The **ten select cases 1129–1133, 1139, 1140, 1147–1149** (next bullet).
+  - **NEW this pass: the three errors cases 1517, 1518 and 1522**, all declaring
+    `client-error-verbosity: minimal`. `spec/errors.yaml` is unusually explicit
+    about this — it carries a dedicated `harness_gate:` key naming the three ids,
+    the fix ("add 1517, 1518, 1522 to `@variant_case_ids`"), the harness
+    reference (`test/support/conformance_server.ex#L58`) and a note that no
+    PostgREST source applies because it is Bier-side wiring. **Verified on disk
+    this pass**: `@variant_case_ids` at `:58-59` does not contain any of the
+    three, so all three route to the shared *verbose* instance and their
+    `config:` block is silently ignored. That the area model declares its own
+    gate is the right pattern; the other two clusters do not.
+
+  Closing any of these is a harness decision (per-`config` instance booting, or
+  `@variant_case_ids` entries) behind the human harness gate, not a spec edit.
+  **115** of the 657 cases carry a `config:` key (111 non-empty).
 
 - **Same constraint, select area — ten cases.** `spec/select.yaml`'s
   `harness_exposure` gap lists **1129–1133, 1139, 1140, 1147, 1148, 1149**;
@@ -652,7 +738,7 @@ Two missing-coverage findings, **0 citation defects**.
   97 / 100) for cases 1450/1451/1455, and the `Proxy-Status` header on the
   PGRST301 response (`ErrorSpec.hs#L51`) for 1457. Both are disclosed in
   `auth.yaml`'s `gaps:`, and the `Proxy-Status` envelope behavior is already
-  pinned by the errors area (1002, 1506, 1515–1516, 1518).
+  pinned by the errors area (1002, 1506, 1515–1516, 1519).
 - Further auth gaps recorded in `spec/auth.yaml` (`gaps:`): ES256 and EdDSA
   verification (library-supported, no upstream test at v16.0), JWKS multi-key
   rotation, and relative-time claim values (the 30 s clock-skew *boundary* is
@@ -730,6 +816,9 @@ express them, so all three are actionable.
   (`log-query` CLI config key), but no conformance case pins it.
 - **Server version header** — no case asserts the `Server: postgrest/<version>`
   response header.
+- **`Proxy-Status` on a HEAD request** — the docs' stated motivation for the
+  header, exercised by no case. Cross-listed from **Known gaps → errors**; the
+  behavior is method-independent in `errorResponseFor`, so it is MINOR.
 
 ### admin_server
 
@@ -738,14 +827,12 @@ express them, so all three are actionable.
 
 ### options / transactions
 
-- `options`: **narrowed this pass, not closed.** The previous entry read "no
-  dedicated assertions on the `Allow` header contents beyond 1019"; that is no
-  longer true — cases **1031** (VOLATILE routine → `OPTIONS,POST`), **1032**
-  (STABLE routine → `OPTIONS,GET,HEAD,POST`), **1033** (root →
-  `OPTIONS,GET,HEAD`) and **1034** (unknown relation → 404) landed with the
-  url_grammar re-sync. What remains uncased is the **updatability-driven** half
-  of upstream's matrix — auto-updatable views, trigger-backed views and
-  partitioned tables
+- `options`: **narrowed by the url_grammar pass, not closed.** Cases **1031**
+  (VOLATILE routine → `OPTIONS,POST`), **1032** (STABLE routine →
+  `OPTIONS,GET,HEAD,POST`), **1033** (root → `OPTIONS,GET,HEAD`) and **1034**
+  (unknown relation → 404) joined 1019. What remains uncased is the
+  **updatability-driven** half of upstream's matrix — auto-updatable views,
+  trigger-backed views and partitioned tables
   ([`OptionsSpec.hs#L24-L80`](https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OptionsSpec.hs#L24),
   flags at `Response.hs#L215-L222`). `spec/url_grammar.md`'s `gaps:` states the
   cost honestly: `bier_test` has no `projects_*_view_*` relations and standing
@@ -756,62 +843,72 @@ express them, so all three are actionable.
 
 ## Validation status
 
-Machine-verified on **2026-08-09** at commit **`9bfeca4`**
-("spec(ordering): re-sync to PostgREST v16.0 (area 6/17)"), against a tree
-**dirty mid-re-sync**: 6 modified (`spec/url_grammar.md`, this file,
-`spec/conformance/INDEX.md`, `spec/conformance/fixtures.sql`,
-`spec/conformance/fixtures/url_grammar.delta.sql`, and cases **1016**/**1029**)
-plus 6 untracked new url_grammar cases (**1030–1035**). The checks cover the
-on-disk state *including* those. No repository file was modified by the
-verification — its scripts live in a scratchpad outside the repo. **All six
-checks ran for real and every one passed**; the substantive findings are
-recorded under *Open verification findings* below.
+Machine-verified on **2026-08-09** at commit **`dcebc66`**
+("spec(url_grammar): re-sync to PostgREST v16.0 (area 7/17)"), against a tree
+**dirty mid-re-sync**: 2 modified (`spec/errors.yaml`,
+`spec/conformance/fixtures.sql`) plus 9 untracked (cases **1519–1526** and
+`spec/conformance/fixtures/errors.delta.sql`). The checks cover the on-disk
+state *including* those. No repository file was modified by the verification —
+its scripts live in a scratchpad outside the repo. **All six checks ran for
+real**; the substantive findings are recorded under *Open verification findings*
+below.
+
+> **The verification had to be run twice, and that is recorded rather than
+> hidden.** The tree was clean at the start of the verification session but
+> another process wrote the errors re-sync into it mid-run
+> (`spec/conformance/fixtures.sql` mtime landed *after* the first fixture load).
+> The first run was **discarded** rather than patched. Run 2 is a consistent
+> snapshot, proved by hashing the whole tree before and after every check:
+> `find spec -type f | sort | xargs shasum | shasum` →
+> `a7ec05e2fe259484b1891fa33d59c983ef494e80` at both ends, and again at the start
+> of this synthesis. All numbers below are run 2's.
 
 - **Fixture load: OK.** `mix bier.fixtures.load` exited **0**, reporting the
   mirrored area schemas: `operators, ordering, pagination, representations,
   mutations, config, domain_representations`. The loader wires the human-owned
-  supplement (`lib/mix/tasks/bier.fixtures.load.ex:105` expands
-  `spec/conformance/fixtures_local.sql`). Post-load sanity on the loaded DB:
-  **626** relations with `relkind in ('r','v','m','f','p')` excluding
-  `pg_catalog`/`information_schema`/`pg_toast`, and **1027** non-catalog
+  supplement (`lib/mix/tasks/bier.fixtures.load.ex:45,105` expand
+  `fixtures.sql` and `fixtures_local.sql`). Post-load sanity on the loaded DB:
+  **642** relations with `relkind in ('r','v','m','f','p')` excluding
+  `pg_catalog`/`information_schema`/`pg_toast`, and **1028** non-catalog
   functions. Schemas present: `SPECIAL "@/\#~_-`, `auth`, `config`,
   `domain_representations`, `geotest`, `headers`, `headers_private`, `jwt`,
   `mutations`, `observability`, `openapi_no_comment`, `operators`, `ordering`,
   `pagination`, `postgrest`, `private`, `public`, `representations`, `rpc`,
-  `test`, `v1`, `v2`, `تست` — **23** schemas, the same list as the previous two
-  passes. The url_grammar re-sync added a fixture *object*
-  (`test."Server Today"`) but no new namespace, so the schema list is unchanged
-  by construction.
-  *(Relation count across passes: 616 → 618 → 616 → **626**. Only the last
-  step has an identified cause, and it is only partial — `test."Server Today"`
-  is one new relation, not ten. Earlier passes recorded the same drift with **no**
-  fixture change at all, so the remainder is a reload artifact, consistent with
-  what those passes concluded. No case depends on the count; it is recorded
-  rather than chased, and it should not be cited as evidence of anything. The
-  function count moved 1025 → **1027** over the same window with no functions
-  added by this area.)*
-- **Case count: 649** — `ls -1 spec/conformance/cases/*.yaml | wc -l` and the
-  validator agree (649 files, 649 parsed), and `ls -1
-  spec/conformance/cases/ | wc -l` is also **649**: **0** non-`.yaml` entries in
-  the directory.
-- All **649** cases parse as YAML. **0** parse errors, **0** non-mapping roots.
-- All **649** cases validate against `case.schema.json` (`jsonschema` 4.26.0,
-  Draft 2020-12, PyYAML 6.0.3) — **0** invalid cases. The validator
-  was proved **live rather than vacuous** by negative controls on a mutated copy
-  of a pristine case, all five caught: dropping `id` → *"'id' is a required
-  property"*; `status: 99` → *"99 is less than the minimum of 100"*; an extra key
-  → *"Additional properties are not allowed ('bogus' was unexpected)"*; a
-  `source:` with no `#L` anchor → pattern violation; a `source:` on a
-  non-PostgREST path → pattern violation.
+  `test`, `v1`, `v2`, `تست` — **23** schemas, the same list as the previous
+  three passes. The errors re-sync added two fixture *objects* but no new
+  namespace, so the schema list is unchanged by construction.
+  *(Relation count across passes: 616 → 618 → 616 → 626 → **642**. The errors
+  re-sync explains part of the last step and only part: `test.infinite_inserts`
+  and `test.infinite_recursion` are two new relations in `test`, and the loader
+  mirrors `infinite_recursion` into each of the seven area schemas, so the
+  fixture change accounts for roughly nine. Earlier passes recorded the same
+  drift with **no** fixture change at all, so the remainder is a reload artifact,
+  consistent with what those passes concluded. No case depends on the count; it
+  is recorded rather than chased, and it should not be cited as evidence of
+  anything. The function count moved 1027 → **1028**, matching the one new
+  trigger function `test.infinite_inserts()`.)*
+- **Case count: 657** — `ls -1 spec/conformance/cases/*.yaml | wc -l` and the
+  validator agree (657 files, 657 parsed), and `ls -1
+  spec/conformance/cases/ | wc -l` is also **657**: **0** non-`.yaml` entries in
+  the directory. **8** of the 657 (1519–1526) were untracked at verification
+  time.
+- All **657** cases parse as YAML. **0** parse errors, **0** non-mapping roots.
+- All **657** cases validate against `case.schema.json` (`jsonschema`
+  Draft 2020-12, PyYAML) — **0** invalid cases. The validator was proved **live
+  rather than vacuous** by negative controls on a mutated copy of a pristine
+  case: dropping `id` → *"'id' is a required property"*; `status: 99` → *"99 is
+  less than the minimum of 100"*; an extra key → *"Additional properties are not
+  allowed"*; a `source:` with no `#L` anchor → pattern violation; a `source:` on
+  a non-PostgREST path → pattern violation.
 - **Every case carries all seven required keys** — `id`, `feature`, `request`,
-  `schema`, `expect`, `notes`, `source` present on all 649, checked by
+  `schema`, `expect`, `notes`, `source` present on all 657, checked by
   intersecting the key sets rather than by trusting the schema's `required`
   list. **Every `NNNN_` filename prefix equals the in-file `id:`** (0
   mismatches).
 
   > **FAILURE OF THE NEGATIVE CONTROL, recorded honestly: the schema does not
-  > enforce the pin.** The fourth control — rewriting a `source:` URL onto a
-  > *different* PostgREST tag — produced **0 errors, NOT CAUGHT**. The schema's
+  > enforce the pin.** The control that rewrites a `source:` URL onto a
+  > *different* PostgREST tag produced **0 errors, NOT CAUGHT**. The schema's
   > pattern is
   > `^https://raw\.githubusercontent\.com/PostgREST/postgrest/.+#L[0-9]+$`, whose
   > `.+` matches any tag. So a clean schema run proves every case carries a
@@ -820,96 +917,99 @@ recorded under *Open verification findings* below.
   > do not substitute the schema run for it. (`case.schema.json` is the Tester's
   > file and was deliberately not edited here; tightening the pattern to the
   > pinned tag would be a Tester-side change.)
-- **649** files, **649** distinct ids — **no duplicate ids**.
-- **Source pins: clean, single tag.** A regex sweep of every PostgREST
-  `github`/`raw.githubusercontent` URL across `spec/*.yaml`, `spec/*.md` and
-  `spec/conformance/cases/*.yaml` (in `source:` fields and in `notes:` prose
-  alike) found **1749** references and **exactly one tag: `v16.0`**. Zero stale
-  pins in scope. All **649** `source:` lines carry the tag (cases contribute
-  **653** URLs — exactly four cases cite a second URL in `notes:`: 1141, 1703,
-  1725, 1742). Per group:
-  `spec/*.yaml` + `spec/*.md` **1090**, `spec/conformance/cases/*.yaml` **653**;
-  split by host form, **1676** `raw.githubusercontent.com` + **73**
-  `github.com/…/blob/`. Doc links resolve to `postgrest.org/en/v16`. This is the
-  **only** check that enforces the pin — see the schema-validation caveat above.
+- **657** files, **657** distinct ids — **no duplicate ids**.
+- **Source pins: clean, single tag.** A prefix-aware regex sweep of every
+  PostgREST `github`/`raw.githubusercontent` URL across `spec/*.yaml`,
+  `spec/*.md`, `spec/conformance/*.md` and `spec/conformance/cases/*.yaml` (in
+  `source:` fields and in `notes:` prose alike) found **1787** references and
+  **exactly one tag: `v16.0`** — zero files carrying any other tag. Every case's
+  `source:` value was additionally checked individually: **0** non-v16.0. Doc
+  links resolve to `postgrest.org/en/v16` (19 hits, no other version). This is
+  the **only** check that enforces the pin — see the schema-validation caveat
+  above.
+
+  > **Re-counted after this document was rewritten: 1792, still a single tag.**
+  > The 1787 above is the verification phase's number, measured on the
+  > pre-synthesis snapshot. Rewriting `README.md`, `COVERAGE.md` and
+  > `conformance/INDEX.md` added five citations of its own, all `v16.0`. Both
+  > figures are reported rather than reconciled, because a synthesis document
+  > that cites sources necessarily changes the count it is reporting — the
+  > invariant that matters (**one tag, zero exceptions**) holds at both.
 
   > **Use a prefix-aware pattern.** A naive `grep -vE 'postgrest/v16\.0/'`
-  > reports false stale hits — **73** of them at this state: those are
-  > `github.com/PostgREST/postgrest/blob/v16.0/…` lines where `blob/` sits
-  > between the repo and the tag. All 73 are v16.0. Match
+  > reports false stale hits: `github.com/PostgREST/postgrest/blob/v16.0/…`
+  > lines put `blob/` between the repo and the tag. Match
   > `postgrest/(raw/|blob/|tree/)?<tag>`.
 
-  > **Do not anchor the sweep on `https://` either.** 1090 + 653 = 1743, six
-  > short of 1749: six in-scope URLs are written scheme-less
-  > (`raw.githubusercontent.com/…` with no `https://`). A scheme-anchored regex
-  > silently skips them. Both totals are reported here rather than reconciled to
-  > one number, because the discrepancy *is* the finding: neither figure is
-  > wrong, they measure different patterns.
+  > **Do not anchor the sweep on `https://` either.** Several in-scope URLs are
+  > written scheme-less (`raw.githubusercontent.com/…` with no `https://`); a
+  > scheme-anchored regex silently skips them.
 
-  > **110 bare `v14.12` occurrences are prose, not citations.** Re-counted on
-  > disk this pass across the 19 files of `spec/*.yaml` + `spec/*.md`:
-  > `url_grammar.md` (15), this file (13), `auth.yaml` (10), `config.yaml` (8),
-  > `errors.yaml` (7), `README.md`/`filters.yaml`/`observability.yaml`/`ordering.yaml`/`pagination.yaml`
-  > (6 each), `content_negotiation.yaml`/`headers.yaml` (5 each), `select.yaml`
-  > (4), `openapi.yaml`/`rpc.yaml` (3 each), `mutations.yaml` (2),
-  > `domain_representations.yaml`/`operators.yaml`/`representations.yaml`
-  > (1 each) — plus **24** case files. Sampled contexts are deliberate
-  > v14.12→v16.0 change notes ("v16 dropped the named `testUnicodeCfg` helper
-  > that v14.12 kept in `SpecHelper.hs`"; "the block is byte-identical to
-  > v14.12, only the `src/library/` path and line numbers move"; "v16.0 moved to
-  > RFC 9535 JSONPath, so a leading-dot expression — the v14.12 grammar — is now
-  > itself invalid"). Verified mechanically, not sampled: **zero** files in
+  > **The only two in-scope lines that *look* like a non-v16 citation are not
+  > URLs**: the literal schema regex
+  > `^https://raw\.githubusercontent\.com/PostgREST/postgrest/.+#L[0-9]+$` quoted
+  > in `README.md` and in this file. Both are pattern text.
+
+  > **Bare `v14.12` occurrences are prose, not citations.** **96** remain across
+  > the 17 area model files (`url_grammar.md` 15, `errors.yaml` 13, `auth.yaml`
+  > 10, `config.yaml` 9, `filters.yaml`/`observability.yaml`/`ordering.yaml`/`pagination.yaml`
+  > 6 each, `content_negotiation.yaml`/`headers.yaml` 5 each, `select.yaml` 4,
+  > `openapi.yaml`/`rpc.yaml` 3 each, `mutations.yaml` 2,
+  > `domain_representations.yaml`/`operators.yaml`/`representations.yaml` 1
+  > each), plus **25** across 24 case files. `errors.yaml` is the biggest mover
+  > (7 → 13), all of it in its `changes_since_v14_12:` block documenting the
+  > `Proxy-Status` refactor. Verified mechanically: **zero** files in
   > `spec/*.yaml`, `spec/*.md` or `spec/conformance/cases/*.yaml` contain a
-  > `v14.12` *URL*. **Not** counted as stale pins.
+  > `v14.12` *URL*. **Not** counted as stale pins. (This count excludes
+  > `README.md`, `COVERAGE.md` and `conformance/INDEX.md`, which the synthesis
+  > phase rewrites — counting regenerated files against themselves is not a
+  > measurement.)
   >
-  > **But "prose, not a citation" is not the same as "correct".** The
-  > url_grammar re-sync found one of these comparative notes to be **false** and
-  > fixed it: case **1029** claimed the query parser was "byte-identical between
-  > the pins". The parser *body* is unchanged (v14.12 `QueryParams.hs` L64
-  > onward == v16.0 `ApiRequest/QueryParams.hs` L72 onward, +8 offset) but the
-  > module header is not (`TupleSections` dropped, 11 combinators exported).
-  > Case **1016**'s note was wrong in a way that mattered more — it asserted
-  > that v16.0 had no Feature-spec line for the PUT-`limit` rule, when
-  > `UpsertSpec.hs#L295` has asserted it in both pins; the case has been
-  > re-anchored onto it. Two false claims out of 135 prose occurrences (110 in
-  > `spec/*.yaml` + `spec/*.md`, 25 across 24 case files) is a low rate, but the
-  > sweep above cannot detect either — it checks tags, not truth. Treat every
-  > one of these mentions as unaudited.
+  > **But "prose, not a citation" is not the same as "correct".** Two of these
+  > comparative notes have been found **false** and fixed, one per re-sync: case
+  > **1029**'s "byte-identical parser" claim (the body is unchanged with a +8
+  > offset; the module header is not) and case **1016**'s claim that v16.0 had no
+  > Feature-spec line for the PUT-`limit` rule (`UpsertSpec.hs#L295` asserts it
+  > in both pins). Two false claims out of ~121 prose occurrences is a low rate,
+  > but the sweep above cannot detect either — it checks tags, not truth. Treat
+  > every one of these mentions as unaudited.
 - **Stale pins outside the checked globs — 51 `v14.12` URLs, unchanged.**
   Re-counted this pass with the prefix-aware pattern: **eight** files, **51**
   URLs, all in `--` provenance comments under `spec/conformance/fixtures/`:
   `ordering.sql` **27**, `observability.sql` **7**, `errors.sql` **5**,
   `auth.sql` **4**, `mutations.sql` **3**, `config.sql` **2**, `filters.sql`
-  **2**, `rpc.sql` **1**. (A looser `grep -c v14.12` over the same directory
-  returns **78** *lines* across **17** files — most are prose mentions, not
-  URLs; the 51 is the URL count.) Per `conformance/fixtures/README.md` these
-  files are historical provenance and explicitly **not authoritative** (the live
-  artifact is `fixtures.sql`), and `.sql` is outside the pin check's declared
-  globs — so this is **not** an in-scope failure. It is nonetheless real
-  leftover pin drift the v16.0 re-sync has not touched.
-- **Citation composition (not a check — an honesty note).** Grouping all **649**
-  `source:` lines by directory: **463** cite `test/spec/Feature/Query`, 44
+  **2**, `rpc.sql` **1**. Per `conformance/fixtures/README.md` these files are
+  historical provenance and explicitly **not authoritative** (the live artifact
+  is `fixtures.sql`), and `.sql` is outside the pin check's declared globs — so
+  this is **not** an in-scope failure. It is nonetheless real leftover pin drift
+  the v16.0 re-sync has not touched. Note the errors re-sync did **not** add to
+  it: the new `errors.delta.sql` carries only a fold provenance line and no URL.
+- **Citation composition (not a check — an honesty note).** Grouping all **657**
+  `source:` lines by directory: **468** cite `test/spec/Feature/Query`, 44
   `test/spec/Feature/Auth`, 34 `test/spec/Feature/OpenApi`, 15
-  `test/spec/Feature/Query/Preferences`, 14 `test/spec/Feature`, 45 the
-  `test/io` tree (20 fixtures, 15 top-level, 5 `configs`, 5 `configs/expected`)
-  — and **34** cite implementation code under `src/library/PostgREST/…` rather
-  than an upstream assertion (25 directly under `src/library/PostgREST`, 6 under
-  `.../ApiRequest`, 2 under `.../Response`, 1 under `.../Config`). Those 34
+  `test/spec/Feature/Query/Preferences`, 14 `test/spec/Feature`, **46** the
+  `test/io` tree (20 fixtures, 16 top-level, 5 `configs`, 5 `configs/expected`)
+  — and **36** cite implementation code under `src/library/PostgREST/…` rather
+  than an upstream assertion (27 directly under `src/library/PostgREST`, 6 under
+  `.../ApiRequest`, 2 under `.../Response`, 1 under `.../Config`). Those 36
   expected bodies are *derived from reading the implementation*, not transcribed
   from an it-block, which is a weaker form of ground truth even though it is not
   a citation defect.
 
-  The count fell 35 → **34** for a reason worth stating plainly: **each of the
-  last two area re-syncs found exactly one case in this set that did not belong
-  there.** The filters re-sync moved **1189** (`Plan.hs#L855` →
-  `QuerySpec.hs#L1187`, the assertion that actually spells out the expected `299`
-  Warning). The url_grammar re-sync moved **1016**
-  (`ApiRequest.hs#L178` → `UpsertSpec.hs#L295`) and, in doing so, retired the
-  case's explicit claim that no such upstream assertion existed. Both
-  implementation lines survive in `notes:` as rationale. Two for two suggests the
-  remaining 34 should be re-read during their areas' audits rather than accepted
-  — follow-up 9 below. Six url_grammar cases were added this pass and **all six
-  cite upstream `it`-blocks**, so the only movement in the count is 1016's.
+  The count moved 34 → **36** this pass, and the two additions are defensible
+  rather than sloppy: **1522** (`Response.hs#L76`) and **1526**
+  (`Response.hs#L65`) both pin properties of the **inline** 416 body, which is
+  built outside `errorResponseFor` and which upstream never asserts black-box —
+  each case says so in its `notes:`. That is the same justification the other
+  implementation-anchored cases give. Against that, **each of the last three area
+  re-syncs found exactly one case in this set that did not belong there**: the
+  filters re-sync moved **1189** (`Plan.hs#L855` → `QuerySpec.hs#L1187`), the
+  url_grammar re-sync moved **1016** (`ApiRequest.hs#L178` →
+  `UpsertSpec.hs#L295`) and retired its false "no upstream assertion exists"
+  claim, and the errors re-sync's own new cases went the other way — six of its
+  eight cite upstream `it`-blocks (1519–1521, 1523–1524 plus 1525's `test/io`
+  golden). The remaining 36 should be re-read during their areas' audits rather
+  than accepted — follow-up 10 below.
 - **Id bands.** Fifteen areas each occupy one contiguous band; two areas are
   non-contiguous and must stay that way: **representations** (1300–1314,
   1320–1324, 1330–1333 — the gaps are deliberate sub-feature spacing) and
@@ -919,48 +1019,48 @@ recorded under *Open verification findings* below.
   of ids (see `conformance/INDEX.md` → *Case file shapes*). The **filters**
   primary band 1150–1199 is **fully allocated**; `spec/filters.yaml` declares
   `[10600..10799]` as the area's closed overflow range for future cases.
-  **ordering** grew to 1200–1232 and is still **contiguous with room** —
-  1233+ is free inside its own band, which is why both ordering gaps below are
-  costed as case-only with no band decision attached. New this pass:
-  **url_grammar** grew to **1000–1035**, also contiguous, with **1036–1049**
-  free before the operators band starts at 1050 — 14 slots, comfortably enough
-  for the escaped-`in.( … )` gap below and the OPTIONS updatability variants if
-  their fixtures are ever built.
-- **Referenced relations: 21 flagged of ~600 resolved — 17 deliberate
-  negatives, 4 real (and all four share one root cause).** The check resolved the
-  first path segment of each HTTP case (percent-decoded, `+`→space;
-  `/rpc/<fn>` → function `<fn>`; bare `/` skipped; the 38 `kind: cli` cases have
+  **ordering** (1200–1232) and **url_grammar** (1000–1035) remain contiguous
+  with room — 1233+ and 1036–1049 respectively. New this pass: **errors** grew
+  to **1500–1526**, still contiguous, with **1527–1549** free before the headers
+  band starts at 1550 — 23 slots, comfortably enough for the two HEAD gaps below.
+- **Referenced relations: 25 flagged of 575 resolved — 22 deliberate negatives,
+  3 real (and all three share one root cause).** The check resolved the first
+  path segment of each HTTP case (percent-decoded, `+`→space; `/rpc/<fn>` →
+  function `<fn>`; the 44 bare-`/` cases skipped; the 38 `kind: cli` cases have
   no path) against `pg_class`/`pg_proc` on the freshly loaded DB, following the
   frozen harness's schema resolution: `test`/`public`/`null` → `test`, an
-  explicit `Accept-Profile`/`Content-Profile` on the case wins (`http_case.ex:66-69`
-  uses `Map.put_new`, so the case header beats the label), plus the harness label
-  alias `unicode` → `تست` (`conformance_server.ex:181`). Honoring the explicit
-  headers is what makes the number meaningful: a label-only pass reported **27**,
-  and six of those (1009/1011/1013/1014/1017/1018 — plus 1574, which carries
-  `Accept-Profile: SPECIAL "@/\#~_-` where `names` does exist) are false
-  positives that dissolve once the case's own header is read.
+  explicit `Accept-Profile`/`Content-Profile` on the case wins
+  (`http_case.ex` uses `Map.put_new`, so the case header beats the label), plus
+  the harness label alias `unicode` → `تست` (`conformance_server.ex:181`).
+  Honoring the explicit headers is what makes the number meaningful: a
+  label-only pass reported **33**, and eight of those dissolve once the case's
+  own header is read — 1003/1004/1021 (`unicode` → `تست.موارد`, which exists)
+  and 1013/1014/1017/1018/1023 (explicit `Accept-Profile: v1`/`v2`).
 
-  **17 of the 21 are intentional negatives** — the case asserts 404 or 406
+  **22 of the 25 are intentional negatives** — the case asserts 404 or 406
   *because* the target is absent:
 
   | Expected | Cases |
   |----------|-------|
-  | 404 | 1001 (`test.first`), 1002 (`test.invalid`), 1024 (`v1.another_table` — exists only in `v2`), 1034 (`test.unknown`, the new OPTIONS-on-unknown case), 1360/1368/1373 (`mutations.garlic`/`.fake`/`.foozle`), 1432 (`rpc/fake`), 1515/1516/1517 (`test.non_existent_table`/`.invalid`/`.itemsx`), 1765 (`observability.unknown`) |
+  | 404 | 1001 (`test.first`), 1002 (`test.invalid`), 1024 (`v1.another_table` — exists only in `v2`), 1034 (`test.unknown`), 1360/1368/1373 (`mutations.garlic`/`.fake`/`.foozle`), 1432 (`rpc/fake`), 1515/1516/1517 (`test.non_existent_table`/`.invalid`/`.itemsx`), **1520/1521/1525** (`test.projectx`/`.projxxxx`, the new fuzzy-hint and envelope-order cases), 1765 (`observability.unknown`) |
+  | 405 | 1006/1007 (`multi.get_parents_below` — the RPC method check fires before profile resolution) |
   | 406 | 1010/1560/1583 (`Accept-Profile: unknown`), 1012 (`Content-Profile: unknown`), 1652 (`Accept-Profile: openapi`, a label naming no schema) |
 
-  **The remaining 4 — 1005, 1006, 1007, 1008 — are a real finding**, promoted to
-  *Open verification findings* below. All four carry `schema: multi` with no
-  profile header of their own, so the harness sends `Accept-Profile: multi`;
-  `multi` is neither a schema in `bier_test` nor a `db_schema_aliases` key, and
-  the objects they target exist as `v1.parents` / `v1.get_parents_below`.
+  **The remaining 3 — 1005, 1008 and 1011 — are a real finding**, promoted to
+  *Open verification findings* below. All three carry `schema: multi` and none
+  spells out an `Accept-Profile` of its own, so the harness injects
+  `Accept-Profile: multi`; `multi` is neither a schema in `bier_test` nor a
+  `db_schema_aliases` key, and the objects they target exist as `v1.parents` /
+  `v1.get_parents_below` / `v2.children`. They expect **200**, **200** and
+  **201** respectively — which is precisely why they are promoted rather than
+  filed.
 
-  > **Do not read 30 → 16 → 11 → 21 as a regression.** These are four different
-  > scripts counting overlapping sets: prior passes ran the check literally with
-  > no label aliases (30), then with aliases and 406-expectations bucketed as
-  > schema-level skips (16, then 11). This pass re-merges the 406 cases into the
-  > table *and* stops crediting `multi` to `db_profile_default` — which the
-  > previous revision of this file asserted and which is **wrong**, see below.
-  > The underlying set of cases has barely moved; the classification has.
+  > **Do not read 30 → 16 → 11 → 21 → 25 as a regression.** These are successive
+  > scripts counting overlapping sets, with the classification changing rather
+  > than the underlying tree. This pass buckets the 405 pair (1006/1007) as
+  > deliberate rather than real — they never reach profile resolution — and adds
+  > the three new errors negatives (1520/1521/1525), which is the whole of the
+  > +4.
 
   Two spot-checks confirm intent rather than accident: **1024** asserts the body
   message `Could not find the table 'v1.another_table' in the schema cache`
@@ -969,29 +1069,29 @@ recorded under *Open verification findings* below.
 
   **Zero** case whose expected status is 2xx/3xx targets a relation missing for a
   reason other than the `multi` label — the one conclusion that matters, and it
-  is identical under all four classifications. 1005 and 1008 do expect **200**,
-  which is precisely why they are promoted rather than filed.
+  is identical under every classification tried so far.
 
-  All six new url_grammar cases resolve: **1030** targets `test.tiobe_pls` (as
-  does the rewritten **1016**), **1031**/**1032** the functions
-  `test.reset_table` / `test.getallusers`, **1033** the root path (skipped by the
-  check), **1034** is the intentional 404 above, and **1035** the newly folded
-  `test."Server Today"`.
+  All eight new errors cases resolve or are accounted for: **1519** targets the
+  *function* `test.raise_sqlstate_test1` (a `/rpc/` path),
+  **1522**/**1526** `test.items`, **1523**
+  `test.infinite_inserts` and **1524** `test.infinite_recursion` (both newly
+  folded and both confirmed present in the loaded DB), and
+  **1520**/**1521**/**1525** are the intentional 404s above.
 
 ### Open verification findings (carry into the conformance run)
 
 Two findings, both about **fixture-set labels that resolve for the wrong
-reason**. The first is new this pass; the second was open at the last pass and
-still is. They share a root cause worth naming once: a case's `schema:` label is
-turned into an `Accept-Profile` header by the harness, but nothing checks that
-the label denotes anything, so a label can be inert (finding 2) or can be
-rescued by production code (finding 1) without any case failing.
+reason**. Both were open at the last pass and both still are; the first is
+**refined** this pass, not merely carried over. They share a root cause worth
+naming once: a case's `schema:` label is turned into an `Accept-Profile` header
+by the harness, but nothing checks that the label denotes anything, so a label
+can be inert (finding 2) or can be rescued by production code (finding 1)
+without any case failing.
 
-#### 1. `schema: multi` resolves only because `lib/` hard-codes the harness's label — NEW
+#### 1. `schema: multi` resolves only because `lib/` hard-codes the harness's label — REFINED
 
-**Correction first: the previous revision of this file was wrong about this.**
-It stated that `multi` "stands for the `v1`/`v2` profile pair routed by
-`db_profile_default` / `db_profile_schemas`". It does not. On disk:
+The finding stands and its scope is **larger than the previous revision said**.
+On disk:
 
 - `multi` is **not** a schema in `bier_test` (`SELECT nspname FROM pg_namespace
   WHERE nspname IN ('openapi','multi')` → zero rows), and **not** a key in
@@ -1006,12 +1106,23 @@ It stated that `multi` "stands for the `v1`/`v2` profile pair routed by
   `:504`, which routes those two literal labels to the default profile schema
   instead of returning `{:error, {:invalid_schema, …}}`.
 
-So Bier's production request path carries a hard-coded list of **conformance
-harness labels**. Fourteen cases carry `schema: multi`; ten of them
-(**1009–1014, 1017, 1018, 1023, 1024**) spell out their own
-`Accept-Profile`/`Content-Profile` and never touch the allowlist. **Four do:
-1005, 1006, 1007 and 1008**, which is exactly the set the relation check
-flagged.
+**What is new: six cases send the label, not four.** The harness injects
+`Accept-Profile` with `Map.put_new`, so a case escapes the injection only by
+spelling out **`Accept-Profile`** itself. Spelling out `Content-Profile` does
+not help — and the previous revision of this file assumed it did. Of the
+fourteen `multi` cases, these six receive `Accept-Profile: multi`:
+
+| Case | Own headers | Expected | Depends on the allowlist? |
+|------|-------------|---------:|---------------------------|
+| 1005 | none | 200 | **yes** |
+| 1006 | none | 405 | no — the RPC method check fires first |
+| 1007 | none | 405 | no — same |
+| 1008 | none | 200 | **yes** |
+| 1011 | `Content-Profile: v2` | 201 | **yes** |
+| 1012 | `Content-Profile: unknown` | 406 | no — 406 either way |
+
+The other eight `multi` cases (1009, 1010, 1013, 1014, 1017, 1018, 1023, 1024)
+set their own `Accept-Profile` and never touch the allowlist.
 
 Why this is a finding and not bookkeeping: **case 1008's assertion is
 self-contradictory as executed.** Its `notes:` read "No Accept-Profile header ->
@@ -1020,18 +1131,16 @@ the harness *always* sends `Accept-Profile: multi`, so the no-header path the
 case documents is never exercised. Against real PostgREST, `Accept-Profile:
 multi` against `db-schemas="v1,v2"` is a **PGRST106 / 406**, not a 200. The case
 passes because `lib/` compensates for the harness, which is the one direction
-this tree is supposed to forbid. 1005 (expects 200) has the same shape; 1006/1007
-expect 405 and would reach the RPC-method check before profile resolution
-mattered.
+this tree is supposed to forbid. 1005 (expects 200) and 1011 (expects 201) have
+the same shape.
 
 **This is a harness/implementation question, not a spec edit**, and it is
 deliberately left as one: `test/**` is frozen, and removing `@profile_aliases`
 from `lib/` without first giving the harness a way to send *no* profile header
-would break four cases that are otherwise correct transcriptions of
+would break three cases that are otherwise correct transcriptions of
 `MultipleSchemaSpec`. The clean fix is harness-side — let a case opt out of the
 `Accept-Profile` injection — after which `@profile_aliases` can go. Raise it with
-the harness owner before the conformance run reads too much into these four
-passing.
+the harness owner before the conformance run reads too much into these passing.
 
 *(`headers`, the allowlist's other entry, is benign: it **is** a real schema in
 the loaded DB, so it would resolve through the ordinary `profile in
@@ -1040,13 +1149,11 @@ load-bearing.)*
 
 #### 2. Case 1652 (`openapi.entities`) may pass for the wrong reason — CARRIED OVER
 
-**Case 1652 (`openapi.entities`) may pass for the wrong reason — and the whole
-`openapi` label family is inert.** Still open at this pass. The empirical data
-point below (1652 **passes**, `mix test --only area:openapi` → 32/33) is
-**carried over from the previous pass, not re-run here** — this pass ran the six
-static checks only, no `mix test`. Passing does not distinguish the two possible
-reasons, so re-running it proves nothing new anyway; strengthening the case is
-what would.
+Still open at this pass. The empirical data point below (1652 **passes**,
+`mix test --only area:openapi` → 32/33) is **carried over from an earlier pass,
+not re-run here** — this pass ran the static checks only, no `mix test`. Passing
+does not distinguish the two possible reasons, so re-running it proves nothing
+new anyway; strengthening the case is what would.
 
 None of the three `openapi`-area fixture-set labels names a schema that exists in
 the loaded DB. All 33 openapi cases carry one of `openapi` (31),
@@ -1055,12 +1162,11 @@ the loaded DB. All 33 openapi cases carry one of `openapi` (31),
 header, yet `mix bier.fixtures.load` creates none of them — re-confirmed against
 the freshly loaded DB this pass: the schema list on the load includes
 `openapi_no_comment` but no `openapi`, no `multi` and no `unicode`, and
-`fixtures.sql` only ever does
-`CREATE SCHEMA IF NOT EXISTS openapi_no_comment` (line 187). The area's objects
-live in schema `test` (`spec/conformance/fixtures/openapi.sql:24–41`), and the
-loader deliberately does **not** mirror `openapi`
-(`lib/mix/tasks/bier.fixtures.load.ex:29` — "Function-heavy areas (rpc, openapi,
-headers) are intentionally NOT mirrored").
+`fixtures.sql` only ever does `CREATE SCHEMA IF NOT EXISTS openapi_no_comment`.
+The area's objects live in schema `test`
+(`spec/conformance/fixtures/openapi.sql:24–41`), and the loader deliberately does
+**not** mirror `openapi` (`lib/mix/tasks/bier.fixtures.load.ex:29` — "Function-
+heavy areas (rpc, openapi, headers) are intentionally NOT mirrored").
 
 Why it is currently harmless for 32 of the 33:
 `Bier.Plugs.ActionController.dispatch/3` routes the root path (`conn.path_info
@@ -1099,148 +1205,154 @@ the other 32 cases request `/`.
 
 ### Fixture write channels
 
-All five `*.delta.sql` files are **comment-only** — each holds a single
+All **six** `*.delta.sql` files are **comment-only** — each holds a single
 `-- Folded into ../fixtures.sql on <date> (…); empty until the next delta.`
 provenance line and no DDL, i.e. the write channel is empty and the folds are
 recorded: `content_negotiation` (the `application/vnd.pgrst.object` /
 `text/tab-separated-values` domains and their handlers), `headers`
 (`test.get_vary_header_override()` + GRANT), `ordering` (`test.arrays` + seeds),
-`rpc` (`test."true"()` + GRANT) — all four dated 2026-08-08 — and
-`url_grammar`, **re-dated 2026-08-09** this pass.
+`rpc` (`test."true"()` + GRANT) — all four dated 2026-08-08 — plus
+`url_grammar` and, new this pass, `errors`, both dated **2026-08-09**.
 
-`url_grammar.delta.sql` is the one that moved. Its previous fold line recorded
-case 1029's `test.pgrst_reserved_chars` + seeds; it now reads
-`-- Folded into ../fixtures.sql on 2026-08-09 (test."Server Today" + its 5
-upstream seed rows, case 1035); empty until the next delta.` The corresponding
-26 lines landed in `fixtures.sql` (DDL at `:789-:796`, seeds at `:1746-:1752`).
-This is the **only** fixture object added by the last three area re-syncs —
-filters (9 cases), ordering (6) and url_grammar (6+2 rewrites) produced 21 new
-cases and exactly one new relation between them. Note the fold line overwrote the
-1029 provenance rather than appending to it, so the delta file no longer records
-that `test.pgrst_reserved_chars` came through the same channel; `fixtures.sql`
-is the artifact of record either way.
+`errors.delta.sql` is the one that appeared. It is the **sixth** channel and the
+**first new one since the tree was built**; its fold line reads
+`-- Folded into ../fixtures.sql on 2026-08-09 (test.infinite_inserts table + its
+same-named trigger function and do_infinite_inserts trigger, case 1523;
+test.infinite_recursion self-referential view, case 1524); empty until the next
+delta.` **The fold is verified landed, not assumed**: `fixtures.sql` carries the
+table at `:826`, the trigger function and trigger at `:1436`/`:1442`, the
+`CREATE VIEW` + self-referential `CREATE OR REPLACE VIEW` pair at `:945`/`:948`,
+and provenance comments at `:145-:150`, `:818`, `:936` and `:1431` — 78 added
+lines in total. It is also the only delta whose fold `fixtures.sql` documents
+with an in-file verification note (`:1909-:1915`) recording that all seven area
+schemas built their `infinite_recursion` mirror without error and that the two
+objects raise the expected SQLSTATEs (54001 / 42P17).
 
-Verified at the previous pass: the select area's new cases 1142–1149 were
-authored against existing relations (`test.fav_numbers`, `test.arrays`,
-`test.trash_details`, `test.project_invoices`) and added **no** fixture delta —
-consistent with `select.yaml`'s `loader_exposure` gap, which deliberately
-declines to create new `test`-schema relations because they would be visible to
-the OpenAPI area's document assertions.
+> That mirror is the non-obvious part and is worth keeping written down: the
+> loader's area-schema step does `CREATE VIEW <area>.infinite_recursion AS SELECT
+> * FROM test.infinite_recursion`, which **succeeds** — PostgreSQL does not
+> re-plan the underlying self-reference at `CREATE VIEW` time. The 42P17 surfaces
+> only on `SELECT`. A fixture that "loads fine" is not evidence the behavior
+> works; case 1524 is.
 
-Verified this pass: the filters area's nine new cases **1191–1199** likewise
-added **no** fixture delta, and `spec/conformance/fixtures/filters.delta.sql`
-does not exist. `filters.yaml` states the position explicitly — "this area adds
-no fixture objects at all; every filters case, old and new (1150–1199), runs on
-objects already built by `mix bier.fixtures.load`" — and names the one place a
-delta was considered and rejected (upstream's `client`/`clientinfo`/`contact`
-tables, which would collide with `fixtures.sql:477` renaming
-`test.projects`' clients FK constraint to `client`, on which case 1122 depends).
+Verified in earlier passes and unchanged: the select area's cases 1142–1149, the
+filters area's 1191–1199 and the ordering area's 1227–1232 all added **no**
+fixture delta — `filters.delta.sql` does not exist at all, and `filters.yaml`
+states the position explicitly ("this area adds no fixture objects at all"),
+naming the one place a delta was considered and rejected (upstream's
+`client`/`clientinfo`/`contact` tables, which would collide with `fixtures.sql`
+renaming `test.projects`' clients FK constraint to `client`, on which case 1122
+depends). `url_grammar.delta.sql` recorded case 1035's `test."Server Today"` +
+its five seed rows on 2026-08-09.
 
-Verified this pass: the ordering area's six new cases **1227–1232** likewise
-added **no** fixture delta — `ordering.delta.sql` still holds exactly its single
-fold line (`-- Folded into ../fixtures.sql on 2026-08-08 (test.arrays + its two
-upstream seed rows); empty until the next delta.`) and nothing else. Every
-relation the six drive was confirmed present in the loaded DB
-(`test.videogames`, `test.designers` + the two computed-relationship functions,
-`ordering.clients`, `mutations.no_pk`, `ordering.getitemrange`). Both ordering
-gaps recorded above are likewise costed as **no delta needed**.
-
-The five delta files therefore hold **only** a fold provenance line and no DDL,
-byte-for-byte as listed above (re-read this pass) — four at 2026-08-08 and
-`url_grammar` at 2026-08-09. Three of the gaps in this file would change that if
-closed: filters' `empty_string` row (a first `filters.delta.sql`) and, if the
-eight-column-type sweep is wanted, `items_with_different_col_types`; and
-url_grammar's three quote/backslash seed rows for `test.w_or_wo_comma_names` —
-though **not** the fourth (`David White`), which is why that one is costed as
-case-only.
+Across the last four area re-syncs — filters (9 cases), ordering (6),
+url_grammar (6 + 2 rewrites) and errors (8) — **29 new cases produced exactly
+three new relations**, all three in the last two passes. Three of the gaps in
+this file would add more if closed: filters' `empty_string` row (a first
+`filters.delta.sql`) and, if the eight-column-type sweep is wanted,
+`items_with_different_col_types`; headers' three `delete_items_returns_*`
+routines; and url_grammar's three quote/backslash seed rows for
+`test.w_or_wo_comma_names` — though **not** the fourth (`David White`), which is
+why that one is costed as case-only. **Neither errors gap needs a delta**: both
+are HEAD requests against `test.items`.
 
 ## Review status
 
 The v16.0 re-sync re-pinned **every** case `source:` from `v14.12` to `v16.0`, so
 the per-area audit verdicts recorded by the v14.12 pass no longer describe the
 citations on disk and are not carried forward. All 17 area behavior models are
-marked with the v16.0 pin and each closes with an explicit `gaps:` list. (The
-pin's *key spelling* is not uniform — 10 models use `version: v16.0`, five use
-`version: PostgREST v16.0` (`errors`, `filters`, `observability`, `operators`,
-`ordering`), `pagination.yaml` uses `postgrest_version: v16.0`, and
-`url_grammar.md` states it in prose. Do not grep for a single spelling.)
+marked with the v16.0 pin. (The pin's *key spelling* is not uniform — 10 models
+use `version: v16.0`, five use `version: PostgREST v16.0` (`errors`, `filters`,
+`observability`, `operators`, `ordering`), `pagination.yaml` uses
+`postgrest_version: v16.0`, and `url_grammar.md` states it in prose. Nor is the
+gap-list shape uniform: most models close with a top-level `gaps:` key, but
+`errors.yaml` records coverage under `coverage:` and adds a `harness_gate:` key
+instead. Do not grep for a single spelling.)
 
 Adversarial review summaries recorded so far cover **auth**, **headers**,
-**config**, **select**, **filters**, **ordering** and **url_grammar** — 7 of 17
-areas:
+**config**, **select**, **filters**, **ordering**, **url_grammar** and
+**errors** — **8 of 17** areas:
 
 | Area | v16.0 audit result | Nature of findings |
 |------|--------------------|--------------------|
 | auth | ⚠️ revise | 4 informational gaps, **0 citation defects** — the reviewer independently re-verified each gap's justification against v16.0 sources and confirmed all four are correct. See **Known gaps → auth**. |
-| headers | ⚠️ revise | 3 missing-coverage findings, **0 citation defects** — RPC-flavored `max-affected` (incl. the wholly-uncovered PGRST128), RPC-flavored `handling`, and the CORS-preflight leg of the `Vary` rule. All three are *citable but uncovered*. See **Known gaps → headers**. |
+| headers | ⚠️ revise | 3 missing-coverage findings, **0 citation defects** — RPC-flavored `max-affected` (incl. the wholly-uncovered PGRST128), RPC-flavored `handling`, and the CORS-preflight leg of the `Vary` rule. All three *citable but uncovered*. See **Known gaps → headers**. |
 | config | ⚠️ revise | 2 missing-coverage findings, **0 citation defects** — `db-pre-config` (the v16-*recommended* in-database config mechanism, dump-observable, while cases 1724/1725/1744 cover only the deprecated `ALTER ROLE` path) and `app.settings.*` reaching SQL as a GUC (1729 pins only the dump surface). Both *citable but uncovered*. See **Known gaps → config**. |
 | select | ⚠️ revise | 5 missing-coverage findings, **0 citation defects** — FK joins on views / chains of views (20 upstream it-blocks, no case *and* no gap entry), spread to-many (gap recorded but its "needs a fixture" justification does not hold), aggregates in to-one spreads + the PGRST127 rejection (entire upstream context, absent from the whole tree), FK joins on partitioned tables, and the terminal `->` on a json/jsonb column. All five *citable but uncovered*. See **Known gaps → select**. |
 | filters | ⚠️ revise | 3 missing-coverage findings, **0 citation defects** — the `IN`/`NOT IN` empty set (an 11-it-block upstream `describe`, `in.()` issued by no case in the tree, while `operators.yaml` already models the `= ANY('{}')` rendering it produces), the empty filter *value* (`?string=eq.` → `""`), and the implicit AND of two plain filters. All three *citable but uncovered*. See **Known gaps → filters**. |
-| ordering | ⚠️ revise | 2 missing-coverage findings, **0 citation defects** — *Order in spread to-many* (a named v16 docs section with its own worked example, exercised by upstream at `SpreadQueriesSpec.hs#L163` and `AggregateFunctionsSpec.hs#L157/#L168`, and asserted by **no case anywhere in `spec/`**; recorded only as the `order.spread_embed` gap, whose "the fixtures don't exist" justification the local `ordering.projects` → `ordering.tasks` graph defeats) and the aliased-relation PGRST118 (upstream asserts `order=pros(id)` naming the **alias** in both `details` and `message`; case 1216 covers only the unaliased twin). Both *citable but uncovered*, both case-only. See **Known gaps → ordering**. |
-| url_grammar | ⚠️ revise | 1 missing-coverage finding, **0 citation defects** — backslash / escaped-double-quote values inside `in.( … )`, a named part of the area's own docs page with three upstream `it`-blocks (plus one in the adjacent describe) and **no case anywhere in `spec/`**. *Citable but uncovered*, and **partly case-only**: three of the four need seed rows the fixture lacks, but `QuerySpec.hs#L1334` runs against the already-seeded `David White` row. The pass also produced two case repairs that are *not* review findings but belong on the record — **1016** re-anchored off implementation code onto `UpsertSpec.hs#L295` (retiring a false "no Feature spec line exists" claim) and **1029**'s overstated "byte-identical parser" note corrected. See **Known gaps → url_grammar**. |
-| the other 10 areas | not re-audited in the input to this pass | Citations are self-reported at the v16.0 pin. |
+| ordering | ⚠️ revise | 2 missing-coverage findings, **0 citation defects** — *Order in spread to-many* (a named v16 docs section with its own worked example, exercised by upstream at `SpreadQueriesSpec.hs#L163` and `AggregateFunctionsSpec.hs#L157/#L168`, and asserted by **no case anywhere in `spec/`**) and the aliased-relation PGRST118 (upstream asserts `order=pros(id)` naming the **alias** in both `details` and `message`; case 1216 covers only the unaliased twin). Both *citable but uncovered*, both case-only. See **Known gaps → ordering**. |
+| url_grammar | ⚠️ revise | 1 missing-coverage finding, **0 citation defects** — backslash / escaped-double-quote values inside `in.( … )`, a named part of the area's own docs page with three upstream `it`-blocks (plus one in the adjacent describe) and **no case anywhere in `spec/`**. *Citable but uncovered*, and **partly case-only**. The pass also produced two case repairs that are *not* review findings but belong on the record — **1016** re-anchored off implementation code onto `UpsertSpec.hs#L295` (retiring a false "no Feature spec line exists" claim) and **1029**'s overstated "byte-identical parser" note corrected. See **Known gaps → url_grammar**. |
+| **errors** | **✅ pass** | **The tree's first pass verdict.** 3 findings, **all explicitly MINOR / non-blocking**, **0 citation defects** — no `Proxy-Status` assertion on a HEAD request (the docs' stated motivation, but the behavior is method-independent in `errorResponseFor`), the modelled `inline_416_content_length_suppressed_on_head` flag that no case exercises (the one genuinely method-dependent behavior, and case-only to close), and the 42883 `xmlagg` → 406 special case (effectively unreachable black-box, accepted as-is). The pass additionally confirmed by reproduction in a scratch DB that cases **1523/1524**'s fixtures behave as asserted, and flagged a **harness gate** (1517/1518/1522 need `@variant_case_ids` entries) that is Bier-side wiring, not a spec defect. See **Known gaps → errors**. |
+| the other 9 areas | not re-audited at this pin | Citations are self-reported at the v16.0 pin. |
 
 Open follow-ups:
 
-1. Run `bier-spec-audit` over the **10** areas without a recorded v16.0
+1. Run `bier-spec-audit` over the **9** areas without a recorded v16.0
    adversarial verdict: `operators`, `pagination`, `representations`,
-   `mutations`, `rpc`, `errors`, `content_negotiation`, `openapi`,
-   `observability`, `domain_representations`.
+   `mutations`, `rpc`, `content_negotiation`, `openapi`, `observability`,
+   `domain_representations`.
 2. Re-check the `openapi` label finding above — specifically whether case **1652**
    returns 406 for the media-type reason or for the unknown-schema reason —
    before trusting that area's results. It currently *passes*, which is exactly
    why it needs the stronger assertion.
 3. **Raise the `schema: multi` finding with the harness owner** (*Open
-   verification findings → 1*). Cases **1005–1008** pass only because
-   `lib/bier/plugs/action_controller.ex:479` hard-codes the conformance labels
-   `headers` and `multi`; 1008's own `notes:` describe a no-`Accept-Profile`
-   request the harness never sends. Needs a harness affordance (opt out of the
-   profile-header injection) before the `lib/`-side allowlist can be removed —
-   do not "fix" it from the spec side. Pairs naturally with item 2: both are
-   labels that resolve for the wrong reason.
-4. Close the five select gaps, cheapest first: the terminal-`->` json case and
+   verification findings → 1*). Cases **1005**, **1008** and **1011** pass only
+   because `lib/bier/plugs/action_controller.ex:479` hard-codes the conformance
+   labels `headers` and `multi`; 1008's own `notes:` describe a
+   no-`Accept-Profile` request the harness never sends. Note the scope is
+   **six** cases receiving the injected header, three of which depend on the
+   allowlist — the previous revision undercounted by treating an explicit
+   `Content-Profile` as suppressing the `Accept-Profile` injection. Needs a
+   harness affordance (opt out of the profile-header injection) before the
+   `lib/`-side allowlist can be removed — do not "fix" it from the spec side.
+   Pairs naturally with item 2.
+4. **Close the two errors gaps — now the cheapest open work in this file.** Both
+   are a single HEAD request in the free **1527+** slice of the errors band
+   against `test.items`, which the loaded DB already has: `HEAD
+   /items?offset=100` asserting `headers_absent: [Content-Length]` (the modelled
+   `inline_416_content_length_suppressed_on_head` flag, the one method-dependent
+   behavior with no case) and, if wanted, the same request asserting
+   `Proxy-Status` — though that second one is MINOR by the reviewer's own
+   assessment, since the header is emitted method-independently. Closing the
+   first also closes the tree's only *request-shape* blind spot: all 11 existing
+   HEAD cases expect 2xx.
+5. **Wire the errors harness gate.** `spec/errors.yaml`'s `harness_gate:` key
+   asks for **1517, 1518, 1522** to be added to `@variant_case_ids`
+   (`test/support/conformance_server.ex:58`); verified on disk this pass that
+   none of the three is there, so all three run against the shared *verbose*
+   instance with their `client-error-verbosity: minimal` block silently ignored.
+   Human harness gate, not a spec change. Group it with item 8.
+6. Close the five select gaps, cheapest first: the terminal-`->` json case and
    the spread-to-many case need only case files; aggregates-in-to-one-spreads
    (+ PGRST127) needs cases plus the `db-aggregates-enabled` harness wiring; FK
    joins on views/chains and on partitioned tables need fixtures.
-5. Close the two config gaps: one CLI case for `db-pre-config` (needs a
+7. Close the two config gaps: one CLI case for `db-pre-config` (needs a
    pre-config function reachable at startup) and one HTTP case for
    `app.settings.*` via `/rpc/get_guc_value` (the fixture function already
    exists).
-6. Close the three headers gaps. Two need only case files (RPC `handling`; the
+8. Decide the harness question behind **all** the unhonoured `config:` blocks —
+   case **1742** (config band), the ten select cases
+   1129–1133/1139/1140/1147–1149, and the three errors cases 1517/1518/1522.
+   Until then 1742 fails for the wrong reason, the eight aggregate cases run with
+   `db-aggregates-enabled` at its `False` default, and the three verbosity cases
+   run verbose.
+9. Close the three headers gaps. Two need only case files (RPC `handling`; the
    preflight `Vary` assertion); the RPC `max-affected` / PGRST128 gap
    additionally needs `delete_items_returns_setof` / `_returns_table` /
    `_returns_void` fixtures, so it is a fixture-delta decision, not a spec-only
    edit.
-7. Decide the harness question behind the unhonoured `config:` blocks — case
-   **1742** (config band) and the ten select cases 1129–1133/1139/1140/1147–1149.
-   Until then 1742 fails for the wrong reason and the eight aggregate cases run
-   with `db-aggregates-enabled` at its `False` default.
-8. Decide whether to re-pin the **51** `v14.12` provenance URLs in the eight
-   `spec/conformance/fixtures/*.sql` files, or to state in
-   `conformance/fixtures/README.md` that they are frozen at the pin they were
-   derived from.
-9. Close the three filters gaps. Two are case-only — the `in.()` / `not.in.()` /
-   `in.(    )` / `in.( ,3,4)` set on an existing relation, and the two-plain-
-   filters AND — but both need a band decision first, because filters' primary
-   band 1150–1199 is full (overflow `[10600..10799]`) and `in.`'s SQL rendering
-   is claimed by `operators`. The empty-`eq.` case needs a seeded `''` row,
-   which would be the filters area's first fixture delta. Note this now
-   collides with item 12: three separate gaps are about `in.( … )` and they are
-   spread over three areas. Settle ownership once.
-10. Review the **34** cases whose `source:` anchors implementation code rather
+10. Review the **36** cases whose `source:` anchors implementation code rather
     than an upstream assertion (list: group `grep -h '^source:' …` by
-    directory). **Two of the last two re-syncs each found one** — 1189
-    (filters) and 1016 (url_grammar), the latter also carrying a false claim
-    that no upstream assertion existed. Each remaining one should either follow,
-    or say in `notes:` why no upstream it-block exists — several already do
-    (e.g. 1583). Treat this as a real defect source, not hygiene.
-11. Close the two ordering gaps — among **the cheapest open work in this file**.
-    Both are case-only, both land in the free 1233+ slice of ordering's own band,
-    and both run on relations the loaded DB already has: one case for *Order in
-    spread to-many* on `ordering.projects` → `ordering.tasks` (and, if the
-    `order.spread_embed` gap is kept for the upstream-fixture variants, rewrite
-    its justification so it no longer rests on an absence the local graph
-    defeats), and one for the aliased-relation PGRST118 on
+    directory). **Three of the last three re-syncs each produced movement here** —
+    1189 (filters) and 1016 (url_grammar) moved *off* implementation code, while
+    errors added two (1522, 1526) with an explicit justification in their
+    `notes:`. Each remaining one should either follow 1189/1016, or say in
+    `notes:` why no upstream it-block exists — several already do (e.g. 1583).
+    Treat this as a real defect source, not hygiene.
+11. Close the two ordering gaps — both case-only, both landing in the free 1233+
+    slice of ordering's own band, both running on relations the loaded DB
+    already has: one case for *Order in spread to-many* on `ordering.projects` →
+    `ordering.tasks`, and one for the aliased-relation PGRST118 on
     `ordering.clients`/`ordering.projects`, whose envelope must name the **alias**
     (`pros`) in both `details` and `message`. Re-confirm both `#L` anchors
     against the raw upstream files when authoring — two independent reads
@@ -1255,9 +1367,21 @@ Open follow-ups:
     fixture argument that only applies to three. Re-fetch both anchors first —
     the reviewer's `QuerySpec.hs#L1323-L1340` and `url_grammar.rst#L68-L74` are
     both off (correct: `#L1320-L1337` and `#L77-L81`).
-13. Consider asking the Tester to tighten `case.schema.json`'s `source` pattern
+13. Close the three filters gaps. Two are case-only — the `in.()` / `not.in.()` /
+    `in.(    )` / `in.( ,3,4)` set on an existing relation, and the two-plain-
+    filters AND — but both need a band decision first, because filters' primary
+    band 1150–1199 is full (overflow `[10600..10799]`) and `in.`'s SQL rendering
+    is claimed by `operators`. The empty-`eq.` case needs a seeded `''` row,
+    which would be the filters area's first fixture delta. Note this collides
+    with item 12: three separate gaps are about `in.( … )` and they are spread
+    over three areas. Settle ownership once.
+14. Decide whether to re-pin the **51** `v14.12` provenance URLs in the eight
+    `spec/conformance/fixtures/*.sql` files, or to state in
+    `conformance/fixtures/README.md` that they are frozen at the pin they were
+    derived from. Note the new `errors.delta.sql` did **not** add to the count.
+15. Consider asking the Tester to tighten `case.schema.json`'s `source` pattern
     from `.../postgrest/.+#L[0-9]+$` to the pinned tag. As written, schema
-    validation cannot catch a stale pin (proved by negative control this pass),
-    so the pin is enforced only by an ad-hoc grep sweep that lives in this
-    document rather than in CI. `case.schema.json` is the Tester's file and was
-    deliberately not edited here.
+    validation cannot catch a stale pin (proved by negative control), so the pin
+    is enforced only by an ad-hoc grep sweep that lives in this document rather
+    than in CI. `case.schema.json` is the Tester's file and was deliberately not
+    edited here.

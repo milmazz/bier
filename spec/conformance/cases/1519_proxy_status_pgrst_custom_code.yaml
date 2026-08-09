@@ -1,0 +1,30 @@
+id: 1519
+feature: errors/headers/proxy_status_pgrst_custom_code
+request:
+  method: GET
+  path: /rpc/raise_sqlstate_test1
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 332
+  headers:
+    Proxy-Status: "PostgREST; error=123"
+    Content-Length: "59"
+  body_exact:
+    code: "123"
+    message: "ABC"
+    details: "DEF"
+    hint: "XYZ"
+notes: >
+  The Proxy-Status value is built from `code err` — the envelope code, whatever
+  its origin — not from a PGRSTxxx constant. For a RAISE SQLSTATE 'PGRST' error
+  the code comes verbatim out of the MESSAGE JSON, so a function that raises
+  code "123" yields "Proxy-Status: PostgREST; error=123" (Error.hs:86 pSHeader,
+  assembled at Error.hs:88; the code is read back by the CommandError instance
+  at Error.hs:501-503). Case 1508 covers the same request's status/status_text/
+  X-Header; this case pins the Proxy-Status and Content-Length upstream asserts
+  alongside them. Mirrors ErrorSpec.hs "works with sqlstate PGRST custom error"
+  (L70), which asserts Proxy-Status "PostgREST; error=123" at L75 and
+  Content-Length 59 at L76 for this exact body.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L70

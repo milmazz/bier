@@ -1,0 +1,33 @@
+id: 1522
+feature: errors/verbosity/minimal_range_error
+request:
+  method: GET
+  path: /items?offset=100
+  headers:
+    Accept: application/json
+    Prefer: count=exact
+schema: test
+config:
+  client-error-verbosity: minimal
+preconditions: []
+expect:
+  status: 416
+  headers:
+    Content-Range: "*/15"
+  body_exact:
+    code: "PGRST103"
+    message: "Requested range not satisfiable"
+notes: >
+  NEW in v16.0, and the case that shows `client-error-verbosity` is NOT confined
+  to `Error.errorResponseFor`. A 416 OutOfBounds body is not produced by the
+  error path at all: Response.hs builds it inline while assembling the normal
+  read response, calling `Error.errorPayload configClientErrorVerbosity` on an
+  InvalidRange/OutOfBounds error (Response.hs:76 for a relation read, :180 for
+  an RPC read). So the configured verbosity reaches it too, and under `minimal`
+  the envelope collapses to {code, message} — the `details` string ("An offset
+  of 100 was requested, but there are only 15 rows.") and the null `hint` are
+  omitted, not nulled (toJsonPgrstError Minimal, Error.hs:75-78).
+  Under the default `verbose` this is case 1257, which asserts the same status
+  and Content-Range with the four-key body; `test.items` holds 15 rows in a
+  freshly loaded bier_test, as `pagination.items` does for 1257.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L76

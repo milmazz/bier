@@ -133,6 +133,23 @@
 --       GRANT (section 9). Case 1440.
 --   * url_grammar.delta.sql         -> test.pgrst_reserved_chars (section 4) +
 --       its 3 seed rows (section 8). Case 1029.
+--
+-- 2026-08-09  url_grammar.delta.sql (second fold, recorded retroactively — the
+--             fold landed in fixtures.sql but this log was not updated at the
+--             time): test."Server Today" (section 4) + its 5 upstream seed rows
+--             (section 8). Case 1035. No collision, nothing renamed.
+--
+-- 2026-08-09  errors.delta.sql -> the two SQLSTATE-only-reachable-from-outside
+--             objects. No name collided with an existing object, so nothing was
+--             renamed:
+--   * test.infinite_inserts table (section 4) + its same-named trigger function
+--       and the do_infinite_inserts AFTER INSERT trigger (section 6, errors
+--       block) -> SQLSTATE 54001 via the '5':'4':_ -> 500 branch. Case 1523.
+--       Intentionally receives NO grant in section 9 (runs on the no-auth
+--       instance as the owning superuser).
+--   * test.infinite_recursion self-referential view (section 5, after its
+--       bootstrap base test.projects) -> SQLSTATE 42P17 -> 500. Case 1524.
+--       Carries no seed data.
 -- ----------------------------------------------------------------------------
 
 BEGIN;
@@ -798,6 +815,19 @@ CREATE TABLE test."Server Today" (
   "Just A Server Model" text
 );
 
+-- infinite_inserts (errors.delta.sql): the AFTER INSERT trigger in section 6
+-- re-inserts into this same table, so any INSERT recurses until PostgreSQL
+-- aborts with SQLSTATE 54001 (program_limit_exceeded, "stack depth limit
+-- exceeded") — the only outside-visible exercise of the '5':'4':_ -> 500 branch
+-- of PostgREST's SQLSTATE map (case 1523). Mirrors upstream
+-- test/spec/fixtures/schema.sql, schema-qualified for `test`. Deliberately NOT
+-- granted to postgrest_test_anonymous in section 9: the case runs on the
+-- no-auth instance (owning superuser) and nothing should reach it anonymously.
+CREATE TABLE test.infinite_inserts (
+  id   int,
+  name text
+);
+
 -- ---------------------------- schema: private ------------------------------
 CREATE TABLE private.stuff (
   id integer PRIMARY KEY,
@@ -902,6 +932,21 @@ CREATE VIEW test.datarep_todos_computed AS (
 -- bad_subquery (errors.sql) — scalar subquery returns >1 row -> 21000.
 CREATE VIEW test.bad_subquery AS
   SELECT * FROM test.cv_rows WHERE id = (SELECT id FROM test.cv_rows);
+
+-- infinite_recursion (errors.delta.sql) — a view defined over ITSELF, so
+-- reading it raises SQLSTATE 42P17 ("infinite recursion detected in rules for
+-- relation ..."), the only outside-visible exercise of the 42P17 -> 500 rule
+-- (case 1524). The two-statement dance is upstream's and is load-bearing: a
+-- view cannot be created referring to itself, so it is first defined over
+-- another relation (test.projects, section 4) and then REPLACEd with the
+-- self-reference. Only *reading* recurses — creation, and the loader's area
+-- mirroring (CREATE VIEW <area>.x AS SELECT * FROM test.x), resolve the column
+-- list from the catalog and never run the rewriter.
+CREATE VIEW test.infinite_recursion AS
+  SELECT * FROM test.projects;
+
+CREATE OR REPLACE VIEW test.infinite_recursion AS
+  SELECT * FROM test.infinite_recursion;
 
 -- ===========================================================================
 -- 6. Functions, sequences, aggregates and triggers
@@ -1383,6 +1428,22 @@ begin
 end;
 $$;
 
+-- infinite_inserts (errors.delta.sql) — the self-referential AFTER INSERT
+-- trigger on test.infinite_inserts (section 4) that drives SQLSTATE 54001
+-- (case 1523). The trigger function shares its name with the table; that is
+-- upstream's shape and is legal (relations and routines are separate
+-- namespaces). Mirrors upstream test/spec/fixtures/schema.sql.
+CREATE FUNCTION test.infinite_inserts() RETURNS trigger AS $$
+begin
+  insert into test.infinite_inserts values (NEW.id, NEW.name);
+end
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER do_infinite_inserts
+  AFTER INSERT ON test.infinite_inserts
+  FOR EACH ROW
+  EXECUTE PROCEDURE test.infinite_inserts();
+
 -- --------------------------- test (ordering.sql) ---------------------------
 CREATE FUNCTION test.anti_id(test.items) RETURNS bigint
   LANGUAGE sql IMMUTABLE
@@ -1840,4 +1901,21 @@ COMMIT;
 -- numbers->0 desc and 0,1 by numbers_mult->2->2 asc (1225/1226); and
 -- test.pgrst_reserved_chars row "*id*"=1 renders the four quoted columns with
 -- the surrounding spaces of case 1029.
+--
+-- 2026-08-09 (errors delta fold): re-verified end to end with
+-- `mix bier.fixtures.load` — drops/recreates bier_test, loads this file with
+-- `psql -v ON_ERROR_STOP=1 -f`, then mirrors the seven area schemas; clean,
+-- zero errors. The self-referential view is safe to create and to mirror:
+-- all 7 area schemas built their `infinite_recursion` view without error,
+-- confirming that CREATE VIEW resolves the column list from the catalog and
+-- never invokes the rewriter. The folded objects were then spot-checked
+-- against their cases: INSERT INTO test.infinite_inserts raises SQLSTATE 54001
+-- "stack depth limit exceeded" with a hint and no detail (case 1523), and
+-- SELECT FROM test.infinite_recursion raises SQLSTATE 42P17 with the message
+-- 'infinite recursion detected in rules for relation "infinite_recursion"'
+-- byte-identical to case 1524's body_exact. `mix test --only area:errors`
+-- then passed 1523 and 1524; its remaining failures are lib/ behavior gaps
+-- from the v16.0 re-sync (fuzzy PGRST205 hints, verbosity=minimal, error
+-- envelope key order, plus the 3 known :pending status_text cases) and are
+-- unrelated to the fixtures.
 -- ============================================================================

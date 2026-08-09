@@ -1,0 +1,36 @@
+id: 1523
+feature: errors/sqlstate/statement_too_complex
+request:
+  method: POST
+  path: /infinite_inserts
+  headers: { Content-Type: application/json }
+  body: { id: 3, name: "qwer" }
+schema: test
+preconditions: []
+expect:
+  status: 500
+  headers:
+    Content-Type: "application/json; charset=utf-8"
+  body_jsonpath:
+    - { path: "$.code", equals: "54001" }
+    - { path: "$.message", equals: "stack depth limit exceeded" }
+    - { path: "$.details", equals: null }
+    - { path: "$.hint", present: true }
+notes: >
+  Inserting into test.infinite_inserts fires an AFTER INSERT trigger that
+  inserts into the same table, so PostgreSQL aborts with SQLSTATE 54001. 54001
+  has no exact rule in the SQLSTATE map and falls to the '5':'4':_ class, which
+  maps to HTTP 500 (Error.hs:574) — the only outside-visible exercise of that
+  branch. The envelope is the raw PG ServerError: code is the SQLSTATE, message
+  and hint come from PG, details is null. Mirrors ErrorSpec.hs "should return
+  500 for statement too complex" (L19).
+  ASSERTION NOTE: upstream asserts the whole body plus Content-Length 217, but
+  its `hint` embeds the server's setting — "Increase the configuration parameter
+  \"max_stack_depth\" (currently 2048kB), after ensuring the platform's stack
+  depth limit is adequate." (ErrorSpec.hs:27). That string, and therefore the
+  body length, changes with `max_stack_depth`, so this case pins the three
+  server-independent members exactly and only asserts that `hint` is present.
+  Reproduced on a freshly loaded bier_test (PostgreSQL default max_stack_depth
+  2048kB) in ~34 ms: `ERROR: stack depth limit exceeded`, with the identical
+  hint. Fixture objects come from fixtures/errors.delta.sql.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L19

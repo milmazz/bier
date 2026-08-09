@@ -1,0 +1,40 @@
+id: 1525
+feature: errors/envelope/key_emission_order
+request:
+  method: GET
+  path: /projxxxx
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 404
+  headers:
+    Content-Length: "119"
+  body_raw: "{\"code\":\"PGRST205\",\"details\":null,\"hint\":null,\"message\":\"Could not find the table 'test.projxxxx' in the schema cache\"}"
+notes: >
+  Pins the WIRE BYTES of the error envelope, which no other case can do.
+  `errorPayload` constructs the object as [code, message, details, hint]
+  (Error.hs:69-74) but emits it through `JSON.encode` (Error.hs:66) over an
+  aeson `KeyMap`. postgrest.cabal pins `aeson >= 2.0.3 && < 2.3`
+  (postgrest.cabal:107) and neither postgrest.cabal nor cabal.project overrides
+  aeson's `ordered-keymap` flag, whose default is True — so KeyMap is
+  `Data.Map.Strict` and the encoder walks keys in ascending order. The emitted
+  body is therefore ALPHABETICAL (code, details, hint, message), NOT the
+  construction order, and compact (no spaces after ':' or ',').
+  PostgREST asserts exactly this byte shape itself, in test/io/test_settings.py
+  (this case's `source`), which compares a whole error response body against the
+  literal string
+  '{"code":"57014","details":null,"hint":null,"message":"canceling statement due to statement timeout"}'.
+  The request, the message text, the null hint and the Content-Length 119 are
+  the same ground truth as case 1521 (ErrorSpec.hs "don't show hint when
+  similarity score is less than 75%", ErrorSpec.hs:97-103): `test.projxxxx`
+  does not exist in a freshly loaded bier_test and nothing in that schema
+  clears the 0.75 fuzzy threshold for it, so `hint` is null.
+  This case is deliberately `body_raw` rather than `body_exact`: the harness
+  decodes both sides for `body_exact`
+  (test/support/conformance_assertions.ex:49), so key order is invisible there,
+  and Content-Length is order-independent — 1521 passes under either ordering.
+  Bier's default encoder (Elixir's stdlib `JSON`, via Bier.json_library/0)
+  preserves insertion order, so an implementation that follows the
+  construction order emits a byte-different body that only this case catches.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_settings.py#L299
