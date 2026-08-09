@@ -1,7 +1,7 @@
 # Conformance case index
 
-Cross-reference of the **643** conformance cases under `spec/conformance/cases/`.
-Pinned target: **PostgREST v16.0** (all 643 `source:` URLs).
+Cross-reference of the **649** conformance cases under `spec/conformance/cases/`.
+Pinned target: **PostgREST v16.0** (all 649 `source:` URLs).
 
 Each case is one YAML file `NNNN_<slug>.yaml` validated against
 [`../case.schema.json`](../case.schema.json). Cases are grouped into 17 feature
@@ -39,7 +39,7 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 
 | Area | Cases | Id band | Fixture fragment | `schema:` labels used |
 |------|------:|---------|------------------|-----------------------|
-| url_grammar | 30 | 1000–1029 | `fixtures/url_grammar.sql` | `multi`, `test`, `unicode`, `ordering` |
+| url_grammar | 36 | 1000–1035 | `fixtures/url_grammar.sql` + `fixtures/url_grammar.delta.sql` (case 1029's `test.pgrst_reserved_chars` and case 1035's `test."Server Today"`, both folded) | `multi`, `test`, `unicode`, `ordering` |
 | operators | 50 | 1050–1099 | `fixtures/operators.sql` | `operators` |
 | select | 50 | 1100–1149 | `fixtures/select.sql` | `test` |
 | filters | 50 | 1150–1199 | `fixtures/filters.sql` | `test` |
@@ -57,11 +57,13 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | observability | 20 | 1750–1769 | `fixtures/observability.sql` | `observability` |
 | domain_representations | 21 | 1800–1820 | `fixtures/domain_representations.sql` | `domain_representations` |
 
-Total: **643 cases**, **17 areas**, **17 fixture fragments**
+Total: **649 cases**, **17 areas**, **17 fixture fragments**
 (plus 5 `*.delta.sql` write channels, all currently **comment-only** — each
-carries a single `-- Folded into ../fixtures.sql on 2026-08-08 …` provenance
-line and no DDL; see [`fixtures/README.md`](fixtures/README.md) for who may
-write which file).
+carries a single `-- Folded into ../fixtures.sql on <date> …` provenance line
+and no DDL. Four are dated 2026-08-08; `url_grammar.delta.sql` was re-folded on
+**2026-08-09** for case 1035's `test."Server Today"`, the only fixture object
+added since. See [`fixtures/README.md`](fixtures/README.md) for who may write
+which file).
 
 Each area's `feature:` prefix matches its area name exactly, so the area is
 recoverable directly from the case file:
@@ -81,10 +83,22 @@ grep -h '^feature:' spec/conformance/cases/1800_format_single_domain_column.yaml
   [`../COVERAGE.md`](../COVERAGE.md) → *Open verification finding*.
 - **`multi`** is not a schema either — it stands for the `v1`/`v2` profile pair
   routed by `db_profile_default` / `db_profile_schemas`
-  (`test/support/conformance_server.ex:184-185`, resolved in
-  `lib/bier/plugs/action_controller.ex:477-506`). All the relations these cases
+  (`test/support/conformance_server.ex:184-185`). All the relations these cases
   target (`parents`, `children`, `get_parents_below`) exist in both `v1` and
   `v2`; case 1024 deliberately targets one that exists only in `v2`.
+
+  > **Where the label is actually resolved matters, and it is not the harness.**
+  > `multi` is neither a DB schema nor a `db_schema_aliases` key; it resolves
+  > only because **implementation code** carries a hard-coded allowlist of
+  > conformance labels — `@profile_aliases ~w(headers multi)` at
+  > `lib/bier/plugs/action_controller.ex:479`, consumed at `:504`. Four cases
+  > (**1005–1008**) send `Accept-Profile: multi` with no explicit profile header
+  > of their own and would otherwise be PGRST106/406; the other ten `multi`
+  > cases spell out their own `Accept-Profile`/`Content-Profile` and never
+  > exercise the allowlist. Recorded in [`../COVERAGE.md`](../COVERAGE.md) →
+  > *Open verification findings*: this is a genuine finding, not a bookkeeping
+  > note, because 1008's own `notes:` claim "no `Accept-Profile` header" while
+  > the harness always sends one.
 - **`unicode`** aliases the schema `تست` via `db_schema_aliases`
   (`test/support/conformance_server.ex:181`); **`test`**, `public` and `null`
   suppress the `Accept-Profile` header entirely.
@@ -126,6 +140,15 @@ spread). It belongs to `select`; see
 > two files — `COVERAGE.md` and this INDEX, i.e. only the documents recording
 > the gap. No case and no area model mentions either code.
 
+A third split needs the same care. The `in.( … )` **value grammar** is
+url_grammar's (its docs page owns the *Reserved characters* section), the `in`
+operator's **SQL rendering** is claimed by `operators.yaml:213`, and the
+`in.()` **empty set** was raised against `filters`. Two of the three
+`in.`-shaped gaps in [`../COVERAGE.md`](../COVERAGE.md) therefore have no
+settled owner: decide the band before authoring, and note that `filters`' primary
+band 1150–1199 is full (overflow `[10600..10799]`) while url_grammar's
+1036+ and ordering's 1233+ are free.
+
 ## Per-area sub-feature breakdown
 
 The `feature:` field is a slash-delimited path `<area>/<sub-feature>/...`. The
@@ -133,7 +156,7 @@ sub-features present per area (second segment, as on disk):
 
 | Area | Id band | Sub-features |
 |------|---------|--------------|
-| url_grammar | 1000–1029 | method, path, percent-encoding, profile, reserved-params, reserved-characters |
+| url_grammar | 1000–1035 | method (incl. the OPTIONS `Allow` matrix on a table 1019, a VOLATILE routine 1031, a STABLE routine 1032 and the root path 1033), path (incl. OPTIONS on an unknown relation -> 404, 1034), percent-encoding (incl. `%20` in both a relation and a column name, 1035), profile, reserved-params (`limit` **and** `offset` forbidden on PUT, 1016/1030), reserved-characters |
 | operators | 1050–1099 | eq, neq, lt/lte/gt/gte, in, is, like/ilike, match/imatch, fts/plfts/wfts/phfts, cs/cd/ov, sl/sr/nxl/nxr/adj, isdistinct, not, quantifier (any/all) |
 | select | 1100–1149 | columns, alias, cast, alias-and-cast, json-path, **composite**, **array**, computed-column, computed-relationship, embed (incl. one-to-one, the v16 alias/legacy-target-name rules and the `table!fk` hint), spread, aggregate |
 | filters | 1150–1199 | horizontal, logical, not, json, quoting, embed |
@@ -153,6 +176,35 @@ sub-features present per area (second segment, as on disk):
 
 ### v16.0 additions worth knowing
 
+- **url_grammar** grew its band to **1000–1035** (36 cases, up from 35 — the
+  newest area in the tree). Six ids are new and two existing cases were
+  rewritten:
+  - **1031–1033** complete the OPTIONS `Allow` matrix that 1019 (a writeable
+    table) had covered alone: a VOLATILE routine → `OPTIONS,POST`
+    (`OptionsSpec.hs#L84`), a STABLE routine → `OPTIONS,GET,HEAD,POST`
+    (`#L90`), and the root path → `OPTIONS,GET,HEAD` (`#L103`).
+  - **1034** pins OPTIONS on an unknown relation → **404**
+    (`OptionsSpec.hs#L22`), i.e. OPTIONS does not bypass relation resolution.
+  - **1035** pins `%20` decoding in a *relation* name and a *column* name at
+    once (`GET /Server%20Today?select=Just%20A%20Server%20Model&…`,
+    `QuerySpec.hs#L1281`). It is the only case in this pass that needed a
+    fixture object: `test."Server Today"` plus its five upstream seed rows,
+    written through `fixtures/url_grammar.delta.sql` and folded into
+    `fixtures.sql` on 2026-08-09.
+  - **1030** is 1016's twin — `offset` on PUT, not just `limit`
+    (`UpsertSpec.hs#L302`).
+  - **1016** was **re-anchored and rewritten**: it previously asserted against
+    `/parents` under `schema: multi`, cited implementation code
+    (`ApiRequest.hs#L178`) and claimed in `notes:` that v16.0 had no Feature
+    spec line for the rule. That claim was false — `UpsertSpec.hs#L295` asserts
+    it in both v14.12 and v16.0 — so the case now transcribes the upstream
+    it-block verbatim (`PUT /tiobe_pls?name=eq.Javascript&limit=1`,
+    `schema: test`, exact PGRST114 envelope). This is the **only** case in the
+    tree to move off `src/library/…` onto an upstream assertion this pass, which
+    is why the implementation-anchored count fell 35 → **34**.
+  - **1029**'s `notes:` were corrected: the v14.12→v16.0 parser claim
+    "byte-identical" was overstated; the parser *body* is unchanged (+8 line
+    offset) but the module header is not.
 - **select** grew its band to **1100–1149** (50 cases, up from 42). Eight ids are
   new since the last synthesis, and they introduce two new sub-features:
   **1142** (`select/embed/hint-table-bang-fk`, disambiguation via `table!fk`,
@@ -228,7 +280,7 @@ sub-features present per area (second segment, as on disk):
 
 ## Case file shapes
 
-Most cases are HTTP request/response (**605**). The **config** area additionally
+Most cases are HTTP request/response (**611**). The **config** area additionally
 uses a **CLI** shape (`request.kind: cli`, `request.flag: "--dump-config"`)
 asserting on `expect.exit_code`, `expect.dump_contains`,
 `expect.dump_reparse_stable`, and `expect.stderr_contains` rather than an HTTP
@@ -244,9 +296,9 @@ does not know.
 
 Any case may carry a `config:` block — **114** do (110 non-empty; 1705, 1719,
 1727 and 1743 carry an empty `config: {}`), spread over six areas: config 45,
-auth 33, observability 20, select 10, openapi 4, errors 2. Neither the nine new
-filters cases nor the six new ordering cases carries one, so this count is
-unchanged from the 637-case state. The harness boots a dedicated
+auth 33, observability 20, select 10, openapi 4, errors 2. None of the nine
+filters cases, six ordering cases or six url_grammar cases added since the
+637-case state carries one, so this count has not moved. The harness boots a dedicated
 instance only for the ids listed in `@variant_case_ids`
 (`test/support/conformance_server.ex:58-59`, **18** ids: 1467–1473, 1491, 1493,
 1654, 1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764) plus every `kind: cli`
@@ -258,7 +310,7 @@ ten select cases **1129–1133, 1139, 1140, 1147–1149**; see
 
 `preconditions:` is parsed but **never executed** by the harness — treat it as
 declarative documentation, never as setup a case may depend on. It is present on
-642 of the 643 cases (case **1330** omits it, which the schema allows).
+648 of the 649 cases (case **1330** omits it, which the schema allows).
 
 **3** cases assert `expect.status_text` (**1508, 1510, 1511**) and are tagged
 `:pending` / excluded by `test/conformance/conformance_test.exs`, because `Req`

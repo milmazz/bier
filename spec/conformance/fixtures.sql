@@ -786,6 +786,18 @@ CREATE TABLE test.pgrst_reserved_chars (
   "  col  w  space  " text
 );
 
+-- "Server Today" (url_grammar.delta.sql): a relation name AND a column name
+-- that carry spaces, so the "Table / Columns with spaces" rule can be
+-- exercised end to end (case 1035) — %20 inside an UNQUOTED identifier, which
+-- is a different rule from the %22-quoted reserved-character identifiers of
+-- case 1029 above. Mirrors upstream test/spec/fixtures/schema.sql; upstream
+-- creates it unqualified under `SET search_path = test, pg_catalog`, so it
+-- lands in `test`.
+CREATE TABLE test."Server Today" (
+  "cHostname"           text,
+  "Just A Server Model" text
+);
+
 -- ---------------------------- schema: private ------------------------------
 CREATE TABLE private.stuff (
   id integer PRIMARY KEY,
@@ -1730,6 +1742,20 @@ VALUES
   (1, ' arrow-1 ', ' parens-1 ', ' dotted-1 ', ' space-1'),
   (2, ' arrow-2 ', ' parens-2 ', ' dotted-2 ', ' space-2'),
   (3, ' arrow-3 ', ' parens-3 ', ' dotted-3 ', ' space-3');
+
+-- test."Server Today" (url_grammar.delta.sql) — upstream loads these with
+-- `COPY ... FROM STDIN CSV DELIMITER '|'`, which does NOT trim the padding
+-- around the delimiter, so every "Just A Server Model" value carries a leading
+-- space and every "cHostname" value trailing spaces. Reproduced verbatim: case
+-- 1035 asserts the leading space, and insertion order is the order the
+-- unordered SELECT returns.
+INSERT INTO test."Server Today" ("cHostname", "Just A Server Model")
+VALUES
+  ('argnim1    ', ' IBM,9113-550 (P5-550)'),
+  ('argnim2    ', ' IBM,9113-550 (P5-550)'),
+  ('daaa2nim71 ', ' IBM,9131-52A (P5-52A)'),
+  ('daah3nim71 ', ' IBM,8406-71Y (P7-PS701)'),
+  ('hbnim1     ', ' IBM,9133-55A (P5-55A)');
 
 -- private.stuff
 INSERT INTO private.stuff (id, name) VALUES (1, 'stuff 1');

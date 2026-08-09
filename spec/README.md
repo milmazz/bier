@@ -13,9 +13,9 @@ that compatibility means, case by case, so it can be checked automatically.
 Everything here targets **PostgREST v16.0** (docs:
 [postgrest.org/en/v16](https://postgrest.org/en/v16/)). Every conformance case
 carries a `source:` URL pinned to the `v16.0` git tag with a `#L<line>` anchor,
-fetchable via `raw.githubusercontent.com`. All **643** cases are pinned to
+fetchable via `raw.githubusercontent.com`. All **649** cases are pinned to
 `v16.0` — verified on disk this pass (a sweep of every PostgREST URL across
-`spec/*.yaml`, `spec/*.md` and the case files found **1738** references and
+`spec/*.yaml`, `spec/*.md` and the case files found **1749** references and
 exactly one tag). When bumping the target version, re-pin the sources and re-run
 the review pass.
 
@@ -29,14 +29,20 @@ the review pass.
 > puts `blob/` between the repo and the tag. Sweep with a prefix-aware pattern
 > (`postgrest/(raw/|blob/|tree/)?<tag>`) or the count is wrong.
 
-> **`v14.12` in prose is not a stale pin.** **103** bare `v14.12` occurrences
-> remain across the 19 files of `spec/*.yaml` + `spec/*.md` (this `README` 4,
-> `COVERAGE.md` 12, `url_grammar.md` 11, `auth.yaml` 10, `config.yaml` 8,
-> `errors.yaml` 7, and the rest fewer), plus **23** case files. Sampling them
+> **`v14.12` in prose is not a stale pin.** **110** bare `v14.12` occurrences
+> remain across the 19 files of `spec/*.yaml` + `spec/*.md` (`url_grammar.md`
+> 15, `COVERAGE.md` 13, `auth.yaml` 10, `config.yaml` 8, `errors.yaml` 7, this
+> `README` 6, and the rest fewer), plus **24** case files. Sampling them
 > shows deliberate v14.12→v16.0 change notes ("the block is byte-identical to
 > v14.12, only the `src/library/` path and line numbers move"). Verified this
 > pass: **zero** of them carries a `v14.12` *URL* — they are comparative prose,
 > not citations.
+>
+> One such note was **corrected** this pass rather than carried forward: case
+> 1029 claimed the query parser was "byte-identical between the pins", which is
+> false at the module level — the body is unchanged with an +8 line offset, but
+> the header is not. Treat comparative prose as a claim to re-verify, not as
+> settled fact.
 
 > **Fixture provenance comments are still on the old pin.** Eight files under
 > `conformance/fixtures/` carry **51** `v14.12` URLs in `--` provenance comments
@@ -64,7 +70,7 @@ spec/
 ├── <area>.yaml | url_grammar.md   # 17 per-area behavior models (the "why")
 └── conformance/
     ├── INDEX.md               # area <-> id band <-> fixture cross-reference
-    ├── cases/NNNN_<slug>.yaml # 643 conformance cases (the "what", machine-checkable)
+    ├── cases/NNNN_<slug>.yaml # 649 conformance cases (the "what", machine-checkable)
     ├── fixtures.sql           # the authoritative merged DDL+seed set
     ├── fixtures_local.sql     # human-owned harness supplement
     └── fixtures/              # per-area fragments + write-channel deltas (see its README)
@@ -87,7 +93,7 @@ There are two layers:
    states it in prose ("Version pinned: **PostgREST v16.0**"). Do not grep for
    a single spelling.
 
-2. **Conformance cases** — 643 YAML files under `conformance/cases/`. Each is one
+2. **Conformance cases** — 649 YAML files under `conformance/cases/`. Each is one
    concrete scenario: a request and the exact response (status, headers, body)
    PostgREST produces. These are the machine-checkable contract.
 
@@ -115,14 +121,16 @@ source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/...#L<n>
 ```
 
 `id`, `feature`, `request`, `schema`, `expect`, `notes` and `source` are present
-on all 643 cases. `preconditions` is present on 642 (case **1330** omits it);
+on all 649 cases — verified mechanically this pass, not assumed.
+`preconditions` is present on 648 (case **1330** omits it);
 `config` is present on **114** (four of those — 1705, 1719, 1727, 1743 — are the
-empty `config: {}`). None of the six new ordering cases carries a `config:`
-block, so that count is unchanged from the 637-case state.
+empty `config: {}`). None of the twelve cases added since the 637-case state —
+six ordering, six url_grammar — carries a `config:` block, so that count has not
+moved.
 
 Two request shapes are supported:
 
-- **HTTP** (the common case, 605 cases): `request.method` + `request.path`, with
+- **HTTP** (the common case, 611 cases): `request.method` + `request.path`, with
   optional `request.headers` / `request.body` / `request.body_raw` /
   `request.body_json`. The **auth** area may add `request.jwt` to have the runner
   mint and send a signed token (32 cases do; case 11809 instead spells out a
@@ -154,17 +162,37 @@ The conformance database is built by `mix bier.fixtures.load` from
 any label other than `null`/`public`/`test` as an `Accept-Profile: <label>`
 request header, so the label must name a schema the conformance server exposes
 *or* resolve through one of the server's aliases/profile lists (`unicode` →
-`تست`; `multi` → the `v1`/`v2` profile pair). The harness sets the header with
-`Map.put_new`, so a case that spells out its own `Accept-Profile` wins over the
-label (case 1574 is the one that does).
+`تست`) *or* through the implementation-side allowlist (`multi` and `headers`;
+see below). The harness sets the header with `Map.put_new`, so a case that spells
+out its own `Accept-Profile`/`Content-Profile` wins over the label.
+
+> **Correction, counted on disk this pass.** Earlier revisions of this file said
+> "case 1574 is the one that does". **Fifteen** cases spell out their own
+> profile header and thereby override their label: ten of the fourteen `multi`
+> cases (**1009–1014, 1017, 1018, 1023, 1024**) and five `headers` cases
+> (**1558–1560, 1574, 1583**). Only the remaining four `multi` cases
+> (**1005–1008**) actually send `Accept-Profile: multi`.
+>
+> **And `multi` is not resolved by the harness at all.** It is neither a schema
+> in `bier_test` nor a `db_schema_aliases` key; it resolves only because
+> *implementation* code carries a hard-coded allowlist of conformance labels
+> (`@profile_aliases ~w(headers multi)`,
+> `lib/bier/plugs/action_controller.ex:479`). Machine verification flagged
+> 1005–1008 as targeting unresolvable relations for exactly this reason. See
+> `COVERAGE.md` → *Open verification findings*.
 
 Ownership rules for everything under `conformance/fixtures/` — who may write
 which file, and why `<area>.delta.sql` is the only write channel — are in
 [`conformance/fixtures/README.md`](conformance/fixtures/README.md). There are
 **17** per-area fragments and **5** `*.delta.sql` write channels; all five deltas
 are currently **comment-only** — each holds a single
-`-- Folded into ../fixtures.sql on 2026-08-08 (…); empty until the next delta.`
-provenance line and no DDL, i.e. empty as a write channel.
+`-- Folded into ../fixtures.sql on <date> (…); empty until the next delta.`
+provenance line and no DDL, i.e. empty as a write channel. Four carry the
+2026-08-08 date; `url_grammar.delta.sql` was re-folded on **2026-08-09** for case
+1035's `test."Server Today"` + its five upstream seed rows — the only fixture
+object added since, and the only one added by the last three area re-syncs
+(filters, ordering and url_grammar together produced 21 cases and one new
+relation).
 
 See [`conformance/INDEX.md`](conformance/INDEX.md) for the full
 area ↔ id-band ↔ fixture ↔ label map.
@@ -201,9 +229,13 @@ print("OK" if not bad else f"{bad} errors")
 PY
 ```
 
-All **643** cases currently parse and validate, with **no duplicate ids** (and
+All **649** cases currently parse and validate, with **no duplicate ids** (and
 every `NNNN_` filename prefix equals the in-file `id:`). Remember the caveat
 above: a clean run proves shape, not pin — the `source` pattern accepts any tag.
+The validator was proved live, not vacuous, by negative controls on a mutated
+copy of a pristine case (dropped `id`, `status: 99`, unknown key, missing `#L`
+anchor all caught); the one control it **failed** is the stale-pin rewrite, which
+is why the URL sweep above exists.
 
 ## Review status
 
@@ -213,18 +245,20 @@ line and confirming it still asserts what the case claims — is summarized
 per area in [`COVERAGE.md`](COVERAGE.md), together with the open gaps and the
 machine-verification results for this pass.
 
-Six areas carry a recorded v16.0 adversarial verdict so far — **auth**,
-**headers**, **config**, **select**, **filters** and **ordering**, all six
-⚠️ *revise* with **zero citation defects** (every finding is a missing-coverage
-gap, now itemized in `COVERAGE.md` → *Known gaps*). The other **11** areas have
-not been re-audited at this pin; run `bier-spec-audit` over them before treating
-their citations as verified.
+Seven areas carry a recorded v16.0 adversarial verdict so far — **auth**,
+**headers**, **config**, **select**, **filters**, **ordering** and
+**url_grammar**, all seven ⚠️ *revise* with **zero citation defects** (every
+finding is a missing-coverage gap, now itemized in `COVERAGE.md` → *Known
+gaps*). The other **10** areas have not been re-audited at this pin; run
+`bier-spec-audit` over them before treating their citations as verified.
 
-Note what "zero citation defects" does *not* mean: **35** cases anchor their
+Note what "zero citation defects" does *not* mean: **34** cases anchor their
 `source:` at implementation code under `src/library/PostgREST/…` rather than at
 an upstream `it`-block, so their expected bodies are derived rather than
-transcribed (re-counted at the 643-case state; the six new ordering cases all
-cite upstream `it`-blocks, so the figure is unchanged). The filters re-sync moved
-one of them (case **1189**) back onto the assertion that actually spells out the
-expected header; the rest are behaviors upstream never asserts black-box, and
-each says so in its `notes:`.
+transcribed (re-counted at the 649-case state). Two cases have been moved back
+onto real assertions so far — **1189** during the filters re-sync and **1016**
+during the url_grammar re-sync, the latter also retiring a false "no Feature
+spec line exists" claim in its `notes:`. The rest are behaviors upstream never
+asserts black-box, and each says so in its `notes:`. That two of the last two
+re-syncs each found one such case suggests the remaining 34 are worth
+re-reading rather than accepting.

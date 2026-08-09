@@ -1,0 +1,49 @@
+id: 1035
+feature: url_grammar/percent-encoding/space-in-identifier
+request:
+  method: GET
+  path: /Server%20Today?select=Just%20A%20Server%20Model&Just%20A%20Server%20Model=like.*91*
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - "Just A Server Model": " IBM,9113-550 (P5-550)"
+    - "Just A Server Model": " IBM,9113-550 (P5-550)"
+    - "Just A Server Model": " IBM,9131-52A (P5-52A)"
+    - "Just A Server Model": " IBM,9133-55A (P5-55A)"
+notes: >
+  The documented "Table / Columns with spaces" rule
+  (docs/references/api/url_grammar.rst#L38-L47, label `.. _tabs-cols-w-spaces:`,
+  example `/Order%20Items?Unit%20Price=lt.200`): a space inside a table or
+  column identifier is written `%20` and needs NO `%22` quoting, because a
+  space is not one of PostgREST's reserved characters
+  (`, . : * ( )`, docs#L54). Distinct from case 1029, which quotes identifiers
+  that DO carry a reserved character, and from cases 1017/1018, where the
+  `%20`/`+` sits in a filter VALUE rather than an identifier. WAI
+  percent-decodes the path into `pathInfo` before `getResource` sees it
+  (`getResource conf $ pathInfo req`,
+  src/library/PostgREST/ApiRequest.hs#L78; the single-segment clause
+  `[table] -> Right $ ResourceRelation table` at #L126 takes the decoded
+  segment verbatim), and `HTTP.parseQueryReplacePlus True` decodes the query
+  string (src/library/PostgREST/ApiRequest/QueryParams.hs#L157), so both the
+  relation `Server Today` and the column `Just A Server Model` arrive as plain
+  names with spaces and no quoting is involved — `pFieldName` (QueryParams.hs
+  #L359-L363) parses an unquoted `identifier with spaces` verbatim, per its own
+  doctest at #L331-L332 (it trims only *edge* spaces, #L354-L355, which is the
+  one thing case 1029's `  col  w  space  ` needs `%22` for). The `like.*91*`
+  filter shows the space-bearing name working as a filter key too: `*` is
+  rewritten to the SQL `%` wildcard
+  (src/library/PostgREST/Query/SqlFragment.hs#L415), so it selects the four
+  rows whose model string contains `91`, skipping `IBM,8406-71Y (P7-PS701)`.
+  Mirrors QuerySpec "will select and filter a column that has spaces" (it at
+  L1281, get at L1282, body at L1283-L1287). Fixture: test."Server Today" is
+  new here, added in fixtures/url_grammar.delta.sql, mirroring upstream
+  test/spec/fixtures/schema.sql#L1816-L1819 and data.sql#L562-L569; the leading
+  space in every value comes from upstream's `COPY ... CSV DELIMITER '|'`
+  padding and was reproduced and verified against a loaded bier_test (the row
+  order below is the insertion order the unordered SELECT returns).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1281
