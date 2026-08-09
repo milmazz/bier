@@ -1,0 +1,31 @@
+id: 1325
+feature: representations/read/return-token-not-echoed
+request:
+  method: GET
+  path: /items?id=eq.1
+  headers:
+    Accept: application/json
+    Prefer: "return=representation"
+schema: representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  headers_absent: [Preference-Applied]
+  body_exact: [{ "id": 1 }]
+notes: >-
+  `return=` is a MUTATION preference: a plain read parses it but never applies
+  or echoes it. responsePreferences rewrites preferRepresentation to Nothing for
+  every plan that is not a MutateReadPlan{} (Response.hs#L281-L283), and a GET on
+  a relation is a WrappedReadPlan (Plan.hs#L194-L200). The read dispatch builds
+  its prefHeader from that rewritten preference set (Response.hs#L63), so with
+  no other preference in play prefsVals is empty and prefAppliedHeader yields
+  Nothing — no Preference-Applied header at all (Preferences.hs#L174-L175). The
+  response is otherwise an ordinary read: 200 with the JSON array body. Note the
+  preference is not an error either — it is a well-formed, accepted token
+  (Preferences.hs#L146), so it never reaches invalidPrefs and cannot trip the
+  handling=strict guard at Plan.hs#L199. DERIVED FROM SOURCE: v16.0 has no
+  it-block sending `return=` on a GET, so the absence assertion comes from the
+  cited dispatch rather than an upstream expectation.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L283

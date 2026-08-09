@@ -1,0 +1,37 @@
+id: 1318
+feature: representations/prefer/duplicate-return-token-first-wins
+request:
+  method: POST
+  path: /complex_items
+  headers:
+    Prefer: "return=minimal, return=representation"
+    Content-Type: application/json
+  body: { "id": 202, "name": "Doscientos Dos" }
+schema: representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Length: "0"
+    Preference-Applied: "return=minimal"
+  headers_absent: [Content-Type]
+  body_exact: ""
+notes: >-
+  When the same preference is given more than once, only the FIRST occurrence is
+  used — request order decides, not the order of the internal constructor list.
+  fromHeaders splits every Prefer header on ',' and strips each token, preserving
+  request order (Preferences.hs#L152-L153), and parsePrefs takes
+  `head $ mapMaybe (flip Map.lookup $ prefMap vals) prefs` — i.e. it walks the
+  REQUEST tokens and returns the first one that is a known representation token
+  (Preferences.hs#L165-L167), with prefMap keyed by the canonical tokens
+  (Preferences.hs#L169-L170, #L219-L222). So "return=minimal,
+  return=representation" resolves to None even though Full is listed first in
+  `parsePrefs [Full, None, HeadersOnly]` (Preferences.hs#L133). The rule is
+  asserted upstream by the doctests under "If a preference is set more than once,
+  only the first is used": `preferTransaction $ fromHeaders True [("Prefer",
+  "tx=commit, tx=rollback")]` => Just Commit (Preferences.hs#L98-L101), and the
+  same across separate headers for resolution (Preferences.hs#L103-L111). The
+  resulting response is the None arm of the MutationCreate dispatch — 201, empty
+  body, no Content-Type, Content-Length 0 (Response.hs#L112, #L116) — echoing
+  only the winning token (Preferences.hs#L221).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L100

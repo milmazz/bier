@@ -1,0 +1,34 @@
+id: 1316
+feature: representations/post/return-representation-no-pk-no-location
+request:
+  method: POST
+  path: /no_pk
+  headers:
+    Prefer: "return=representation"
+    Content-Type: application/json
+  body: { "a": "bar", "b": "baz" }
+schema: representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: "return=representation"
+  headers_absent: [Location]
+  body_exact: [{ "a": "bar", "b": "baz" }]
+notes: >-
+  Inserting into a relation with NO primary key still yields 201 with the full
+  representation and echoes Preference-Applied: return=representation, but
+  carries no Location header. Directly mirrors the upstream it-block "returns
+  full details of inserted record if asked" (InsertSpec.hs#L228-L237), which
+  POSTs {"a":"bar","b":"baz"} to /no_pk with Prefer: return=representation and
+  asserts 201, the single-element array body, matchHeaderAbsent hLocation and
+  "Preference-Applied" <:> "return=representation". Two independent reasons
+  suppress Location here, either sufficient on its own: the location expression
+  is built only when the requested representation is exactly HeadersOnly
+  (Statements.hs#L45-L52), and the relation has no PK columns to build it from
+  (case 1317 isolates that second reason). test.no_pk is a two-column PK-less
+  table (a, b) mirrored into this area's schema as an auto-updatable view; the
+  harness rolls every request back, so the write does not leak into the shared
+  test.* fixtures other areas read.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L228

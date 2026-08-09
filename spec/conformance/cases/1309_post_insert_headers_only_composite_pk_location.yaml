@@ -33,9 +33,23 @@ notes: >-
   Content-Range */*, Content-Length 0, Preference-Applied: return=headers-only
   and an absent Content-Type. Upstream declares car_models as a PARTITIONED
   table; the partitioning is incidental to the Location rule (locationF only
-  reads the inserted row's PK columns), and the consolidated fixture builds
-  car_models as a plain table with the same composite PK (name, year), seeded
-  empty — so the insert always succeeds and affects exactly one row, which is
-  what the `count(_postgrest_t) = 1` guard in Statements.hs#L48 requires for a
-  Location to be produced at all.
+  reads the inserted row's PK columns).
+
+  FIXTURE SHAPE — this case targets a VIEW, not a table. The consolidated
+  fixture declares `test.car_models` as a plain table with the same composite
+  PK (name, year) and seeds it with no rows (fixtures.sql#L711-L715). Under
+  `schema: representations` the request resolves against
+  `representations.car_models`, which the loader creates as a plain mirror view
+  — `CREATE VIEW "representations"."car_models" AS SELECT * FROM
+  test."car_models"` (lib/mix/tasks/bier.fixtures.load.ex:417) — because
+  car_models is NOT one of the five relations isolate_representations replaces
+  with independent real tables (items, projects, clients, complex_items,
+  auto_incrementing_pk; same file, line 460). So this case DOES exercise
+  key-column inference through a view: the two Location filters can only be
+  produced if the view's `name`/`year` columns are traced back to the base
+  table's PK. The view is auto-updatable (a bare SELECT * over one table), so
+  the INSERT reaches test.car_models and is contained by the conformance
+  server's db_tx_end: :rollback. The base table being empty is what makes the
+  insert affect exactly one row, which is what the `count(_postgrest_t) = 1`
+  guard in Statements.hs#L48 requires for a Location to be produced at all.
 source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L142

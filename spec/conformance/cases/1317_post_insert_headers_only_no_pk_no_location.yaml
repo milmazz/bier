@@ -1,0 +1,38 @@
+id: 1317
+feature: representations/post/return-headers-only-no-pk-no-location
+request:
+  method: POST
+  path: /no_pk
+  headers:
+    Prefer: "return=headers-only"
+    Content-Type: application/json
+  body: { "a": "foo", "b": "bar" }
+schema: representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Range: "*/*"
+    Content-Length: "0"
+    Preference-Applied: "return=headers-only"
+  headers_absent: [Content-Type, Location]
+  body_exact: ""
+notes: >-
+  return=headers-only on a relation with NO primary key yields the usual
+  headers-only response (201, empty body, Content-Length 0, Content-Range "*/*",
+  Preference-Applied: return=headers-only) but no Location header — the one
+  header the resolution exists to produce. This is the single-row case, so the
+  `count(_postgrest_t) = 1` guard passes and the THEN arm runs
+  `coalesce(locationF pkCols, array[]::text[])` (Statements.hs#L45-L52, the
+  coalesce at #L49). With no PK columns, locationF's filter degenerates to
+  `WHERE json_data.key IN ('')`, which matches nothing, so array_agg returns
+  NULL (SqlFragment.hs#L223-L231) and the coalesce falls through to
+  noLocationF = array[]::text[] (SqlFragment.hs#L102-L103); Response.hs#L91-L93
+  then emits no header for the empty rsLocation. DERIVED FROM SOURCE: v16.0 has
+  no PK-less + headers-only it-block — the /no_pk blocks at
+  InsertSpec.hs#L217-L255 use either no Prefer or return=representation
+  (case 1316). The Preference-Applied echo follows responsePreferences passing
+  preferRepresentation through for any MutateReadPlan{} (Response.hs#L281-L283),
+  prefAppliedHeader (Preferences.hs#L182) and
+  toHeaderValue HeadersOnly = "return=headers-only" (Preferences.hs#L222).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Query/Statements.hs#L49
