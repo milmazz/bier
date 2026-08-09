@@ -1,0 +1,23 @@
+id: 11401
+feature: mutations/insert/error/unique-violation
+request:
+  method: POST
+  path: /single_unique
+  headers: { Content-Type: application/json }
+  body: { "unique_key": 1, "value": "dup" }
+schema: mutations
+preconditions: []
+expect:
+  status: 409
+  body_jsonpath:
+    - { path: "$.code", equals: "23505" }
+notes: >-
+  A violated UNIQUE constraint (not the primary key) is mapped to 409 Conflict
+  just like a duplicate pk (case 1356). Mirrors InsertSpec.hs#L320-L322
+  ("attempting to insert a row with conflicting unique constraint",
+  `post "/withUnique" { "uni":"nodup", "extra":"e2" }` -> 409), applied to
+  `single_unique`, which the mutations area exposes with a UNIQUE constraint on
+  `unique_key` and the seeded row (1, 'A'). Upstream asserts only the status;
+  the SQLSTATE is 23505 (unique_violation), the same code InsertSpec.hs#L317
+  asserts for the pk flavor.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L322

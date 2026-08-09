@@ -10,5 +10,15 @@ preconditions: []
 expect:
   status: 201
   headers_absent: [Content-Type, Location]
-notes: "Bulk insert via JSON array; no-pk table -> 201 but no Location header."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L218
+notes: >-
+  Bulk insert: a JSON ARRAY payload inserts many rows and, with no Prefer
+  header, answers 201 with neither Content-Type nor Location. Mirrors the
+  upstream context "with bulk insert" / it "returns 201 but no location header"
+  (InsertSpec.hs#L268-L281), which POSTs a two-element array
+  to /compound_pk and asserts matchStatus 201 + matchHeaderAbsent hContentType +
+  matchHeaderAbsent hLocation. `compound_pk` does not exist in the consolidated
+  fixture database, so the same request shape is applied to `no_pk` (columns a,
+  b); the Location-absent assertion holds there for the additional reason that
+  the relation has no primary key (InsertSpec.hs#L217-L226, the single-object
+  no-pk it-block).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L268

@@ -1,0 +1,31 @@
+id: 11412
+feature: mutations/delete/resource-embedding-parent
+request:
+  method: DELETE
+  path: /tasks?id=eq.8&select=id,name,project:projects(id)
+  headers:
+    Prefer: return=representation
+schema: mutations
+# No setup needed: the consolidated fixture seeds test.tasks id=8
+# ('Code OSX', project_id 4) and test.projects id=4 ('OSX'), no other row
+# references task 8 (test.users_tasks covers task_ids 1-7 only), and the
+# conformance server runs every request with db-tx-end=rollback, so the delete
+# never persists. `mutations.tasks`/`mutations.projects` are auto-updatable view
+# mirrors of `test`, through which DELETE ... RETURNING works.
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "*/*"
+  body_exact:
+    - { "id": 8, "name": "Code OSX", "project": { "id": 4 } }
+notes: >-
+  DELETE + Prefer: return=representation accepts the full select grammar,
+  including an embedded to-one parent aliased with `project:projects(id)`: the
+  embedding is resolved over the rows being deleted and returned alongside them.
+  Documented as a first-class feature of Delete ("Deletions also support
+  :ref:`prefer_return`, :ref:`resource_embedding` and :ref:`v_filter`",
+  docs/references/api/tables_views.rst#L702). Mirrors the it-block "can embed
+  (parent) entities" (DeleteSpec.hs#L71-L76), which asserts exactly this request,
+  this body, 200 and Content-Range "*/*".
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L71

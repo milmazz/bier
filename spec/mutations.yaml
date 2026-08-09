@@ -10,6 +10,28 @@
 area: mutations
 version: v16.0
 
+# v14.12 -> v16.0 re-sync verdict for this area (diff of both tags' trees):
+#   * ONE behavior change. InsertSpec.hs dropped the PostgreSQL-version
+#     conditional on the GENERATED ALWAYS insert error; 428C9 is now
+#     unconditional (see missing_default.generated_always_column below). This
+#     follows from "Drop support for PostgreSQL EOL version 13" in the v16.0
+#     CHANGELOG; nothing else in the v16.0 CHANGELOG touches POST/PATCH/PUT/
+#     DELETE semantics.
+#   * NO other behavioral drift. Every other diff hunk in InsertSpec.hs,
+#     UpdateSpec.hs, DeleteSpec.hs, UpsertSpec.hs, PgSafeUpdateSpec.hs and
+#     QueryLimitedSpec.hs is harness plumbing (`spec :: SpecWith ((), Application)`
+#     -> `spec :: SpecWithConfig` + per-spec `withConfig baseCfg`, import
+#     reshuffles) or test determinism (QueryLimitedSpec.hs added `&order=last_name`
+#     to two mutation assertions). src/PostgREST/ApiRequest/Payload.hs -- which
+#     owns payload parsing, ?columns and the PGRST102 envelope -- is byte-identical
+#     across the two tags; the whole src/ tree merely moved to src/library/.
+#   * ANCHORS MOVED anyway: InsertSpec.hs is 10 lines shorter (-3 above the
+#     generated-column block, -7 at it), Update/Delete/Upsert -1/-2/-2,
+#     PgSafeUpdateSpec +2, and the max-affected block was rehomed from
+#     PreferencesSpec.hs into Preferences/MaxAffectedSpec.hs. Every `source:`
+#     here and in the band's cases was re-anchored and the anchored line's
+#     content re-read against the v16.0 checkout.
+
 # --------------------------------------------------------------------------
 # INSERT (POST)
 # --------------------------------------------------------------------------
@@ -19,87 +41,121 @@ insert:
     # A single JSON object inserts one row; a JSON array inserts many (bulk).
     accepts_object_or_array: true
     # Single-object half of the claim (one object -> one row):
-    object_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L21
+    object_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L21
     # Array/bulk half of the claim (array -> many rows) on /compound_pk:
-    array_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L268
+    array_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L268
     # x-www-form-urlencoded bodies are accepted and treated as a single row.
     accepts_form_urlencoded: true
-    form_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L169
+    form_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L169
     # Leading/trailing insignificant whitespace around the JSON is ignored.
     ignores_insignificant_whitespace: true
-    whitespace_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L403
+    whitespace_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L403
     # An empty object {} (or [{}]) inserts a row using all column defaults.
     empty_object_inserts_defaults: true
-    empty_object_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L343
+    empty_object_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L343
     # An empty array [] inserts nothing and (with return=rep) returns [].
     empty_array_inserts_nothing: true
-    empty_array_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L239
+    empty_array_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L239
   status:
     # Successful insert returns 201 Created.
     created: 201
-    source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L27
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L27
   location_header:
     # The Location header is emitted ONLY when Prefer: return=headers-only is
     # requested. Every Location assertion in InsertSpec.hs is paired with
-    # return=headers-only (L139 /projects?id=eq.11, L207 /auto_incrementing_pk
-    # ?id=eq.2, L773 composite). A plain POST (no Prefer) and a
-    # return=representation insert do NOT set Location (L102/L114/L125/L268 all
-    # assert matchHeaderAbsent hLocation). Do not assume a bare POST emits it.
+    # return=headers-only (L136 /projects?id=eq.11, L204 /auto_incrementing_pk
+    # ?id=eq.2, L763 composite). A plain POST (no Prefer) and a
+    # return=representation insert do NOT set Location (L99/L111/L122/L165/L265
+    # all assert matchHeaderAbsent hLocation). Do not assume a bare POST emits
+    # it. (All line numbers re-anchored to v16.0: the v14.12 file was 3 lines
+    # longer above the generated-column block and 10 lines longer below it.)
     emitted_only_with_headers_only: true
-    source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L204
-    headers_only_projects_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L136
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L204
+    headers_only_projects_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L136
     # Under return=representation, selecting columns that exclude the pk emits no
     # Location header (and does not throw). NOTE: under return=headers-only the
-    # Location IS still emitted even when select excludes the pk (L131-L139),
+    # Location IS still emitted even when select excludes the pk (L128-L140),
     # so this "absent" claim is specific to the representation path.
     absent_when_select_excludes_pk: true
-    absent_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L122
+    absent_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L122
     # A table with no pk never gets a Location header.
     absent_when_no_pk: true
-    no_pk_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L218
-    # Composite pk is encoded as multiple eq filters in the Location (with
-    # return=headers-only). Assertion line is L773 (the it-block opens at L766).
+    no_pk_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L218
+    # Composite pk is encoded as ONE eq filter per pk column in the Location
+    # (with return=headers-only). The canonical assertion is on the partitioned
+    # `car_models` (pk name+year): it-block "should not throw and return location
+    # header for partitioned tables when selecting without PK" opens at L142 and
+    # asserts Location "/car_models?name=eq.Enzo&year=eq.2021" at L150. The
+    # black-box cases for this live outside the mutations band -- case 1309
+    # (representations) and case 1562 (headers), both /car_models, both citing
+    # the it-block head L142.
+    #
+    # Do NOT anchor this claim at L763. That line belongs to the SEPARATE
+    # `with_multiple_pks` it-block ("returns a location header with pks from both
+    # tables", L756-L767), whose two pk columns come from two DIFFERENT base
+    # tables of a view -- a distinct behavior, on a relation absent from the
+    # fixture DB (see gaps). A genuine second flavor of THIS claim is the view
+    # /compound_pk_view (pk k1+k2) at L777, also absent from the fixture DB.
     composite_pk_encoded: true
-    composite_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L763
+    composite_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L150
+    composite_view_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L777
   errors:
-    # Non-uniform JSON array (not all objects, or objects with different keys)
-    # -> 400 PGRST102 "All object keys must match".
+    # Non-uniform JSON array -> 400 PGRST102 "All object keys must match".
+    # Upstream asserts the two flavors in two SEPARATE it-blocks inside the
+    # "non uniform json array" context, with the identical envelope:
+    #   * not exclusively objects  -- [{...}, 123, "xxxx", {...}]  (L74-L81)
+    #   * objects with DIFFERENT keys -- [{id,body}, {id,body,owner}] (L83-L90)
+    # Both anchors are recorded; case 1354 exercises the second flavor.
     non_uniform_array: {status: 400, code: PGRST102, message: "All object keys must match"}
-    non_uniform_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L74
+    non_uniform_not_all_objects_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L74
+    non_uniform_different_keys_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L83
     # Empty or invalid JSON body -> 400 PGRST102 "Empty or invalid json".
     invalid_json: {status: 400, code: PGRST102, message: "Empty or invalid json"}
-    invalid_json_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L283
+    invalid_json_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L283
     empty_body: {status: 400, code: PGRST102, message: "Empty or invalid json"}
-    empty_body_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L293
+    empty_body_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L293
     # Duplicate pk surfaces Postgres 23505 as 409 Conflict.
     duplicate_pk: {status: 409, code: "23505"}
-    duplicate_pk_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L314
+    duplicate_pk_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L314
     # Conflicting unique constraint also -> 409 (on /withUnique).
     unique_violation: {status: 409, code: "23505"}
-    unique_violation_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L322
+    unique_violation_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L322
     # not-null violation surfaces Postgres 23502 as 400.
     not_null_violation: {status: 400, code: "23502"}
-    not_null_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L210
+    not_null_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L210
     # Unknown table -> 404 PGRST205, even when ?columns is also invalid.
     table_not_found: {status: 404, code: PGRST205}
-    table_not_found_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L477
+    table_not_found_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L477
 
 # --------------------------------------------------------------------------
-# columns= query parameter (applies to POST, PATCH, PUT)
+# columns= query parameter (applies to POST and PATCH)
+#
+# PUT IS DELIBERATELY NOT CLAIMED HERE. At v16.0 there is no traceable
+# ?columns= behavior for PUT: every `columns=` occurrence in UpsertSpec.hs is a
+# POST (L108, L121, L134, L236, L248, L260 -- all surr_*_upsert), and the docs
+# list :ref:`specify_columns` only under Insert (tables_views.rst#L560-L586)
+# and Update (#L607). The Upsert/PUT sections (#L613-L689) never mention it;
+# the PUT prose says the opposite -- "All the columns must be specified in the
+# request body, including the primary key columns" (#L689). See gaps.
 # --------------------------------------------------------------------------
 columns_param:
+  applies_to: [POST, PATCH]
   # JSON keys NOT listed in ?columns are ignored (not inserted/updated).
   ignores_unlisted_keys: true
-  source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L436
+  source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L436
+  # Docs corroboration for each supported method (behavior above is test-derived;
+  # these anchors only establish WHICH methods the parameter is documented for).
+  insert_docs_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/tables_views.rst#L565
+  update_docs_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/tables_views.rst#L607
   # Blank ?columns= -> 400 PGRST100 (parse error).
   blank_is_parse_error: {status: 400, code: PGRST100}
-  blank_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L455
+  blank_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L455
   # A ?columns column that does not exist -> 400 PGRST204 (column not found).
   unknown_column: {status: 400, code: PGRST204}
-  unknown_column_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L466
+  unknown_column_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L466
   # On PATCH, an unknown ?columns column is likewise 400 PGRST204.
   unknown_column_patch: {status: 400, code: PGRST204}
-  unknown_column_patch_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L348
+  unknown_column_patch_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L348
 
 # --------------------------------------------------------------------------
 # missing=default preference (Prefer: missing=default)
@@ -109,13 +165,18 @@ missing_default:
   # column receive that column's table/view DEFAULT instead of NULL.
   # Without missing=default, missing values become NULL.
   applies_table_defaults: true
-  source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L496
+  source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L496
   # Echoed in Preference-Applied as "missing=default, ...".
   preference_applied: "missing=default"
-  preference_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L511
+  preference_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L511
   # Also works on UPDATE (PATCH).
   applies_on_update: true
-  update_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L370
+  update_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L370
+  # A missing value can also come from a DOMAIN's default rather than the
+  # column's (InsertSpec.hs#L562-L569, /evil_friends -> id 666). That flavor is
+  # cased by the domain_representations band (case 1814), not here.
+  applies_domain_defaults: true
+  domain_default_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L563
   # A GENERATED ALWAYS column can never receive a value, even under
   # missing=default: Postgres raises 428C9 and PostgREST surfaces it as 400 with
   # details "Column \"b\" is a generated column."
@@ -125,7 +186,7 @@ missing_default:
   # dropped support for PostgreSQL 13 (EOL), so the test now asserts 428C9
   # unconditionally. Bier targets PG >= 14, so 428C9 is the only shape.
   generated_always_column: {status: 400, code: "428C9", message: "cannot insert a non-DEFAULT value into column \"b\"", details: "Column \"b\" is a generated column."}
-  generated_always_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/InsertSpec.hs#L547
+  generated_always_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L547
 
 # --------------------------------------------------------------------------
 # UPDATE (PATCH)
@@ -135,36 +196,67 @@ update:
   status:
     # Successful update with no representation returns 204 No Content.
     no_content: 204
-    source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L68
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L68
     # With return=representation the status is 200 and the body is an array.
     representation: 200
-    representation_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L93
+    representation_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L93
     # Matching zero rows still returns 204 (no return=) or 200 with [] (return=rep).
     zero_rows_no_return: 204
-    zero_rows_no_return_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L88
+    zero_rows_no_return_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L88
     zero_rows_return_rep: {status: 200, body: "[]"}
-    zero_rows_return_rep_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L78
+    zero_rows_return_rep_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L78
   content_range:
     # 204 updates emit Content-Range "0-<n-1>/*" reflecting affected rows.
     single_row: "0-0/*"
-    source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L75
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L75
     multiple_rows: "0-1/*"
-    multiple_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L115
+    multiple_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L115
   empty_body:
     # An empty body ({} / [] / [{}]) makes no updates; returns 204 with
     # Content-Range "*/*" (no return=), or 200 with [] (return=rep).
     no_updates: true
     content_range: "*/*"
-    source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L232
-    return_rep_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L301
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L232
+    return_rep_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L301
+  resource_embedding:
+    # PATCH + return=representation supports the FULL select grammar, including
+    # embedded resources: `?select=<cols>,<related>(<cols>)` resolves the
+    # embedding over the UPDATED rows and returns them shaped. Documented as a
+    # first-class feature of Update ("Updates also support ...
+    # :ref:`resource_embedding`", docs tables_views.rst#L604) and asserted in
+    # UpdateSpec.hs across every cardinality:
+    #   * O2M / self-reference children      -- /web_content?id=eq.0&select=id,name,web_content(name)   (L432)
+    #   * parent + children + grandchildren  -- ...,web_content(name,web_content(name)),parent_content:p_web_id(name) (L471)
+    #   * children with the pk NOT selected  -- /web_content?...&select=name,web_content(name)          (L513)
+    #   * M2M + nested parent                -- /users?id=eq.1&select=name,tasks(name,project:projects(name)) (L539)
+    #   * O2O both directions                -- /students?id=eq.1&select=name,students_info(address)     (L579)
+    # Embedded rows accept their own filters (`<embed>.<col>=<op>.<val>`), which
+    # can null a to-one embed out (L607 -> "students_info": null), and their own
+    # `<embed>.order=` (L740). Status/headers are the ordinary
+    # return=representation ones: 200 + Content-Type json + Preference-Applied.
+    # Black-box cases: 11413 (O2O) and 11415 (M2M + nested parent) -- the two
+    # flavors whose relations all exist in the consolidated fixture DB with the
+    # exact upstream seed values. The four `web_content` flavors (self-reference
+    # children, grandchildren, pk-not-selected, embed order) have no case
+    # because that relation is absent from the fixture DB (see gaps).
+    supported: true
+    status: 200
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L579
+    o2m_self_reference_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L432
+    grandchildren_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L471
+    pk_not_selected_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L513
+    m2m_with_parent_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L539
+    embed_filters_null_to_one_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L607
+    embed_order_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L740
+    docs_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/tables_views.rst#L604
   errors:
     invalid_json: {status: 400, code: PGRST102, message: "Empty or invalid json"}
-    invalid_json_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L37
+    invalid_json_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L37
     empty_payload: {status: 400, code: PGRST102, message: "Empty or invalid json"}
-    empty_payload_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L47
+    empty_payload_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L47
     # Unknown table -> 404 PGRST205.
     table_not_found: {status: 404, code: PGRST205}
-    table_not_found_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L15
+    table_not_found_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L15
 
 # --------------------------------------------------------------------------
 # DELETE
@@ -174,24 +266,47 @@ delete:
   status:
     # Successful delete with no representation returns 204; Content-Range "*/*".
     no_content: {status: 204, content_range: "*/*"}
-    source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L15
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L15
     # With return=representation returns 200 and the deleted rows as an array.
     representation: 200
-    representation_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L27
+    representation_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L27
     # No rows matched + return=rep -> 200 with [] body, Content-Range "*/*".
     zero_rows_return_rep: {status: 200, body: "[]"}
-    zero_rows_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L104
+    zero_rows_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L104
   count_exact:
     # count=exact reports the deleted count in Content-Range "*/<n>".
     content_range: "*/<n>"
-    source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L27
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L27
   select_shaping:
     # ?select on DELETE+return=rep shapes/renames/casts the returned rows.
     supports_rename_cast: true
-    source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L67
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L67
+  resource_embedding:
+    # DELETE + return=representation likewise supports the full select grammar
+    # including embedded resources: the embedding is resolved over the rows being
+    # deleted and returned alongside them. Documented as a first-class feature of
+    # Delete ("Deletions also support :ref:`prefer_return`,
+    # :ref:`resource_embedding` and :ref:`v_filter`", docs tables_views.rst#L702)
+    # and asserted in DeleteSpec.hs:
+    #   * to-one parent -- /tasks?id=eq.8&select=id,name,project:projects(id)
+    #     -> [{"id":8,"name":"Code OSX","project":{"id":4}}]  (it-block L71-L76,
+    #     200 + Content-Range "*/*")
+    #   * O2O both directions -- /students?id=eq.1&select=name,students_info(address)
+    #     and the mirrored /students_info?id=eq.1&select=address,students(name)
+    #     (it-block L78-L102)
+    #   * embed + top-level order -- /artists?id=lt.3&select=id,name,albums(title)&order=id.desc
+    #     (it-block L158-L168; `artists` is absent from the fixture DB, see gaps)
+    # Black-box case: 11412 (the to-one parent flavor).
+    supported: true
+    status: 200
+    content_range: "*/*"
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L71
+    o2o_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L78
+    embed_with_order_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L159
+    docs_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/tables_views.rst#L702
   errors:
     table_not_found: {status: 404, code: PGRST205}
-    table_not_found_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L113
+    table_not_found_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L113
 
 # --------------------------------------------------------------------------
 # UPSERT via POST (Prefer: resolution=...)
@@ -205,33 +320,64 @@ upsert_post:
     behavior: "insert-or-update on conflict"
     status_inserted: 201
     status_all_updated: 200
-    inserted_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L19
-    all_updated_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L34
+    inserted_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L19
+    all_updated_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L34
     preference_applied: "resolution=merge-duplicates"
-    pref_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L31
+    pref_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L31
   resolution_ignore_duplicates:
     # Prefer: resolution=ignore-duplicates -> INSERT ... ON CONFLICT DO NOTHING.
     # Conflicting rows are skipped; return=rep returns only newly inserted rows.
     behavior: "insert, skip conflicting"
     status: 201
-    source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L165
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L165
     preference_applied: "resolution=ignore-duplicates"
-    pref_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L174
+    pref_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L174
+    # ASYMMETRY WITH merge-duplicates: when EVERY row conflicts and nothing is
+    # inserted, ignore-duplicates still answers 201 with [] -- it does NOT
+    # degrade to 200 the way merge-duplicates does (compare
+    # resolution_merge_duplicates.status_all_updated above). Upstream asserts
+    # this twice in the same it-block ("succeeds if not a single resource is
+    # created"): one all-conflicting row at L282 and two at L288.
+    status_when_none_created: 201
+    none_created_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L287
   on_conflict_param:
     # ?on_conflict=<cols> targets a UNIQUE constraint (not the pk) as the
     # conflict target for the upsert.
     targets_unique: true
-    single_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L81
-    compound_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L94
+    single_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L81
+    compound_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L94
+  only_pk_table:
+    # Degenerate target: when the table's ONLY columns are pk columns, the
+    # ON CONFLICT DO UPDATE has nothing to SET. The upsert still succeeds (201)
+    # in every flavor, but WHAT COMES BACK under return=representation differs
+    # per resolution -- it is the ordinary returning-set rule, not a special
+    # only-pk rule, so do NOT model it as "every payload row is echoed".
+    succeeds: true
+    status: 201
+    # merge-duplicates: DO UPDATE touches the conflicting rows, so they are part
+    # of the RETURNING set -- POST /only_pk [{1},{2},{4}] -> [{1},{2},{4}]
+    # (1 and 2 conflict with the seed, 4 is inserted). Case 11410.
+    merge_echoes_every_payload_row: true
+    merge_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L147
+    # ignore-duplicates: DO NOTHING, so conflicting rows are NOT in the
+    # RETURNING set -- POST /only_pk [{1},{2},{3}] -> [{3}] ONLY (the single
+    # newly inserted row). Assertion line L275.
+    ignore_echoes_only_inserted_rows: true
+    ignore_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L275
+    # PUT: addresses one non-existent resource (the it-block first GETs
+    # /only_pk?id=eq.10 and asserts []), so the single-element payload is
+    # inserted and echoed -- "every row echoed" holds only trivially here.
+    put_single_element_echoed: true
+    put_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L407
   no_pk_behavior:
     # If the table has no pk, the resolution preference is silently ignored and
     # NO Preference-Applied: resolution=... is emitted.
     ignores_resolution: true
-    source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L155
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L155
   empty_payload:
     # Empty array payload with merge-duplicates inserts nothing -> 200, [].
     status: 200
-    source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L75
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L75
 
 # --------------------------------------------------------------------------
 # UPSERT via PUT
@@ -242,33 +388,44 @@ upsert_put:
     # PUT addresses a single resource by its full pk via eq filters and either
     # inserts it (201) or replaces it (200/204). Body is a single-element array.
     insert_status: 201
-    insert_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L361
-    update_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L414
+    insert_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L361
+    update_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L414
+    # A composite pk is addressed with ONE eq filter per pk column; the insert
+    # leg then behaves exactly as for a single-column pk (201).
+    composite_pk_needs_one_eq_per_col: true
+    composite_insert_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L394
     # A payload array with MORE than one element is not an error on PUT: only
     # the first element is applied (and returned). PUT addresses exactly one
     # resource, so trailing elements are ignored rather than bulk-upserted.
     multi_element_payload_uses_first_only: true
-    multi_element_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L428
+    multi_element_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L428
     # PUT + Prefer: return=minimal -> 204 with no Content-Type and
-    # Preference-Applied: return=minimal.
+    # Preference-Applied: return=minimal. The black-box case for this lives in
+    # the representations band (case 1332, PUT /items?id=eq.2), which mirrors
+    # the same it-block and additionally asserts the empty body; the mutations
+    # band deliberately carries no duplicate of it.
     return_minimal_status: 204
-    return_minimal_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L543
+    return_minimal_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L543
   restrictions:
     # limit/offset are not allowed on PUT -> 400 PGRST114.
     no_limit_offset: {status: 400, code: PGRST114, message: "limit/offset querystring parameters are not allowed for PUT"}
-    limit_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L295
-    offset_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L302
+    limit_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L295
+    offset_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L302
     # Filters must be exactly the pk columns with eq operators, else 405 PGRST105.
+    # "All and only" is literal on both ends: a non-pk column (L310), a non-eq
+    # operator on the pk (`not.eq` L316, `in.` L321, `and=()` L326) and a STRICT
+    # SUBSET of a composite pk (L333/L338) all produce the identical envelope.
     pk_eq_only: {status: 405, code: PGRST105, message: "Filters must include all and only primary key columns with 'eq' operators"}
-    pk_eq_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L309
+    pk_eq_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L309
+    partial_composite_pk_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L333
     # No-pk table with PUT -> 405 PGRST105.
     no_pk: {status: 405, code: PGRST105}
-    no_pk_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L355
+    no_pk_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L355
     # URL pk must match the payload pk, else 400 PGRST115.
     pk_mismatch: {status: 400, code: PGRST115, message: "Payload values do not match URL in primary key column(s)"}
-    pk_mismatch_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L344
+    pk_mismatch_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L344
   ignores_range_header: true
-  ignores_range_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L477
+  ignores_range_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L477
 
 # --------------------------------------------------------------------------
 # pg-safeupdate: full-table UPDATE/DELETE protection
@@ -277,12 +434,12 @@ safe_mutations:
   # When the pg-safeupdate extension is loaded, an UPDATE/DELETE with no WHERE
   # condition raises Postgres 21000 -> 400.
   update_requires_where: {status: 400, code: "21000", message: "UPDATE requires a WHERE clause"}
-  update_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L18
+  update_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L18
   delete_requires_where: {status: 400, code: "21000", message: "DELETE requires a WHERE clause"}
-  delete_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L37
+  delete_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L37
   # A filter satisfies the WHERE requirement -> 204.
   filter_satisfies: {status: 204}
-  filter_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L31
+  filter_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PgSafeUpdateSpec.hs#L31
 
 # --------------------------------------------------------------------------
 # max-affected preference (limited / guarded mutations)
@@ -297,17 +454,32 @@ max_affected:
   # Preferences/MaxAffectedSpec.hs L13-L128), so the behavior is unchanged and
   # only the anchors were re-homed.
   strict_exceeds: {status: 400, code: PGRST124, message: "Query result exceeds max-affected preference constraint"}
-  exceeds_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/Preferences/MaxAffectedSpec.hs#L14
+  exceeds_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/MaxAffectedSpec.hs#L14
   strict_within: {status: 204}
-  within_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/Preferences/MaxAffectedSpec.hs#L22
+  within_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/MaxAffectedSpec.hs#L22
+  # The cap guards PATCH as well as DELETE, and `details` reports the affected
+  # count verbatim as "The query affects <n> rows" (no singular/plural form).
+  applies_to_update: true
+  update_details: "The query affects 1 rows"
+  update_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/MaxAffectedSpec.hs#L32
   # handling=lenient ignores the constraint (never fails on it).
   lenient_ignores: true
-  lenient_source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/Feature/Query/Preferences/MaxAffectedSpec.hs#L48
+  lenient_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/MaxAffectedSpec.hs#L48
+  # A max-affected violation is reported by the RPC path with a DIFFERENT code
+  # (PGRST128) when the routine does not return SETOF/TABLE; that rule is
+  # RPC-specific and is owned by the rpc area (case 1441), not this band.
+  rpc_variant_owned_elsewhere: PGRST128
+  rpc_variant_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/Preferences/MaxAffectedSpec.hs#L122
 
 gaps:
   - "The GENERATED ALWAYS insert error (modeled under missing_default.generated_always_column) has no conformance case: the upstream target is table `foo` (columns a text, b text GENERATED ALWAYS AS (...) STORED), which does not exist in the consolidated fixture database and has no generated-column stand-in there (no is_generated='ALWAYS' column exists in test.* or mutations.*). loader_exposure: add a generated-always table and expose it under the `mutations` area schema as a real table (a view mirror does not preserve the generated-column rejection) before a case can assert 428C9."
-  - "limit/offset on PATCH/DELETE (true 'limited update/delete' requiring an order=) still has no dedicated test case in PostgREST v16.0 test/spec/Feature/Query/{Update,Delete}Spec.hs (re-checked at the v16.0 pin); modeled here only via max-affected (PGRST124). The classic PGRST109/PGRST110 limited-mutation errors are still marked 'no longer used' in src/library/PostgREST/Error.hs#L153-L154 (the src/ tree moved to src/library/ in v16.0), so they are intentionally omitted."
+  - "limit/offset on PATCH/DELETE (true 'limited update/delete' requiring an order=) still has no dedicated test case in PostgREST v16.0 test/spec/Feature/Query/{Update,Delete}Spec.hs (re-checked at the v16.0 pin: neither file contains the substring 'limit='); modeled here only via max-affected (PGRST124). The classic PGRST109/PGRST110 limited-mutation errors are still marked 'no longer used' in src/library/PostgREST/Error.hs#L153-L154 (the src/ tree moved to src/library/ in v16.0), so they are intentionally omitted. The documentation section is gone too: at v16.0 the only surviving trace of it is a legacy anchor redirect in docs/references/api.rst#L58 ('#limited-updates-deletions' -> 'api/tables_views.html#limited-update-delete') whose target heading no longer exists anywhere under docs/ (the string 'limited' appears in no docs/references/api/*.rst at either pin). There is therefore nothing citable to case."
   - "db-max-rows does NOT cap rows affected by POST/PATCH/DELETE (QueryLimitedSpec.hs#L81-L116, 'max-rows=2 on mutations'). That spec is config-driven (configDbMaxRows = Just 2) and its black-box cases are owned by the config/pagination bands (cases 1700-1701), so no mutations-band case duplicates it. The only v16.0 change there was adding &order=last_name for determinism, not a behavior change."
   - "CSV insert is marked pendingWith \"Decide on what to do with CSV insert\" in InsertSpec.hs#L629, so the disparate-csv-types path is not asserted upstream and is omitted; only the simpler CSV return=representation cases are tested but were left out of this band to keep fixtures JSON-only."
-  - "PUT return=minimal yields 204 with hContentType absent and Preference-Applied: return=minimal (UpsertSpec.hs#L543-L552). The status is modeled under upsert_put.semantics.return_minimal_status, but no conformance case covers it: the upstream test targets the case-sensitive /UnitTest relation (pk \"idUnitTest\"), which does not exist anywhere in the consolidated fixture database. loader_exposure: add test.\"UnitTest\" and expose it under the `mutations` area schema (isolate_mutations' table list is hardcoded to items, articles, complex_items, tiobe_pls, simple_pk, no_pk, single_unique, compound_unique, safe_update_items, safe_delete_items) before a black-box case can assert this."
+  - "PUT return=minimal yields 204 with hContentType absent and Preference-Applied: return=minimal (https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L543, block L543-L552). That wire contract was ALREADY covered before this pass, by case 1332 in the representations band (PUT /items?id=eq.2), which mirrors the same it-block and additionally asserts the empty body; this pass briefly added a mutations-band clone of it (11406, PUT /tiobe_pls) and DROPPED it again as redundant -- same anchor, same it-block, strictly weaker assertions, only the derived relation differed. What remains uncovered is not the wire contract but the CASE-SENSITIVE-IDENTIFIER half: upstream's target is the quoted /UnitTest relation (pk \"idUnitTest\"), which does not exist anywhere in the consolidated fixture database, so neither this block nor its camel-case POST siblings at UpsertSpec.hs#L501-L530 (merge-duplicates echoing both payload rows, ignore-duplicates echoing only the inserted one) can be asserted against a quoted identifier. loader_exposure: add test.\"UnitTest\" and expose it under the `mutations` area schema (isolate_mutations' hardcoded real-table list is items, articles, complex_items, tiobe_pls, simple_pk, no_pk, single_unique, compound_unique, safe_update_items, safe_delete_items; every other relation is exposed only as a view mirror) before a black-box case can assert the quoted-identifier flavor."
+  - "Composite-pk UPSERT is only PARTLY caseable, and the reason is per-leg, not per-relation. Upstream asserts every composite-pk leg TWICE: once on `employees` (pk first_name+last_name, plus a `money` column rendered as '$24,000.00') and once on the partitioned `car_models` (pk name+year) -- POST merge-duplicates at UpsertSpec.hs#L49-L60 (employees) and https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L62 ('INSERTs and UPDATEs rows on composite pk conflict for partitioned tables', block L62-L73); POST ignore-duplicates at #L177-L187 (employees) and #L189-L199 (car_models); PUT update at #L441-L451 (employees) and #L453-L463 (car_models). `employees` is absent from the consolidated fixture database, but `car_models` IS present -- test.car_models(name text, year integer) PRIMARY KEY (name, year), fixtures.sql#L710-L715 -- so the car_models it-blocks are what decides each leg, and that table seeds ZERO rows (verified against a freshly loaded bier_test: SELECT count(*) FROM test.car_models = 0). Leg by leg: (a) POST merge-duplicates IS derivable there -- with an empty table both payload rows simply insert and the upstream assertion still holds verbatim (201, Preference-Applied 'resolution=merge-duplicates, return=representation', both rows echoed in payload order); cased this pass as 11414, minus upstream's third column `car_brand_name`, which the fixture table does not have. (b) POST ignore-duplicates is NOT derivable -- the whole assertion is that the conflicting first row is OMITTED from the RETURNING set (#L189-L199 echoes only 'Huracán'), which cannot happen with nothing to conflict against. (c) The PUT *update* leg is NOT derivable -- #L453-L463 first GETs /car_models?name=eq.DeLorean&year=eq.1981 and asserts a seeded row, then PUTs over it; with no seed the request degenerates into the insert leg. Also covered already: the composite-pk PUT *insert* leg, case 11408, which is NOT a derivation (upstream's own 'succeeds on a partitioned table with composite pk', #L388, block L388-L399, PUTs {\"name\":\"Supra\",\"year\":2021} to /car_models?name=eq.Supra&year=eq.2021; 11408's notes record the car_brand_name/partitioning differences). Only case 11409 (partial composite pk -> PGRST105) is genuinely derived, from upstream's `employees` block at #L332-L342. loader_exposure: seed test.car_models with the upstream rows (at minimum Murcielago/2001 for leg (b) and DeLorean/1981 for leg (c); neither collides with the Supra/2021 of 11408 nor the Enzo/2021 of cases 1309/1562), or expose an `employees`-shaped table (composite pk, money column, upstream seeds) under the `mutations` area schema, before legs (b) and (c) can be asserted."
+  - "Resource embedding on mutations is COVERED for every flavor whose relations the consolidated fixture database has, and the residue is relation-shaped, not feature-shaped. Covered this pass: DELETE + to-one parent (case 11412, DeleteSpec.hs#L71-L76 on test.tasks id=8 'Code OSX'/project_id 4 + test.projects id=4), PATCH + one-to-one (case 11413, UpdateSpec.hs#L577-L604 on test.students 1 'John Doe' + test.students_info 1 'Street 1'), PATCH + many-to-many with a nested parent (case 11415, UpdateSpec.hs#L537-L556 on users/users_tasks/tasks/projects) -- all three assert upstream's exact seed values with no derivation and no fixture change. POST + embed was already covered by the representations band (case 1300). What is NOT cased, purely because the relation is missing from the fixture DB: the DELETE O2O reverse direction is skipped by choice (DeleteSpec.hs#L91-L102, same rule as 11412/11413); the four `web_content` self-reference flavors on PATCH (UpdateSpec.hs#L432 children, #L471 parent+children+grandchildren, #L513 pk-not-selected, #L740 embed order) and on PUT (UpsertSpec.hs#L558, block L556-L567); DELETE embed + top-level order on `artists` (DeleteSpec.hs#L158-L168); and batch-upsert POST + embed on `artists` (UpsertSpec.hs#L569-L578). loader_exposure: `web_content` (self-referencing FK p_web_id, upstream's tardis/fezz/foo/bar/wut seed) and `artists`/`albums` must be created and exposed under the `mutations` area schema before those it-blocks can be asserted; nothing about the embedding rules themselves is unknown."
+  - "Several relations the upstream mutation specs target are absent from the consolidated fixture database, so the corresponding it-blocks have no case anywhere: `compound_pk`/`compound_pk_view` (bulk insert + composite Location, InsertSpec.hs#L257-L281/#L770-L781 -- case 1352 derives the bulk half onto `no_pk` and the representations band derives the Location half onto `car_models`, case 1309), `withUnique` (unique-constraint 409, #L320-L322 -- derived onto `single_unique` as case 11401), `with_multiple_pks` (#L756-L767), `test_null_pk_competitors_sponsors` (Location with a null pk component, #L783-L791), `tbl_w_json`, `bitchar_with_length`, `items3`, `empty_table`, `complex_items_view` (the VIEW flavor of missing=default, InsertSpec.hs#L514-L527 and UpdateSpec.hs#L395-L400), `app_users` (column-privilege DELETE, DeleteSpec.hs#L122-L133), `artists`/`web_content` and `unsafe_update_items`/`unsafe_delete_items` (PgSafeUpdateSpec.hs#L53-L66, the pg-safeupdate-DISABLED spec). loader_exposure: each needs the relation created and exposed under the `mutations` area schema before a case can assert it; the disabled-safeupdate pair additionally needs an instance whose db-safe-update-tables excludes them."
+  - "operator_action: the frozen harness never executes an HTTP case's `preconditions:` list -- test/support/conformance_case.ex parses it into the struct and nothing runs it (only CLI cases' `config.preconditions_sql` are executed, test/support/cli_case.ex#L22). This area is the heaviest user of the key (25 of its 65 cases carry one), and those cases pass only because `mix bier.fixtures.load`'s isolate_mutations pre-bakes the same state and the server rolls every request transaction back. The listed SQL is therefore documentation of the required starting state, not a runnable setup step: any NEW mutations case must be valid against the loaded state as-is (all 17 cases added across this pass and its review fix-up are -- 1398, 1399, 11400-11405, 11407-11411 and 11412-11415 -- each with `preconditions: []`; the four review-fix cases additionally rely on db-tx-end=rollback to keep their writes off the un-isolated view mirrors of test.tasks/students/students_info/users/car_models). Either wire preconditions up in the harness or the key should be re-documented as advisory."
+  - "?columns= on PUT is deliberately NOT modeled (the columns_param section claims POST and PATCH only): no v16.0 source states it. Every `columns=` occurrence in UpsertSpec.hs is a POST (L108, L121, L134 under merge-duplicates and L236, L248, L260 under ignore-duplicates, all against surr_*_upsert); the file contains no PUT + ?columns= it-block. The docs reference :ref:`specify_columns` only from Insert (https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/tables_views.rst#L565, section L560-L586) and Update (#L607); the Upsert section's own `columns=` example is a POST (#L642-L644) and the PUT subsection says the opposite -- 'All the columns must be specified in the request body, including the primary key columns' (#L689). A previous revision of this file asserted PUT in the section header with no citation; that claim is withdrawn rather than approximated. Nothing to case until upstream asserts it."
   - "Upsert + Prefer: missing=default on SERIAL / GENERATED-BY-DEFAULT surrogate primary keys (UpsertSpec.hs#L107, #L120, #L133 for merge-duplicates and #L235, #L247, #L259 for ignore-duplicates) has no case: the upstream targets `surr_serial_upsert`, `surr_gen_default_upsert` and the case-sensitive `Surr_Gen_Default_Upsert` do not exist anywhere in the consolidated fixture database. loader_exposure: these three tables must be added AND exposed under the `mutations` area schema as real tables (the area's view mirror does not carry column DEFAULTs / identity, which is exactly why bier.fixtures.load's isolate_mutations already materializes complex_items as a real table); its table list is hardcoded, so a fixtures delta alone is not enough."

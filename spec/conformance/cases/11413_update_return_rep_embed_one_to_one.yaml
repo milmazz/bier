@@ -1,0 +1,36 @@
+id: 11413
+feature: mutations/update/resource-embedding-one-to-one
+request:
+  method: PATCH
+  path: /students?id=eq.1&select=name,students_info(address)
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation
+  body: { "name": "Johnny Doe" }
+schema: mutations
+# No setup needed: the consolidated fixture seeds test.students (1, '0001',
+# 'John Doe') and test.students_info (1, '0001', 'Street 1'), the same values
+# upstream asserts. The O2O cardinality comes from students_info's composite FK
+# (code, id) -> students(code, id) covering the full pk on both sides, so the
+# embed renders as an object, not an array. The conformance server runs every
+# request with db-tx-end=rollback, so the update never persists.
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: return=representation
+  body_exact:
+    - { "name": "Johnny Doe", "students_info": { "address": "Street 1" } }
+notes: >-
+  PATCH + Prefer: return=representation accepts the full select grammar,
+  including embedded resources; here a one-to-one embed rendered as an object.
+  Documented as a first-class feature of Update ("Updates also support ...
+  :ref:`resource_embedding`", docs/references/api/tables_views.rst#L604).
+  Mirrors the first request of the it-block "without filters" under context
+  "embeds an O2O relationship after update" (UpdateSpec.hs#L577-L604): PATCH
+  /students?id=eq.1&select=name,students_info(address) with {"name":"Johnny
+  Doe"}. The block's second request is the mirrored direction
+  (/students_info?id=eq.1&select=address,students(name)); only the first is
+  cased, the reverse direction adds no new rule.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L579
