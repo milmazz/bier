@@ -12,7 +12,11 @@
 -- the routines exercised by spec/conformance/cases/14xx_*.yaml. All objects live
 -- in schema `test`, which is the exposed (db-schemas) schema for these cases.
 --
--- Upstream source: https://github.com/PostgREST/postgrest/blob/v14.12/test/spec/fixtures/schema.sql
+-- Upstream source: https://github.com/PostgREST/postgrest/blob/v16.0/test/spec/fixtures/schema.sql
+-- Re-pinned v14.12 -> v16.0 after verifying all 23 vendored routines are still
+-- defined upstream at v16.0 with unchanged argument signatures. The local copy
+-- deliberately adds IMMUTABLE/STABLE/VOLATILE markers upstream omits, because
+-- routine volatility drives the OPTIONS `Allow` cases (1031/1032).
 -- Loads cleanly on PostgreSQL 14/15/16.
 
 DROP SCHEMA IF EXISTS test CASCADE;
