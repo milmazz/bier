@@ -1,0 +1,30 @@
+id: 1279
+feature: pagination/range_header/open_ended_nonzero_offset
+request:
+  method: GET
+  path: /items?select=id&order=id.asc
+  headers:
+    Accept: application/json
+    Range-Unit: items
+    Range: 10-
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "10-14/*"
+  body_exact: [{"id":11},{"id":12},{"id":13},{"id":14},{"id":15}]
+notes: >
+  An open-ended Range with a NON-zero lower bound is an offset with no limit:
+  "You may also request open-ended ranges for an offset with no limit, e.g.
+  Range: 10-" (pagination_count.rst:52). Case 1260 only covers 'Range: 0-',
+  which cannot distinguish an honored offset from an ignored header. Derivable
+  from source: RangeQuery.hs:38 matches the value against ^([0-9]+)-([0-9]*)$
+  and an empty upper group yields `allRange` for the upper bound
+  (RangeQuery.hs:43), so the parsed range is (BoundaryBelow 10,
+  BoundaryAboveAll); rangeOffset is then 10 and rangeLimit is Nothing
+  (RangeQuery.hs:58-68). With no count requested the total is '*' and the
+  status is 200 (RangeQuery.hs:105). Verified against a freshly loaded
+  bier_test: pagination.items holds ids 1..15, so skipping 10 leaves 11..15
+  and the window is 10-14.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/pagination_count.rst#L52

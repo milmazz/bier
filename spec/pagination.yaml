@@ -7,16 +7,31 @@
 # Every entry carries a `source` URL with a line anchor. Behaviors that could
 # not be traced to a specific source line are recorded under `gaps` (see end).
 #
-# RE-SYNC NOTE (v14.12 -> v16.0): no pagination behavior changed between the
-# pins. `test/spec/Feature/Query/RangeSpec.hs` only lost its
+# RE-SYNC NOTE (v14.12 -> v16.0): no *asserted* pagination behavior changed
+# between the pins. `test/spec/Feature/Query/RangeSpec.hs` only lost its
 # `import Network.Wai (Application)` line and switched to the `SpecWithConfig`
-# harness signature (every anchor shifted by -1); `RpcSpec.hs` gained three
-# import lines (+3); `QueryLimitedSpec.hs` kept its line numbers. The
-# PostgREST source tree moved from `src/PostgREST/...` to
-# `src/library/PostgREST/...`, and `Error.hs` was split (the `RangeError`
-# constructors now live in `PostgREST/Error/Types.hs`), so every non-test
-# anchor was re-derived. The v16.0 deltas that touch this area at all are
-# recorded as PAG-020..PAG-022 below.
+# harness signature (every anchor shifted by -1; the diff is 5 lines, all in
+# the module header). `RpcSpec.hs` lost the same import and gained four header
+# lines, so anchors below line 14 shifted +3. `QueryLimitedSpec.hs` swapped two
+# header lines for two others (net 0, so its anchors kept their numbers) and
+# moved to `SpecWithConfig` with `configDbMaxRows = Just 2`; its only body
+# change is unrelated to this area (two mutation tests gained `&order=last_name`
+# to stabilize row order — the mutations area owns those). The PostgREST source
+# tree moved from `src/PostgREST/...` to `src/library/PostgREST/...`, and
+# `Error.hs` was split (the `RangeError` constructors now live in
+# `PostgREST/Error/Types.hs`), so every non-test anchor was re-derived.
+# `RangeQuery.hs` itself changed by exactly one line of whitespace alignment.
+# The v16.0 deltas that touch this area at all are recorded as
+# PAG-020..PAG-022 below; PAG-023/PAG-024 are pre-existing behaviors that this
+# pass added because they were traceable but unmodeled.
+#
+# REVIEW PASS (adversarial citation audit): the Range header entry previously
+# claimed "Range headers override limit/offset query params" — wrong as a
+# general rule, `getRanges` INTERSECTS the two. That entry is rewritten below,
+# and four behaviors that were traceable but unmodeled were added:
+# PAG-025 (Range honored only for GET), PAG-026 (the intersection itself),
+# PAG-027 (Prefer: count is echoed as Preference-Applied on plain reads) and
+# PAG-028 (count=none is not a parsed preference value at all).
 
 area: pagination
 postgrest_version: v16.0
@@ -36,7 +51,10 @@ inputs:
         - "limit=0 is valid and returns an empty array (Content-Range */*)."
         - "limit must be >= 0; a negative limit is a 416 PGRST103 InvalidRange (NegativeLimit)."
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L259
-      source_limit_zero_range: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/RangeQuery.hs#L87
+      # limitZeroRange itself — the `Range (BoundaryBelow 0) (BoundaryAbove
+      # (-1))` empty window (0 <= x <= -1) that limit=0 is converted to. The
+      # `hasLimitZero` predicate that tests for it is two lines below, at #L87.
+      source_limit_zero_range: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/RangeQuery.hs#L85
       source_negative: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L204
     offset:
       meaning: >
@@ -53,11 +71,32 @@ inputs:
       source_oob: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L206
     embedded_limit_offset:
       meaning: >
-        limit/offset apply at every nesting level via the
-        <embed_path>.limit / <embed_path>.offset params, e.g.
-        projects.limit=2, projects.tasks.limit=1. Embedded windows do not
-        affect the top-level Content-Range.
+        Embedded resources take their own window through the
+        <embed_path>.limit / <embed_path>.offset params. Embedded windows
+        never affect the top-level Content-Range.
+      constraints:
+        # Each half of this entry is anchored separately on purpose: the
+        # "all levels" evidence is a limit-only test.
+        - >
+          <embed_path>.limit applies at EVERY nesting level. The upstream
+          it-block ("limit works on all levels") requests
+          /clients?select=id,projects(id,tasks(id)) with
+          limit=1&projects.limit=2&projects.tasks.limit=1 and gets one client
+          with two projects, each carrying one task.
+        - >
+          Embedded windows are invisible to the top-level Content-Range: the
+          same request asserts '0-0/*', which reflects only the top-level
+          limit=1.
+        - >
+          <embed_path>.offset is documented (and only ever exercised upstream)
+          in the single-level form, e.g.
+          /films?select=*,actors(*)&actors.limit=10&actors.offset=2. No
+          upstream test asserts an embedded offset at a deeper nesting level,
+          so this model does not claim one.
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L202
+      source_limit_request: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L203
+      source_content_range_unaffected: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L207
+      source_embedded_offset: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/resource_embedding.rst#L919
 
   request_headers:
     Range-Unit:
@@ -70,19 +109,89 @@ inputs:
       forms:
         - "Range: <from>-<to>   (closed window, inclusive both ends)"
         - "Range: <from>-       (open-ended: offset <from>, no limit)"
+      grammar: >
+        The header value is matched against the regex ^([0-9]+)-([0-9]*)$. The
+        lower group is required and becomes the offset; the upper group may be
+        empty, in which case there is no upper bound. Anything that does not
+        match (including a bare '-', a non-numeric bound, or a suffix range
+        like '-5') is ignored and the full range is used.
+      source_grammar: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/RangeQuery.hs#L38
+      source_open_ended_offset: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/pagination_count.rst#L52
+      method_scope: >
+        The Range header is read ONLY for GET. getRanges computes
+        `headerRange = if method == "GET" then rangeRequested hdrs else
+        allRange`, directly under a comment citing RFC 9110 ("the Range header
+        must be ignored for all methods other than GET"). `method` is the raw
+        request method (ApiRequest.hs userApiRequest: `method = requestMethod
+        req`), so HEAD is NOT folded into GET. Consequences:
+          - HEAD /items with 'Range: 0-1' returns the whole table:
+            Content-Range '0-14/*', status 200, empty body (case 1284);
+          - 'Range: 0-1' on POST /rpc/<fn> is ignored (case 1285); likewise on
+            PATCH/PUT/DELETE.
+        limit/offset query params are NOT method-scoped — they are parsed from
+        the query string for every method and still apply to HEAD (case 1277)
+        and to POST /rpc (case 1281). PUT is the one method that rejects a
+        top-level range outright (PutLimitNotAllowedError); the mutations area
+        owns that.
+      source_method_scope: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L183
+      source_rfc_comment: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L181
+      source_raw_method: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L102
       semantics: >
-        The Range header is an alternative to limit/offset. 'from' acts as the
-        offset and 'to' bounds the window inclusively. Ranges beyond the
-        collection length are truncated (no error) for an in-range start.
-        Range headers override limit/offset query params.
+        'from' acts as the offset and 'to' bounds the window inclusively.
+        Ranges beyond the collection length are truncated (no error) for an
+        in-range start.
+
+        The Range header does NOT override limit/offset: the two windows are
+        INTERSECTED. getRanges derives `limitRange` from the limit/offset query
+        params and computes
+        `headerAndLimitRange = rangeIntersection headerRange limitRange`, and
+        that intersection becomes the top-level range. Worked cases:
+          - ?limit=2 + 'Range: 0-5'  -> limitRange 0..1, headerRange 0..5,
+            intersection 0..1 -> 2 rows, Content-Range '0-1/*' (an override
+            rule would have returned 6 rows). Case 1287.
+          - ?limit=3 + 'Range: 0-1'  -> limitRange 0..2, headerRange 0..1,
+            intersection 0..1 -> 2 rows. This is the ONLY upstream it-block on
+            the subject ("headers override get parameters", RangeSpec.hs#L194,
+            case 1261) and it is the one shape where intersection and override
+            coincide, so it does not establish an override rule.
+          - ?offset=3 + 'Range: 0-1' -> limitRange 3..unbounded, headerRange
+            0..1, intersection is the empty range -> 416 (see `invalid`).
+        limit/offset themselves are combined into one range upstream in
+        QueryParams (`Range (BoundaryBelow offset) (BoundaryAbove $ offset +
+        limit - 1)`), which is why 'limit' is the single hash-map key carrying
+        both.
       invalid:
         - >
           Offside range (to < from), e.g. Range: 1-0, is a 416 PGRST103
           InvalidRange (LowerGTUpper): 'The lower boundary must be lower than
           or equal to the upper boundary in the Range header.'
+        - >
+          More generally, ANY empty top-level range is rejected —
+          `isInvalidRange = topLevelRange == emptyRange && not (hasLimitZero
+          limitRange)` — with limit=0 as the sole exception (it is rewritten to
+          the sentinel limitZeroRange). Emptiness here is semantic, not
+          structural: ranged-sets defines `rangeIsEmpty (Range lower upper) =
+          upper <= lower` and an Eq instance under which any two empty ranges
+          compare equal, which is also why limit=-1 (range 0..-2) is caught.
+        - >
+          Which details string is reported is decided by whether the RANGE
+          HEADER is empty, NOT by which input emptied the final range:
+          `InvalidRange (if rangeIsEmpty headerRange then LowerGTUpper else
+          NegativeLimit)`. So the empty intersection produced by ?offset=3 +
+          'Range: 0-1' — where the header range 0..1 is itself perfectly valid
+          — reports the NegativeLimit string, 'Limit should be greater than or
+          equal to zero.', even though the request carries no limit. No
+          upstream it-block exercises that combination (see gaps), so no
+          conformance case asserts the string.
       source_open_ended: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L421
       source_truncation: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L442
-      source_override: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L194
+      source_intersection: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L185
+      source_top_level_range: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L191
+      source_limit_offset_range: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/QueryParams.hs#L181
+      # The narrow example where intersection and override happen to agree.
+      source_coincident_example: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L194
+      source_is_invalid_range: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L190
+      source_details_selection: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L177
       source_offside: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L451
 
     Prefer_count:
@@ -90,9 +199,8 @@ inputs:
         Prefer: count=<value> controls whether and how the total table count is
         computed and reported in the Content-Range total.
       values:
-        none: >
-          Default. No count is computed; Content-Range total is '*' and the
-          status is 200 (never 206) regardless of window size.
+        # PreferCount has exactly three constructors. There is no `none`
+        # member — see `unrecognized_count_none` below.
         exact: >
           Compute the exact total with COUNT. The total appears after the '/'
           in Content-Range.
@@ -101,14 +209,71 @@ inputs:
           total. Cheap; total may be inaccurate. limit/offset do not change the
           planned total.
         estimated: >
-          Use the planner guess only when it exceeds max-rows; otherwise fall
-          back to the exact count. Equivalently: returns the larger of the
-          planner estimate and the exact count behavior described in docs.
+          Get the exact count up to the db-max-rows threshold, and the planner
+          guess once that threshold is surpassed (docs wording). The exact rule
+          in code is:
+            total = if exactCount > db_max_rows
+                      then max exactCount plannerEstimate
+                      else exactCount
+          where the comparison is over `Maybe` values, so an UNSET db-max-rows
+          (Nothing) is smaller than any Just — with no db-max-rows configured
+          the condition is always true and the total is
+          max(exactCount, plannerEstimate). See PAG-023.
+        applies_to: >
+          The planned/estimated post-processing only runs for table/view reads
+          (WrappedReadPlan). /rpc/<fn> calls take a different code path that
+          never runs the EXPLAIN query, so count=planned yields no count at all
+          and count=estimated degrades to the exact count. See PAG-024.
+
+      unrecognized_count_none: >
+        `count=none` is NOT a value of PreferCount. `fromHeaders` parses the
+        count preference with `parsePrefs [ExactCount, PlannedCount,
+        EstimatedCount]`, so the token 'count=none' simply fails to match and
+        leaves `preferCount = Nothing` — exactly the same state as sending no
+        Prefer header at all. Its observable consequences:
+          - the default (no count computed) applies: Content-Range total is '*'
+            and the status is 200 (never 206) regardless of window size,
+            because rangeStatus returns 200 whenever the total is Nothing;
+          - NO 'Preference-Applied' token is emitted for it (prefAppliedHeader
+            serializes `toHeaderValue <$> preferCount`, which is Nothing here;
+            with no other preference in the header the whole
+            Preference-Applied header is omitted). Cases 1267 and 1268 assert
+            its absence.
+          - the token IS collected into `invalidPrefs` (it is absent from
+            `acceptedPrefs` and carries neither the `timezone=` nor the
+            `max-affected=` prefix), so combining it with `Prefer:
+            handling=strict` is a 400 PGRST122 'Invalid preferences given with
+            handling=strict' whose details read 'Invalid preferences:
+            count=none'. Case 1288.
+      source_count_none_not_parsed: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L134
+      source_count_none_unacceptable: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L161
+      source_count_none_accepted_list: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L147
+      source_strict_read_check: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan.hs#L199
+      source_strict_code: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L166
+
+      preference_applied: >
+        A recognized `Prefer: count=<v>` is echoed back as
+        `Preference-Applied: count=<v>` — on EVERY plan, not only on mutations.
+        `responsePreferences` masks preferResolution/preferRepresentation/
+        preferMissing/preferMaxAffected per plan but passes `preferCount`
+        through untouched, and the plain-read branch of `actionResponse`
+        (WrappedReadPlan) appends `prefAppliedHeader $ responsePreferences plan
+        ctxApiRequest` to its headers. So GET /items with 'Prefer: count=exact'
+        answers with 'Preference-Applied: count=exact' alongside Content-Range
+        (case 1286); the same holds for count=planned and count=estimated, and
+        for HEAD reads and /rpc/ calls. When several preferences are applied
+        they are joined with ', ' in a fixed order (resolution, missing,
+        representation, count, transaction, handling, timezone, max-affected).
+      source_pref_applied_passthrough: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L296
+      source_pref_applied_read_path: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L63
+      source_pref_applied_serialization: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L183
       source_enum: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L225
       source_header_values: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L232
       source_should_count: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L236
       source_should_explain_count: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L240
+      source_total_selection: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MainTx.hs#L127
       source_docs: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/pagination_count.rst#L59
+      source_docs_estimated_threshold: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/pagination_count.rst#L119
 
 # ---------------------------------------------------------------------------
 # Outputs.
@@ -121,8 +286,11 @@ outputs:
       - "lower = offset; upper = lower + returned_row_count - 1."
       - "When the returned window is non-empty and lower <= upper: '<lower>-<upper>'."
       - "When the window is empty (no rows returned): the range part is '*'."
-      - "total = the requested count when count!=none, else '*'."
-      - "total = '*' when no count was requested (Prefer: count=none / absent)."
+      - "total = the requested count when Prefer: count=exact|planned|estimated, else '*'."
+      - >
+        total = '*' when no count was requested — i.e. no Prefer: count token,
+        or an unrecognized one such as the commonly-sent 'count=none', which
+        PostgREST does not parse into a PreferCount at all.
       - "An empty result with count=exact over an empty/filtered-out table yields '*/0'."
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/RangeQuery.hs#L111
 
@@ -209,8 +377,12 @@ behaviors:
 
   - id: PAG-010
     claim: >
-      Range header overrides limit/offset query params (limit=3 + Range 0-1
-      returns 2 rows, Content-Range '0-1/*').
+      limit=3 combined with Range 0-1 returns 2 rows, Content-Range '0-1/*'.
+      The upstream it-block is titled "headers override get parameters", but
+      the mechanism is intersection (PAG-026): 0..2 intersected with 0..1 is
+      0..1, which happens to equal the header range. This is the only upstream
+      assertion combining the two inputs, and it cannot distinguish override
+      from intersection — see PAG-026 / case 1287 for a shape that does.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L194
 
   - id: PAG-011
@@ -228,8 +400,12 @@ behaviors:
   - id: PAG-013
     claim: >
       count=exact over an empty/filtered-out result returns [] with
-      Content-Range '*/0'.
-    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L152
+      Content-Range '*/0'. The it-block is at RangeSpec.hs#L153 (inside the
+      context "count with an empty body" at #L152); the request is at #L154,
+      the 'Prefer: count=exact' header at #L155 and the asserted
+      `"Content-Range" <:> "*/0"` at #L158.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L153
+    source_assertion: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L158
 
   - id: PAG-014
     claim: >
@@ -255,7 +431,8 @@ behaviors:
     claim: >
       count=estimated uses the planner guess when query rows exceed max-rows
       (HEAD /getallprojects_view -> 206, Content-Range '0-1/2019').
-    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QueryLimitedSpec.hs#L48
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QueryLimitedSpec.hs#L49
+    source_context: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QueryLimitedSpec.hs#L48
     caveat: planner-dependent total; requires server max-rows configured
 
   - id: PAG-018
@@ -314,6 +491,140 @@ behaviors:
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L86
     source_oob_path: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L76
 
+  # -------------------------------------------------------------------------
+  # Pre-existing behaviors (identical in v14.12) that the previous pass left
+  # unmodeled. Added here because they are traceable and they change what an
+  # implementation must emit.
+  # -------------------------------------------------------------------------
+  - id: PAG-023
+    claim: >
+      The Content-Range total for a table/view read is picked per count
+      preference AFTER the main query runs:
+        count=planned   -> the EXPLAIN 'Plan Rows' estimate, replacing the
+                           SQL total outright (which is NULL, since
+                           shouldCount(PlannedCount) is False);
+        count=estimated -> `if exactTotal > db_max_rows then max exactTotal
+                           plannerEstimate else exactTotal`;
+        anything else   -> the SQL total.
+      The estimated comparison is over Maybe values and `Nothing` orders below
+      every `Just`, so when db-max-rows is NOT configured the branch is always
+      taken and the reported total is max(exactTotal, plannerEstimate) — an
+      unconfigured server does not simply return the exact count for
+      count=estimated. Additionally, for count=estimated the counting CTE is
+      itself capped at db-max-rows + 1 rows, so with db-max-rows set the
+      "exact" side of that max is really min(exactTotal, db_max_rows + 1).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MainTx.hs#L129
+    source_planned_branch: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MainTx.hs#L128
+    source_explain_decode: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MainTx.hs#L139
+    source_count_cte_cap: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Query/Statements.hs#L87
+    caveat: >
+      Unchanged from v14.12 (same expression at
+      src/PostgREST/MainTx.hs#L140 there); listed because it was not modeled
+      before and it governs every count=planned/estimated expectation.
+
+  - id: PAG-024
+    claim: >
+      Prefer: count=<value> behaves differently on /rpc/<fn> than on a
+      table/view. The RPC plan (CallReadPlan) is built with NO explain query
+      (`mempty` in the third position of genQ), and MainTx's CallReadPlan
+      clause returns the result set untouched — it never rewrites rsTableTotal.
+      Consequently:
+        count=exact     -> exact total, same as a table read;
+        count=planned   -> shouldCount(PlannedCount) is False, so the SQL total
+                           is NULL and there is no planner estimate to put in
+                           its place: Content-Range total is '*' and the status
+                           is 200 even for a partial window;
+        count=estimated -> shouldCount(EstimatedCount) is True and there is no
+                           estimate to max against, so the exact total is
+                           reported (count=estimated degrades to count=exact).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Query.hs#L54
+    source_read_plan_contrast: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Query.hs#L50
+    source_call_result: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MainTx.hs#L161
+    source_should_count: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L236
+    caveat: >
+      Unchanged from v14.12 (src/PostgREST/Query.hs#L56 there also passes
+      `mempty`). PostgREST's own suite never sends count=planned or
+      count=estimated to an /rpc/ path, so this is derived from source
+      (ground-truth priority 2), not from a Feature spec assertion.
+
+  # -------------------------------------------------------------------------
+  # Behaviors added by the citation-audit pass. All four are pre-existing (no
+  # v14.12 -> v16.0 delta) but were unmodeled and, for three of them, unpinned
+  # by any case.
+  # -------------------------------------------------------------------------
+  - id: PAG-025
+    claim: >
+      The Range request header is honored ONLY for GET
+      (`headerRange = if method == "GET" then rangeRequested hdrs else
+      allRange`, under a comment citing RFC 9110). HEAD /items with
+      'Range: 0-1' therefore returns the whole table — Content-Range '0-14/*',
+      status 200, empty body — and a Range header on POST /rpc/<fn> is ignored.
+      limit/offset query params are unaffected by this rule and still apply to
+      HEAD and to POST /rpc.
+    cases: [1284, 1285]
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L183
+    source_rfc_comment: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L181
+    source_raw_method: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L102
+    caveat: >
+      Unchanged from v14.12. Derived from source (ground-truth priority 2):
+      PostgREST's own suite never sends a Range header on a non-GET request.
+
+  - id: PAG-026
+    claim: >
+      The Range header and the limit/offset params are INTERSECTED, not
+      overridden: `headerAndLimitRange = rangeIntersection headerRange
+      limitRange`, and that intersection is the top-level range. ?limit=2 with
+      'Range: 0-5' returns 2 rows (Content-Range '0-1/*'), not 6. An empty
+      intersection (e.g. ?offset=3 with 'Range: 0-1') is a 416 PGRST103 whose
+      details string is picked by `rangeIsEmpty headerRange` — NegativeLimit
+      ('Limit should be greater than or equal to zero.') when the header range
+      itself is non-empty, LowerGTUpper only when the header range is the empty
+      one.
+    cases: [1287]
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L185
+    source_details_selection: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L177
+    source_is_invalid_range: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L190
+    caveat: >
+      Unchanged from v14.12. The 2-row half is case-covered; the 416 half is
+      source-only (see gaps).
+
+  - id: PAG-027
+    claim: >
+      A recognized `Prefer: count=<v>` is echoed as `Preference-Applied:
+      count=<v>` on plain reads, not only on mutations: responsePreferences
+      passes preferCount through for every plan and the WrappedReadPlan branch
+      of actionResponse appends prefAppliedHeader to its header list. GET
+      /items?id=eq.1 with 'Prefer: count=exact' answers 200 with
+      Content-Range '0-0/1' and 'Preference-Applied: count=exact'.
+    cases: [1286]
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L63
+    source_passthrough: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L296
+    source_serialization: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L183
+    caveat: >
+      Unchanged from v14.12. Derived from source: upstream only asserts
+      'Preference-Applied: ..., count=exact' on mutations
+      (InsertSpec.hs#L101, DeleteSpec.hs#L33), never on a read.
+
+  - id: PAG-028
+    claim: >
+      'count=none' is not a member of PreferCount and is never parsed:
+      `preferCount = parsePrefs [ExactCount, PlannedCount, EstimatedCount]`
+      leaves it Nothing, identical to sending no Prefer header. Hence
+      (a) no count is computed, Content-Range total is '*' and the status is
+      200; (b) no 'Preference-Applied' token is emitted for it, and with no
+      other preference present the header is absent entirely; (c) the token
+      lands in invalidPrefs, so 'Prefer: count=none, handling=strict' on a read
+      is a 400 PGRST122 with details 'Invalid preferences: count=none'.
+    cases: [1267, 1268, 1288]
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L134
+    source_invalid_prefs: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L140
+    source_strict_read_check: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan.hs#L199
+    source_strict_message: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L192
+    caveat: >
+      Unchanged from v14.12. Upstream sends 'count=none' in two RangeSpec
+      it-blocks (#L163, #L170) but asserts only the Content-Range; the
+      Preference-Applied and handling=strict consequences are source-derived.
+
 gaps:
   - >
     count=estimated exact-vs-planner threshold logic (the 'only uses the
@@ -336,34 +647,89 @@ gaps:
     config knob; the config area owns those cases (1700/1701).
   - >
     v16.0 changed the planned/estimated Content-Range totals for reads that
-    filter on an embedded resource: RelatedQueriesSpec.hs 'works with
-    count=planned'/'count=estimated' moved from '0-3/1200' to '0-3/5' and from
-    '0-1/952' (206) to '0-1/2' (200), i.e. the planner estimate became
-    realistic and one sub-request flipped 206 -> 200. Both totals remain pure
-    planner estimates over a join, so per the policy above no exact-total
-    conformance case is emitted; recorded here so the drift is traceable.
-    Sources:
+    filter on an embedded resource. BOTH the 'works with count=planned' and the
+    'works with count=estimated' it-blocks in RelatedQueriesSpec.hs changed the
+    same way and by the same amounts: the first sub-request moved from
+    '0-3/1200' to '0-3/5' (still 206) and the third from '0-1/952' (206) to
+    '0-1/2' (200), i.e. the planner estimate became realistic and one
+    sub-request flipped 206 -> 200. Both totals remain pure planner estimates
+    over a join, so per the policy above no exact-total conformance case is
+    emitted; recorded here so the drift is traceable. Sources (count=planned
+    block; the 206 -> 200 flip is the matchStatus line at #L341):
     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L324
     and
-    https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L341
+    https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L343
+    ; the identical count=estimated block:
+    https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L358
+    and
+    https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L377
   - >
     v16.0 deprecates targeting an aliased embedded resource by its relation
-    name in filters, orders AND limits: with the default
-    url-use-legacy-target-names=true the request still succeeds but gains a
-    `Warning: 299 PostgRESTv<version> "..."` header, and with the config set to
-    false it becomes a 400 PGRST108 whose hint reads "Change '<name>' to
-    '<alias>' in filters, orders or limits.". No pagination case is emitted:
-    the assertion needs the server's own version string inside the header value
-    (Bier's differs), and the behavior's primary owner is the select/embedding
-    area. Sources:
+    name in filters, orders AND limits (`the_tasks:tasks(...)` + `tasks.limit=1`):
+    with the default url-use-legacy-target-names=true the request still
+    succeeds but gains a `Warning: 299 PostgRESTv<version> "..."` header, and
+    with the config set to false it becomes a 400 PGRST108 whose hint reads
+    "Change '<name>' to '<alias>' in filters, orders or limits.". No PAGINATION
+    case is emitted because the behavior is already covered end-to-end by other
+    areas on the very same request (which carries `tasks.limit=1`): case 1028
+    (url_grammar) and case 1224 (ordering) assert the Warning header with a
+    `headers_match` regex whose product token is `\S+`, and case 1139 (select)
+    asserts the 400 PGRST108 envelope using a per-case
+    `config: {url-use-legacy-target-names: false}` block. A pagination copy
+    would duplicate them byte-for-byte. Sources:
     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1187
     and
     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1710
+  - >
+    count=estimated is only case-covered in its "falls back to the exact count"
+    shape (case 1275). Its other two upstream assertions both need a server with
+    db-max-rows configured AND a relation whose planner estimate is large:
+    QueryLimitedSpec.hs#L49 asserts '0-1/2019' for HEAD /getallprojects_view and
+    QueryLimitedSpec.hs#L70 asserts '0-1/3' for HEAD /get_projects_above_view.
+    Neither total is reproducible from the fixture alone. Note also PAG-023: the
+    conformance server sets no db-max-rows, and with db-max-rows unset the
+    reported total is max(exactTotal, plannerEstimate) rather than the exact
+    total — so an estimated-count case is only safe when the planner estimate
+    equals the exact count. That holds for case 1275 (EXPLAIN of
+    getallprojects_view WHERE id < 3 reports "Plan Rows": 2 against the loaded
+    bier_test, matching the 2 real rows), and it is why no further
+    count=estimated case is emitted.
+  - >
+    No case asserts count=estimated or count=exact on an /rpc/ path *together*
+    with the PAG-024 degradation: count=estimated on an RPC produces exactly the
+    same wire bytes as count=exact (there is no EXPLAIN result to max against),
+    so a case for it would duplicate case 1270/1280 byte-for-byte and could not
+    distinguish a correct implementation from one that simply aliased the two
+    preferences. Only the count=planned half is distinguishable, and that is
+    case 1283.
+  - >
+    Cases 1272, 1274 and 1275 carry `preconditions: ["ANALYZE ..."]` for their
+    planner-estimate expectations, but the frozen harness parses `preconditions`
+    without executing them (`test/support/conformance_case.ex` stores the list;
+    nothing runs it). Those cases pass today only because
+    `mix bier.fixtures.load` runs a database-wide `ANALYZE` after loading. The
+    precondition lists are therefore documentation of an assumption, not an
+    executed setup step; if the loader's ANALYZE is ever removed the three cases
+    become planner-flaky. Recorded for the harness owner rather than worked
+    around, since `test/**` is frozen.
   - >
     No pagination case asserts the v16.0 `Proxy-Status` error header (PAG-022).
     PostgREST's own RangeSpec never asserts it for PGRST103, and it is emitted
     on only two of the five PGRST103 shapes, so asserting it here would go
     beyond ground truth; the errors area owns Proxy-Status coverage.
+  - >
+    No case asserts the 416 produced by an EMPTY Range/limit intersection
+    (?offset=3 + 'Range: 0-1'). PostgREST's own suite never combines an offset
+    param with a Range header, and the reported details string is
+    'Limit should be greater than or equal to zero.' (the NegativeLimit
+    variant) rather than the LowerGTUpper one, because the ternary at
+    ApiRequest.hs#L177 keys off `rangeIsEmpty headerRange` and the header range
+    0..1 is not empty. Deriving that requires the ranged-sets semantics of
+    range emptiness/equality on top of the PostgREST source, which is one hop
+    further than ground truth reaches, so it is modeled (PAG-026) but not
+    pinned by a case. The two shapes that ARE upstream-asserted — an empty
+    header range (case 1265) and a negative limit (case 1254) — cover the two
+    details strings themselves.
   - >
     spec/conformance/fixtures/pagination.sql still labels itself "PostgREST
     v14.12 parity" in its header comment. Its cited upstream line ranges are

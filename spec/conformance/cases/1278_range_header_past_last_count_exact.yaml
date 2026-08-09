@@ -1,0 +1,33 @@
+id: 1278
+feature: pagination/range_header/past_last_item_with_count
+request:
+  method: GET
+  path: /items
+  headers:
+    Accept: application/json
+    Range-Unit: items
+    Range: 100-199
+    Prefer: count=exact
+schema: pagination
+preconditions: []
+expect:
+  status: 416
+  headers:
+    Content-Range: "*/15"
+  body_exact:
+    message: "Requested range not satisfiable"
+    code: "PGRST103"
+    details: "An offset of 100 was requested, but there are only 15 rows."
+    hint: null
+notes: >
+  A Range header whose lower bound is past the last row, combined with
+  count=exact, is a 416 PGRST103 OutOfBounds carrying Content-Range
+  '*/<total>'. This is the Range-header route into OutOfBounds on a NON-empty
+  collection; case 1257 covers the offset= query-param route and case 1266 the
+  Range-header route over an empty table. Mirrors RangeSpec.hs:478
+  (rangeHdrsWithCount $ ByteRangeFromTo 100 199 = Range 100-199 plus
+  'Prefer: count=exact', SpecHelper.hs:192). The status/details come from
+  Error.hs:107/206 and the '*/15' Content-Range from Response.hs:76, which
+  replaces the body of an otherwise normal response when the status is 416.
+  Verified against a freshly loaded bier_test: pagination.items has 15 rows.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L478

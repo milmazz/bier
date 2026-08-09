@@ -1,0 +1,26 @@
+id: 1281
+feature: pagination/limit_offset/rpc_post_query_params
+request:
+  method: POST
+  path: /rpc/getitemrange?limit=1&offset=1
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Prefer: count=exact
+  body_json: { "min": 2, "max": 4 }
+schema: pagination
+preconditions: []
+expect:
+  status: 206
+  headers:
+    Content-Range: "1-1/2"
+  body_exact: [{"id":4}]
+notes: >
+  limit/offset are read from the query string even on a POST /rpc/ call whose
+  arguments arrive in the JSON body — the pagination window is never taken from
+  the body. Mirrors RpcSpec.hs:65 (the first request of the "using limit and
+  offset" it-block, which is the POST form; case 1270 is the GET form at
+  RpcSpec.hs:72). Verified against a freshly loaded bier_test:
+  pagination.getitemrange(2,4) yields ids 3 and 4 (total 2), so offset=1
+  limit=1 returns id 4 as window 1-1 and the status is 206.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L65
