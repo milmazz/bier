@@ -14,7 +14,7 @@ expect:
     - { "id": 1, "name": "Windows 7" }
 notes: >
   Directly traces the "select works on the first level" it-block
-  (GET /rpc/getproject?id=1&select=id,name) at RpcSpec.hs#L314; the GET request
-  line is L317. select shapes the columns of a table-valued proc result the same
+  (GET /rpc/getproject?id=1&select=id,name) at RpcSpec.hs#L317; the GET request
+  line is L320. select shapes the columns of a table-valued proc result the same
   way as on a table.
 source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L320

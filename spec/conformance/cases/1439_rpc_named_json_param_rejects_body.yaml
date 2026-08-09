@@ -5,7 +5,7 @@ request:
   path: /rpc/named_json_param
   headers: { Content-Type: application/json, Accept: application/json }
   body: { "A": 1, "B": 2, "C": 3 }
-schema: rpc
+schema: test
 preconditions: []
 expect:
   status: 404
@@ -22,4 +22,16 @@ notes: >
   top-level keys are treated as named params (A, B, C), which do not match, so the
   whole-body fallback (single unnamed json/jsonb parameter) is also searched and
   no match is found -> 404 PGRST202.
+  `schema: test` is load-bearing: PGRST202 qualifies the message and the details
+  with the REQUESTED schema (`func = schema <> "." <> procName`, Error.hs#L249
+  and #L269,
+  https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L269),
+  so under the `rpc` fixture-set label — which the harness sends as
+  `Accept-Profile: rpc` (test/support/http_case.ex build_headers) — the wire
+  text would read `rpc.named_json_param(…)`. `test` is suppressed as the
+  default schema, making upstream's strings verbatim-correct.
+  `test.named_json_param(data json)` exists exactly once in the loaded
+  bier_test (fixtures.sql#L1371), so the hint stays null for the same reason it
+  does upstream: the sole same-named overload's parameter list "(data)" is
+  below the 0.75 fuzzy threshold against the supplied "(A, B, C)".
 source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1158
