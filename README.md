@@ -340,13 +340,19 @@ and regenerate; never edit the generated `.ex` directly.
 ## Conformance
 
 Bier is developed against a frozen conformance suite derived from PostgREST
-**v14.12**: 532 cases spanning URL grammar, operators, select/embedding, filters,
-ordering, pagination, representations, mutations, RPC, auth, errors, headers,
-content negotiation, OpenAPI, config, observability, and domain representations.
-PostgREST is the ground truth — each case cites the exact upstream source line.
+**v16.0**: 762 cases across 17 areas — URL grammar, operators, select/embedding,
+filters, ordering, pagination, representations, mutations, RPC, auth, errors,
+headers, content negotiation, OpenAPI, config, observability, and domain
+representations. PostgREST is the ground truth — each case cites the exact
+upstream source line.
 
-The full suite passes today (0 failures; ~475 active of 532, the rest `:pending`
-and excluded). The `spec/` tree (behavior models + `COVERAGE.md`) and
+759 of the 762 cases are active (the 3 `status_text` cases are `:pending` and
+excluded). The suite was re-synced from v14.12 to v16.0 as a spec-only pass, so
+the target currently sits ahead of the implementation: 100 cases fail, spread
+over all 17 areas. The largest clusters are the v16 behavior changes to
+`jwt-role-claim-key`, `Prefer: timezone`, embed target names and `db-schemas`
+validation, each tracked as a GitHub issue and worked down one area at a time.
+The `spec/` tree (behavior models + `COVERAGE.md`) and
 `docs/CONFORMANCE_IMPL.md` document the model and the build. Known feature gaps
 are tracked as GitHub issues (observability/telemetry, admin/health endpoints, …).
 

@@ -5,8 +5,15 @@ conformance suite (`test/conformance/conformance_test.exs`) pass. Read it fully
 before writing code. It encodes findings that are expensive to re-derive.
 
 > Goal (operational definition of done): every conformance case that passes
-> against PostgREST v14.12 must pass against Bier, against the same Postgres
+> against PostgREST v16.0 must pass against Bier, against the same Postgres
 > fixture DB. PostgREST is the ground truth; cases cite the exact source line.
+
+> **Pinned version: v16.0.** `spec/` was re-synced from v14.12 to v16.0 in one
+> spec-only pass (532 → 762 cases, every `source:` re-pinned), which moved the
+> target ahead of `lib/`. The suite is not green: expect failures concentrated in
+> `config`, `auth`, `headers` and `select`, tracked as GitHub issues #93–#96.
+> Re-syncing `spec/` itself is done only via the `bier-spec` / `bier-spec-audit`
+> workflows; implementation work never edits it.
 
 ---
 
@@ -168,29 +175,40 @@ preference:
 ## 3. Case → area → tag map (how to target a slice)
 
 `test/conformance/conformance_test.exs` generates one test per case and sets
-`@tag area: :<area>` (first `/` segment of `feature:`). Pending tags
-(`:cli`, `:jwt` via `request.jwt`, `:jsonpath` via `expect.body_jsonpath`,
-`:status_text`) are excluded — **don't count or target them.**
+`@tag area: :<area>` (first `/` segment of `feature:`). **`:status_text` is now
+the only pending reason** (`Req` does not expose the HTTP reason phrase, #42) —
+3 cases, excluded; don't target them. `:jwt`, `:jsonpath` and `:cli` are no
+longer pending: JWT and JSONPath cases run in the normal suite and CLI cases run
+directly via `Bier.CliCase`.
+
+Counts and bands below are the **762**-case v16.0 tree, derived from disk;
+`spec/conformance/INDEX.md` is the authoritative cross-reference and a case's
+`feature:` prefix — not its id neighbourhood — decides its area.
+
+> **Four areas use 5-digit overflow bands** (`operators` 10200+, `mutations`
+> 11400+, `auth` 11800+, `content_negotiation` 12400+) because their 50-wide
+> primary bands filled. These sort *lexically* into unrelated areas' ranges, so
+> `ls spec/conformance/cases/` is misleading — always `ls | sort -n`.
 
 | Area | Id band | Count | Profile/schema | Notes |
 |------|---------|------:|----------------|-------|
-| url_grammar | 1000–1027 | 28 | test/multi/unicode + explicit v1/v2 | path & method resolution, %-encoding, `+`→space, reserved params, Accept/Content-Profile (incl. 406 PGRST106), unicode schema `"تست"` |
-| operators | 1050–1099 | 50 | `operators` | eq/neq/lt../in/is/like/ilike/match/fts/cs/cd/ov/sl/sr/adj/isdistinct/not/quantifier |
-| select | 1100–1137 | 38 | `test` | columns, alias, `::cast`, json-path, computed cols, **embedding** (FK resolution), spread, aggregates |
-| filters | 1150–1187 | 38 | `test` | horizontal, logical `and/or/not`, json, quoting, embed filters |
-| ordering | 1200–1222 | 23 | `ordering` | dir, nulls first/last, json_path, computed, multi-col, related/embed |
-| pagination | 1250–1277 | 28 | `pagination` | limit/offset, **Range header**, **Content-Range**, count modes (`Prefer: count=`), `db-max-rows` |
-| representations | 1300–1332 | 33 | `representations` | `Prefer: return=representation/minimal`, singular (`Accept: ...vnd.pgrst.object`), stripped nulls |
-| mutations | 1350–1395 | 46 | `mutations` | POST/PATCH/PUT/DELETE, upsert (`Prefer: resolution=`), columns param, missing-default, safe-update/delete, max-affected |
-| rpc | 1400–1439 | 40 | `rpc` (functions) | GET/POST `/rpc/<fn>`, scalar/setof/composite/void, args, overloaded, single unnamed json param |
-| auth | 1450–1494 | 45 | `auth` | **mostly `:pending` (jwt)**. Non-jwt: anonymous, role via GUC, pre-request — small subset evaluable |
-| errors | 1500–1516 | 17 | `test` | SQLSTATE→HTTP map, PGRST codes, `RAISE`, error headers |
-| headers | 1550–1574 | 25 | `headers` (+v1/v2/private/special) | Prefer, Accept/Content-Profile, Location, Content-Location, GUC response headers |
-| content_negotiation | 1600–1638 | 39 | `test` | JSON/CSV/GeoJSON/octet-stream/text, `Accept` negotiation & precedence, singular, nulls-stripped, custom media handlers, errors |
-| openapi | 1650–1682 | 33 | `openapi` (functions) | root spec, defaults, comments, table/types/rpc/security, modes |
-| config | 1700–1730 | 31 | `config` | sources/aliases/validation/coercion/precedence, `db-max-rows`, `db-tx-end`, app-settings, CORS. Several are `:cli` (pending) |
-| observability | 1750–1767 | 18 | `observability` | `Server-Timing`, trace header passthrough, log level |
-| domain_representations | 1800–1814 | 15 | `domain_representations` | domain cast read/write/filter/default representations |
+| url_grammar | 1000–1035 | 36 | test/multi/unicode + explicit v1/v2 | path & method resolution, %-encoding, `+`→space, reserved params (`limit`/`offset` forbidden on PUT), OPTIONS `Allow` matrix, Accept/Content-Profile (incl. 406 PGRST106), unicode schema `"تست"` |
+| operators | 1050–1099, 10200–10236 | 87 | `operators` | eq/neq/lt../in (incl. empty set)/is/like/ilike/match/fts (incl. auto `to_tsvector()` coercion)/cs/cd/ov/sl/sr/adj/isdistinct/not/quantifier |
+| select | 1100–1149 | 50 | `test` | columns, alias, `::cast`, json-path, computed cols, **embedding** (incl. the v16 alias/legacy-target-name rules and `table!fk` hints), spread, aggregates |
+| filters | 1150–1199 | 50 | `test` | horizontal, logical `and/or/not`, json, quoting, embed filters (incl. `!inner`, null filtering, or-across-embeds) |
+| ordering | 1200–1232 | 33 | `ordering` | dir, nulls first/last, json_path, computed, multi-col, related/embed |
+| pagination | 1250–1288 | 39 | `pagination` | limit/offset, **Range header**, **Content-Range**, count modes (`Prefer: count=`), `db-max-rows` |
+| representations | 1300–1327, 1330–1333 | 32 | `representations` (+`rpc` for 1326) | `Prefer: return=representation/minimal`, singular (`Accept: ...vnd.pgrst.object`), stripped nulls, `Preference-Applied` |
+| mutations | 1350–1399, 11400–11415 (no 11406) | 65 | `mutations` | POST/PATCH/PUT/DELETE, upsert (`Prefer: resolution=`), columns param, missing-default, safe-update/delete, max-affected, form-urlencoded bodies |
+| rpc | 1400–1443 | 44 | `rpc` (functions) + `test` | GET/POST `/rpc/<fn>`, scalar/setof/composite/void, args, overloaded, variadic, single unnamed json param |
+| auth | 1450–1499, 11800–11818 | 69 | `auth` | JWT verification, audience, `jwt-role-claim-key` (v16: RFC 9535 JSON Path, #93), anonymous role, role via GUC, pre-request |
+| errors | 1500–1526 | 27 | `test` | SQLSTATE→HTTP map, PGRST codes, `RAISE`, error headers, envelope key order, verbosity |
+| headers | 1550–1584 | 35 | `headers` (+v1/v2/private/special) | Prefer (incl. v16 `timezone`, #94), Accept/Content-Profile, Location, Content-Location, `Vary`, GUC response headers |
+| content_negotiation | 1600–1649, 12400–12401 | 52 | `test` | JSON/CSV/GeoJSON/octet-stream/text, `Accept` negotiation & precedence, singular, nulls-stripped, custom media handlers, errors |
+| openapi | 1650–1688 | 39 | `openapi` (functions) + `openapi_no_comment` | root spec, defaults, comments, table/types/rpc/security, modes |
+| config | 1700–1744 | 45 | `config` | sources/aliases/validation/coercion/precedence, `db-max-rows`, `db-tx-end`, app-settings, CORS, `--dump-config` (via `Bier.CliCase`) |
+| observability | 1750–1771 | 22 | `observability` | `Server-Timing`, trace header passthrough, log level, `Server:` header |
+| domain_representations | 1800–1836 | 37 | `domain_representations` (+`test` for 1822) | domain cast read/write/filter/default representations, `?columns=` on views |
 
 ---
 
@@ -261,8 +279,8 @@ Accept-Profile, then builds **one SQL statement** returning JSON. Mirror that:
    (`postgrex`), config plumbing (§2.4), fixture loader + mirror (§2.2–2.3),
    Postgrex pool, introspection, catch-all routing, read pipeline
    (select/filters/order/limit/offset → SQL → JSON), Content-Type, basic
-   Content-Range, error envelope skeleton. **Target green:** `operators` (50),
-   `ordering` (23), and the `test`-schema read parts of `select`/`filters`.
+   Content-Range, error envelope skeleton. **Target green:** `operators` (87),
+   `ordering` (33), and the `test`-schema read parts of `select`/`filters`.
 2. **Read-shaped slices** (extend parser/executor): `pagination`
    (Range/Content-Range/count), `select` embedding+aggregates+casts, `filters`
    logical/json, `ordering` edge cases, `content_negotiation`
