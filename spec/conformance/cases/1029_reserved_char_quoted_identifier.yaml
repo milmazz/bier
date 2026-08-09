@@ -25,8 +25,11 @@ notes: >
   (%20). v16.0 added `*` to the documented reserved set
   (docs/references/api/url_grammar.rst#L54, changed from v14.12's ", . : ()");
   `*` is reserved because like/ilike rewrite a `*` in the value into the SQL `%`
-  wildcard (src/library/PostgREST/Query/SqlFragment.hs#L415). The parser itself
-  is byte-identical between the pins. Mirrors QuerySpec "will select and filter
+  wildcard (src/library/PostgREST/Query/SqlFragment.hs#L415). The parser BODY is
+  unchanged between the pins (v14.12 QueryParams.hs L64 onward == v16.0
+  src/library/PostgREST/ApiRequest/QueryParams.hs L72 onward, +8 offset); only
+  the module header changed (TupleSections dropped, 11 combinators exported at
+  #L11). Mirrors QuerySpec "will select and filter
   a quoted column that has PostgREST reserved characters" (it at L1290, get at
   L1291, body at L1292). Fixture: test.pgrst_reserved_chars is new here, added
   in fixtures/url_grammar.delta.sql, mirroring upstream

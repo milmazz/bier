@@ -1,0 +1,24 @@
+id: 1032
+feature: url_grammar/method/options-routine
+request:
+  method: OPTIONS
+  path: /rpc/getallusers
+  headers: {}
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Allow: OPTIONS,GET,HEAD,POST
+notes: >-
+  The non-volatile arm of the same `ActRoutineInfo` dispatch: a STABLE (or
+  IMMUTABLE) routine is also reachable with GET/HEAD, so the `Allow` header is
+  "OPTIONS,GET,HEAD,POST" (src/library/PostgREST/Response.hs#L224,L226 — the
+  guard is `pdVolatility proc == Volatile`, everything else falls to the
+  otherwise arm). Mirrors the upstream it-block "includes the GET/HEAD/POST
+  method for a stable function" (OptionsSpec.hs#L89 the it, L90 the
+  `request methodOptions "/rpc/getallusers"`, L93 the
+  matchHeader "Allow" "OPTIONS,GET,HEAD,POST"). test.getallusers() is declared
+  STABLE in the consolidated fixture — verified against a freshly loaded
+  bier_test (pg_proc.provolatile = 's').
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OptionsSpec.hs#L90
