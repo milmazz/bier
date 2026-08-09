@@ -1,1 +1,1 @@
--- Folded into ../fixtures.sql on 2026-08-08 (domains "application/vnd.pgrst.object" + "text/tab-separated-values", test.pgrst_obj_json_trans/pgrst_obj_agg, test.tsv_trans/tsv_final/tsv_agg); empty until the next delta.
+-- Folded into ../fixtures.sql on 2026-08-09 (public."application/octet-stream" domain in section 3c; test.unnamed_bytea_param(bytea) REPLACED IN PLACE at section 6 to return that domain instead of plain bytea — the delta's DROP FUNCTION guard was unnecessary and dropped, cases 1622/1623/1624); empty until the next delta.

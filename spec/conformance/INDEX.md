@@ -1,7 +1,9 @@
 # Conformance case index
 
-Cross-reference of the **735** conformance cases under `spec/conformance/cases/`.
-Pinned target: **PostgREST v16.0** (all 735 `source:` URLs).
+Cross-reference of the **740** conformance cases under `spec/conformance/cases/`.
+Pinned target: **PostgREST v16.0** (all 740 `source:` URLs, re-derived on disk
+this pass by parsing each case's `source:` value and extracting its tag —
+`{'v16.0': 740}`, no other value).
 
 Each case is one YAML file `NNNN_<slug>.yaml` validated against
 [`../case.schema.json`](../case.schema.json). Cases are grouped into 17 feature
@@ -20,7 +22,7 @@ The first `/`-delimited segment of each case's `feature:` field is the
 **authoritative** area assignment. The id bands below are derived from what is on
 disk now; read the `feature:` prefix if a row ever looks ambiguous.
 
-> **Non-contiguous bands.** **Four** areas do not occupy a single contiguous
+> **Non-contiguous bands.** **Five** areas do not occupy a single contiguous
 > range and regenerating this file must preserve that rather than collapsing it:
 >
 > - **auth** uses **11800–11818** on top of its full primary band **1450–1499**
@@ -45,10 +47,34 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 >   area's only free primary ids are 1328, 1329 and 1334–1349. An earlier
 >   revision of this page described 1315–1319 and 1325–1329 as empty spacing;
 >   that was stale — always re-derive the band from the `feature:` prefix.
+> - **content_negotiation** (new this pass) uses **12400–12401** on top of its
+>   now-full primary band **1600–1649** (all 50 primary ids are in use; 1647,
+>   1648 and 1649 took the last three). **12402+ is free.** It is the tree's
+>   **fourth** 5-digit band and the **only one that lands in an empty lexical
+>   neighbourhood**: `12400` sorts between `1232` (ordering's last) and `1250`
+>   (pagination's first), i.e. into the free 1233–1249 slice, so it interleaves
+>   with nothing. That is luck, not design — `content_negotiation.yaml` declares
+>   no overflow range, exactly as `operators.yaml` and `mutations.yaml` do not.
 >
-> **There are now three 5-digit bands, so `ls spec/conformance/cases/` is actively
+> **There are now FOUR 5-digit bands, so `ls spec/conformance/cases/` is actively
 > misleading — always `ls | sort -n`.** The `feature:` prefix remains
 > authoritative; an id's numeric neighbourhood never decides its area.
+>
+> **An id was REUSED this pass, which no previous pass has done, and it is the
+> single most misleading thing on disk if you read ids as stable handles.**
+> `1623_octet_stream_no_charset.yaml` was **deleted** and `1623` re-issued to
+> `1623_octet_stream_not_registered_scalar_rpc_406.yaml` — a different request
+> (`GET /rpc/add_them` instead of `POST /rpc/unnamed_bytea_param`), a different
+> sub-feature (`octet-stream/not-registered-406` instead of
+> `octet-stream/no-charset`) and the opposite expectation (**406/PGRST107**
+> instead of 200). The deleted case's assertion was not dropped: its
+> no-charset `Content-Type` claim was **folded into case 1622**, which now
+> asserts it directly alongside `body_raw` byte equality. **Contrast 11406**,
+> where the mutations pass deleted a case and left the id permanently vacant so
+> the deletion stayed visible. Two deletions, two opposite conventions, and
+> nothing on disk says which is right — see
+> [`../COVERAGE.md`](../COVERAGE.md) → follow-up 26. In the meantime: **an id
+> cited in an older document may not name the case that document meant.**
 >
 > **The internal gap at 11406 is a different kind of hole from every other gap on
 > this page and must not be closed up.** Representations' 1328–1329 gap is
@@ -61,16 +87,19 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 > **case-sensitive-identifier** flavor, upstream's quoted `/UnitTest` relation,
 > which the fixture DB does not have.
 >
-> **The three overflow bands follow three different conventions, which is still
-> unsettled — and this pass is the event follow-up 19 was written to prevent.**
-> `spec/filters.yaml` *declares* `[10600..10799]` as its area's closed overflow
-> range (and has used none of it); `spec/operators.yaml` declares nothing — its
-> band exists only as the ids on disk; **`spec/mutations.yaml` likewise declares
-> nothing** and chose 11400+, which lands numerically *between* operators' and
-> auth's ranges. **`rpc` still holds 1400–1443 with only 1444–1449 free**
-> before auth starts at 1450, while its audit left **five** open findings that
-> need more than six cases. See [`../COVERAGE.md`](../COVERAGE.md) → follow-up 19
-> before anyone picks a number ad hoc — a fourth time.
+> **The FOUR overflow bands follow four different placements and only one
+> declaration, and this pass is the fourth-area event follow-up 19 was written to
+> prevent.** `spec/filters.yaml` *declares* `[10600..10799]` as its area's closed
+> overflow range (and has used none of it); `spec/operators.yaml` declares
+> nothing — its band exists only as the ids on disk; `spec/mutations.yaml`
+> likewise declares nothing and chose 11400+, which lands numerically *between*
+> operators' and auth's ranges; **`spec/content_negotiation.yaml` declares
+> nothing either** and chose **12400+**, the highest so far. **Four areas, one
+> declaration, four ad-hoc placements.** `rpc` still holds 1400–1443 with only
+> 1444–1449 free before auth starts at 1450, while its audit left **five** open
+> findings that need more than six cases — so a **fifth** area will face the same
+> question. See [`../COVERAGE.md`](../COVERAGE.md) → follow-up 19 before anyone
+> picks a number.
 
 ## Area <-> id band <-> fixture fragment
 
@@ -88,21 +117,41 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | auth | 69 | 1450–1499 **+ 11800–11818** | `fixtures/auth.sql` | `auth` (69) |
 | errors | 27 | 1500–1526 | `fixtures/errors.sql` + `fixtures/errors.delta.sql` (cases 1523/1524's `test.infinite_inserts` + `test.infinite_recursion`, folded) | `test` (27) |
 | headers | 35 | 1550–1584 | `fixtures/headers.sql` + `fixtures/headers.delta.sql` (`test.get_vary_header_override()`, folded) | `headers` (34), `test` (1) |
-| content_negotiation | 47 | 1600–1646 | `fixtures/content_negotiation.sql` + `fixtures/content_negotiation.delta.sql` (the vendored media-type domains + handlers, folded) | `test` (47) |
+| **content_negotiation** | **52** | **1600–1649, 12400–12401** | `fixtures/content_negotiation.sql` + `fixtures/content_negotiation.delta.sql` (**folded twice** — the vendored media-type domains + handlers on 2026-08-08, then on **2026-08-09** the octet-stream **correction**: the new `public."application/octet-stream"` domain plus `test.unnamed_bytea_param` **re-declared in place** to return that domain instead of plain `bytea`, without which case 1622 is unreachable) | `test` (52) |
 | openapi | 33 | 1650–1682 | `fixtures/openapi.sql` | `openapi` (31), `openapi_no_schema_comment` (1), `openapi_variadic` (1) |
 | config | 45 | 1700–1744 | `fixtures/config.sql` | `config` (45) |
 | observability | 22 | 1750–1771 | `fixtures/observability.sql` (**no delta** — the v16.0 re-sync added two cases and zero fixture objects; its `.sql` change is a comment-only provenance re-pin) | `observability` (22) |
 | domain_representations | 21 | 1800–1820 | `fixtures/domain_representations.sql` | `domain_representations` (21) |
 
-Total: **735 cases**, **17 areas**, **17 fixture fragments**
+Total: **740 cases**, **17 areas**, **17 fixture fragments**
 (plus **7** `*.delta.sql` write channels, all currently **comment-only** —
 re-verified mechanically this pass: stripping comment and blank lines leaves zero
 lines in every one of the seven. Each carries a single
-`-- Folded into ../fixtures.sql on <date> …` provenance line and no DDL. Four are
-dated 2026-08-08 (`content_negotiation`, `headers`, `ordering`, `rpc`); three are
-dated 2026-08-09 (`url_grammar`, `errors`, `operators`). **There is still no
-`mutations.delta.sql`.** See
+`-- Folded into ../fixtures.sql on <date> …` provenance line and no DDL. **Three**
+are dated 2026-08-08 (`headers`, `ordering`, `rpc`); **four** are dated 2026-08-09
+(`content_negotiation`, `url_grammar`, `errors`, `operators`). **There is still no
+`mutations.delta.sql` and no `representations.delta.sql`.** See
 [`fixtures/README.md`](fixtures/README.md) for who may write which file).
+
+**`content_negotiation.delta.sql` is the first channel to be folded TWICE, and
+its second fold is the first in the tree to CHANGE an existing definition rather
+than append a new object.** `test.unnamed_bytea_param(bytea)` was transcribed
+into `fixtures.sql` as `RETURNS bytea`; upstream declares it
+`returns "application/octet-stream"` — the mime-named **DOMAIN**
+(`schema.sql#L2372`). The return type is the *only* thing that registers an
+octet-stream handler (`SchemaCache.hs#L1016` ships json/csv/geo+json/`*/*` and
+nothing else), so under the old transcription case **1622** could not reach its
+200 at all: it would negotiate to 406/PGRST107. The fold adds
+`public."application/octet-stream"` (section 3c) and re-declares the routine in
+place (section 6). **Read the fold note in `fixtures.sql` before assuming this
+made anything green** — it says so plainly: 1622 was *already* passing, because
+`lib/bier/rpc.ex:288` offers octet-stream for any scalar RPC result regardless
+of return type, which is precisely the over-permissive behavior the **new** case
+1623 was written to catch. The fold is upstream-fidelity groundwork that keeps
+1622 reachable once `lib/` narrows handler discovery; it is not a green-maker.
+Deliberately **no** aggregate over the new domain and **no** GRANT, which is
+what keeps 1623 (`test.add_them`, scalar) and 1624 (`test.get_lines`, SETOF —
+excluded by the discovery query's `NOT proretset`) at 406.
 
 **The mutations re-sync added no channel and no fixture object either**, and its
 band is where that constraint bites hardest. `fixtures.sql` does not appear in
@@ -182,7 +231,7 @@ grep -h '^feature:' spec/conformance/cases/1800_format_single_domain_column.yaml
   > spelling out **`Accept-Profile`** itself — spelling out `Content-Profile` is
   > not enough. Of the fourteen `multi` cases, **1005, 1006, 1007, 1008, 1011 and
   > 1012** receive `Accept-Profile: multi` (re-derived mechanically at the
-  > 735-case state). Three of the six expect success (**1005**/**1008** → 200,
+  > 740-case state). Three of the six expect success (**1005**/**1008** → 200,
   > **1011** → 201) and so depend on the allowlist. Recorded in
   > [`../COVERAGE.md`](../COVERAGE.md) → *Open verification findings*: a genuine
   > finding, not a bookkeeping note, because 1008's own `notes:` claim "no
@@ -273,7 +322,7 @@ spread), which — unlike PGRST128 — really is asserted by no case and modelle
 no area file. It belongs to `select`; see
 [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → select*.
 
-> Re-checked at the 735-case state: `grep -rl PGRST128 spec/` matches
+> Re-checked at the 740-case state: `grep -rl PGRST128 spec/` matches
 > `rpc.yaml` (entry `rpc.prefer.max_affected.returns_single`),
 > `conformance/cases/1441_rpc_max_affected_returns_single.yaml`, this INDEX and
 > `COVERAGE.md`. `grep -rl PGRST127 spec/` still matches exactly two files —
@@ -298,10 +347,11 @@ close it. Check a gap against disk before costing it.
 What remains unsettled: url_grammar's **escaped-char** `in.( … )` values
 (`\"`, `\\`) and the general value grammar. Decide the band before authoring, and
 note that `filters`' primary band 1150–1199 is full (overflow `[10600..10799]`),
-`operators`' 1050–1099 is full (overflow 10237+ in use but undeclared), and
-**`rpc`'s 1400–1443 is now nearly full (only 1444–1449 free)**, while
-url_grammar's 1036+, ordering's 1233+, errors' 1527+ and pagination's 1289+ are
-free.
+`operators`' 1050–1099 is full (overflow 10237+ in use but undeclared),
+**`content_negotiation`'s 1600–1649 is now full too (overflow 12402+ in use but
+undeclared)**, and **`rpc`'s 1400–1443 is nearly full (only 1444–1449 free)**,
+while url_grammar's 1036+, ordering's 1233+, errors' 1527+ and pagination's 1289+
+are free.
 
 ### A fifth split, opened by the mutations pass — and it points both ways
 
@@ -363,7 +413,7 @@ sub-features present per area (second segment, as on disk):
 | auth | 1450–1499, 11800–11818 | anonymous, claims, role, role-claim-key, role-switching, jwt, audience, pre-request, guc, rpc |
 | errors | 1500–1526 | sqlstate (incl. the two 5xx paths 1523/1524), pgrst_code (incl. the PGRST205 fuzzy-hint pair 1520/1521), raise, headers (incl. the `Proxy-Status` custom-code case 1519), verbosity (incl. the inline-416 case 1522), envelope (1525, byte-exact key emission order), proxy_status (1526, absent on the inline 416) |
 | headers | 1550–1584 | prefer, profile, location, content-location, guc, vary |
-| content_negotiation | 1600–1646 | json, csv, geojson, octet-stream, singular, nulls-stripped, plan, openapi, precedence, error, custom-media-handler |
+| **content_negotiation** | **1600–1649, 12400–12401** | json, csv, geojson, octet-stream (incl. the **negative** 1623 — a scalar RPC with no media-type domain is not negotiable as octet-stream — alongside the SETOF flavor 1624), singular, nulls-stripped (incl. the mutation-representation pair **12400**/**12401** and the explicit-`select=` singular 1649), plan, openapi, precedence, error (incl. the unparsable-media-type echo 1647), custom-media-handler, **case-insensitivity** (1648). The band is 1600–**1649**, not 1646: 1647/1648/1649 and the overflow pair 12400/12401 are on disk |
 | openapi | 1650–1682 | root, defaults, comments, table, types, rpc, mode, security |
 | config | 1700–1744 | dump-config, sources, aliases, validation, coercion, parsing, precedence, db-max-rows, db-tx-end, db-extra-search-path, app-settings, server-cors-allowed-origins, cli, client-error-verbosity, server-reuseport, url-use-legacy-target-names, admin-server-unix-socket |
 | observability | 1750–1771 | server-timing (incl. **1770**, the exact five-metric render), trace-header, log-level, server (**1771**, the `Server: postgrest/…` version header — the tree's only `Server:` assertion) |
@@ -371,6 +421,56 @@ sub-features present per area (second segment, as on disk):
 
 ### v16.0 additions worth knowing
 
+- **content_negotiation** grew from **47 to 52** cases and is the tree's
+  **fifteenth** audited area — ⚠️ *revise*, **0 citation defects**, **seven**
+  missing-coverage findings. **Six cases added (1647, 1648, 1649, the re-issued
+  1623, and the overflow pair 12400/12401), one deleted, one id REUSED, three
+  rewritten (1600, 1622, 1637), and one fixture object corrected.** Five things
+  about this pass are worth carrying forward:
+  - **It is the first pass to reuse an id.** The old **1623**
+    (`octet-stream/no-charset`, a 200) was deleted and 1623 re-issued to a
+    **406** negative (`octet-stream/not-registered-406`, `GET /rpc/add_them`
+    under `Accept: application/octet-stream`). The deleted assertion was folded
+    into case **1622** rather than dropped. See the id-reuse warning at the top
+    of this page, and contrast the mutations pass's 11406, whose id was left
+    vacant on purpose.
+  - **It corrected a FIXTURE, which is a species this tree had not recorded.**
+    Every earlier fold added objects; this one re-declared an existing routine.
+    `test.unnamed_bytea_param(bytea)` returned plain `bytea` where upstream
+    returns the mime-named DOMAIN, and that single transcription slip made case
+    1622's assertion **unreachable** — the case could only ever have answered
+    406/PGRST107 against a faithful implementation. Nothing mechanical in this
+    tree could see it: the case validated, its pin was correct, its citation was
+    real, and it *passed* — against a `lib/` that is over-permissive in exactly
+    the way case 1623 now pins.
+  - **A modelled rule was corrected at its root: handler discovery keys on the
+    RETURN TYPE, never on an aggregate's `stype`.** The model had described a
+    custom media handler as "an AGGREGATE whose stype is that domain". The
+    discovery query joins `proc.prorettype = <domain oid>` and
+    `pg_aggregate.aggfnoid = proc.oid` (`SchemaCache.hs#L1062-L1071`), with a
+    second branch for plain non-set-returning **functions** returning such a
+    domain (`#L1080-L1086`). stype merely *coincides* with the return type when
+    the aggregate has no finalfunc — true of every fixture here, which is why
+    the wrong rule survived. Case **1637**'s notes were rewritten with it.
+  - **Two claims were weakened to what their citations actually support.**
+    "negotiateContent's body is **byte-identical** to v14.12's" became
+    identical **modulo whitespace** (v16.0 re-aligned the `case` alternatives);
+    and "**NEW in v16.0**: the JSON plan includes a Query Identifier field"
+    became "upstream **added a test** at v16.0", since the field is emitted by
+    PostgreSQL's `EXPLAIN (VERBOSE, FORMAT JSON)` when `compute_query_id` is on
+    — PostgREST introduced nothing, and the old wording contradicted this
+    model's own `version_delta.behavior_changes: []`.
+  - **Case 1600's `source:` moved OFF implementation code** (`MediaType.hs#L69`
+    → `RawOutputTypesSpec.hs#L15`), joining 1189/1016/1767 in that direction.
+    The tree's implementation-anchored total is **unchanged at 53** only by
+    coincidence: 1600 and the deleted 1623 left, the re-issued 1623 and 1648
+    arrived. **Read the composition, not the total.**
+  - **The model is still silent.** `content_negotiation.yaml` gained a new
+    top-level `fixture_notes:` key — three entries recording exactly which
+    fixture properties its cases depend on, which has no precedent in the tree
+    and is worth copying — but it still carries **no `gaps:` key under any
+    name**, so all seven audit findings live only in
+    [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → content_negotiation*.
 - **representations** grew from **24 to 32** cases, filling **1315–1319** and
   **1325–1327** inside its existing band (no new band, no fixture object, no
   `representations.delta.sql`). **Eight cases added, one rewritten (1309), none
@@ -464,7 +564,8 @@ sub-features present per area (second segment, as on disk):
     sections (*Untyped functions*; *Functions with array parameters*) have no
     case, no model entry and no gap note; the `text/plain` and `text/xml` flavors
     of the single unnamed parameter are absent while only the bytea flavor is
-    covered (and from `content_negotiation`, cases 1622/1623); resource embedding
+    covered (and from `content_negotiation` — **case 1622 alone** now that 1623
+    has been re-issued as an unrelated 406 negative); resource embedding
     through a table-valued function is exercised only incidentally by case 1023
     in the `url_grammar` band; and `?columns=` on an RPC POST has no case
     anywhere. **A freshly re-synced area is not a covered area.** See
@@ -654,7 +755,7 @@ sub-features present per area (second segment, as on disk):
 
 ## Case file shapes
 
-Most cases are HTTP request/response (**697**). The **config** area additionally
+Most cases are HTTP request/response (**702**). The **config** area additionally
 uses a **CLI** shape (`request.kind: cli`, `request.flag: "--dump-config"`)
 asserting on `expect.exit_code`, `expect.dump_contains`,
 `expect.dump_reparse_stable`, and `expect.stderr_contains` rather than an HTTP
@@ -671,12 +772,26 @@ does not know.
 Any case may carry a `config:` block — **116** do (112 non-empty; 1705, 1719,
 1727 and 1743 carry an empty `config: {}`), spread over six areas: config 45,
 auth 33, observability 21, select 10, openapi 4, errors 3. **The count did not
-move for a third consecutive pass**: none of the operators re-sync's 37 new
-cases, the rpc re-sync's 3 or the mutations re-sync's 17 declares a `config:`
-block, because none of those areas is
+move for a FOURTH consecutive pass**: none of the operators re-sync's 37 new
+cases, the rpc re-sync's 3, the mutations re-sync's 17, the representations
+re-sync's 8 or the content_negotiation re-sync's 6 declares a `config:` block,
+because none of those areas is
 config-gated — a useful contrast with `select`, whose ten config-carrying cases
 all need `db-aggregates-enabled` or `url-use-legacy-target-names` and none of
-which the harness honours. The harness boots a dedicated instance only for the
+which the harness honours.
+
+> **The content_negotiation pass is the sharpest illustration that a missing
+> `config:` block can itself be the gap.** Its area model states, twice, that the
+> plan media types resolve only when `db-plan-enabled` is true
+> (`Plan/Negotiate.hs#L74`) — yet cases **1625, 1626, 1627, 1628** and **1643**
+> record that requirement in a **`preconditions:` string**, a key the harness
+> **never executes**, and no case anywhere pins the **406** that the default
+> `db-plan-enabled = false` produces. Upstream asserts it at
+> `PlanSpec.hs#L544`. So five cases declare a dependency the harness ignores
+> while the behavior that dependency implies is untested. See
+> [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → content_negotiation*.
+
+The harness boots a dedicated instance only for the
 ids listed in `@variant_case_ids`
 (`test/support/conformance_server.ex:58-59`, **18** ids: 1467–1473, 1491, 1493,
 1654, 1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764) plus every `kind: cli`
@@ -684,7 +799,7 @@ case. On any other HTTP case the `config:` block is **inert** — it documents t
 upstream configuration the assertion depends on, but the case still runs against
 a shared instance. Mechanically, **60** HTTP cases carry a non-empty `config:`
 outside `@variant_case_ids` (re-derived on disk this pass against the harness's
-live 18-id list), now out of **697** HTTP cases; most simply restate what the
+live 18-id list), now out of **702** HTTP cases; most simply restate what the
 shared instance already provides. **The mutations band adds a dependency of a
 different kind**: it declares no `config:` at all, yet ten of its seventeen new
 cases rely on the shared instance's `db_tx_end: :rollback` to contain writes
@@ -702,15 +817,26 @@ assertions are log-level-independent statuses, so they still hold — see
 
 `preconditions:` is parsed but **never executed** by the harness — treat it as
 declarative documentation, never as setup a case may depend on. It is present on
-**734** of the 735 cases (case **1330** is still the only omission, which the
+**739** of the 740 cases (case **1330** is still the only omission, which the
 schema allows), and **44** of those carry a *non-empty* list — **25 of the 44 in
 the mutations area alone**, which makes it by far the heaviest user of a key that
-does nothing. All 17 new mutations cases correctly carry `preconditions: []`. The sharpest
-illustration is in the pagination area: cases **1272, 1274 and 1275** declare
-`preconditions: ["ANALYZE …"]` for planner-estimate expectations and pass only
-because `mix bier.fixtures.load` happens to run a database-wide `ANALYZE`
-afterwards. `spec/pagination.yaml` records this for the harness owner rather than
-working around it.
+does nothing. Full non-empty distribution, re-derived at the 740-case state:
+mutations **25**, content_negotiation **11**, pagination **4**, openapi **2**,
+url_grammar **1**, representations **1**. All six new content_negotiation cases
+correctly carry `preconditions: []`, as all 17 mutations and all 8
+representations cases did before them — a convention three consecutive passes
+have now followed and nobody has written down.
+
+**Two areas show the cost, and they show it differently.** In *pagination*,
+cases **1272, 1274 and 1275** declare `preconditions: ["ANALYZE …"]` for
+planner-estimate expectations and pass only because `mix bier.fixtures.load`
+happens to run a database-wide `ANALYZE` afterwards; `spec/pagination.yaml`
+records this for the harness owner rather than working around it. In
+*content_negotiation*, **eleven** cases carry non-empty lists and five of them
+(**1625–1628**, **1643**) use the key to state the `db-plan-enabled = true`
+requirement — where pagination's inert preconditions happen to be satisfied,
+these five leave a documented gate with **no case pinning the ungated 406**.
+An inert declaration is not coverage.
 
 **3** cases assert `expect.status_text` (**1508, 1510, 1511**) and are tagged
 `:pending` / excluded by `test/conformance/conformance_test.exs`, because `Req`
@@ -719,15 +845,17 @@ deferral; `case.schema.json` itself has no `pending` field. (Earlier revisions o
 this file claimed 6 such cases, listing 1509, 1513 and 1514 as well — those three
 only *mention* `status_text` in `notes:` or in an expected `hint:` string and
 carry no `expect.status_text` key, so they run normally. Re-verified at the
-**735**-case state: still exactly three.)
+**740**-case state: still exactly three.)
 
 **13** cases use the HTTP `HEAD` method (1020, 1272, 1274, 1275, 1277, 1284,
 1425, 1681, 1756, 1760, 1761, 1762, 1771) and **every one expects a 2xx** —
-re-derived mechanically at the 735-case state. No case in the tree issues a HEAD
+re-derived mechanically at the 740-case state. No case in the tree issues a HEAD
 request that errors, which is the tree's only *request-shape* blind spot; see
-[`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → errors*. The count has not
-moved in five re-syncs while the tree grew by 59 cases. Full method
-distribution at 735: GET **500**, POST **107**, CLI **38**, PATCH **26**,
+[`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → errors*. **The count has now
+not moved in seven re-syncs while the tree grew by 64 cases**, and this pass is
+another clean miss: the content_negotiation band's whole subject is the response
+`Content-Type`, the one header a HEAD response still carries. Full method
+distribution at **740**: GET **504**, POST **107**, CLI **38**, PATCH **27**,
 DELETE **21**, PUT **18**, HEAD **13**, OPTIONS **12**.
 
 ## Looking up a case
@@ -739,11 +867,13 @@ grep -l '^feature: domain_representations/' spec/conformance/cases/*.yaml
 # the source citation for a case
 grep '^source:' spec/conformance/cases/1200_order_by_column_asc.yaml
 
-# list ids in numeric order — REQUIRED: the three 5-digit bands sort wrong
+# list ids in numeric order — REQUIRED: the four 5-digit bands sort wrong
 # otherwise (operators 10200-10236 lands next to 1020*, mutations
-# 11400-11415 next to 1140*, auth 11800-11818 next to 1180*)
+# 11400-11415 next to 1140*, auth 11800-11818 next to 1180*, and
+# content_negotiation 12400-12401 next to 1240* — an empty slice, so it
+# interleaves with nothing and is the easiest of the four to overlook)
 ls spec/conformance/cases/ | sort -n
 
 # every case in an overflow band, by area
-ls spec/conformance/cases/ | sort -n | grep -E '^(102|114|118)[0-9]{2}_'
+ls spec/conformance/cases/ | sort -n | grep -E '^(102|114|118|124)[0-9]{2}_'
 ```

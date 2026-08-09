@@ -54,6 +54,11 @@ media_types:
     internal: MTOctetStream
     charset_appended: false
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L62-L65
+    # NOT a built-in producer. Unlike json/csv/geojson/"*/*", octet-stream has
+    # no entry in initialMediaHandlers, so it is negotiable ONLY where a
+    # media-type DOMAIN registers a handler (see behaviors.octet_stream).
+    not_builtin_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/SchemaCache.hs#L1016
+    registration_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/SchemaCache.hs#L1024
   other:
     # Any mime decodeMediaType does not recognise becomes MTOther and is echoed
     # verbatim, WITHOUT a charset. This is how custom media-type handlers
@@ -85,7 +90,12 @@ media_types:
       application/vnd.pgrst.array+json WITHOUT nulls=stripped decodes back to
       MTApplicationJSON (plain JSON array). Only the stripped variant is a
       distinct media type.
-    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L153-L154
+    # toMime emits "application/vnd.pgrst.array+json;nulls=stripped" (no space
+    # before the parameter); toContentType then appends "; charset=utf-8"
+    # because MTVndArrayJSONStrip is not one of the two charset-less cases.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L70
+    charset_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L60-L65
+    decode_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L153-L154
   plan:
     accept_examples:
       - application/vnd.pgrst.plan                       # defaults to +text, for=application/json
@@ -105,13 +115,33 @@ media_types:
 parsing:
   tokenizer:
     description: >-
-      decodeMediaType tokenizes "<main>/<sub>[; k=v]*" with a Parsec parser;
-      parameter NAMES are lowercased (RFC 7231), and the main/sub types are
-      compared case-insensitively, so "ApplicatIon/vnd.PgRsT.object+json"
-      decodes to MTVndSingularJSON False. A trailing semicolon is tolerated and
-      everything after a failed parse is discarded.
-    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L190
+      decodeMediaType tokenizes "<main>/<sub>[; k=v]*" with a Parsec parser; the
+      main/sub types are compared case-insensitively and parameter NAMES are
+      normalized to lowercase, so "ApplicatIon/vnd.PgRsT.object+json" decodes to
+      MTVndSingularJSON False. A trailing semicolon is tolerated and everything
+      after it is discarded.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L190-L197
   case_insensitivity_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L139
+  # The anchored line is:
+  #   params = fromList $ map (first T.toLower) params' -- normalize parameter
+  #   names to lowercase, per RFC 7321
+  # Note "RFC 7321" is upstream's own typo for RFC 7231 (HTTP/1.1 Semantics and
+  # Content); flagged so nobody "corrects" this spec to match the typo.
+  param_names_lowercased_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L162
+  case_insensitivity_doctest:
+    claim: >-
+      The module carries an executable doctest for the case-insensitive path
+      (added for upstream issue #3478): decodeMediaType
+      "ApplicatIon/vnd.PgRsT.object+json" == MTVndSingularJSON False.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L127-L129
+  parse_failure:
+    claim: >-
+      When the tokenizer fails, decodeMediaType falls back to (mt', "", []) and
+      the final catch-all yields MTOther <the whole string>, so an Accept with
+      no "/" at all (e.g. "undefined") is carried through verbatim and surfaces
+      in the PGRST107 message as-is rather than being rejected earlier.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L156-L161
+    test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L394-L399
   unknown_parameters_ignored:
     claim: >-
       Parameters other than nulls=/for=/options= are ignored, so "text/csv;
@@ -158,7 +188,10 @@ negotiation:
     fatal. If none match, it errors with MediaTypeError -> PGRST107 / HTTP 406.
   module_note: >-
     v16.0 moved negotiateContent out of PostgREST.Plan into the dedicated module
-    PostgREST.Plan.Negotiate. The function body is unchanged from v14.12.
+    PostgREST.Plan.Negotiate. The function body is unchanged from v14.12 EXCEPT
+    for whitespace: the case alternatives were re-aligned. A
+    whitespace-insensitive diff of the two bodies is empty - same clauses, same
+    guards, same results, same order - so nothing wire-observable moved.
   source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan/Negotiate.hs#L52-L63
   handler_lookup_order:
     description: >-
@@ -168,12 +201,33 @@ negotiation:
       only; (3) (anyelement, the requested media type). Step (3) is what makes
       an anyelement aggregate apply to every relation and RPC result.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan/Negotiate.hs#L75-L78
+  accept_list_construction:
+    claim: >-
+      iAcceptMediaType is the Accept header run through parseHttpAccept (which
+      orders by q factor) and then decodeMediaType per entry. A REQUEST WITH NO
+      Accept HEADER AT ALL yields the singleton list [MTAny], i.e. it is treated
+      exactly like "*/*" - which is why a bare `GET /` with no Accept still
+      resolves to the OpenAPI document (case 1645).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L98
+    q_factor_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L71
+    q_factor_test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L208-L219
   rules:
     - claim: >-
         Vendored media types (vnd.pgrst.object, vnd.pgrst.array stripped, and
         vnd.pgrst.plan) have special handling and cannot be overridden by custom
         media handlers; the others (json, csv, geojson, ...) can be overridden.
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan/Negotiate.hs#L64-L73
+    - claim: >-
+        A media type whose tokenizer parse fails (no "/" at all, e.g.
+        "undefined") is not rejected during parsing: it becomes MTOther and is
+        echoed verbatim in the 406 / PGRST107 message.
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L394-L399
+    - claim: >-
+        Media type matching is case-insensitive, so
+        "ApplicatIon/vnd.PgRsT.object+json" negotiates the singular object
+        handler and the response Content-Type is re-rendered canonically
+        lowercase (upstream issue #3478).
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L127-L129
     - claim: >-
         When multiple acceptable types are listed, PostgREST honors the client's
         order (first acceptable wins), even when it is the opposite of the
@@ -302,17 +356,76 @@ behaviors:
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L41-L48
 
   octet_stream:
-    - claim: "POST to an RPC with a single unnamed bytea parameter, Content-Type + Accept application/octet-stream, echoes the raw bytes back; Content-Type application/octet-stream (no charset)."
+    # READ THIS FIRST. octet-stream is not produced by any built-in rule; the
+    # ONLY thing that makes it negotiable is a media-type DOMAIN. An earlier
+    # revision of this block asserted "bytea return => octet-stream", which is
+    # false and induced a wrong rule downstream; the claims below replace it.
+    - claim: >-
+        application/octet-stream is NOT a built-in producer. initialMediaHandlers
+        registers exactly four (anyelement, <media type>) entries -- */*,
+        application/json, text/csv, application/geo+json -- and nothing else, so
+        no relation or routine produces octet-stream by default.
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/SchemaCache.hs#L1016
+    - claim: >-
+        An octet-stream handler exists only where the schema puts one, and the
+        mediaHandlers discovery query keys on RETURN TYPES -- never on an
+        aggregate's stype. First UNION branch: a handler is registered for every
+        AGGREGATE whose own pg_proc row (reached via `pg_aggregate.aggfnoid =
+        proc.oid`) has `proc.prorettype` equal to a DOMAIN named after a mime,
+        takes exactly one argument (`proc.pronargs = 1`) whose type is a
+        relation's reltype or `anyelement`, and lives in an exposed schema.
+        Second UNION branch: a handler is registered for every non-set-returning
+        plain FUNCTION (`prokind = 'f'`, `NOT proretset`) whose return type is
+        such a domain. stype coincides with the aggregate's return type only
+        when there is no finalfunc (true of every upstream fixture), which is
+        why upstream's own docs phrase the rule as "domain media types as the
+        return type of their transition or final functions" -- an
+        implementation that keys on stype registers a subtly different handler
+        set. The domain named "*/*" is additionally resolved to
+        application/octet-stream. A routine returning plain `bytea` registers
+        nothing.
+      # The aggregate branch's whole FROM/JOIN/WHERE chain: `from media_types`
+      # (#L1062) -> `join pg_proc proc on proc.prorettype = media_types.oid`
+      # (#L1063) -> `join pg_aggregate agg on agg.aggfnoid = proc.oid` (#L1065)
+      # -> `proc.pronargs = 1` (#L1070) -> arg in all_relations (#L1071).
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/SchemaCache.hs#L1062-L1071
+      function_branch_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/SchemaCache.hs#L1080-L1086
+      resolved_mime_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/SchemaCache.hs#L1045-L1048
+      docs_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/media_type_handlers.rst#L77
+    - claim: >-
+        Upstream's own fixture is what makes the single-unnamed-bytea-parameter
+        routine negotiable: it is declared
+        `test.unnamed_bytea_param(bytea) returns "application/octet-stream"`,
+        i.e. it returns the mime-named DOMAIN, not bytea.
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L2372
+    - claim: >-
+        Given that fixture, POST to that RPC with Content-Type + Accept
+        application/octet-stream echoes the raw request bytes back. NOTE the
+        cited it-block asserts ONLY `respBody == file`: it asserts neither a
+        status nor a Content-Type, so neither may be attributed to it (case 1622
+        cites those separately).
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RpcSpec.hs#L1184-L1191
+    - claim: "When octet-stream IS negotiated, its Content-Type carries no charset (toContentType special-cases MTOctetStream and MTOther)."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L62-L65
     - claim: "Accept application/octet-stream against a relation that has no octet-stream handler returns 406 / PGRST107."
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L161-L166
     - claim: "A routine returning the \"*/*\" DOMAIN matches ANY Accept and, when the handler sets no response.headers, the Content-Type defaults to application/octet-stream."
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L320-L325
 
   custom_media_handlers:
-    # A custom media type is a DOMAIN named after the mime; its handler is an
-    # AGGREGATE whose stype is that domain, defined either over a specific row
-    # type (relation-scoped) or over anyelement (applies everywhere).
+    # A custom media type is a DOMAIN named after the mime. Its handler is an
+    # AGGREGATE that RETURNS that domain (the discovery query joins
+    # proc.prorettype = the domain oid and pg_aggregate.aggfnoid = proc.oid --
+    # it does NOT key on stype; stype merely coincides with the return type
+    # when the aggregate has no finalfunc, as in every fixture here), taking a
+    # single argument that is either a specific row type (relation-scoped) or
+    # anyelement (applies everywhere). Plain non-set-returning FUNCTIONS
+    # returning such a domain are handlers too, via the query's second branch.
+    # See behaviors.octet_stream for the full anchor set:
+    #   discovery query, aggregate branch  SchemaCache.hs#L1062-L1071
+    #   discovery query, function branch   SchemaCache.hs#L1080-L1086
+    #   docs phrasing ("return type of their transition or final functions")
+    #                                      docs/references/api/media_type_handlers.rst#L77
     - claim: "An anyelement aggregate over a custom DOMAIN is negotiable for any relation or RPC result and emits the custom mime with no charset."
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L169-L175
     - claim: "A builtin, non-vendored media type (application/json) can be overridden for a single relation; the builtin Content-Type is kept but the body is the handler's output."
@@ -323,8 +436,10 @@ behaviors:
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L229-L236
     - claim: "A relation-scoped aggregate is only negotiable with the default select: naming fewer, more, or reordered columns makes it unavailable (406)."
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/CustomMediaSpec.hs#L301-L316
-    - claim: "PostgREST vendor media types cannot be overridden, and mimes longer than a PostgreSQL identifier cannot be expressed as DOMAINs (use the any handler instead)."
+    - claim: "PostgREST vendor media types (application/vnd.pgrst.plan, application/vnd.pgrst.object, application/vnd.pgrst.array) cannot be overridden."
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/media_type_handlers.rst#L18
+    - claim: "Mimes longer than a PostgreSQL identifier (e.g. application/vnd.openxmlformats-officedocument.wordprocessingml.document) cannot be expressed as DOMAINs; the any handler is the documented workaround. This is a SEPARATE docs bullet from the vendor-type one above -- it spans the next two lines, not #L18."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/media_type_handlers.rst#L19-L20
 
   nulls_stripped:
     # 'Stripped Nulls' is a dedicated user-facing feature (own docs ToC
@@ -341,6 +456,12 @@ behaviors:
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/NullsStripSpec.hs#L66
     - claim: "nulls=stripped removes null keys even when the column was explicitly named in select=."
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/NullsStripSpec.hs#L77
+    - claim: "The stripped SINGULAR type composes with an explicit select= too: /organizations?select=id,referee,auditor&limit=1 returns just {\"id\":1}."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/NullsStripSpec.hs#L105-L113
+    - claim: "The stripped array type also applies to MUTATION representations: POST with Prefer: return=representation returns 201 and a stripped array, so explicitly-sent null columns are absent from the echoed row."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/NullsStripSpec.hs#L28-L35
+    - claim: "Likewise for PATCH: a column set to null by the patch is stripped from the returned representation while the untouched non-null columns remain."
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/NullsStripSpec.hs#L37-L44
     - claim: "Plain application/vnd.pgrst.array+json (no nulls=stripped) keeps null keys and responds with Content-Type application/json; charset=utf-8 (decodes back to MTApplicationJSON)."
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/NullsStripSpec.hs#L116
 
@@ -357,8 +478,19 @@ behaviors:
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PlanSpec.hs#L118-L125
     - claim: "for= may also name a custom media type (text/xml, application/vnd.twkb); it is echoed unchanged."
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PlanSpec.hs#L429-L448
-    - claim: "NEW in v16.0: the JSON plan includes a \"Query Identifier\" field when options=verbose (requires the server to compute query ids)."
-      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PlanSpec.hs#L97-L105
+    # Deliberately worded as a TEST change, not a behavior change: an earlier
+    # revision said "NEW in v16.0: the JSON plan includes ...", which the cited
+    # lines do not support and which contradicts this file's own
+    # version_delta.behavior_changes ([] - nothing wire-observable changed).
+    - claim: >-
+        Upstream ADDED a test at v16.0 asserting that the JSON plan carries a
+        "Query Identifier" field when options=verbose (it asserts only
+        `isJust`, plus the usual options=verbose Content-Type). PostgREST did
+        not introduce the field: it is emitted by PostgreSQL's
+        EXPLAIN (VERBOSE, FORMAT JSON) when the server computes query ids
+        (compute_query_id), so the assertion holds only on such a server. Filed
+        under version_delta.test_changes, not behavior_changes.
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PlanSpec.hs#L97
     - claim: "When db-plan-enabled is false (the default) the plan media type does not resolve and the request fails."
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/PlanSpec.hs#L544-L548
 
@@ -368,8 +500,16 @@ version_delta:
   source_moves:
     - claim: "All library sources moved from src/PostgREST/... to src/library/PostgREST/..."
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L1
-    - claim: "negotiateContent moved out of PostgREST.Plan into the new module PostgREST.Plan.Negotiate; the function body is byte-identical to v14.12's."
-      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan/Negotiate.hs#L52
+    # NOT byte-identical: v16.0 re-aligned the `case` alternatives. The earlier
+    # revision of this entry claimed "byte-identical", which a diff refutes;
+    # the correct, weaker (and true) statement is identical-modulo-whitespace.
+    - claim: >-
+        negotiateContent moved out of PostgREST.Plan into the new module
+        PostgREST.Plan.Negotiate. The function body is identical to v14.12's
+        MODULO WHITESPACE only (the case alternatives were re-aligned); a
+        whitespace-insensitive diff is empty, so no clause, guard, result or
+        ordering changed.
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan/Negotiate.hs#L52-L63
     - claim: "MediaType.hs gained only a doctest $setup block and a tokenizeMediaType export; every toMime/toContentType/decodeMediaType clause is unchanged."
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/MediaType.hs#L11
   test_changes:
@@ -387,3 +527,30 @@ version_delta:
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L86
     - claim: "client-error-verbosity (default verbose) can reduce error bodies to code+message only - config/errors-area scope; at the default the PGRST107 body shape asserted here is unchanged."
       source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/configuration.rst#L245
+
+# --- Fixture dependencies this area's cases carry ---------------------------
+# Recorded because a transcription slip in one of them silently made an
+# assertion unreachable, and the failure mode was invisible from the case alone.
+fixture_notes:
+  - object: test.unnamed_bytea_param(bytea)
+    requirement: >-
+      Must RETURN the DOMAIN "application/octet-stream" (base type bytea), NOT
+      plain bytea. The return type is the only thing that registers the
+      octet-stream handler; with `RETURNS bytea` case 1622 answers 406/PGRST107
+      instead of 200. spec/conformance/fixtures.sql:1201 had the plain-bytea
+      form; spec/conformance/fixtures/content_negotiation.delta.sql corrects it.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L2372
+  - object: 'public."application/octet-stream"'
+    requirement: >-
+      The DOMAIN itself must exist; upstream declares it alongside the other
+      mime-named domains. Declaring the domain alone registers nothing - some
+      routine's RETURN TYPE must be it (a plain function's, or an aggregate's
+      own prorettype; the discovery query never looks at stype).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L114
+  - object: test.add_them(integer, integer)
+    requirement: >-
+      Must keep its plain `integer` return type: case 1623 pins the negative
+      (a scalar routine with no media-type domain is not negotiable as
+      octet-stream). Giving it a mime-named domain return would silently turn
+      that 406 into a 200.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/SchemaCache.hs#L1016

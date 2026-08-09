@@ -1,0 +1,29 @@
+id: 12400
+feature: content_negotiation/nulls-stripped/post-representation
+request:
+  method: POST
+  path: /organizations?select=*
+  headers:
+    Accept: application/vnd.pgrst.array+json;nulls=stripped
+    Content-Type: application/json
+    Prefer: return=representation
+  body_json: { "id": 7, "name": "John", "referee": null, "auditor": null, "manager_id": 6 }
+schema: test
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8
+  body_exact:
+    - { id: 7, name: "John", manager_id: 6 }
+notes: >-
+  nulls=stripped is not read-only: it governs the MUTATION representation too.
+  With Prefer: return=representation the 201 body is still a stripped array, so
+  the referee/auditor columns the request explicitly sent as null come back
+  absent rather than as null keys, while the Content-Type keeps echoing the
+  stripped array media type. Mirrors the POST assertion inside NullsStripSpec's
+  it block "strips nulls when Accept:
+  application/vnd.pgrst.array+json;nulls=stripped" (same row, same expected
+  body). Allocated from this area's overflow band because 1600..1649 is fully
+  taken.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/NullsStripSpec.hs#L28
