@@ -1,0 +1,24 @@
+id: 1282
+feature: pagination/content_range/empty_window_rpc
+request:
+  method: GET
+  path: /rpc/getitemrange?min=2&max=2
+  headers: { Accept: application/json }
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "*/*"
+    Content-Length: "2"
+  body_exact: []
+notes: >
+  An /rpc/ read that returns no rows and requests no count emits Content-Range
+  '*/*' — the range part collapses to '*' because lower (0) > upper (-1), i.e.
+  `fromInRange` is False (RangeQuery.hs:117-121) — and the body is the two-byte
+  document `[]`. Mirrors RangeSpec.hs:22, which asserts both the '*/*' header
+  and 'Content-Length: 2'. Case 1264 covers the same Content-Range on a table
+  read but does not pin the byte count. Verified against a freshly loaded
+  bier_test: pagination.getitemrange(2,2) is
+  `SELECT * FROM items WHERE id > 2 AND id <= 2`, which matches no row.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L22

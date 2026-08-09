@@ -1,0 +1,33 @@
+id: 1284
+feature: pagination/range_header/get_only_head
+request:
+  method: HEAD
+  path: /items
+  headers:
+    Accept: application/json
+    Range-Unit: items
+    Range: 0-1
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: "application/json; charset=utf-8"
+    Content-Range: "0-14/*"
+  body_exact: ""
+notes: >
+  The Range header is honored ONLY for GET, so HEAD /items with 'Range: 0-1'
+  ignores the header and reports the whole table: Content-Range '0-14/*',
+  status 200, empty body. getRanges computes
+  `headerRange = if method == "GET" then rangeRequested hdrs else allRange`
+  (ApiRequest.hs:183), immediately under a comment citing RFC 9110 "the Range
+  header must be ignored for all methods other than GET" (ApiRequest.hs:181-182);
+  `method` is the raw request method (`method = requestMethod req`,
+  ApiRequest.hs:102), so HEAD is not folded into GET. Contrast case 1259, the
+  identical GET, which honors the header and answers '0-1/*', and case 1277,
+  which shows that limit/offset query params ARE still applied on HEAD.
+  PostgREST's own suite never sends a Range header on a non-GET request, so
+  this expectation is derived from source (ground-truth priority 2). Verified
+  against a freshly loaded bier_test: pagination.items has 15 rows (ids 1..15),
+  so the unwindowed Content-Range is '0-14/*'.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest.hs#L183

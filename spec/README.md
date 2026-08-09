@@ -13,15 +13,17 @@ that compatibility means, case by case, so it can be checked automatically.
 Everything here targets **PostgREST v16.0** (docs:
 [postgrest.org/en/v16](https://postgrest.org/en/v16/)). Every conformance case
 carries a `source:` URL pinned to the `v16.0` git tag with a `#L<line>` anchor,
-fetchable via `raw.githubusercontent.com`. All **657** cases are pinned to
-`v16.0` — verified on disk this pass (a sweep of every PostgREST URL across
-`spec/*.yaml`, `spec/*.md` and the case files found **exactly one tag**). When
-bumping the target version, re-pin the sources and re-run the review pass.
+fetchable via `raw.githubusercontent.com`. All **668** cases are pinned to
+`v16.0` — verified on disk this pass (a prefix-aware sweep of every PostgREST
+URL across `spec/*.yaml`, `spec/*.md`, `spec/conformance/*.md` and the case files
+found **1857** references and **exactly one tag**). When bumping the target
+version, re-pin the sources and re-run the review pass.
 
 > **`case.schema.json` does not enforce the pin.** Its `source` pattern is
 > `^https://raw\.githubusercontent\.com/PostgREST/postgrest/.+#L[0-9]+$` — the
 > `.+` matches *any* tag, so a case pinned to `v14.12` still validates. Only the
-> URL sweep above catches stale pins; a green schema run does not.
+> URL sweep above catches stale pins; a green schema run does not. This was
+> re-proved by negative control this pass (see *Validating cases locally*).
 
 > **Match the URL prefix, not just the tag.** A naive `grep -v 'postgrest/v16\.0/'`
 > reports dozens of false stale hits, because
@@ -29,22 +31,26 @@ bumping the target version, re-pin the sources and re-run the review pass.
 > and the tag. Sweep with a prefix-aware pattern
 > (`postgrest/(raw/|blob/|tree/)?<tag>`) or the count is wrong.
 
-> **`v14.12` in prose is not a stale pin.** **96** bare `v14.12` occurrences
-> remain across the 17 area model files (`url_grammar.md` 15, `errors.yaml` 13,
-> `auth.yaml` 10, `config.yaml` 9, and the rest fewer), plus **25** across 24
-> case files. Sampling them shows deliberate v14.12→v16.0 change notes ("the
-> block is byte-identical to v14.12, only the `src/library/` path and line
-> numbers move"). Verified this pass: **zero** of them carries a `v14.12` *URL*
-> — they are comparative prose, not citations. (This count deliberately excludes
-> `README.md`, `COVERAGE.md` and `conformance/INDEX.md`, which the synthesis
-> phase rewrites; counting files against themselves is not a measurement.)
+> **`v14.12` in prose is not a stale pin.** **104** bare `v14.12` occurrences
+> remain across the 17 area model files (`url_grammar.md` 15, `pagination.yaml`
+> 14, `errors.yaml` 13, `auth.yaml` 10, `config.yaml` 9, and the rest fewer),
+> plus **25** across 24 case files. Sampling them shows deliberate
+> v14.12→v16.0 change notes ("the block is byte-identical to v14.12, only the
+> `src/library/` path and line numbers move"). Verified this pass: **zero** of
+> them carries a `v14.12` *URL* — they are comparative prose, not citations.
+> (This count deliberately excludes `README.md`, `COVERAGE.md` and
+> `conformance/INDEX.md`, which the synthesis phase rewrites; counting files
+> against themselves is not a measurement.)
 >
-> Two such notes have been **corrected** rather than carried forward, one per
+> Three such notes have been **corrected** rather than carried forward, one per
 > re-sync: case 1029's claim that the query parser was "byte-identical between
 > the pins" (false at the module level — the body is unchanged with an +8 line
-> offset, but the header is not) and case 1016's claim that no v16.0 Feature-spec
+> offset, but the header is not); case 1016's claim that no v16.0 Feature-spec
 > line existed for the PUT-`limit` rule (`UpsertSpec.hs#L295` asserts it in both
-> pins). Treat comparative prose as a claim to re-verify, not as settled fact.
+> pins); and, this pass, `pagination.yaml`'s "no pagination behavior changed
+> between the pins", narrowed to "no *asserted* behavior changed" after the
+> re-sync found four traceable-but-unmodeled behaviors. Treat comparative prose
+> as a claim to re-verify, not as settled fact.
 
 > **Fixture provenance comments are still on the old pin.** Eight files under
 > `conformance/fixtures/` carry **51** `v14.12` URLs in `--` provenance comments
@@ -71,7 +77,7 @@ spec/
 ├── <area>.yaml | url_grammar.md   # 17 per-area behavior models (the "why")
 └── conformance/
     ├── INDEX.md               # area <-> id band <-> fixture cross-reference
-    ├── cases/NNNN_<slug>.yaml # 657 conformance cases (the "what", machine-checkable)
+    ├── cases/NNNN_<slug>.yaml # 668 conformance cases (the "what", machine-checkable)
     ├── fixtures.sql           # the authoritative merged DDL+seed set
     ├── fixtures_local.sql     # human-owned harness supplement
     └── fixtures/              # per-area fragments + write-channel deltas (see its README)
@@ -85,22 +91,28 @@ There are two layers:
    `errors`, `headers`, `content_negotiation`, `openapi`, `config`,
    `observability`, `domain_representations`). These describe the grammar,
    defaults, and rules of an area in prose/structured form, each claim citing a
-   PostgREST source line, and each closing with an explicit gap list of
-   behaviors that were *not* modeled and why. They are the human-readable
-   rationale. All 17 declare the v16.0 pin, but the key spelling is not uniform
-   on disk: 10 use `version: v16.0`, 5 use `version: PostgREST v16.0`
-   (`errors`, `filters`, `observability`, `operators`, `ordering`),
-   `pagination.yaml` uses `postgrest_version: v16.0`, and `url_grammar.md`
-   states it in prose ("Version pinned: **PostgREST v16.0**"). Do not grep for
-   a single spelling.
+   PostgREST source line. They are the human-readable rationale. All 17 declare
+   the v16.0 pin, but the key spelling is not uniform on disk: 10 use
+   `version: v16.0`, 5 use `version: PostgREST v16.0` (`errors`, `filters`,
+   `observability`, `operators`, `ordering`), `pagination.yaml` uses
+   `postgrest_version: v16.0`, and `url_grammar.md` states it in prose
+   ("Version pinned: **PostgREST v16.0**"). Do not grep for a single spelling.
 
-   > The gap list is not uniform either. Most models close with a top-level
-   > `gaps:` key; **`errors.yaml` does not** — it records coverage under
-   > `coverage:` (grouped by rule, with `case_ids`) and its open items inline in
-   > the relevant section, plus a `harness_gate:` key naming the Bier-side
-   > wiring three of its cases need. Read the model, do not assume the schema.
+   > **Correction, counted on disk this pass: the gap list is not universal, and
+   > earlier revisions of this file overstated it twice.** This file used to say
+   > every model closes "with an explicit gap list", then narrowed the exception
+   > to `errors.yaml` alone. Both were wrong. **Four** of the 17 models carry no
+   > `gaps:` key anywhere: `errors.yaml` (which records coverage under
+   > `coverage:`, its open items inline, and a `harness_gate:` key naming the
+   > Bier-side wiring three of its cases need) and — the part that was missed —
+   > `content_negotiation.yaml`, `operators.yaml` and `representations.yaml`,
+   > which record **no gap list at all, under any key**. `url_grammar.md` uses a
+   > `## Gaps` markdown section rather than a YAML key. Read the model; do not
+   > assume the shape. All three silent models are also among the areas with no
+   > recorded v16.0 adversarial verdict, which is worth knowing before reading
+   > their silence as "no gaps" (see *Review status*).
 
-2. **Conformance cases** — 657 YAML files under `conformance/cases/`. Each is one
+2. **Conformance cases** — 668 YAML files under `conformance/cases/`. Each is one
    concrete scenario: a request and the exact response (status, headers, body)
    PostgREST produces. These are the machine-checkable contract.
 
@@ -127,17 +139,19 @@ notes: "..."                   # rationale, references the upstream it-block
 source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/...#L<n>
 ```
 
-`id`, `feature`, `request`, `schema`, `expect`, `notes` and `source` are present
-on all 657 cases — verified mechanically this pass, not assumed.
-`preconditions` is present on 656 (case **1330** omits it);
+The schema's `required` list is six keys — `id`, `feature`, `request`, `schema`,
+`expect`, `source` — but in practice `notes` is universal too: all seven are
+present on all **668** cases, verified mechanically this pass by intersecting key
+sets rather than by trusting the schema.
+`preconditions` is present on 667 (case **1330** omits it);
 `config` is present on **115** (four of those — 1705, 1719, 1727, 1743 — are the
-empty `config: {}`). The count moved 114 → 115 this pass, entirely from the
-errors area's new case 1522.
+empty `config: {}`). The config count is **unchanged** this pass: the pagination
+re-sync added eleven cases and not one of them declares a `config:` block.
 
 Two request shapes are supported:
 
-- **HTTP** (the common case, 619 cases): `request.method` + `request.path`, with
-  optional `request.headers` / `request.body` / `request.body_raw` /
+- **HTTP** (the common case, **630** cases): `request.method` + `request.path`,
+  with optional `request.headers` / `request.body` / `request.body_raw` /
   `request.body_json`. The **auth** area may add `request.jwt` to have the runner
   mint and send a signed token (32 cases do; case 11809 instead spells out a
   literal `Authorization` header, because it needs a token signed with a secret
@@ -157,7 +171,10 @@ the schema for the authoritative field list and descriptions.
 
 > **`preconditions:` are declarative documentation only.** The frozen harness
 > parses the field but never executes it; nothing in a case may depend on a
-> precondition having run.
+> precondition having run. `spec/pagination.yaml` records the sharpest instance:
+> cases 1272/1274/1275 carry `preconditions: ["ANALYZE …"]` for planner-estimate
+> expectations and pass only because `mix bier.fixtures.load` happens to run a
+> database-wide `ANALYZE`.
 
 ## Fixtures
 
@@ -172,24 +189,33 @@ request header, so the label must name a schema the conformance server exposes
 see below). The harness sets the header with `Map.put_new`, so a case that spells
 out its own `Accept-Profile` wins over the label.
 
-> **Correction, counted on disk this pass.** **Fifteen** cases spell out a
+> **Counted on disk this pass, unchanged.** **Fifteen** cases spell out a
 > profile header of their own: ten of the fourteen `multi` cases (**1009–1014,
 > 1017, 1018, 1023, 1024**) and five `headers` cases (**1558–1560, 1574, 1583**).
 > But only an explicit **`Accept-Profile`** suppresses the injection —
 > `Content-Profile` does not — so **six** `multi` cases actually receive
 > `Accept-Profile: multi`: **1005–1008** (which set no profile header at all) and
-> **1011**/**1012** (which set only `Content-Profile`). Earlier revisions of this
-> file said four; the two extra were missed by crediting `Content-Profile` with
-> a suppression it does not perform.
+> **1011**/**1012** (which set only `Content-Profile`).
 >
 > **And `multi` is not resolved by the harness at all.** It is neither a schema
 > in `bier_test` nor a `db_schema_aliases` key; it resolves only because
 > *implementation* code carries a hard-coded allowlist of conformance labels
 > (`@profile_aliases ~w(headers multi)`,
-> `lib/bier/plugs/action_controller.ex:479`). Machine verification flagged
-> **1005, 1008 and 1011** — the three of the six whose expected status is 2xx —
-> as targeting unresolvable relations for exactly this reason. See
-> `COVERAGE.md` → *Open verification findings*.
+> `lib/bier/plugs/action_controller.ex:479`) — re-verified on disk this pass.
+> Three of the six (**1005**, **1008**, **1011**) expect a 2xx and therefore
+> depend on that allowlist. See `COVERAGE.md` → *Open verification findings*.
+> Note this pass's machine check did **not** re-flag them, because its
+> label-resolution step maps `multi` to the `v1`/`v2` pair itself; that is a
+> change in the checking script, not a fix to the tree.
+
+The fixture set also carries one **renamed** relation worth knowing about, because
+four cases now point at a path upstream does not use: upstream's `menagerie` is
+the pagination fixture's single-column *empty* table, but `openapi.sql`
+contributes a 7-column type-mapping table of the same name. The consolidated
+fixture keeps openapi's as `test.menagerie` and renames the empty one to
+`test.menagerie_empty`; the pagination re-sync retargeted cases **1258, 1264,
+1266 and 1268** onto `/menagerie_empty`, since emptiness is the whole point of
+those four assertions.
 
 Ownership rules for everything under `conformance/fixtures/` — who may write
 which file, and why `<area>.delta.sql` is the only write channel — are in
@@ -198,13 +224,10 @@ which file, and why `<area>.delta.sql` is the only write channel — are in
 are currently **comment-only** — each holds a single
 `-- Folded into ../fixtures.sql on <date> (…); empty until the next delta.`
 provenance line and no DDL, i.e. empty as a write channel. Four carry the
-2026-08-08 date; two carry **2026-08-09**: `url_grammar.delta.sql` (case 1035's
-`test."Server Today"` + its five upstream seed rows) and the new
-`errors.delta.sql` (cases 1523/1524's `test.infinite_inserts` — table, same-named
-trigger function and `do_infinite_inserts` trigger — plus the self-referential
-`test.infinite_recursion` view). Those are the only fixture objects added by the
-last four area re-syncs: filters, ordering, url_grammar and errors together
-produced 29 cases and three new relations.
+2026-08-08 date; two carry 2026-08-09 (`url_grammar.delta.sql` and
+`errors.delta.sql`). **The pagination re-sync added no seventh channel**: its
+eleven new cases needed no fixture object at all, and `pagination.delta.sql` does
+not exist.
 
 See [`conformance/INDEX.md`](conformance/INDEX.md) for the full
 area ↔ id-band ↔ fixture ↔ label map.
@@ -218,6 +241,9 @@ per-case config variants), and `Bier.HttpCase`/`Bier.CliCase` replay the request
 and assert the response matches `expect`. The Tester owns `case.schema.json` and
 the CI lint gate. The area models guide implementation; the cases are the
 pass/fail contract.
+
+> `CLAUDE.md` still says "532 cases". That is stale relative to this tree, which
+> holds **668**.
 
 Everything under `spec/` and `test/` is **frozen ground truth** for
 implementation work: fix `lib/` to match the cases, never edit the cases to
@@ -241,13 +267,13 @@ print("OK" if not bad else f"{bad} errors")
 PY
 ```
 
-All **657** cases currently parse and validate, with **no duplicate ids** (and
+All **668** cases currently parse and validate, with **no duplicate ids** (and
 every `NNNN_` filename prefix equals the in-file `id:`). Remember the caveat
 above: a clean run proves shape, not pin — the `source` pattern accepts any tag.
 The validator was proved live, not vacuous, by negative controls on a mutated
-copy of a pristine case (dropped `id`, `status: 99`, unknown key, missing `#L`
-anchor all caught); the one control it **failed** is the stale-pin rewrite, which
-is why the URL sweep above exists.
+copy of a pristine case (unknown key, dropped required key, wrong `id` type, and
+a malformed `source` were all caught); the one control it **fails** is the
+stale-pin rewrite, which is why the URL sweep above exists.
 
 ## Review status
 
@@ -257,26 +283,32 @@ line and confirming it still asserts what the case claims — is summarized
 per area in [`COVERAGE.md`](COVERAGE.md), together with the open gaps and the
 machine-verification results for this pass.
 
-**Eight** areas carry a recorded v16.0 adversarial verdict so far. Seven —
-**auth**, **headers**, **config**, **select**, **filters**, **ordering** and
-**url_grammar** — are ⚠️ *revise* with **zero citation defects** (every finding
-is a missing-coverage gap, itemized in `COVERAGE.md` → *Known gaps*). The eighth,
-**errors**, is the tree's first ✅ *pass*: three findings, all explicitly marked
-MINOR / non-blocking, and again zero citation defects. The other **9** areas have
-not been re-audited at this pin; run `bier-spec-audit` over them before treating
-their citations as verified.
+**Nine** areas carry a recorded v16.0 adversarial verdict so far. Eight —
+**auth**, **headers**, **config**, **select**, **filters**, **ordering**,
+**url_grammar** and now **pagination** — are ⚠️ *revise* with **zero citation
+defects** (every finding is a missing-coverage or mis-modelled-rule gap, itemized
+in `COVERAGE.md` → *Known gaps*). The ninth, **errors**, remains the tree's only
+✅ *pass*. The other **8** areas have not been re-audited at this pin; run
+`bier-spec-audit` over them before treating their citations as verified.
 
-Note what "zero citation defects" does *not* mean: **36** cases anchor their
+> **The pagination verdict is the one to read as a warning about the other 8.**
+> Its findings were not merely "a case is missing": one modelled *rule* was
+> **wrong** — the Range header was documented as *overriding* limit/offset, when
+> `getRanges` **intersects** them — and the single upstream it-block on the
+> subject (`RangeSpec.hs#L194`, case 1261) is the one shape where the two rules
+> coincide, so no existing case could have caught it. A green suite is not
+> evidence that a model is right.
+
+Note what "zero citation defects" does *not* mean: **42** cases anchor their
 `source:` at implementation code under `src/library/PostgREST/…` rather than at
 an upstream `it`-block, so their expected bodies are derived rather than
-transcribed (re-counted at the 657-case state). The count moved 34 → 36 because
-the errors re-sync added two such cases — **1522** and **1526**, both anchored at
-`Response.hs`, both pinning properties of the **inline** 416 body that
-`errorResponseFor` never sees and that upstream therefore never asserts
-black-box. Two cases have been moved *off* implementation code so far —
-**1189** during the filters re-sync and **1016** during the url_grammar re-sync,
-the latter also retiring a false "no Feature spec line exists" claim in its
-`notes:`. The rest are behaviors upstream never asserts black-box, and each says
-so in its `notes:`. That two of the last four re-syncs each found one such case
-worth moving suggests the remaining 36 are worth re-reading rather than
-accepting.
+transcribed (re-counted at the 668-case state). The count moved 36 → 42 because
+the pagination re-sync added six such cases (**1283–1288**), each stating in its
+`notes:` that PostgREST's own suite never exercises the shape. Two cases have
+been moved *off* implementation code so far — **1189** during the filters
+re-sync and **1016** during the url_grammar re-sync. Separately, case **1279** is
+the tree's **first and only case anchored at the documentation** rather than at
+either the test suite or the source
+(`docs/references/api/pagination_count.rst#L52`, the open-ended `Range: 10-`
+paragraph). The rest are behaviors upstream never asserts black-box, and each
+says so in its `notes:`.

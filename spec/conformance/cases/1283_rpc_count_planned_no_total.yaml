@@ -1,0 +1,32 @@
+id: 1283
+feature: pagination/count/planned_on_rpc_yields_no_total
+request:
+  method: GET
+  path: /rpc/getitemrange?min=2&max=4&order=id&limit=1
+  headers:
+    Accept: application/json
+    Prefer: count=planned
+schema: pagination
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "0-0/*"
+  body_exact: [{"id":3}]
+notes: >
+  Prefer: count=planned has NO effect on an /rpc/ call: the total stays '*' and
+  the status stays 200 even though the returned window (1 row) is smaller than
+  the function's 2-row result. Derived from source (PostgREST's own suite never
+  sends count=planned to an /rpc/ path — see PAG-024 in spec/pagination.yaml):
+  Query.hs:54 builds the CallReadPlan query with `mempty` in the explain-query
+  position, so unlike the table/view branch at Query.hs:50 there is no EXPLAIN
+  result to substitute; `shouldCount PlannedCount` is False
+  (Preferences.hs:236), so the counting CTE is skipped and the SQL total is
+  `null::bigint` (SqlFragment.hs:489); and MainTx.hs:161's CallReadPlan clause
+  returns the result set without rewriting rsTableTotal, unlike the
+  WrappedReadPlan clause at MainTx.hs:127. With the total Nothing,
+  rangeStatus returns 200 unconditionally (RangeQuery.hs:105) and the total
+  string is '*' (RangeQuery.hs:119). Verified against a freshly loaded
+  bier_test: pagination.getitemrange(2,4) yields ids 3 and 4, so limit=1 with
+  order=id returns id 3 as window 0-0.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Query.hs#L54

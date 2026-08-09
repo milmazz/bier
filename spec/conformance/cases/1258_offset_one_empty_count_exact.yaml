@@ -2,7 +2,7 @@ id: 1258
 feature: pagination/limit_offset/offset_out_of_bounds_empty_table
 request:
   method: GET
-  path: /menagerie?offset=1
+  path: /menagerie_empty?offset=1
   headers:
     Accept: application/json
     Prefer: count=exact
@@ -18,5 +18,14 @@ expect:
     code: "PGRST103"
     details: "An offset of 1 was requested, but there are only 0 rows."
     hint: null
-notes: "Nonzero start with no items + count=exact -> 416, Content-Range '*/0', Content-Length 144. Mirrors RangeSpec.hs:280."
+notes: >
+  Nonzero start with no items + count=exact -> 416, Content-Range '*/0',
+  Content-Length 144. Mirrors RangeSpec.hs:280, which requests
+  '/menagerie?offset=1'. Upstream's `menagerie` here is the pagination
+  fixture's single-column EMPTY table; Bier's consolidated fixture had a name
+  collision with openapi.sql's 7-column type-mapping table of the same name and
+  resolved it by keeping openapi's table as `test.menagerie` and renaming the
+  empty one to `test.menagerie_empty` (fixtures.sql:75-79, :719-722). The
+  emptiness is the whole point of the case, so the path targets
+  `/menagerie_empty`.
 source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L280
