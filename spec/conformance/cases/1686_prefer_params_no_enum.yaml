@@ -1,0 +1,30 @@
+id: 1686
+feature: openapi/table/path-parameters
+request:
+  method: GET
+  path: /
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  body_jsonpath:
+    - { path: "$.parameters.preferParams", equals: { description: "Preference", in: "header", name: "Prefer", required: false, type: "string" } }
+    - { path: "$.parameters.preferParams.enum", absent: true }
+notes: >
+  The shared `preferParams` parameter definition carries NO `enum` key, unlike
+  its siblings preferReturn/preferCount/preferPost. makePreferParam maps each
+  requested Prefer family to its literal values and emits `enum_ .~ if null enu
+  then Nothing else ...` (OpenAPI.hs#L177); the `val` table has arms only for
+  "count", "return" and "resolution" and a catch-all `_ -> []`
+  (OpenAPI.hs#L181-185), and preferParams is built as `makePreferParam
+  ["params"]` (OpenAPI.hs#L228) — which falls through to the catch-all, so the
+  enum list is empty and the key is omitted rather than emitted as [].
+  Mirrors OpenApiSpec.hs#L1087-1092 ("does not include empty enum in the
+  preferParams parameter"), which reads parameters.preferParams.enum and
+  asserts Nothing. The remaining fields come from makePreferParam's fixed
+  shape: name "Prefer" (#L171), description "Preference" (#L172), required
+  False (#L173), in: header + type: string (#L175-176). This closes the
+  "preferParams empty-enum suppression ... covered indirectly" gap that
+  openapi.yaml carried.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L1087

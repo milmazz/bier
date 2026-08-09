@@ -4,7 +4,7 @@ request:
   method: HEAD
   path: /
   headers: { Accept: application/openapi+json }
-schema: openapi
+schema: test
 preconditions: []
 expect:
   status: 200

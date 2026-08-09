@@ -4,7 +4,7 @@ request:
   method: GET
   path: /
   headers: { Accept: application/json }
-schema: openapi
+schema: test
 preconditions: []
 expect:
   status: 200
@@ -14,5 +14,32 @@ expect:
     - { path: "$.paths['/child_entities'].post.responses['201'].description", equals: "Created" }
     - { path: "$.paths['/child_entities'].patch.responses['204'].description", equals: "No Content" }
     - { path: "$.paths['/child_entities'].delete.responses['204'].description", equals: "No Content" }
-notes: "Per-method response status descriptions for a writable table. Mirrors OpenApiSpec.hs:74-121 and OpenAPI.hs:321-337"
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L117
+notes: >
+  Per-method response status descriptions for a writable table, all five
+  produced by makePathItem.
+  RE-CITED this pass: the five assertions do NOT share one source, and the
+  previous single anchor (OpenApiSpec.hs#L117) over-claimed.
+  * POST 201 "Created", PATCH 204 "No Content", DELETE 204 "No Content" ARE
+    asserted upstream, inside the "includes definitions to tables"/child-entities
+    block: `postResponse shouldBe Just "Created"`
+    (https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/OpenApi/OpenApiSpec.hs#L117),
+    `patchResponse shouldBe Just "No Content"` (#L119) and
+    `deleteResponse shouldBe Just "No Content"` (#L121), reading the lenses
+    bound at #L74-L76.
+  * GET 200 "OK" and GET 206 "Partial Content" are asserted by NO upstream
+    Feature test. Grepping test/spec/Feature/OpenApi/*.hs for "Partial Content"
+    or `key "206"` returns nothing, and the only `key "200"` in the file
+    (OpenApiSpec.hs#L130) reads that response's `schema`, never its
+    `description` — that is case 1663's assertion, not this one. Both values
+    are therefore cited to the generator that emits them:
+    `& at 206 ?~ "Partial Content"`
+    (https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response/OpenAPI.hs#L321)
+    and `& at 200 ?~ Inline ((mempty :: Response) & description .~ "OK" ...)`
+    (#L322-L323). PostgREST source is ground truth in its own right, so the
+    values stay cased; only the citation changes.
+  The same function emits the writable-table arms this case reads:
+  `at 201 ?~ "Created"` (OpenAPI.hs#L331), `at 204 ?~ "No Content"` for PATCH
+  (#L334) and for DELETE (#L337), and the post/patch/delete path items exist
+  only because `tableInsertable || tableUpdatable || tableDeletable` holds for
+  test.child_entities (OpenAPI.hs#L309).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response/OpenAPI.hs#L321
