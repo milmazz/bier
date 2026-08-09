@@ -34,12 +34,24 @@ area: errors
 changes_since_v14_12:
   - change: "NEW: `client-error-verbosity` config selects the error envelope shape (verbose | minimal)."
     effect: "With `minimal`, the body carries ONLY {code, message}; details/hint keys are omitted entirely (not nulled)."
+    note: "v14.12 has no such key: `grep -r client-error-verbosity` over the v14.12 src/ and docs/ trees returns nothing."
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L75
   - change: "The Proxy-Status header is now emitted by errorResponseFor for every error, instead of by a per-error-class `headers` clause."
-    effect: "No observable change — v14.12 already covered all five error classes; only the source location moved."
+    effect: "No observable change on the wire."
+    why: >
+      In v14.12 the header came from the `headers` method of the `PgrstError Error`
+      instance, which prepended it for all five Error constructors; the sub-type
+      instances (ApiRequestError, SchemaCacheError, ...) did not add it. Both
+      v14.12 call sites of errorResponseFor (App.hs) passed a whole `Error`, so
+      every response already carried it. v16.0 moves the header into
+      errorResponseFor itself, ahead of `headers err`, keeping the same position
+      (Content-Type, Content-Length, Proxy-Status, per-error headers).
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L86
+    single_call_site_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L154
   - change: "PGRST000 message changed from 'Database connection error. Retrying the connection.' to 'Database connection error.'"
+    note: "Landed in the 14.13 patch release, not in 16.0 — but it is a change relative to the v14.12 pin. The retry is still logged separately."
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L484
+    changelog_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/CHANGELOG.md#L116
   - change: "Hasql pipeline errors (`SessionUsageError (PipelineError ...)`) are now mapped alongside query errors."
     effect: "Same statuses: a pipeline ClientError is 503, a pipeline ResultError goes through the same SQLSTATE map."
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L540
@@ -47,6 +59,13 @@ changes_since_v14_12:
     note: "Owned by the content_negotiation area; recorded here only because it appears in the shared PGRSTxxx code table."
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/errors.rst#L202
   - change: "The SQLSTATE -> HTTP status table itself is byte-identical to v14.12; only line anchors moved."
+    note: >
+      Machine-verified this pass, not assumed: v14.12 Error.hs lines 603-653 and
+      v16.0 Error.hs lines 547-597 (the whole `case rError of` block, from
+      `mapSQLtoHTTP`'s scrutinee down to the final `-> HTTP.status500`) diff
+      clean. What moved is the function head: v14.12 matched the SQLSTATE
+      directly inside the last `pgErrorStatus` clause, v16.0 splits it out into
+      `mapSQLtoHTTP` so the new pipeline-error clause can share it.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L545
 
 # ---------------------------------------------------------------------------
@@ -54,14 +73,87 @@ changes_since_v14_12:
 # ---------------------------------------------------------------------------
 envelope:
   # Under the default `verbose` verbosity every PostgREST error body is a JSON
-  # object with EXACTLY these four keys, always present, emitted in this key
-  # order. `details` and `hint` are JSON null when absent (they are not
-  # omitted). errorPayload/toJsonPgrstError, Error.hs:65-78.
+  # object with EXACTLY these four keys, always present. `details` and `hint`
+  # are JSON null when absent (they are NOT omitted).
+  # errorPayload/toJsonPgrstError, Error.hs:65-78.
   keys: [code, message, details, hint]
+
+  # ---- CONSTRUCTION ORDER IS NOT EMISSION ORDER (corrected this pass) ----
+  # A previous revision of this file claimed the four keys are "emitted in this
+  # key order" (code, message, details, hint), citing Error.hs:69. That is
+  # wrong: Error.hs:69-74 is only the argument list handed to `JSON.object`,
+  # which builds an aeson `KeyMap`; the wire bytes are produced one line
+  # earlier in the pipeline expression, by `JSON.encode` at Error.hs:66.
+  #
+  # aeson's KeyMap has two backends selected by its `ordered-keymap` cabal
+  # flag, whose default is True (`Data.Map.Strict`). postgrest.cabal pins
+  # `aeson >= 2.0.3 && < 2.3` (postgrest.cabal:107) and neither postgrest.cabal
+  # nor cabal.project overrides that flag, so KeyMap is the ordered map and
+  # encoding walks its keys in ASCENDING order. The emitted body is therefore
+  # ALPHABETICAL, not construction-ordered.
+  construction_order: [code, message, details, hint]
+  construction_order_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L69
+  emission_order: [code, details, hint, message]
+  # `minimal` builds {code, message}, which is already alphabetical, so the two
+  # orders coincide there and only the verbose shape is observably reordered.
+  emission_order_minimal: [code, message]
+  encode_step_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L66
+  aeson_bound_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/postgrest.cabal#L107
+  # Byte-level evidence, not inference: PostgREST's own IO test asserts a whole
+  # error response body as a literal Python string — keys alphabetical, compact
+  # separators, no spaces:
+  #   '{"code":"57014","details":null,"hint":null,"message":"canceling statement due to statement timeout"}'
+  wire_bytes_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_settings.py#L299
+  # The same alphabetical shape is what the docs print for a PG error body.
+  docs_wire_body_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/errors.rst#L28
+  # CAVEAT — do not read the docs' *other* JSON blocks as wire order. They are
+  # hand-written illustrations and none of them matches the encoder:
+  #   - errors.rst:387-392, 412-417, 440-445 print {message, details, hint,
+  #     code} — an order of their own, matching neither the alphabetical wire
+  #     order nor the construction order recorded above;
+  #   - errors.rst:492-497 prints {code, message, details, hint} — exactly the
+  #     construction order at Error.hs:69-74, i.e. the pre-encoding argument
+  #     list, not the bytes aeson emits.
+  # Only the L27-32 block matches the encoder. The byte-exact test above
+  # (test_settings.py:299) is the primary source and is unaffected by any of
+  # these blocks; case 1525 pins the same bytes.
+  docs_nonfaithful_example_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/errors.rst#L387
+  docs_construction_order_example_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/errors.rst#L492
+  # WHY THIS MATTERS FOR BIER: Elixir's stdlib `JSON` encoder (Bier's default,
+  # see Bier.json_library/0) preserves insertion order for maps built as
+  # keyword-ish literals, so an implementer following the construction order
+  # above would emit
+  #   {"code":…,"message":…,"details":…,"hint":…}
+  # where PostgREST emits
+  #   {"code":…,"details":…,"hint":…,"message":…}
+  # — a different byte sequence with an identical Content-Length. No
+  # `body_exact` case can catch that: the harness decodes both sides before
+  # comparing (test/support/conformance_assertions.ex:49), and Content-Length
+  # is order-independent. Case 1525 pins the bytes with `body_raw`.
+  implementer_note: "Serialize the envelope with keys sorted ascending, not in construction order."
+
   content_type: "application/json; charset=utf-8"
-  # A Content-Length header is always set (response is fully buffered).
-  # errorResponseFor, Error.hs:85 (cLHeader) / :88 (assembly).
+  # Scope: this flag covers errors emitted through `errorResponseFor`, which
+  # buffers the whole body and sets Content-Length unconditionally — it has no
+  # HEAD flag to consult (Error.hs:85 builds cLHeader, :88 assembles the
+  # response).
   always_sets_content_length: true
+  # EXCEPTION — the inline 416 body is NOT emitted by errorResponseFor. It is
+  # built inside Response.hs's normal success paths, which take their
+  # Content-Length from that path's own cLHeader, and BOTH of those suppress
+  # the header on HEAD:
+  #   - relation reads: Response.hs:62,
+  #     `cLHeader = if headersOnly then mempty else [contentLengthHeader bod]`,
+  #     where `headersOnly` is `wrHdrsOnly` off WrappedReadPlan (bound at :59)
+  #     — the HEAD flag for a relation read;
+  #   - RPC: Response.hs:185, same shape keyed on
+  #     `isHeadMethod = invMethod == InvRead True` (:183).
+  # So on `HEAD` with an out-of-range Range, Content-Length is absent even
+  # though the 416 branch still builds the error payload (the 416 guard at
+  # Response.hs:76 precedes the headersOnly guard at :78).
+  inline_416_content_length_suppressed_on_head: true
+  inline_416_content_length_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L62
+  inline_416_content_length_rpc_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L185
   field_semantics:
     code:    "string. PostgREST PGRSTxxx code, or the raw 5-char PG SQLSTATE for DB errors, or the custom code from a RAISE 'PGRST' message."
     message: "string. Human-readable summary."
@@ -73,10 +165,19 @@ envelope:
 # client-error-verbosity  (NEW in v16.0)
 # ---------------------------------------------------------------------------
 client_error_verbosity:
-  # A single config key selects between the two envelope shapes. It is applied
-  # once, in App.hs, to every error the request pipeline produces, so it
-  # applies uniformly to ApiRequest, SchemaCache, JWT and PG errors (including
-  # RAISE 'PTnnn' and RAISE 'PGRST' errors).
+  # A single config key selects between the two envelope shapes. The main
+  # application point is App.hs:154, which wraps EVERY error the request
+  # pipeline returns (`either (Error.errorResponseFor configClientErrorVerbosity)
+  # identity`), so it applies uniformly to ApiRequest, SchemaCache, JWT and PG
+  # errors (including RAISE 'PTnnn' and RAISE 'PGRST' errors).
+  #
+  # CORRECTION (this pass): it is NOT applied only there. `Response.hs` builds
+  # the 416 InvalidRange/OutOfBounds body inline — outside errorResponseFor —
+  # and threads the same `configClientErrorVerbosity` through it, at
+  # Response.hs:76 (relation read) and Response.hs:180 (RPC read). So a 416
+  # OutOfBounds body is also reduced to {code, message} under `minimal`
+  # (case 1522), even though that response never goes through
+  # `Error.errorResponseFor`.
   config_key: "client-error-verbosity"
   env: "PGRST_CLIENT_ERROR_VERBOSITY"
   in_database: "pgrst.client_error_verbosity"
@@ -87,30 +188,53 @@ client_error_verbosity:
     verbose: "body is {code, message, details, hint} (all four keys always present)."
     minimal: "body is {code, message} only — the details and hint keys are OMITTED, not set to null."
   invalid_value: "Any other value fails config parsing with 'Invalid client-error-verbosity. Check your configuration.'"
+  invalid_value_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L341
   unaffected:
     # Verbosity changes the BODY only. Status, Content-Type, Content-Length
     # (recomputed over the shorter body) and Proxy-Status are unchanged; the
     # Proxy-Status value is built from `code err` independently of verbosity.
     - "HTTP status"
+    # ...on the responses that have one. The inline 416 has no Proxy-Status at
+    # all, under either verbosity — see proxy_status_header.exception.
     - "Proxy-Status header"
     - "Content-Type header"
     - "server-side logs (always verbose)"
-  applied_at_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L154
+  # Every place the configured verbosity is threaded into a body:
+  applied_at:
+    - what: "every error response (errorResponseFor)"
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L154
+    - what: "the 416 OutOfBounds body of a relation read, built inline in Response.hs"
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L76
+    - what: "the 416 OutOfBounds body of an RPC read, built inline in Response.hs"
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L180
+  # Logs bypass the config: the Logger hard-codes Verbose.
+  logs_always_verbose:
+    - source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Logger.hs#L157
+    - source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Logger.hs#L249
   parse_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L335
+  dump_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L165
   docs_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/configuration.rst#L240
+  docs_behavior_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/errors.rst#L482
   source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L75
 
 # ---------------------------------------------------------------------------
 # Proxy-Status header
 # ---------------------------------------------------------------------------
 proxy_status_header:
-  # Every PostgREST-originated error response carries a Proxy-Status header with
-  # the error code. Value format: "PostgREST; error=<code>".
-  # In v16.0 the header is built and prepended inside `errorResponseFor`
-  # (Error.hs:86 pSHeader, :88 assembly), for every error without exception.
-  # (In v14.12 the same header was added by five per-error-class clauses of the
+  # SCOPE (corrected this pass): every error response BUILT BY `errorResponseFor`
+  # carries a Proxy-Status header with the error code. Value format:
+  # "PostgREST; error=<code>". In v16.0 the header is built and prepended inside
+  # `errorResponseFor` itself (Error.hs:86 pSHeader, :88 assembly), so within
+  # that function it is unconditional — no per-error-class clause can suppress
+  # it. (In v14.12 the same header was added by five clauses of the
   # `PgrstError Error` headers method; the v16.0 refactor makes it
   # unconditional but does not change the wire behavior.)
+  #
+  # A previous revision of this file said "every PostgREST-originated error
+  # response ... for every error without exception". That is false, and it
+  # contradicted this model's own `client_error_verbosity.applied_at` list.
+  # See `exception` below.
+  emitted_by: "PostgREST.Error.errorResponseFor"
   name: "Proxy-Status"
   value_format: "PostgREST; error=<code>"
   header_order: "Content-Type, Content-Length, Proxy-Status, then the per-error headers (e.g. WWW-Authenticate, or RAISE 'PGRST' custom headers)."
@@ -121,6 +245,24 @@ proxy_status_header:
     - { code: "123",      value: "PostgREST; error=123" }   # custom RAISE 'PGRST' code
   source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L86
   attached_at_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L88
+  # ---- The one response that carries an error BODY but no Proxy-Status ----
+  exception:
+    what: "416 InvalidRange/OutOfBounds (relation read and RPC read)"
+    why: >
+      This response never goes through `errorResponseFor`. `Response.hs` builds
+      it as an ordinary read response and only swaps the BODY for
+      `Error.errorPayload …` when the computed status is 416 (Response.hs:76 for
+      a relation read, :180 for an RPC read). Its header list is assembled
+      independently and contains only Content-Range and Content-Location, then
+      Content-Length, the negotiated Content-Type and Preference-Applied
+      (Response.hs:65-75; the RPC variant at :186 and :192 is Content-Range +
+      Preference-Applied + Content-Length + Content-Type). Nothing in either
+      list is a Proxy-Status header, so a 416 carries a four-key (or, under
+      `minimal`, two-key) error envelope with NO Proxy-Status.
+    header_list_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L65
+    rpc_header_list_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L186
+    body_swap_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L76
+    case_ids: [1522, 1526]
 
 # ---------------------------------------------------------------------------
 # SQLSTATE -> HTTP status map (pgErrorStatus -> mapSQLtoHTTP)
@@ -274,7 +416,14 @@ pgrst_custom_error:
           details: "DETAIL is missing in the RAISE statement",
           hint: "DETAIL must be a JSON object with obligatory keys: 'status', 'headers' and optional key: 'status_text'." }
     message: 'Could not parse JSON in the "RAISE SQLSTATE ''PGRST''" error'
+    # The three `details` strings come from pgrstParseErrorDetails (L446-L450);
+    # the two `hint` strings from pgrstParseErrorHint (L452-L455); the single
+    # `message` from the ApiRequestError message instance (L191); the 500 from
+    # the ApiRequestError status instance (L121); the code from L165.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L446
+    hint_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L452
+    message_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L191
+    status_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L121
 
 # ---------------------------------------------------------------------------
 # PGRSTxxx code namespace (selected, errors-area relevant)
@@ -283,14 +432,90 @@ pgrst_custom_error:
 # Error.hs:136-140
 pgrst_codes:
   source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L136
+  # `source` anchors the code string; `status_source` anchors the HTTP status —
+  # the two live in different instances (ErrorBody vs ErrorHeaders), so one line
+  # never supports both halves of a row.
   notable:
     - { code: "PGRST121", meaning: "Could not parse JSON in RAISE 'PGRST' error", http: 500,
-        source: "https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L165" }
+        source: "https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L165",
+        status_source: "https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L121" }
     - { code: "PGRST125", meaning: "Invalid path specified in request URL (InvalidResourcePath)", http: 404,
-        source: "https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L169" }
+        source: "https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L169",
+        status_source: "https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L123" }
     - { code: "PGRST205", meaning: "Could not find the table in the schema cache (TableNotFound)", http: 404,
-        source: "https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L242" }
+        source: "https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L242",
+        status_source: "https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L232" }
     - { code: "PGRST301", meaning: "JWT decode error", http: 401,
-        source: "https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L651" }
+        source: "https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L651",
+        status_source: "https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L639" }
   # Error data constructors moved to their own module in v16.0.
   types_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error/Types.hs#L29
+
+# ---------------------------------------------------------------------------
+# PGRST205 "did you mean" hint (fuzzy table-name suggestion)
+# ---------------------------------------------------------------------------
+table_not_found_hint:
+  # TableNotFound's `hint` is a fuzzy suggestion drawn from the schema's table
+  # index, NOT a fixed string. It is present only when some table in the same
+  # schema scores at least 0.75 against the requested name; otherwise `hint`
+  # is null. `details` is always null for TableNotFound.
+  when: "a relation is absent from the schema cache (PGRST205, HTTP 404)"
+  hint_format: "Perhaps you meant the table '<schema>.<best_match>'"
+  min_similarity: 0.75
+  absent_when: "no table in the schema scores >= 0.75 -> hint is null"
+  index: "SchemaCache.dbTablesFuzzyIndex, one FuzzySet per exposed schema"
+  hint_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L286
+  builder_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L386
+  min_score_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Error.hs#L400
+  test_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L80
+  # DOCS BUG (v16.0): the client-error-verbosity example in the docs shows the
+  # suggestion in `details` ("details": "Perhaps you meant the table
+  # 'public.items'"). The source puts it in `hint` and the test suite asserts
+  # `hint`; the docs example also contradicts itself by showing "hint": null
+  # next to a populated details. Tests + source win.
+  docs_contradiction_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/errors.rst#L495
+
+# ---------------------------------------------------------------------------
+# Conformance case index (this area's band is 1500..1549)
+# ---------------------------------------------------------------------------
+coverage:
+  sqlstate_map:
+    - { rule: "23505 unique_violation -> 409",            case_ids: [1500] }
+    - { rule: "23503 foreign_key_violation -> 409",       case_ids: [1501] }
+    - { rule: "P0001 plpgsql RAISE -> 400",               case_ids: [1502] }
+    - { rule: "P0* (P0004 assert_failure) -> 500",        case_ids: [1503] }
+    - { rule: "21000 cardinality_violation -> 500",       case_ids: [1504] }
+    - { rule: "54* program limit (54001) -> 500",         case_ids: [1523] }
+    - { rule: "42P17 infinite recursion -> 500",          case_ids: [1524] }
+    - { rule: "PTnnn -> HTTP nnn / non-numeric -> 500",   case_ids: [1505, 1507] }
+    - { rule: "PGRST full response control",              case_ids: [1508, 1509, 1510, 1511] }
+    - { rule: "PGRST parse failures -> PGRST121/500",     case_ids: [1512, 1513, 1514] }
+  envelope_and_headers:
+    - { rule: "PGRSTxxx envelope + Proxy-Status",         case_ids: [1515, 1516] }
+    - { rule: "Proxy-Status carries a PT/custom code",    case_ids: [1506, 1519] }
+    - { rule: "PGRST205 fuzzy hint (>=0.75 / below)",     case_ids: [1520, 1521] }
+    - { rule: "envelope key EMISSION order is alphabetical (byte-exact)", case_ids: [1525] }
+    - { rule: "inline 416 error body carries NO Proxy-Status",            case_ids: [1526] }
+  client_error_verbosity:
+    - { rule: "minimal on a PGRSTxxx error",              case_ids: [1517] }
+    - { rule: "minimal on a PG (RAISE PT) error",         case_ids: [1518] }
+    - { rule: "minimal on the inline 416 body",           case_ids: [1522] }
+
+# ---------------------------------------------------------------------------
+# Harness gate (NOT a spec defect — recorded so it is not mistaken for one)
+# ---------------------------------------------------------------------------
+# 1517/1518/1522 are the only errors-area cases carrying a per-case `config:`
+# block (client-error-verbosity: minimal). The frozen harness routes a case to a
+# dedicated instance ONLY when its id appears in the hard-coded
+# `@variant_case_ids` list (test/support/conformance_server.ex:58-66); none of
+# the three is in that list, so `url_for/1` falls through to the shared bulk
+# instance, which runs the default `verbose`. The config block is therefore
+# silently ignored and the three cases cannot pass as authored. Flipping a
+# shared instance to `minimal` is not an option either: ~500 other cases assert
+# four-key bodies. The fix is a one-line harness change that only the human
+# harness gate may make; spec/ is correct as written.
+harness_gate:
+  cases: [1517, 1518, 1522]
+  needs: "add 1517, 1518, 1522 to @variant_case_ids in test/support/conformance_server.ex"
+  harness_ref: "test/support/conformance_server.ex#L58"
+  note: "Bier-side harness wiring; no PostgREST source applies, so no `source:` URL is given."

@@ -1,0 +1,1 @@
+-- Folded into ../fixtures.sql on 2026-08-09 (test.infinite_inserts table + its same-named trigger function and do_infinite_inserts trigger, case 1523; test.infinite_recursion self-referential view, case 1524); empty until the next delta.

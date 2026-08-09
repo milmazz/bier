@@ -1,0 +1,35 @@
+id: 1520
+feature: errors/pgrst_code/table_not_found_hint
+request:
+  method: GET
+  path: /projectx
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 404
+  headers:
+    Proxy-Status: "PostgREST; error=PGRST205"
+    Content-Length: "160"
+  body_exact:
+    code: "PGRST205"
+    message: "Could not find the table 'test.projectx' in the schema cache"
+    details: null
+    hint: "Perhaps you meant the table 'test.projects'"
+notes: >
+  PGRST205's `hint` is a fuzzy suggestion, not a constant: TableNotFound's hint
+  is `tableNotFoundHint` (Error.hs:286 -> :386), which looks the requested name
+  up in the schema's FuzzySet (SchemaCache.dbTablesFuzzyIndex) and returns
+  "Perhaps you meant the table '<schema>.<match>'" only when the best match
+  scores at least 0.75 (getFuzzyHint, Error.hs:400). `details` stays null.
+  Mirrors ErrorSpec.hs "show hint when similarity score is at least 75%" (L80),
+  whose first request is GET /projectx (L81) and which asserts this exact body
+  plus Content-Length 160 (L83-L86).
+  Fixture derivation: upstream exposes the same `test` schema, so the expected
+  body is byte-identical to upstream's and the asserted Content-Length 160 was
+  re-counted against it. `test.projects` exists in a freshly loaded bier_test
+  and `test.projectx` does not; of the 73 relations in that schema the only one
+  within the 0.75 threshold of "projectx" is "projects" (edit distance 1, i.e.
+  0.875) — the next closest names ("project_invoices", "big_projects",
+  "get_projects_above_view", "getallprojects_view") are far below it.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ErrorSpec.hs#L80
