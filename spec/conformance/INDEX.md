@@ -1,9 +1,9 @@
 # Conformance case index
 
-Cross-reference of the **740** conformance cases under `spec/conformance/cases/`.
-Pinned target: **PostgREST v16.0** (all 740 `source:` URLs, re-derived on disk
+Cross-reference of the **746** conformance cases under `spec/conformance/cases/`.
+Pinned target: **PostgREST v16.0** (all 746 `source:` URLs, re-derived on disk
 this pass by parsing each case's `source:` value and extracting its tag —
-`{'v16.0': 740}`, no other value).
+`{'v16.0': 746}`, no other value).
 
 Each case is one YAML file `NNNN_<slug>.yaml` validated against
 [`../case.schema.json`](../case.schema.json). Cases are grouped into 17 feature
@@ -76,6 +76,17 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 > [`../COVERAGE.md`](../COVERAGE.md) → follow-up 26. In the meantime: **an id
 > cited in an older document may not name the case that document meant.**
 >
+> **The openapi pass supplies a THIRD convention, and it is the only one that
+> costs nothing.** Case **1689** was authored, found red for a harness reason
+> (its `config:` block is inert outside `@variant_case_ids`), and **withdrawn
+> before it was ever committed** — so `1689` never appears in git history, the
+> band is a clean contiguous **1650–1688**, and 1689 is simply the next free id.
+> The behavior is not lost: `openapi.yaml` carries it as an entry with
+> `cases: []` that spells the case out verbatim for restoration. **Three passes,
+> three conventions — reuse (1623), permanent vacancy (11406), never-consumed
+> (1689) — and follow-up 26 now has a third data point that arguably settles it:
+> the cheapest place to withdraw a case is before it has an id on disk.**
+>
 > **The internal gap at 11406 is a different kind of hole from every other gap on
 > this page and must not be closed up.** Representations' 1328–1329 gap is
 > sub-feature spacing. **11406 marks a case that was written and then
@@ -118,12 +129,12 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | errors | 27 | 1500–1526 | `fixtures/errors.sql` + `fixtures/errors.delta.sql` (cases 1523/1524's `test.infinite_inserts` + `test.infinite_recursion`, folded) | `test` (27) |
 | headers | 35 | 1550–1584 | `fixtures/headers.sql` + `fixtures/headers.delta.sql` (`test.get_vary_header_override()`, folded) | `headers` (34), `test` (1) |
 | **content_negotiation** | **52** | **1600–1649, 12400–12401** | `fixtures/content_negotiation.sql` + `fixtures/content_negotiation.delta.sql` (**folded twice** — the vendored media-type domains + handlers on 2026-08-08, then on **2026-08-09** the octet-stream **correction**: the new `public."application/octet-stream"` domain plus `test.unnamed_bytea_param` **re-declared in place** to return that domain instead of plain `bytea`, without which case 1622 is unreachable) | `test` (52) |
-| openapi | 33 | 1650–1682 | `fixtures/openapi.sql` | `openapi` (31), `openapi_no_schema_comment` (1), `openapi_variadic` (1) |
+| **openapi** | **39** | **1650–1688** | `fixtures/openapi.sql` (**no delta** — the v16.0 re-sync added six cases, rewrote the other 33 and touched **no** fixture object; `fixtures.sql` does not appear in `git status`) | `test` (38), `openapi_no_comment` (1 — case 1654) |
 | config | 45 | 1700–1744 | `fixtures/config.sql` | `config` (45) |
 | observability | 22 | 1750–1771 | `fixtures/observability.sql` (**no delta** — the v16.0 re-sync added two cases and zero fixture objects; its `.sql` change is a comment-only provenance re-pin) | `observability` (22) |
 | domain_representations | 21 | 1800–1820 | `fixtures/domain_representations.sql` | `domain_representations` (21) |
 
-Total: **740 cases**, **17 areas**, **17 fixture fragments**
+Total: **746 cases**, **17 areas**, **17 fixture fragments**
 (plus **7** `*.delta.sql` write channels, all currently **comment-only** —
 re-verified mechanically this pass: stripping comment and blank lines leaves zero
 lines in every one of the seven. Each carries a single
@@ -200,19 +211,41 @@ grep -h '^feature:' spec/conformance/cases/1800_format_single_domain_column.yaml
 
 ## Label caveats
 
-- **None of `openapi`, `openapi_no_schema_comment`, `openapi_variadic` is a
-  schema on disk.** `mix bier.fixtures.load` creates none of them (only
-  `openapi_no_comment` exists, as the 1654 variant instance's default); the
-  openapi objects live in `test`. The labels are inert today because the root
-  path is dispatched before profile resolution and the document is built from
-  `hd(db_schemas)`. Re-surfaced independently by this pass's machine
-  verification, which listed `openapi -> openapi` among its unknown label
-  schemas and confirmed the absence is **intentional**:
-  `lib/mix/tasks/bier.fixtures.load.ex:28-34` states that "function-heavy areas
-  (rpc, openapi, headers) are intentionally NOT mirrored". Flagged as an open
-  finding in [`../COVERAGE.md`](../COVERAGE.md) → *Open verification findings*,
-  because the one openapi case that reaches relation dispatch (**1652**) can then
-  return 406 for two different reasons.
+- **RESOLVED this pass, and it was the openapi re-sync's largest single
+  correction.** The three labels `openapi`, `openapi_no_schema_comment` and
+  `openapi_variadic` named schemas that **do not exist on disk** —
+  `mix bier.fixtures.load` creates none of them, and every object the openapi
+  cases assert over lives in `test`. All 33 openapi cases that carried one have
+  been relabelled: **31** `openapi` → `test`, **1** `openapi_variadic` → `test`,
+  and case **1654** `openapi_no_schema_comment` → **`openapi_no_comment`**, which
+  *does* exist (`fixtures.sql#L247`, granted at `#L2002`) and is the only schema
+  its variant instance exposes. The band's label distribution is now
+  `test` (38) + `openapi_no_comment` (1).
+
+  > **Why this was not cosmetic.** The harness turns any label other than
+  > `nil`/`public`/`test` into an `Accept-Profile: <label>` request header
+  > (`test/support/http_case.ex#L60-71`), so those 33 cases shipped
+  > `Accept-Profile: openapi`. PostgREST generates the root document **for the
+  > requested profile** — upstream asserts exactly that, at
+  > `IgnorePrivOpenApiSpec.hs#L49-58` (tables) and `#L81-89` (functions) — so
+  > against a faithful implementation every path and definition assertion in the
+  > area would have been read out of an **empty** document. They passed only
+  > because Bier dispatches the root path before resolving the profile and builds
+  > from `hd(db_schemas)`. **A spec must not depend on that.** `test` is also the
+  > faithful label: upstream's `OpenApiSpec` runs under
+  > `configDbSchemas = ["test"]` (`SpecHelper.hs#L151`) and issues a bare
+  > `get "/"`, which is what the harness's suppression of the `test` label
+  > reproduces on the wire.
+  >
+  > A prior machine verification listed `openapi -> openapi` among its unknown
+  > label schemas, and the loader's own comment
+  > (`lib/mix/tasks/bier.fixtures.load.ex:28-34`) confirms the absence is
+  > **intentional**: "function-heavy areas (rpc, openapi, headers) are
+  > intentionally NOT mirrored". The finding stayed open across four passes
+  > because nothing failed. See [`../COVERAGE.md`](../COVERAGE.md) →
+  > *Open verification findings* → item 2, which tracked the downstream symptom
+  > (case **1652** able to return 406 for two different reasons) and is now
+  > closable on the label half.
 - **`multi`** is not a schema either — it stands for the `v1`/`v2` profile pair
   routed by `db_profile_default` / `db_profile_schemas`
   (`test/support/conformance_server.ex:184-185`). All the relations these cases
@@ -231,7 +264,7 @@ grep -h '^feature:' spec/conformance/cases/1800_format_single_domain_column.yaml
   > spelling out **`Accept-Profile`** itself — spelling out `Content-Profile` is
   > not enough. Of the fourteen `multi` cases, **1005, 1006, 1007, 1008, 1011 and
   > 1012** receive `Accept-Profile: multi` (re-derived mechanically at the
-  > 740-case state). Three of the six expect success (**1005**/**1008** → 200,
+  > 746-case state). Three of the six expect success (**1005**/**1008** → 200,
   > **1011** → 201) and so depend on the allowlist. Recorded in
   > [`../COVERAGE.md`](../COVERAGE.md) → *Open verification findings*: a genuine
   > finding, not a bookkeeping note, because 1008's own `notes:` claim "no
@@ -322,7 +355,7 @@ spread), which — unlike PGRST128 — really is asserted by no case and modelle
 no area file. It belongs to `select`; see
 [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → select*.
 
-> Re-checked at the 740-case state: `grep -rl PGRST128 spec/` matches
+> Re-checked at the 746-case state: `grep -rl PGRST128 spec/` matches
 > `rpc.yaml` (entry `rpc.prefer.max_affected.returns_single`),
 > `conformance/cases/1441_rpc_max_affected_returns_single.yaml`, this INDEX and
 > `COVERAGE.md`. `grep -rl PGRST127 spec/` still matches exactly two files —
@@ -414,12 +447,44 @@ sub-features present per area (second segment, as on disk):
 | errors | 1500–1526 | sqlstate (incl. the two 5xx paths 1523/1524), pgrst_code (incl. the PGRST205 fuzzy-hint pair 1520/1521), raise, headers (incl. the `Proxy-Status` custom-code case 1519), verbosity (incl. the inline-416 case 1522), envelope (1525, byte-exact key emission order), proxy_status (1526, absent on the inline 416) |
 | headers | 1550–1584 | prefer, profile, location, content-location, guc, vary |
 | **content_negotiation** | **1600–1649, 12400–12401** | json, csv, geojson, octet-stream (incl. the **negative** 1623 — a scalar RPC with no media-type domain is not negotiable as octet-stream — alongside the SETOF flavor 1624), singular, nulls-stripped (incl. the mutation-representation pair **12400**/**12401** and the explicit-`select=` singular 1649), plan, openapi, precedence, error (incl. the unparsable-media-type echo 1647), custom-media-handler, **case-insensitivity** (1648). The band is 1600–**1649**, not 1646: 1647/1648/1649 and the overflow pair 12400/12401 are on disk |
-| openapi | 1650–1682 | root, defaults, comments, table, types, rpc, mode, security |
+| **openapi** | **1650–1688** | root (10 — incl. the document's own `/` path item **1687** and the document-level `produces`/`consumes` list **1688**, both anchored at the generator because no upstream Feature it-block reads either), rpc (8 — incl. the all-OUT args schema that emits neither `properties` nor `required` **1683**, its INOUT-with-no-DEFAULT complement **1684**, and the IMMUTABLE half of the volatility switch **1685**), table (5 — incl. the shared `preferParams` definition and its **suppressed empty enum** **1686**), comments (5), types (4), mode (4), security (2), defaults (1). **No sub-feature exists for the `/rpc/*` per-operation `produces`/`responses` pair or for `$.parameters.on_conflict`**; see [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → openapi* |
 | config | 1700–1744 | dump-config, sources, aliases, validation, coercion, parsing, precedence, db-max-rows, db-tx-end, db-extra-search-path, app-settings, server-cors-allowed-origins, cli, client-error-verbosity, server-reuseport, url-use-legacy-target-names, admin-server-unix-socket |
 | observability | 1750–1771 | server-timing (incl. **1770**, the exact five-metric render), trace-header, log-level, server (**1771**, the `Server: postgrest/…` version header — the tree's only `Server:` assertion) |
 | domain_representations | 1800–1820 | read, write, filter, default |
 
 ### v16.0 additions worth knowing
+
+- **openapi** grew from **33 to 39** cases and is the tree's **sixteenth**
+  audited area — ⚠️ *revise*, **0 citation defects**, **two** missing-coverage
+  findings. **Six cases added (1683–1688), 33 rewritten, one authored then
+  WITHDRAWN, no fixture object, no delta channel.** Four things about this pass
+  are worth carrying forward:
+  - **Every one of the 33 rewritten cases changed its `schema:` label**, because
+    31 of them named a schema that does not exist. That is the largest
+    single-property correction any pass has made, and it is the first correction
+    to a case field that is neither `source:` nor an assertion. See **Label
+    caveats** above for the mechanism and why the cases passed anyway.
+  - **It is the first pass to WITHDRAW a case rather than delete or reuse it.**
+    Case **1689** (`openapi-server-proxy-uri` → `host`/`basePath`/`schemes`) was
+    authored, found to be red for a harness reason rather than a behavior reason,
+    and removed before commit — so **1689 was never on disk at HEAD and is free**.
+    The behavior survives as a modelled entry with `cases: []`
+    (`openapi/root/server-proxy-uri`) that spells out the case verbatim, so
+    restoring it is a copy once the harness's `@variant_case_ids` list gains an
+    id. **Three passes, three conventions for a dropped case**: mutations left
+    11406 permanently vacant, content_negotiation reused 1623, openapi freed 1689
+    without ever consuming it. See [`../COVERAGE.md`](../COVERAGE.md) →
+    follow-up 26.
+  - **It is the first pass to REMOVE non-empty `preconditions:`** — both of the
+    area's two, both of which were wrong. See the `preconditions:` note below.
+  - **It wrote the tree's second `fixture_notes:` key** (five entries), following
+    content_negotiation's precedent without a fixture defect to prompt it. Its
+    subject is declarations the cases read but never write: `test.jwt_test`'s
+    missing volatility keyword (which is why case **1685** uses
+    `test.three_defaults` and not upstream's routine), `test.root()`'s plain
+    `json` return, `test.variadic_param`'s `DEFAULT '{}'`, the argument modes of
+    `many_out_params` / `single_inout_param`, and `openapi_no_comment` having no
+    comment.
 
 - **content_negotiation** grew from **47 to 52** cases and is the tree's
   **fifteenth** audited area — ⚠️ *revise*, **0 citation defects**, **seven**
@@ -772,10 +837,10 @@ does not know.
 Any case may carry a `config:` block — **116** do (112 non-empty; 1705, 1719,
 1727 and 1743 carry an empty `config: {}`), spread over six areas: config 45,
 auth 33, observability 21, select 10, openapi 4, errors 3. **The count did not
-move for a FOURTH consecutive pass**: none of the operators re-sync's 37 new
+move for a FIFTH consecutive pass**: none of the operators re-sync's 37 new
 cases, the rpc re-sync's 3, the mutations re-sync's 17, the representations
-re-sync's 8 or the content_negotiation re-sync's 6 declares a `config:` block,
-because none of those areas is
+re-sync's 8, the content_negotiation re-sync's 6 or the openapi re-sync's 6
+declares a `config:` block, because none of those areas is
 config-gated — a useful contrast with `select`, whose ten config-carrying cases
 all need `db-aggregates-enabled` or `url-use-legacy-target-names` and none of
 which the harness honours.
@@ -799,8 +864,20 @@ case. On any other HTTP case the `config:` block is **inert** — it documents t
 upstream configuration the assertion depends on, but the case still runs against
 a shared instance. Mechanically, **60** HTTP cases carry a non-empty `config:`
 outside `@variant_case_ids` (re-derived on disk this pass against the harness's
-live 18-id list), now out of **702** HTTP cases; most simply restate what the
-shared instance already provides. **The mutations band adds a dependency of a
+live 18-id list), now out of **708** HTTP cases; most simply restate what the
+shared instance already provides.
+
+> **The openapi pass turned that inertness into a WITHDRAWN case, which is the
+> clearest demonstration of the gate this document has.** A case pinning
+> `openapi-server-proxy-uri` needs `config: {openapi-server-proxy-uri:
+> "https://postgrest.com"}` to be honoured; **1689** is not in the 18-id list, so
+> it would have fallen through `url_for/1` to the shared auth instance, read
+> `$.host == "127.0.0.1:<port>"` and failed for a reason unrelated to the
+> behavior. The pass authored it, saw the red, and **withdrew it rather than ship
+> a broken case or weaken the assertion** — recording in `openapi.yaml`'s `gaps:`
+> exactly what the harness owner must add and what to restore afterwards. **This
+> is the one deliverable of that pass a `spec/`-only edit could not complete**,
+> and it is the model for how a harness gate should be handed over. **The mutations band adds a dependency of a
 different kind**: it declares no `config:` at all, yet ten of its seventeen new
 cases rely on the shared instance's `db_tx_end: :rollback` to contain writes
 through un-isolated view mirrors — an *undeclared* dependency, which is worse
@@ -817,15 +894,28 @@ assertions are log-level-independent statuses, so they still hold — see
 
 `preconditions:` is parsed but **never executed** by the harness — treat it as
 declarative documentation, never as setup a case may depend on. It is present on
-**739** of the 740 cases (case **1330** is still the only omission, which the
-schema allows), and **44** of those carry a *non-empty* list — **25 of the 44 in
+**745** of the 746 cases (case **1330** is still the only omission, which the
+schema allows), and **42** of those carry a *non-empty* list — **25 of the 42 in
 the mutations area alone**, which makes it by far the heaviest user of a key that
-does nothing. Full non-empty distribution, re-derived at the 740-case state:
-mutations **25**, content_negotiation **11**, pagination **4**, openapi **2**,
-url_grammar **1**, representations **1**. All six new content_negotiation cases
-correctly carry `preconditions: []`, as all 17 mutations and all 8
-representations cases did before them — a convention three consecutive passes
-have now followed and nobody has written down.
+does nothing. Full non-empty distribution, re-derived at the 746-case state:
+mutations **25**, content_negotiation **11**, pagination **4**,
+url_grammar **1**, representations **1**. All six new openapi cases
+correctly carry `preconditions: []`, as all six content_negotiation, all 17
+mutations and all 8 representations cases did before them — a convention four
+consecutive passes have now followed and nobody has written down.
+
+> **The openapi pass is the first to REMOVE non-empty preconditions, and it
+> removed the only two that were demonstrably wrong.** The area carried 2; it now
+> carries **0**, which is the whole of the tree-wide 44 → 42. Both were also
+> incorrect had they ever run: case **1654**'s `COMMENT ON SCHEMA test IS NULL`
+> would have broken case **1656** (which asserts that very comment as the
+> document title), and case **1672**'s `CREATE FUNCTION` omitted the
+> `DEFAULT '{}'` that 1672's own `required: false` assertion depends on. **Two
+> inert-but-wrong statements survived an entire prior re-sync of this area
+> unnoticed** — which is the sharpest available argument that an unexecuted key
+> is worse than no key. Recorded in `openapi.yaml`'s `gaps:` as an
+> `operator_action:` entry and in [`../COVERAGE.md`](../COVERAGE.md) →
+> follow-up 25.
 
 **Two areas show the cost, and they show it differently.** In *pagination*,
 cases **1272, 1274 and 1275** declare `preconditions: ["ANALYZE …"]` for
@@ -845,17 +935,18 @@ deferral; `case.schema.json` itself has no `pending` field. (Earlier revisions o
 this file claimed 6 such cases, listing 1509, 1513 and 1514 as well — those three
 only *mention* `status_text` in `notes:` or in an expected `hint:` string and
 carry no `expect.status_text` key, so they run normally. Re-verified at the
-**740**-case state: still exactly three.)
+**746**-case state: still exactly three.)
 
 **13** cases use the HTTP `HEAD` method (1020, 1272, 1274, 1275, 1277, 1284,
 1425, 1681, 1756, 1760, 1761, 1762, 1771) and **every one expects a 2xx** —
-re-derived mechanically at the 740-case state. No case in the tree issues a HEAD
+re-derived mechanically at the 746-case state. No case in the tree issues a HEAD
 request that errors, which is the tree's only *request-shape* blind spot; see
 [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → errors*. **The count has now
-not moved in seven re-syncs while the tree grew by 64 cases**, and this pass is
-another clean miss: the content_negotiation band's whole subject is the response
-`Content-Type`, the one header a HEAD response still carries. Full method
-distribution at **740**: GET **504**, POST **107**, CLI **38**, PATCH **27**,
+not moved in eight re-syncs while the tree grew by 70 cases**, and this pass is
+another clean miss: all six new openapi cases are `GET /`, and the band already
+owns a HEAD case (**1681**, `HEAD /` asserting no `Content-Length`) that it left
+untouched. Full method
+distribution at **746**: GET **510**, POST **107**, CLI **38**, PATCH **27**,
 DELETE **21**, PUT **18**, HEAD **13**, OPTIONS **12**.
 
 ## Looking up a case

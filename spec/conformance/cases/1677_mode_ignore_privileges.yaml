@@ -4,7 +4,7 @@ request:
   method: GET
   path: /
   headers: { Accept: application/json }
-schema: openapi
+schema: test
 config:
   openapi-mode: ignore-privileges
 preconditions: []
