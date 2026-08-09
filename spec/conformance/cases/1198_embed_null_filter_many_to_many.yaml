@@ -1,0 +1,35 @@
+id: 1198
+feature: filters/embed/null_filtering
+request:
+  method: GET
+  path: /users?select=name,tasks()&tasks.id=eq.1&tasks=not.is.null
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "name": "Angela Martin" }
+    - { "name": "Dwight Schrute" }
+notes: >
+  Null filtering on a MANY-TO-MANY embed, resolved through the users_tasks
+  junction (composite PK (task_id, user_id) with FKs to both sides). A third
+  distinct upstream it-block, and a third render path: the embed is an
+  aggregated array built over a join table, and the null test is combined with
+  an ORDINARY embedded filter on the same embed (`tasks.id=eq.1`). The
+  embedded filter lives inside the embed's LEFT JOIN LATERAL, so it shrinks
+  the aggregate first; `tasks=not.is.null` then keeps only users whose
+  post-filter aggregate is non-null — i.e. the users who own task 1.
+
+  Mirrors RelatedQueriesSpec "related conditions through null operator on
+  embed" > "works on a many-to-many relationship" (not.is.null branch,
+  v16.0 L201-L208) verbatim: same request, same body. Verified against a
+  freshly loaded bier_test — test.users seeds (1,Angela Martin),
+  (2,Michael Scott), (3,Dwight Schrute) and test.users_tasks seeds
+  (user 1: tasks 1,2,3,4), (user 2: tasks 5,6,7), (user 3: tasks 1,5), so
+  users 1 and 3 are the only owners of task 1. The empty embed projection
+  `tasks()` keeps the related array out of the body; row order is the users
+  physical order.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L200

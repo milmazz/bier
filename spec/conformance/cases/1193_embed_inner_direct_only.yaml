@@ -1,0 +1,38 @@
+id: 1193
+feature: filters/embed/inner
+request:
+  method: GET
+  path: /entities?select=id,child_entities!inner(id,grandchild_entities(id))&child_entities.grandchild_entities.id=eq.2
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - id: 1
+      child_entities:
+        - { "id": 1, "grandchild_entities": [{ "id": 2 }] }
+        - { "id": 2, "grandchild_entities": [] }
+        - { "id": 4, "grandchild_entities": [] }
+        - { "id": 5, "grandchild_entities": [] }
+    - id: 2
+      child_entities:
+        - { "id": 3, "grandchild_entities": [] }
+        - { "id": 6, "grandchild_entities": [] }
+notes: >
+  The negative counterpart of case 1192, and the reason `!inner` is not
+  transitive: only a resource whose OWN embedding is an inner join filters
+  its parent. Here `child_entities!inner` drops entities that have no
+  children (3 and 4), but the third level `grandchild_entities(...)` is a
+  plain left join, so the `id=eq.2` filter on it neither drops child rows nor
+  entity rows — it only empties the grandchild arrays that no longer match.
+  Mirrors EmbedInnerJoinSpec "only affects the source table rows if his
+  direct embedding is an inner join" (v16.0 L174-L192) verbatim, request and
+  body.
+
+  Fixture check against the consolidated bier_test: grandchild 2 hangs off
+  child_entity 1 (entity 1); every other child keeps an empty array, and
+  entities 3/4 own no children so the inner join removes them.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L174

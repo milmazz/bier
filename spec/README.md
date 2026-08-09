@@ -13,11 +13,22 @@ that compatibility means, case by case, so it can be checked automatically.
 Everything here targets **PostgREST v16.0** (docs:
 [postgrest.org/en/v16](https://postgrest.org/en/v16/)). Every conformance case
 carries a `source:` URL pinned to the `v16.0` git tag with a `#L<line>` anchor,
-fetchable via `raw.githubusercontent.com`. All **628** cases are pinned to
+fetchable via `raw.githubusercontent.com`. All **637** cases are pinned to
 `v16.0` — verified on disk this pass (a sweep of every PostgREST URL across
-`spec/*.yaml`, `spec/*.md` and the case files found **1686** references and
+`spec/*.yaml`, `spec/*.md` and the case files found **1710** references and
 exactly one tag). When bumping the target version, re-pin the sources and re-run
 the review pass.
+
+> **Match the URL prefix, not just the tag.** A naive `grep -v 'postgrest/v16\.0/'`
+> reports 69 false stale hits, because `github.com/PostgREST/postgrest/blob/v16.0/…`
+> puts `blob/` between the repo and the tag. Sweep with a prefix-aware pattern
+> (`postgrest/(raw/|blob/|tree/)?<tag>`) or the count is wrong.
+
+> **`v14.12` in prose is not a stale pin.** 112 bare `v14.12` mentions remain
+> across the area models, `README`/`COVERAGE` and 22 case files. Sampling them
+> shows deliberate v14.12→v16.0 change notes ("the block is byte-identical to
+> v14.12, only the `src/library/` path and line numbers move"). They carry no
+> URL and are comparative prose, not citations.
 
 > **Fixture provenance comments are still on the old pin.** Eight files under
 > `conformance/fixtures/` carry **51** `v14.12` URLs in `--` provenance comments
@@ -44,7 +55,7 @@ spec/
 ├── <area>.yaml | url_grammar.md   # 17 per-area behavior models (the "why")
 └── conformance/
     ├── INDEX.md               # area <-> id band <-> fixture cross-reference
-    ├── cases/NNNN_<slug>.yaml # 628 conformance cases (the "what", machine-checkable)
+    ├── cases/NNNN_<slug>.yaml # 637 conformance cases (the "what", machine-checkable)
     ├── fixtures.sql           # the authoritative merged DDL+seed set
     ├── fixtures_local.sql     # human-owned harness supplement
     └── fixtures/              # per-area fragments + write-channel deltas (see its README)
@@ -67,7 +78,7 @@ There are two layers:
    states it in prose ("Version pinned: **PostgREST v16.0**"). Do not grep for
    a single spelling.
 
-2. **Conformance cases** — 628 YAML files under `conformance/cases/`. Each is one
+2. **Conformance cases** — 637 YAML files under `conformance/cases/`. Each is one
    concrete scenario: a request and the exact response (status, headers, body)
    PostgREST produces. These are the machine-checkable contract.
 
@@ -95,13 +106,13 @@ source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/...#L<n>
 ```
 
 `id`, `feature`, `request`, `schema`, `expect`, `notes` and `source` are present
-on all 628 cases. `preconditions` is present on 627 (case **1330** omits it);
+on all 637 cases. `preconditions` is present on 636 (case **1330** omits it);
 `config` is present on **114** (four of those — 1705, 1719, 1727, 1743 — are the
 empty `config: {}`).
 
 Two request shapes are supported:
 
-- **HTTP** (the common case, 590 cases): `request.method` + `request.path`, with
+- **HTTP** (the common case, 599 cases): `request.method` + `request.path`, with
   optional `request.headers` / `request.body` / `request.body_raw` /
   `request.body_json`. The **auth** area may add `request.jwt` to have the runner
   mint and send a signed token (32 cases do; case 11809 instead spells out a
@@ -180,7 +191,7 @@ print("OK" if not bad else f"{bad} errors")
 PY
 ```
 
-All **628** cases currently parse and validate, with **no duplicate ids** (and
+All **637** cases currently parse and validate, with **no duplicate ids** (and
 every `NNNN_` filename prefix equals the in-file `id:`).
 
 ## Review status
@@ -191,9 +202,16 @@ line and confirming it still asserts what the case claims — is summarized
 per area in [`COVERAGE.md`](COVERAGE.md), together with the open gaps and the
 machine-verification results for this pass.
 
-Four areas carry a recorded v16.0 adversarial verdict so far — **auth**,
-**headers**, **config** and **select**, all four ⚠️ *revise* with **zero
-citation defects** (every finding is a missing-coverage gap, now itemized in
-`COVERAGE.md` → *Known gaps*). The other **13** areas have not been re-audited
-at this pin; run `bier-spec-audit` over them before treating their citations as
-verified.
+Five areas carry a recorded v16.0 adversarial verdict so far — **auth**,
+**headers**, **config**, **select** and **filters**, all five ⚠️ *revise* with
+**zero citation defects** (every finding is a missing-coverage gap, now itemized
+in `COVERAGE.md` → *Known gaps*). The other **12** areas have not been
+re-audited at this pin; run `bier-spec-audit` over them before treating their
+citations as verified.
+
+Note what "zero citation defects" does *not* mean: **35** cases anchor their
+`source:` at implementation code under `src/library/PostgREST/…` rather than at
+an upstream `it`-block, so their expected bodies are derived rather than
+transcribed. The filters re-sync moved one of them (case **1189**) back onto the
+assertion that actually spells out the expected header; the rest are behaviors
+upstream never asserts black-box, and each says so in its `notes:`.

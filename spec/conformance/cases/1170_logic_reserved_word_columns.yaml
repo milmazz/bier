@@ -16,10 +16,11 @@ notes: >
   logic group. Mirrors AndOrParamsSpec
   "can query columns that begin with and/or reserved words".
   CAVEAT: the cited it-block only asserts `shouldRespondWith 200` -- it makes
-  NO body assertion. The body_exact [] here is an INFERENCE from the controlled
-  filters.sql fixture (all grandchild_entities rows have NULL
-  and_starting_col/or_starting_col, so eq.smth matches nothing) and is
-  STRONGER than what the pinned source guarantees. A conformance runner that
-  wants to stay faithful to the source should assert only status 200; the []
-  is asserted here because the fixture is fully controlled by this area.
+  NO body assertion. The body_exact [] here is an INFERENCE from the seed data
+  and is STRONGER than what the pinned source guarantees: re-verified at the
+  v16.0 re-sync against a freshly loaded bier_test, where all five
+  test.grandchild_entities rows carry NULL in and_starting_col and
+  or_starting_col, so `eq.smth` matches nothing. (The seed matches upstream
+  data.sql L371-L375, which also leaves both columns null.) A runner that
+  wants to stay faithful to the source alone should assert only status 200.
 source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L287

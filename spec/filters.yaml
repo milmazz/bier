@@ -15,13 +15,95 @@
 #     `src/library/PostgREST/...` in v16.0; every source anchor below was
 #     re-pathed and re-numbered accordingly.
 #   * `QueryParams.hs` changed only in imports/exports/doctest-setup between
-#     the two pins (35 insertions / 27 deletions, all non-grammar), so the
-#     filter and logic-tree GRAMMAR is byte-identical to v14.12; only line
-#     numbers shifted (+8 from the export-list and $setup additions).
+#     the two pins, so the filter and logic-tree GRAMMAR is byte-identical to
+#     v14.12; only line numbers shifted (+8 from the export-list and $setup
+#     additions), which is why every filter/logic anchor below moved by
+#     exactly +8: pRequestFilter 229 -> 237, pTreePath 277 -> 285, the
+#     not-prefix 637 -> 645, pIsDist 646 -> 654, pIsVal 657 -> 665,
+#     pQuotedValue 688 -> 696, pLogicTree 815 -> 823, pLogicPath 840 -> 848.
+#     Size: 864 -> 872 lines, 34 insertions / 26 deletions (the minimal edit
+#     script, as produced by GNU `diff -u` and by git's --histogram /
+#     --patience / --minimal; git's DEFAULT Myers heuristic reports 35 / 27 for
+#     the same pair of files, which is what a previous revision of this note
+#     quoted). The counts are cosmetic either way - the load-bearing facts are
+#     the unchanged grammar and the uniform +8 shift, both re-verified this
+#     pass by fetching v16.0 QueryParams.hs and reading each anchored line.
 #   * The one real behavior change in this area is the aliased-embed
 #     deprecation (upstream #4075): see filters.embed.alias_target,
 #     filters.embed.legacy_target_name_deprecation and
 #     filters.embed.legacy_target_names_disabled.
+#   * `ApiRequest/Types.hs` changed only in import formatting between the pins
+#     (3 changed lines, all inside one `PostgREST.SchemaCache.Identifiers`
+#     import), so the OpExpr/Operation/IsVal/OpQuantifier constructors the
+#     filter grammar produces are unchanged.
+#   * CORRECTION (previous revision said `Query/SqlFragment.hs` "changed only
+#     in import formatting" - that is FALSE and is fixed here). Diffing v14.12
+#     `src/PostgREST/Query/SqlFragment.hs` against v16.0
+#     `src/library/PostgREST/Query/SqlFragment.hs` gives 144 changed lines
+#     (704 -> 724), including substantive ones: `countF` gained
+#     `pageCountSelect` / `maxRows` / `range` parameters and now skips the
+#     separate aggregated count when neither db-max-rows nor a limit/offset is
+#     in play (v16.0 L481-L489); a new `pageCountSelectF` was added
+#     (L491-L495); and `accessibleFuncs` / `baseFuncSqlQuery` / the newly
+#     extracted `baseTypesCte` gained a `PgVersion` parameter to branch on
+#     PG17's `pg_basetype()` (L616-L617, L621-L622, L664-L665). None of that is
+#     filters-area scope (it is pagination/count and OpenAPI introspection).
+#   * What IS unchanged is only the FILTER-RENDERING fragments, verified by
+#     diffing the blocks byte-for-byte rather than the whole file: the operator
+#     tables `simpleOperator` / `quantOperator` / `ftsOperator` (v16.0
+#     L105-L136 == v14.12 L112-L143, identical) and the whole span from
+#     `pgFmtFilter` (v16.0 L380, incl. the `OpQuant` + `fmtQuant` any/all
+#     rendering at L386-L389/L416-L419, the `Is` whitelist at L395-L401, the
+#     `IsDistinctFrom` branch at L403 and the `In` -> `= ANY` branch at
+#     L408-L410) through `pgFmtLogicTree` (v16.0 L428) up to `countF`
+#     (v16.0 L380-L480 == v14.12 L387-L487, identical). So the CONCLUSION the
+#     previous revision drew still holds - the operator set, the quantifier
+#     modifier and the is/isdistinct value grammar are unchanged - but it now
+#     rests on the fragments actually cited above.
+#   * The five filters-relevant SPEC files (QuerySpec, AndOrParamsSpec,
+#     JsonOperatorSpec, EmbedInnerJoinSpec, RelatedQueriesSpec) changed
+#     almost entirely in their hspec harness signature
+#     (`SpecWith ((), Application)` -> `SpecWithConfig`). The substantive
+#     deltas are: QuerySpec.hs gained the two NEW url-use-legacy-target-names
+#     it-blocks (L1183-L1189 and the whole `specLegacyTargetNames` block at
+#     L1695-L1720); JsonOperatorSpec.hs and QuerySpec.hs gained a
+#     `pgVersion190` branch on three SQLSTATE 42883 bodies (errors-area
+#     scope, see gaps); RelatedQueriesSpec.hs's count=planned/estimated
+#     Content-Range values changed (pagination-area scope, see gaps).
+#     EmbedInnerJoinSpec.hs L79 and several QuerySpec.hs it-blocks gained
+#     `&order=...` to make already-asserted bodies deterministic — no
+#     behavior change.
+#
+# Second-pass (2026-08-08) verification notes:
+#   * Every `source:` anchor in this file and in all filters cases was
+#     re-fetched from the v16.0 tree and the anchored line confirmed to carry
+#     the claim it is cited for.
+#   * Expected bodies for the embed cases were re-derived against a freshly
+#     loaded `bier_test` (`mix bier.fixtures.load`), not against any fragment
+#     under conformance/fixtures/. The entities / child_entities /
+#     grandchild_entities seeds there are byte-identical to upstream
+#     data.sql L356-L375, which retired the "third level cannot be
+#     reconciled" gap and produced cases 1191-1194.
+#
+# Third-pass (2026-08-08) review-fix notes — all five findings addressed:
+#   * The upstream context "related conditions through null operator on embed"
+#     (RelatedQueriesSpec#L151) is now split into one entry per CARDINALITY.
+#     The old single entry anchored the whole context but its cases (1186-1188)
+#     asserted only the one-to-many branch. Added
+#     filters.embed.null_filtering_many_to_one (L152, cases 1196/1197) and
+#     filters.embed.null_filtering_many_to_many (L200, cases 1198/1199); both
+#     it-blocks are verbatim reproducible on the consolidated seed and are now
+#     asserted verbatim (request AND body).
+#   * "can do an or across embeds" (L225) is now its own entry
+#     (filters.embed.or_across_embeds) with case 1195, adapted to
+#     projects/clients+tasks. The previous revision's blocker was half true:
+#     the `client` FK-constraint rename does block a fixture delta, but not the
+#     shape itself. See the CLOSED gap for the full reversal record.
+#   * filters.horizontal.cs_cd was split into filters.horizontal.cs (L560) and
+#     filters.horizontal.cd (L565): the old single anchor was the "matches with
+#     cs operator" it-block, which supports only the `cs` half.
+#   * The QueryParams.hs diff counts in the re-sync note above were corrected
+#     (34/26 minimal, not 35/27) and the +8 anchor shift was spelled out.
 
 area: filters
 version: PostgREST v16.0
@@ -64,19 +146,55 @@ entries:
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/QueryParams.hs#L665
     cases: [1152, 1153, 1163]
 
-  - id: filters.horizontal.like_ilike
+  # like and ilike are modelled as SEPARATE entries: they are asserted by two
+  # different upstream it-blocks, and the case-sensitivity halves of the claim
+  # are not interchangeable. `pgFmtFilter` renders both through the same
+  # `OpQuant` branch, mapping `*` -> `%` via `star`
+  # (SqlFragment.hs#L386-L389, #L415).
+  - id: filters.horizontal.like
     claim: >
-      `col=like.<pat>` / `col=ilike.<pat>` do pattern matching where `*` is
-      the wildcard (translated to SQL `%`). ilike is case-insensitive.
+      `col=like.<pat>` does pattern matching where `*` is the wildcard
+      (translated to SQL `%`). `like` is case-SENSITIVE: upstream's it-block
+      "matches with like" asserts `/simple_pk?k=like.*yx` and
+      `/simple_pk?k=like.xy*` return only "xyyx" while `/simple_pk?k=like.*YY*`
+      returns only "xYYx" (QuerySpec#L136-L142).
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L136
     cases: [1154]
 
-  - id: filters.horizontal.cs_cd
+  - id: filters.horizontal.ilike
     claim: >
-      Array containment operators `cs` (contains) and `cd` (contained in)
-      take a `{...}` value, e.g. `arr_data=cs.{2}`.
+      `col=ilike.<pat>` does the same `*`-wildcard pattern matching
+      case-INSENSITIVELY: upstream's it-block "matches with ilike" asserts that
+      `/simple_pk?k=ilike.xy*&order=extra.asc` AND
+      `/simple_pk?k=ilike.*YY*&order=extra.asc` each return BOTH "xyyx" and
+      "xYYx" (QuerySpec#L148-L154) - the two rows `like` separates at L136.
+      No filters case duplicates it; claimed cross-area, see gaps.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L148
+    cases: []
+
+  # cs and cd are modelled as SEPARATE entries for the same reason like/ilike
+  # are: upstream asserts them in two different it-blocks ("matches with cs
+  # operator" at L560-L563 and "matches with cd operator" at L565-L568), and
+  # containment is not symmetric, so one anchor cannot carry both claims.
+  - id: filters.horizontal.cs
+    claim: >
+      The array CONTAINS operator `cs` takes a `{...}` value and matches rows
+      whose array contains every listed element: upstream's it-block "matches
+      with cs operator" asserts `/complex_items?select=id&arr_data=cs.{2}`
+      returns ids 2 and 3 (QuerySpec#L560-L563).
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L560
     cases: [1164]
+
+  - id: filters.horizontal.cd
+    claim: >
+      The array CONTAINED-IN operator `cd` takes a `{...}` value and matches
+      rows whose array is a subset of the listed elements — the converse of
+      `cs`, asserted by its own it-block "matches with cd operator":
+      `/complex_items?select=id&arr_data=cd.{1,2,4}` returns ids 1 and 2
+      (QuerySpec#L565-L568). No filters case exercises `cd`; claimed
+      cross-area, see gaps.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L565
+    cases: []
 
   - id: filters.horizontal.isdistinct
     claim: >
@@ -250,9 +368,21 @@ entries:
       separators, e.g. `child_entities.id=eq.1` or
       `child_entities.or=(...)`. `pTreePath` / `pLogicPath` split the path on
       `.`; the init of the path is the embed path, the last segment is the
-      field (or and/or keyword).
+      field (or and/or keyword). The path may be more than one segment deep,
+      addressing an arbitrarily nested embed
+      (`child_entities.grandchild_entities.or=(...)`).
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/QueryParams.hs#L285
-    cases: [1181, 1182]
+    cases: [1181, 1182, 1191]
+
+  - id: filters.embed.third_level
+    claim: >
+      A logic group may be applied to the third level of the read plan via a
+      two-segment embed path, e.g.
+      `child_entities.grandchild_entities.or=(id.eq.1,id.eq.2)`. With the
+      default left join every level above the filtered one is preserved, its
+      related array emptied where nothing below it matches.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AndOrParamsSpec.hs#L34
+    cases: [1191]
 
   - id: filters.embed.left_join_default
     claim: >
@@ -268,7 +398,18 @@ entries:
       (parent) table: parents whose embedding becomes empty are dropped. A
       filter that matches no embedded rows yields an empty top-level array.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L129
-    cases: [1183, 1184]
+    cases: [1181, 1183, 1184]
+
+  - id: filters.embed.inner_join_transitive
+    claim: >
+      The parent-filtering effect chains only through embeddings that are
+      THEMSELVES inner joins. When every level on the path is `!inner`, a
+      filter two levels below the source drops non-matching rows at each
+      level up to the root; when the innermost embedding is a plain (left)
+      join, the filter empties that level's arrays and changes nothing above
+      it.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/EmbedInnerJoinSpec.hs#L146
+    cases: [1192, 1193]
 
   - id: filters.embed.nonexistent_resource_error
     claim: >
@@ -279,17 +420,87 @@ entries:
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L528
     cases: [1185]
 
+  # The upstream context "related conditions through null operator on embed"
+  # (RelatedQueriesSpec#L151) is split here into one entry per CARDINALITY,
+  # because each is a separate it-block and each exercises a different render
+  # path (to-one row aggregate vs. to-many array aggregate vs. array aggregate
+  # over a junction table). The shared mechanism is stated once, on
+  # filters.embed.null_filtering.
   - id: filters.embed.null_filtering
     claim: >
       An embedded resource can be filtered directly on its null-ness to keep
       or drop PARENT rows based on whether a related row exists:
       `embed=not.is.null` behaves like `!inner` (keep parents that HAVE a
       related row), and `embed=is.null` performs an anti-join (keep parents
-      that have NO related row). The embed is typically projected empty
-      (`embed()`) so the related array is omitted from the body. Both forms
-      can also appear inside an `or=(...)` group across multiple embeds.
-    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L151
+      that have NO related row). `addNullEmbedFilters` rewrites any `is null`
+      / `not.is null` filter whose field names an embed into a
+      `CoercibleFilterNullEmbed` over that embed's aggregate alias
+      (Plan.hs#L969-L972), rendered as `<agg> IS [NOT] DISTINCT FROM NULL`
+      (SqlFragment.hs#L381). The embed is typically projected empty
+      (`embed()`) so the related array/object is omitted from the body. This
+      entry states the ONE-TO-MANY branch (upstream "works on a one-to-many
+      relationship", L174-L198); the many-to-one and many-to-many branches are
+      separate entries below.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L174
     cases: [1186, 1187]
+
+  - id: filters.embed.null_filtering_many_to_one
+    claim: >
+      Null filtering also works on a MANY-TO-ONE embed, where the aggregate is
+      a single json OBJECT rather than an array:
+      `/projects?select=name,clients()&clients=not.is.null` keeps the four
+      projects that have a client, and `clients=is.null` keeps only the
+      client-less "Orphan" project. A distinct upstream it-block ("works on a
+      many-to-one relationship") from the one-to-many one.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L152
+    cases: [1196, 1197]
+
+  - id: filters.embed.null_filtering_many_to_many
+    claim: >
+      Null filtering also works on a MANY-TO-MANY embed resolved through a
+      junction table, and composes with an ordinary embedded filter on the
+      SAME embed: in
+      `/users?select=name,tasks()&tasks.id=eq.1&tasks=not.is.null` the
+      `tasks.id=eq.1` filter is applied inside the embed's lateral FIRST, so
+      the null test sees the already-filtered aggregate and keeps exactly the
+      users who own task 1; the `is.null` branch keeps the user who does not
+      (not merely users with no tasks at all). A distinct upstream it-block
+      ("works on a many-to-many relationship").
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L200
+    cases: [1198, 1199]
+
+  - id: filters.embed.or_across_embeds
+    claim: >
+      Embedded null filters may appear INSIDE a logic tree, so two different
+      embeds can be OR-ed against each other and a parent row survives if at
+      least one of its independently-filtered embeds is non-null:
+      `or=(<embedA>.not.is.null,<embedB>.not.is.null)`. `newNullFilters`
+      recurses through `CoercibleExpr` before rewriting leaves
+      (Plan.hs#L967-L968), so each `<embed>.not.is.null` leaf inside the group
+      is rewritten to a `CoercibleFilterNullEmbed` exactly as a top-level one
+      would be. Each embed keeps its OWN filter inside its lateral, so a
+      filtered-out embed aggregates to NULL instead of removing the parent —
+      that is what makes the OR meaningful. This is its own docs heading
+      ("OR filtering across Embedded Resources",
+      docs/references/api/resource_embedding.rst#L1051-L1065, whose example
+      `/films?select=title,actors(),directors()&directors.first_name=eq.John&actors.first_name=eq.John&or=(directors.not.is.null,actors.not.is.null)`
+      has exactly the shape asserted here) and its own upstream it-block
+      ("can do an or across embeds").
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L225
+    cases: [1195]
+
+  - id: filters.embed.null_filtering_nested
+    claim: >
+      Null filtering composes across nesting levels: an embedded null filter
+      may itself sit behind a dotted embed path
+      (`child_entities.grandchild_entities=not.is.null`), and combining it
+      with an outer `child_entities=not.is.null` keeps only parents whose
+      child has a grandchild. `addNullEmbedFilters` recurses into the whole
+      read-plan forest, rewriting each `is null` / `not.is null` filter whose
+      field names an embed into a `CoercibleFilterNullEmbed` over that
+      embed's aggregate alias (Plan.hs#L959-L963, #L969-L973).
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L217
+    cases: [1194]
 
   - id: filters.embed.alias_target
     claim: >
@@ -339,16 +550,17 @@ entries:
 
 gaps:
   - >
-      AndOrParamsSpec "embedded levels" third-level logic
-      (child_entities.grandchild_entities.or=..., v16.0 L34-L50) and
-      EmbedInnerJoinSpec one-to-many cases at L146+ expect
-      grandchild_entities rows distributed across child_entities 1,2,4,5 and
-      3,6, but the committed fixture data.sql L371-375 only defines 5
-      grandchild rows under parent_ids 1,1,2,2,2. The expected vs. seeded data
-      could not be reconciled from the pinned sources, so no conformance case
-      asserts third-level embedded filtering. Needs the actual fixture data
-      PostgREST loads for these tests (possible per-spec data override not
-      found in fixtures/data.sql). Unchanged between v14.12 and v16.0.
+      RETIRED at the 2026-08-08 re-sync (recorded so the reversal is
+      auditable): the previous revision claimed that AndOrParamsSpec's
+      third-level logic (v16.0 L34-L50) and EmbedInnerJoinSpec's L146+
+      one-to-many cases could not be reconciled with the seeded
+      grandchild_entities rows. That was a misreading — the 1,2,4,5 / 3,6
+      split in the expected bodies is the CHILD distribution over entities 1
+      and 2, not a grandchild distribution. The consolidated bier_test seeds
+      (verified by reloading with `mix bier.fixtures.load`) are byte-identical
+      to upstream data.sql L356-L375 and reproduce every one of those expected
+      bodies exactly, in the same row order. Cases 1191, 1192, 1193 and 1194
+      now assert them.
   - >
       Full-text search filter operators inside and/or
       (fts/plfts/phfts/wfts, AndOrParamsSpec v16.0 L82-L115) and range/array
@@ -357,28 +569,121 @@ gaps:
       beyond the and/or/not parser interaction.
   - >
       `is` case-insensitivity of NULL/NoT_NuLl and trilean upper/mixed case
-      (QuerySpec v16.0 L109-L130) is covered by case 1163 only for the
-      lowercase trilean path; the uppercase variants are asserted in QuerySpec
-      but not given dedicated conformance cases to keep the band within
-      1150..1199.
+      (QuerySpec v16.0 L109-L130) is exercised in the filters band only for
+      the lowercase trilean path (case 1163). The uppercase/mixed-case
+      spelling is NOT unasserted overall: it is claimed cross-area by the
+      operators area as case 1058 (`operators/is/case_insensitive`,
+      `/chores?done=is.NoT_NuLl`, anchored at QuerySpec#L114). No filters case
+      duplicates it; if 1058 is dropped in review, re-home it here.
   - >
       `match` (~) and `imatch` (~*) regex filter operators (QuerySpec v16.0
-      L159-L180) parse via quantOperator but no dedicated conformance case was
-      written (operators-area semantics); only like/ilike are exercised here.
+      L159-L180) parse through the same `pQuantOp`/`quantOperator` path as the
+      simple operators, but their value semantics are operators-area scope and
+      are claimed there by cases 1063 (`operators/match`) and 1064
+      (`operators/imatch`); only `like` is exercised standalone in the filters
+      band (case 1154) - for `ilike` see the next gap.
+  - >
+      `ilike` (filters.horizontal.ilike) has NO standalone case in the filters
+      band and carries `cases: []` on purpose. The band's like/ilike cases are
+      1154 (`like.*yx`) and 1155 (`not.like.*yx`), both case-SENSITIVE `like`;
+      1172 uses an ilike pattern but only to prove VALUE QUOTING inside an
+      `or=(...)` group (`name.ilike."*ITY,5)"`, AndOrParamsSpec#L204), so it
+      asserts nothing about case-insensitivity. The case-insensitivity claim
+      is NOT unasserted overall: the operators area owns it as case 1062
+      (`operators/ilike`, `/simple_pk?k=ilike.xy*&order=extra.asc` -> both
+      "xyyx" and "xYYx"), anchored at the same QuerySpec#L148 it-block, so a
+      filters case would be a byte-for-byte duplicate differing only in the
+      `schema:` label. Same treatment as the `is` case-insensitivity gap
+      above: if 1062 is dropped in review, re-home it here. Still unasserted
+      ANYWHERE at this pin: `not.ilike` (QuerySpec#L156-L157,
+      `/simple_pk?k=not.ilike.xy*&order=extra.asc` -> `[]`) and the second
+      ilike assertion of that it-block (`ilike.*YY*`, QuerySpec#L152-L154).
   - >
       The (any)/(all) operator quantifier modifier
       (e.g. id=eq(any).{3,4,5}, id=gt(all).{4,3}, body=like(any).{%plan%,...})
       is a documented major filter MODIFIER with dedicated tests at
-      QuerySpec.hs v16.0 L1507-L1543. The filters parser is the load-bearing
+      QuerySpec.hs v16.0 L1505-L1545. The filters parser is the load-bearing
       piece: pOperation tries pQuantOp (QueryParams.hs#L649, definition
       L660-L663), where the optional (any)/(all) is parsed between parens
       after the base operator. filters.horizontal.shape's claim references
       pOpExpr (which reaches pQuantOp transitively), but this area
       deliberately writes NO conformance case for the quantifier syntax: the
       per-operator value semantics (which ops accept a quantifier, the {..}
-      array value shape) are operators-area scope. Recorded here because the
-      syntactic parse of the (any)/(all) token lives in the filters/operator
-      grammar.
+      array value shape) are operators-area scope and are claimed there by
+      cases 1083 (eq(any)), 1084 (gt(all)), 1086 (like(any)), 1087
+      (imatch(any)) and 1097 (match(any)). Recorded here because the syntactic
+      parse of the (any)/(all) token lives in the filters/operator grammar.
+  - >
+      CLOSED at the third pass (recorded so the reversal is auditable):
+      "can do an or across embeds" (RelatedQueriesSpec v16.0 L225-L233) is now
+      asserted by case 1195, and `filters.embed.or_across_embeds` is a
+      first-class entry. The previous revision left it uncovered on the
+      grounds that reproducing the shape on existing relations "would require
+      inventing a request upstream never asserts" — a policy this area does
+      not actually follow (cases 1150, 1151, 1185 and 1189 all adapt upstream
+      requests to local fixtures). Only HALF the stated blocker was real:
+      `fixtures.sql` L477 does rename test.projects' clients FK constraint to
+      `client` and case 1122 relies on `client` resolving as an FK-name hint,
+      so upstream's `client`/`clientinfo`/`contact` tables (schema.sql
+      L2440-L2455, data.sql L727-L733) still must NOT be added to the
+      consolidated DB — but that argues against a fixture delta, not against
+      reproducing the SHAPE on relations that already exist. Case 1195 does
+      the latter, on projects -> clients (many-to-one) + projects -> tasks
+      (one-to-many), and picks per-embed filters that make each OR branch
+      load-bearing (project 1 enters via tasks only, projects 3 and 4 via
+      clients only, project 2 via neither), mirroring upstream's
+      Walmart-via-clientinfo / Target-via-contact split. Still unasserted at
+      this pin: the ALIASED spelling of the same shape from the docs
+      (`select=title,act:actors(),dir:directors(),actors(first_name),...` +
+      `or=(dir.not.is.null,act.not.is.null)`,
+      docs/references/api/resource_embedding.rst L1080-L1089), which combines
+      or-across-embeds with the alias targeting already claimed by
+      filters.embed.alias_target (case 1188); upstream asserts it in no
+      it-block, so no case was derived for it.
+  - >
+      `computed_clients` — the THIRD assertion of upstream's many-to-one
+      it-block (`/projects?select=name,computed_clients()&computed_clients=is.null`
+      -> Orphan, RelatedQueriesSpec v16.0 L168-L172) — has no case: it needs a
+      computed (function-backed) relationship `test.computed_clients(test.projects)`,
+      and `select * from pg_proc` on a freshly loaded bier_test shows no such
+      function in the `test` schema. It is not a null-filtering behavior per
+      se (cases 1196/1197 assert the is.null / not.is.null semantics on the
+      same relationship via the real FK); what the third assertion adds is
+      that a COMPUTED relationship is also a valid null-filter target, which
+      is computed-relationship scope — the select area owns computed rels as
+      cases 1136/1137, neither of which null-filters. loader_exposure: closing
+      it needs a computed-relationship function over test.projects returning
+      SETOF test.clients exposed under the `test` label; this area does not
+      add it, since the fixture object would have to be shared with the select
+      area rather than owned by a filters delta.
+  - >
+      `cd` (filters.horizontal.cd) has NO standalone case in the filters band
+      and carries `cases: []` on purpose — the same treatment as
+      filters.horizontal.ilike. The entry was split off filters.horizontal.cs
+      because upstream asserts the two in separate it-blocks (QuerySpec#L560
+      "matches with cs operator" vs. #L565 "matches with cd operator") and the
+      single previous anchor (L560) supported only the `cs` half of the
+      claim. The band's only containment case, 1164, is anchored at
+      AndOrParamsSpec#L172 and exercises `cs` alone. The `cd` claim is NOT
+      unasserted overall: the operators area owns it as case 1073
+      (`operators/cd/array`, `/complex_items?select=id&arr_data=cd.{1,2,4}` ->
+      ids 1 and 2), anchored at the very QuerySpec#L565 it-block, so a filters
+      case would differ only in the `schema:` label. If 1073 is dropped in
+      review, re-home it here from the overflow band. Still unasserted
+      ANYWHERE at this pin: the entities-based `cd` sub-assertion
+      `/entities?arr=cd.{1,2,6}&select=id` -> ids 1 and 2
+      (AndOrParamsSpec#L174), which IS reproducible on the consolidated seed
+      (test.entities arr = {1},{1,2},{1,2,3},NULL) and would be the exact
+      sibling of case 1164; omitting it is discretionary, not blocked.
+  - >
+      PGRST120 ("Bad operator on the '<target>' embedded resource", details
+      "Only is null or not is null filters are allowed on embedded resources",
+      Error.hs#L164/#L190/#L209) is modelled by NO entry and NO case: at
+      v16.0 the `UnacceptableFilter` constructor has no raise site anywhere
+      under `src/` (it is declared in Error/Types.hs#L51 and mapped in
+      Error.hs, nothing constructs it) and no spec file asserts the code. It
+      is therefore unreachable at this pin, and any expected body for it would
+      be a guess.
   - >
       needed_assertion: the runner must honour `config` on HTTP cases. The
       v16.0 `url-use-legacy-target-names = false` behavior
@@ -397,7 +702,9 @@ gaps:
       1189 with `config: {url-use-legacy-target-names: false}` and the PGRST108
       body from QuerySpec#L1709-L1720). filters.embed.legacy_target_names_disabled
       therefore carries `cases: []` on purpose; if 1139 is dropped in review,
-      re-home it here as 1191.
+      re-home it here from this area's closed overflow range [10600..10799] —
+      the primary band [1150..1199] is now fully allocated (1150-1199, 50
+      cases).
   - >
       QuerySpec#L1699-L1707 ("works when embedding the same table more than
       once", upstream #4075) uses `places` / `visits`, which do not exist in
@@ -406,14 +713,26 @@ gaps:
       projects/tasks one-to-many (the select area does exactly that in case
       1140), and the behavior is in any case gated on
       url-use-legacy-target-names = false (previous gap). So this area adds no
-      fixture objects at all - every filters case, old and new, runs on
-      objects already built by `mix bier.fixtures.load` (entities,
+      fixture objects at all - every filters case, old and new (1150-1199),
+      runs on objects already built by `mix bier.fixtures.load` (entities,
       child_entities, grandchild_entities, no_pk, simple_pk, chores,
-      json_table, json_arr, jsonb_test, projects, tasks).
+      json_table, json_arr, jsonb_test, projects, clients, tasks, users,
+      users_tasks). No spec/conformance/fixtures/filters.delta.sql exists or is
+      needed at this pin; see the `client`/`clientinfo`/`contact` gap above for
+      the one place a delta was considered and rejected, and the
+      `computed_clients` gap for the one loader_exposure item.
   - >
       Dropped nothing between v14.12 and v16.0: every previously-modelled
-      filters behavior still exists at v16.0 with identical wire output. The
-      only source moves were path (`src/` -> `src/library/`) and line numbers.
+      filters behavior still exists at v16.0 with identical wire output, and
+      no filters case or entry was removed at this re-sync. For the
+      filters-area code paths the only moves were path
+      (`src/` -> `src/library/`) and line numbers; SqlFragment.hs DID change
+      substantively elsewhere in the file (countF / pageCountSelectF /
+      baseTypesCte - see the re-sync note at the top), just not in any fragment
+      that renders a filter or a logic tree. Confirmed
+      by diffing the two pins over `src/library/PostgREST/ApiRequest/*`,
+      `src/library/PostgREST/Query/SqlFragment.hs` and the five
+      filters-relevant spec files.
   - >
       Out-of-area v16.0 changes touched while diffing, recorded so they are not
       lost: (a) every response now carries `Vary: Accept, Prefer, Range`
@@ -423,4 +742,7 @@ gaps:
       QuerySpec#L1655-L1668 now branch on via pgVersion190 - errors/operators
       scope, and no filters case asserts a 42883 body; (c) PGRST107's
       documented status changed from 415 to 406 (docs/references/errors.rst) -
-      content-negotiation scope.
+      content-negotiation scope; (d) RelatedQueriesSpec#L321-L376 changed the
+      count=planned / count=estimated Content-Range values for null-filtered
+      embeds (0-3/1200 -> 0-3/5, and 0-1/952 with 206 -> 0-1/2 with 200) -
+      pagination-area scope, and no filters case asserts a Content-Range.

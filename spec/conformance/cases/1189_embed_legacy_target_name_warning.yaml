@@ -15,13 +15,19 @@ expect:
   body_exact:
     - { "id": 1, "name": "Windows 7", "the_tasks": [{ "id": 2, "name": "Code w7" }] }
 notes: >
-  NEW IN v16.0 (upstream #4075), isolated to a FILTER. Upstream's it-block
-  ("filters, orders and limits aliased embeded entities using the target name",
-  QuerySpec#L1183-L1187) exercises a filter, an order and a limit at once; this
-  case strips it to the filter alone, because `addFilters` is an independent
-  caller of `updateNode useTargetNames` (the anchor below, reached from
-  Plan.hs#L398) - the deprecation must fire from the horizontal filter by
-  itself, not only from the order/limit path. The embed is aliased
+  NEW IN v16.0 (upstream #4075), isolated to a FILTER. The `source` anchor is
+  the upstream assertion itself: QuerySpec's it-block "filters, orders and
+  limits aliased embeded entities using the target name" (L1183) whose
+  `matchHeaders` at L1187 spells out the exact 299 Warning asserted below.
+  That it-block exercises a filter, an order and a limit at once; this case
+  strips it to the filter alone, because `addFilters` is an independent caller
+  of `updateNode useTargetNames` (Plan.hs#L855, `addFilterToNode = updateNode
+  useTargetNames ...`, reached from Plan.hs#L398) - the deprecation must fire
+  from the horizontal filter by itself, not only from the order/limit path.
+  Plan.hs#L855 is the filter-path rationale only; it carries no status, body or
+  header, which is why it is cited here and not as `source`. (Contrast case
+  1190, whose `source` legitimately IS a Plan.hs line: no upstream it-block
+  asserts the no-Warning alias-filter spelling.) The embed is aliased
   `the_tasks:tasks(...)` while the filter still targets the relation name
   `tasks.`, so matchTarget resolves it via the legacy branch (Plan.hs#L1029),
   updateLegacyAttrs sets relIsLegacyTargetNameMatch (Plan.hs#L1033-L1036),
@@ -34,4 +40,4 @@ notes: >
   1 owns tasks 1 "Design w7" and 2 "Code w7"; only "Code w7" matches like.Code*.
   The verbatim upstream filter+order+limit form is covered cross-area by case
   1138.
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan.hs#L855
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1187

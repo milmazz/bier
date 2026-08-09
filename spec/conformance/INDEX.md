@@ -1,7 +1,7 @@
 # Conformance case index
 
-Cross-reference of the **628** conformance cases under `spec/conformance/cases/`.
-Pinned target: **PostgREST v16.0** (all 628 `source:` URLs).
+Cross-reference of the **637** conformance cases under `spec/conformance/cases/`.
+Pinned target: **PostgREST v16.0** (all 637 `source:` URLs).
 
 Each case is one YAML file `NNNN_<slug>.yaml` validated against
 [`../case.schema.json`](../case.schema.json). Cases are grouped into 17 feature
@@ -26,7 +26,7 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 > - **auth** uses **11800–11818** on top of its full primary band **1450–1499**
 >   (all 50 primary ids are in use). These 19 are the only 5-digit case ids in
 >   the tree, and `11800` sorts immediately after `1180` in a *lexical* listing,
->   so they interleave with the filters area's 1180–1190 cases unless ids are
+>   so they interleave with the filters area's 1180–1199 cases unless ids are
 >   sorted **numerically** (`ls | sort -n`, not plain `ls`).
 > - **representations** uses **1300–1314 + 1320–1324 + 1330–1333**; the 1315–1319
 >   and 1325–1329 gaps are deliberate per-sub-feature spacing (post/patch,
@@ -42,7 +42,7 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | url_grammar | 30 | 1000–1029 | `fixtures/url_grammar.sql` | `multi`, `test`, `unicode`, `ordering` |
 | operators | 50 | 1050–1099 | `fixtures/operators.sql` | `operators` |
 | select | 50 | 1100–1149 | `fixtures/select.sql` | `test` |
-| filters | 41 | 1150–1190 | `fixtures/filters.sql` | `test` |
+| filters | 50 | 1150–1199 | `fixtures/filters.sql` | `test` |
 | ordering | 27 | 1200–1226 | `fixtures/ordering.sql` | `ordering` |
 | pagination | 28 | 1250–1277 | `fixtures/pagination.sql` | `pagination` |
 | representations | 24 | 1300–1314, 1320–1324, 1330–1333 | `fixtures/representations.sql` | `representations` |
@@ -57,7 +57,7 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | observability | 20 | 1750–1769 | `fixtures/observability.sql` | `observability` |
 | domain_representations | 21 | 1800–1820 | `fixtures/domain_representations.sql` | `domain_representations` |
 
-Total: **628 cases**, **17 areas**, **17 fixture fragments**
+Total: **637 cases**, **17 areas**, **17 fixture fragments**
 (plus 5 `*.delta.sql` write channels, all currently **comment-only** — each
 carries a single `-- Folded into ../fixtures.sql on 2026-08-08 …` provenance
 line and no DDL; see [`fixtures/README.md`](fixtures/README.md) for who may
@@ -106,13 +106,17 @@ header semantics, `mutations` owns the table-flavored `max-affected` cases
 That delegation currently lands nowhere: **no case in any band exercises
 `Prefer: handling` or `Prefer: max-affected` against `/rpc/*`**, and `PGRST128`
 ("Function must return SETOF or TABLE when max-affected preference is used with
-handling=strict") appears nowhere in the tree. Recorded in
-[`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → headers*; when closing it,
+handling=strict") is asserted by no case and modelled by no area file. Recorded
+in [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → headers*; when closing it,
 decide the owning band first so the delegation stops being circular.
 
 The same pattern applies to **`PGRST127`** (aggregates rejected inside a to-many
-spread): it appears nowhere in any band or area model. It belongs to `select`;
-see [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → select*.
+spread). It belongs to `select`; see
+[`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → select*.
+
+> Re-checked this pass: `grep -rl 'PGRST127\|PGRST128' spec/` matches exactly
+> two files — `COVERAGE.md` and this INDEX, i.e. only the documents recording
+> the gap. No case and no area model mentions either code.
 
 ## Per-area sub-feature breakdown
 
@@ -124,7 +128,7 @@ sub-features present per area (second segment, as on disk):
 | url_grammar | 1000–1029 | method, path, percent-encoding, profile, reserved-params, reserved-characters |
 | operators | 1050–1099 | eq, neq, lt/lte/gt/gte, in, is, like/ilike, match/imatch, fts/plfts/wfts/phfts, cs/cd/ov, sl/sr/nxl/nxr/adj, isdistinct, not, quantifier (any/all) |
 | select | 1100–1149 | columns, alias, cast, alias-and-cast, json-path, **composite**, **array**, computed-column, computed-relationship, embed (incl. one-to-one, the v16 alias/legacy-target-name rules and the `table!fk` hint), spread, aggregate |
-| filters | 1150–1190 | horizontal, logical, not, json, quoting, embed |
+| filters | 1150–1199 | horizontal, logical, not, json, quoting, embed |
 | ordering | 1200–1226 | direction, nulls, json_path, computed_column, multi_column, composite, related, embed, error |
 | pagination | 1250–1277 | limit_offset, range_header, count, embedded |
 | representations | 1300–1333 | post, patch, delete, put |
@@ -178,6 +182,22 @@ sub-features present per area (second segment, as on disk):
   **1742–1743** (the CORS default-preflight and the hard-coded
   `Access-Control-Expose-Headers` list — both **HTTP**, not CLI), and **1744**
   (`db-config = false` ignores `ALTER ROLE … SET pgrst.*`).
+- **filters** grew its band to **1150–1199** (50 cases, up from 41) and its
+  primary band is now **fully allocated** — `spec/filters.yaml` declares
+  `[10600..10799]` as the area's closed overflow range for any future case.
+  All nine new ids are `filters/embed/*` and none needed a fixture delta
+  (every filters case runs on relations `mix bier.fixtures.load` already
+  builds): **1191** (`third_level`, a filter on a third-level embed),
+  **1192–1193** (`inner` over two levels / direct-only),
+  **1194/1196–1199** (`null_filtering` — nested, many-to-one and many-to-many
+  `is.null` plus their `not.is.null` antijoins), and **1195**
+  (`or_across_embeds`, an `or=` whose branches target two different embeds).
+  Two existing cases were re-anchored rather than re-asserted: **1170** (notes
+  now record that the `body_exact []` is a seed inference stronger than the
+  cited it-block, re-verified against a freshly loaded `bier_test`) and
+  **1189**, whose `source:` moved off `Plan.hs#L855` onto the upstream
+  assertion that actually spells out the `299` Warning
+  (`QuerySpec.hs#L1187`), with the implementation line demoted to `notes:`.
 - **select/filters/ordering/url_grammar** gained the embed **alias vs. legacy
   target name** rules (1028, 1138–1141, 1188–1190, 1224).
 - **auth** grew from 45 to 69 cases; the 19 that did not fit the full 1450–1499
@@ -185,7 +205,7 @@ sub-features present per area (second segment, as on disk):
 
 ## Case file shapes
 
-Most cases are HTTP request/response (**590**). The **config** area additionally
+Most cases are HTTP request/response (**599**). The **config** area additionally
 uses a **CLI** shape (`request.kind: cli`, `request.flag: "--dump-config"`)
 asserting on `expect.exit_code`, `expect.dump_contains`,
 `expect.dump_reparse_stable`, and `expect.stderr_contains` rather than an HTTP
@@ -200,7 +220,9 @@ header because it needs a token signed with a secret the harness deliberately
 does not know.
 
 Any case may carry a `config:` block — **114** do (110 non-empty; 1705, 1719,
-1727 and 1743 carry an empty `config: {}`) — but the harness boots a dedicated
+1727 and 1743 carry an empty `config: {}`), spread over six areas: config 45,
+auth 33, observability 20, select 10, openapi 4, errors 2. None of the nine new
+filters cases carries one. The harness boots a dedicated
 instance only for the ids listed in `@variant_case_ids`
 (`test/support/conformance_server.ex:58-59`, **18** ids: 1467–1473, 1491, 1493,
 1654, 1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764) plus every `kind: cli`
@@ -212,7 +234,7 @@ ten select cases **1129–1133, 1139, 1140, 1147–1149**; see
 
 `preconditions:` is parsed but **never executed** by the harness — treat it as
 declarative documentation, never as setup a case may depend on. It is present on
-627 of the 628 cases (case **1330** omits it, which the schema allows).
+636 of the 637 cases (case **1330** omits it, which the schema allows).
 
 **3** cases assert `expect.status_text` (**1508, 1510, 1511**) and are tagged
 `:pending` / excluded by `test/conformance/conformance_test.exs`, because `Req`
