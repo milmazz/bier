@@ -16,6 +16,28 @@
 #     for ALIASED embeds (see `order.embed.alias` and
 #     `order.embed.alias.legacy_target_name`). Everything else re-verified
 #     byte-identical and only re-anchored.
+#   * Diffed v14.12 -> v16.0 to prove the rest is unchanged: `pOrder`/`pOrdDir`/
+#     `pNulls` (QueryParams.hs) and `pgFmtOrderTerm`/`orderF`/`pgFmtJsonPath`
+#     (SqlFragment.hs) are byte-identical; the whole ordering block of
+#     JsonOperatorSpec/QuerySpec is unchanged apart from the two alias tests;
+#     the only ordering-related CHANGELOG entry in the 16.0 section is
+#     "Deprecate filters, orders and limits with the name of an embedded table
+#     when it has an alias" (#4075).
+#   * Coverage added this pass: related orders across COMPUTED relationships
+#     (`order.related.computed_relationship`, cases 1227/1228) — the fixtures
+#     already exist in the consolidated DB's `test` schema, so the former gap
+#     of the same name is retired — and the nulls-order/limit interaction
+#     (`order.nulls.alongside_limits`, case 1229). The latter is NOT new in
+#     v16.0: it is upstream's #4109 regression guard, shipped in 13.0.2 and
+#     already present at the v14.12 pin; it had simply never been covered by
+#     this area, and pagination's twin (case 1276) carries no nulls clause.
+#   * Also modelled this pass: `order=` over a MUTATION's returned
+#     representation (`order.mutation_representation`, case 1230 for the
+#     top-level PATCH variant; the three variants needing web_content /
+#     artists+albums stay in the gap of the same name), and `order=` applied to
+#     an RPC/function result (`order.rpc_result`, cases 1231/1232). Neither is
+#     new in v16.0 — both predate the v14.12 pin; they had simply never been
+#     modelled by this area.
 
 area: ordering
 version: PostgREST v16.0
@@ -96,6 +118,10 @@ embed_target_resolution:
   # source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L213
   # source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L270
   #
+  # The header is emitted only when the config key is on AND the plan collected
+  # at least one legacy match.
+  # source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/App.hs#L215
+  #
   # Config key gating it, default true.
   # source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L324
   config_key: url-use-legacy-target-names
@@ -164,6 +190,22 @@ entries:
       `order=client_id.desc.nullslast,id.desc`.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1131
     cases: [1207]
+
+  - id: order.nulls.alongside_limits
+    claim: >
+      A nulls clause survives being combined with `limit` at the same level and
+      at an embed level:
+      `order=id.asc.nullslast&limit=1&projects.order=id.asc.nullsfirst&projects.limit=2`
+      returns the first client with its first two projects. Upstream's it-block
+      ("works alongside order by with nulls order") is the regression guard for
+      issue #4109 — "Fix regression that makes `ORDER BY` with nulls-order not
+      work alongside limits", CHANGELOG 13.0.2 — so it predates the previous
+      v14.12 pin (RangeSpec.hs#L227 there) and is unchanged at v16.0; it was
+      simply never covered by this spec tree. It is the nulls-carrying twin of
+      the plain nested-limit assertion at RangeSpec.hs#L202 (pagination case
+      1276), which carries no nulls clause.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L226
+    cases: [1229]
 
   - id: order.computed_column
     claim: >
@@ -289,6 +331,18 @@ entries:
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L47
     cases: [1221]
 
+  - id: order.related.computed_relationship
+    claim: >
+      A related order also works across a COMPUTED relationship (a function
+      taking the table's composite type and returning SETOF another table):
+      `order=computed_designers(id).desc` on
+      `computed_designers(videogames) RETURNS SETOF designers ROWS 1` sorts by
+      the computed to-one parent. The to-one requirement is enforced the same
+      way as for FK relationships — the one-to-many twin
+      `order=computed_videogames(id).desc` (no `ROWS 1`) is a 400 PGRST118.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L35
+    cases: [1227, 1228]
+
   - id: order.embed.by_nested_related
     claim: >
       An embedded resource can be ordered by a column of its own nested to-one
@@ -298,6 +352,60 @@ entries:
       `tasks.order=projects(id).desc,name`.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L67
     cases: [1222]
+
+  - id: order.mutation_representation
+    claim: >
+      `order` is not a read-only parameter: it also orders the rows a MUTATION
+      returns under `Prefer: return=representation`. Top level —
+      `PATCH /no_pk?order=a.desc` with body `{"b":"1"}` returns the three updated
+      rows sorted by `a` descending with the NULL row first (DESC defaults to
+      NULLS FIRST, per `defaults` above), status 200 and
+      `Preference-Applied: return=representation`. The same holds for a
+      `DELETE`'s representation (`/artists?id=lt.3&select=id,name,albums(title)&order=id.desc`)
+      and for a batch `POST` upsert (`/artists?select=id,name,albums(title)&order=id.desc`
+      with `resolution=merge-duplicates`). The embedded variant
+      `<embed>.order=` likewise orders the representation's embedded rows for
+      `PATCH` and `PUT`
+      (`/web_content?id=eq.0&select=id,name,web_content(name)&web_content.order=name.asc`).
+    # Additional anchors for the same behavior (one `source:` key per entry, so
+    # the siblings are cited here):
+    #   PATCH, embedded order:
+    #     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L739
+    #   DELETE, top-level order:
+    #     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/DeleteSpec.hs#L159
+    #   PUT, embedded order:
+    #     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L557
+    #   batch POST upsert, top-level order:
+    #     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L569
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L443
+    # Case 1230 asserts the top-level PATCH variant verbatim. The three variants
+    # that need `web_content` / `artists`+`albums` have no fixture home — see the
+    # gap of the same id.
+    cases: [1230]
+
+  - id: order.rpc_result
+    claim: >
+      `order` is not restricted to table/view reads: it also orders a FUNCTION's
+      result set on the `/rpc/<fn>` surface, alongside filters and limits.
+      Ascending: `/rpc/getitemrange?order=id&min=0&max=15` returns ids 1..15 with
+      `Content-Range: 0-14/*` (RangeSpec.hs#L30). The direction and json-path
+      grammar are the same as for a relation read: upstream's
+      `/rpc/returns_complex?select=val->r&val->i=gt.0.5&order=val->>i.desc`
+      (the `source` below) proves a `->>` json-arrow DESC order over a function
+      returning a dynamic TABLE with a composite type.
+    # Additional anchors for the same behavior (one `source:` key per entry, so
+    # the siblings are cited here):
+    #   RPC top-level order, ascending (the request cases 1231/1232 mirror):
+    #     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L30
+    #   Docs, order on an RPC call:
+    #     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/functions.rst#L283
+    #   Docs, "will also inline filters, order and limits":
+    #     https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/docs/references/api/functions.rst#L290
+    # The only pre-existing on-disk coverage was incidental and outside this
+    # band: pagination case 1271 (`/rpc/getallprojects?select=id&order=id`),
+    # which asserts a count envelope, not ordering.
+    source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/JsonOperatorSpec.hs#L318
+    cases: [1231, 1232]
 
   - id: order.related_not_to_one_error
     claim: >
@@ -325,30 +433,104 @@ entries:
 gaps:
   - id: order.embed.alias.legacy_disabled
     why: >
-      Behavior is fully traceable (QuerySpec.hs#L1709, Error.hs#L214/#L220) but
-      needs the instance booted with `url-use-legacy-target-names=false`. The
-      frozen harness only boots per-config variant instances for a hard-coded id
-      list (`@variant_case_ids` in test/support/conformance_server.ex), so a new
-      case carrying `config:` would silently run against the default instance and
-      fail. Modelled as an entry with `cases: []`; add the case once the harness
-      owner wires the id.
-  - id: order.related_to_one.computed_relationship
+      NOT uncovered in spec/ — it is covered from the select band. The
+      byte-identical request and the exact 400/PGRST108 envelope already exist on
+      disk as `spec/conformance/cases/1139_embed_alias_target_name_pgrst108.yaml`
+      (feature `select/embed/alias/target-name-disallowed-error`), which carries
+      `config: {url-use-legacy-target-names: false}` and cites the same
+      QuerySpec.hs#L1709 it-block. Since that upstream request drives a filter,
+      an order (`tasks.order=name.asc`) and a limit through the same target name,
+      an ordering-band duplicate would assert nothing new, so this area models the
+      behavior as an entry with `cases: []` and defers the assertion to 1139.
+      The one caveat is a harness limitation that applies to 1139 EQUALLY, not
+      only to a hypothetical new case: the frozen harness boots per-config variant
+      instances for a hard-coded id list (`@variant_case_ids`,
+      test/support/conformance_server.ex:58 — currently 1467-1473, 1491, 1493,
+      1654, 1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764), and **1139 is not in
+      it**, so 1139 today runs against the default instance where
+      `url-use-legacy-target-names` is still true. Wiring 1139 into
+      `@variant_case_ids` is the single harness-owner action that closes this
+      gap for both bands; no new case is needed.
+
+  - id: order.mutation_representation
     why: >
-      `order=computed_designers(id).desc` (related order across a *computed*
-      relationship, and its not-to-one failure twin
-      `order=computed_videogames(id).desc` -> PGRST118) is asserted upstream at
-      RelatedQueriesSpec.hs#L35 and #L128. It depends on the computed-relationship
-      fixtures (test.computed_designers / test.computed_videogames functions),
-      which are owned by the resource-embedding area, not ordering; no case added
-      here to avoid duplicating another area's fixture surface.
+      loader_exposure — PARTIAL, and narrowed this pass. The top-level PATCH
+      variant (UpdateSpec.hs#L443) is now asserted verbatim by case 1230; only
+      three of the four upstream assertions remain uncovered, all for the same
+      reason — the relations they drive do not exist anywhere in the
+      consolidated fixture DB:
+        * the embedded-order variants (PATCH #L739, PUT #L557) need
+          `web_content` (a self-referencing parent/child table), and
+        * the DELETE (#L159) and batch-POST upsert (#L569) variants need
+          `artists` + `albums`.
+      Verified against a freshly loaded `bier_test`:
+      `select table_schema, table_name from information_schema.tables where
+      table_name in ('web_content','artists','albums')` returns ZERO rows.
+      Standing that graph up would mint a shared mutable fixture surface that
+      belongs to the mutations/representations areas, not to ordering, so it is
+      recorded here rather than added to ordering.delta.sql.
+      A PREVIOUS revision of this gap also withheld the top-level PATCH case,
+      arguing that sibling inserts into `mutations.no_pk` (1352, 1379, 1394)
+      made the representation seed-dependent under ExUnit's randomized
+      within-module order. That rationale was WRONG and is retracted: those
+      writes never persist. The shared conformance instance is configured with
+      `db_tx_end: :rollback` (test/support/conformance_server.ex, base_opts/0)
+      and `Bier.Mutation.finish_tx/3` (lib/bier/mutation.ex) aborts every
+      mutation transaction after the response is computed; there is no
+      `Prefer: tx=` override path in lib/, and none of the sibling cases sends
+      `tx=commit` in any event. `mutations.no_pk` therefore always holds exactly
+      the loader-seeded (NULL,NULL), ('1','0'), ('2','0') — confirmed against
+      the loaded DB — and the only deliberate deviation from a straight `test.*`
+      copy anywhere in that schema is the loader's `mutations.articles` reset.
+
+  - id: order.rpc_result
+    why: >
+      loader_exposure — PARTIAL. The entry `order.rpc_result` is covered for the
+      plain-column form by cases 1231/1232 (`/rpc/getitemrange?order=id[.desc]`,
+      the `ordering` schema mirrors `getitemrange`). The stronger upstream
+      assertion — `/rpc/returns_complex?select=val->r&val->i=gt.0.5&order=val->>i.desc`
+      (JsonOperatorSpec.hs#L318), which drives a json-arrow DESC order over a
+      function returning a dynamic TABLE with a composite type — cannot be
+      minted: `returns_complex` exists in no schema of the consolidated fixture
+      DB (verified: zero rows in `pg_proc` for that name), and the function is an
+      RPC-area object, so exposing it means editing the live loader input
+      `spec/conformance/fixtures/rpc.sql` (forbidden) rather than
+      `ordering.delta.sql`. Closing this needs the loader to expose
+      `returns_complex` (upstream test/spec/fixtures/schema.sql) under an
+      ordering-visible schema. The docs example on the same surface
+      (`/rpc/best_films_2017?rating=gt.8&order=title.desc`,
+      docs/references/api/functions.rst#L283) is blocked identically —
+      `best_films_2017`/`films` are absent too.
+
+  - id: order.spread_embed
+    why: >
+      v16.0 newly exercises embedded orders on SPREAD embeds
+      (`...processes(...)&order=name&processes.order=name`, and its nested twin
+      `processes.supervisors.order=name`) and related orders that target a
+      spread embed (`order=process_categories(name)`,
+      `order=processes(factory_id).desc`,
+      `order=budget_categories(budget_owner)`).
+      Sources:
+      https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/SpreadQueriesSpec.hs#L163
+      https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L157
+      https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L168
+      https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L146
+      Both are real ordering behaviors, but every relation they need
+      (factories, processes, process_costs, process_categories, supervisors,
+      process_supervisor, budget_expenses, budget_categories) is absent from the
+      consolidated fixture DB — no spec/ area owns the spread/aggregate fixture
+      graph. Standing them up in ordering.delta.sql would mint a large shared
+      fixture surface outside this area's ownership, so no case is added; the
+      behavior is recorded here instead.
   - id: order.aggregate_column
     why: >
       No upstream assertion orders BY an aggregate result (e.g.
       `select=count(),client_id&order=count().desc`). Every AggregateFunctionsSpec
       request orders by a plain or spread-embed column, so nothing in this area is
-      traceable for "ordering on aggregate columns"; the spread-embed related
-      orders it does use (`order=budget_categories(budget_owner)`,
-      `order=processes(factory_id).desc`) belong to the aggregates/spread area.
+      traceable for "ordering on aggregate columns" — an exhaustive scan of
+      v16.0's test/spec for `order=<...>(sum|count|avg|max|min)()` returns zero
+      hits. The spread-embed related orders it does use are covered by the
+      `order.spread_embed` gap above, not here.
   - id: order.without_other_constraints
     why: >
       QuerySpec.hs#L1151 ("without other constraints") only asserts status 200 for

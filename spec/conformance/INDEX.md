@@ -1,7 +1,7 @@
 # Conformance case index
 
-Cross-reference of the **637** conformance cases under `spec/conformance/cases/`.
-Pinned target: **PostgREST v16.0** (all 637 `source:` URLs).
+Cross-reference of the **643** conformance cases under `spec/conformance/cases/`.
+Pinned target: **PostgREST v16.0** (all 643 `source:` URLs).
 
 Each case is one YAML file `NNNN_<slug>.yaml` validated against
 [`../case.schema.json`](../case.schema.json). Cases are grouped into 17 feature
@@ -43,7 +43,7 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | operators | 50 | 1050–1099 | `fixtures/operators.sql` | `operators` |
 | select | 50 | 1100–1149 | `fixtures/select.sql` | `test` |
 | filters | 50 | 1150–1199 | `fixtures/filters.sql` | `test` |
-| ordering | 27 | 1200–1226 | `fixtures/ordering.sql` | `ordering` |
+| ordering | 33 | 1200–1232 | `fixtures/ordering.sql` | `ordering`, `mutations` |
 | pagination | 28 | 1250–1277 | `fixtures/pagination.sql` | `pagination` |
 | representations | 24 | 1300–1314, 1320–1324, 1330–1333 | `fixtures/representations.sql` | `representations` |
 | mutations | 48 | 1350–1397 | `fixtures/mutations.sql` | `mutations` |
@@ -57,7 +57,7 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | observability | 20 | 1750–1769 | `fixtures/observability.sql` | `observability` |
 | domain_representations | 21 | 1800–1820 | `fixtures/domain_representations.sql` | `domain_representations` |
 
-Total: **637 cases**, **17 areas**, **17 fixture fragments**
+Total: **643 cases**, **17 areas**, **17 fixture fragments**
 (plus 5 `*.delta.sql` write channels, all currently **comment-only** — each
 carries a single `-- Folded into ../fixtures.sql on 2026-08-08 …` provenance
 line and no DDL; see [`fixtures/README.md`](fixtures/README.md) for who may
@@ -95,7 +95,15 @@ grep -h '^feature:' spec/conformance/cases/1800_format_single_domain_column.yaml
   that schema.
 - **`ordering` appears under `url_grammar`** (case 1028, the legacy embed
   target-name case, reuses the ordering fixture set), and **`test` appears under
-  `rpc`** (case 1440) and **under `headers`** (case 1576).
+  `rpc`** (case 1440), **under `headers`** (case 1576) and **under `ordering`**
+  (cases 1227–1228, the computed-relationship related orders — the
+  `computed_designers` / `computed_videogames` functions live in `test` and the
+  `ordering` view mirror does not carry them).
+- **`mutations` appears under `ordering`** (case 1230, `order=` applied to a
+  PATCH's returned representation). The `ordering` schema is a read-only view
+  mirror of `test`, so the write goes to the loader-isolated `mutations.no_pk`
+  real table; the case's `feature:` prefix (not its label) is what puts it in
+  the ordering area.
 
 ## Cross-area ownership caveat
 
@@ -129,7 +137,7 @@ sub-features present per area (second segment, as on disk):
 | operators | 1050–1099 | eq, neq, lt/lte/gt/gte, in, is, like/ilike, match/imatch, fts/plfts/wfts/phfts, cs/cd/ov, sl/sr/nxl/nxr/adj, isdistinct, not, quantifier (any/all) |
 | select | 1100–1149 | columns, alias, cast, alias-and-cast, json-path, **composite**, **array**, computed-column, computed-relationship, embed (incl. one-to-one, the v16 alias/legacy-target-name rules and the `table!fk` hint), spread, aggregate |
 | filters | 1150–1199 | horizontal, logical, not, json, quoting, embed |
-| ordering | 1200–1226 | direction, nulls, json_path, computed_column, multi_column, composite, related, embed, error |
+| ordering | 1200–1232 | direction, nulls (incl. alongside limits, 1229), json_path, computed_column, multi_column, composite, related (incl. computed relationships, 1227–1228), embed, mutation_representation (1230, `schema: mutations`), rpc (1231–1232), error |
 | pagination | 1250–1277 | limit_offset, range_header, count, embedded |
 | representations | 1300–1333 | post, patch, delete, put |
 | mutations | 1350–1397 | insert, update, delete, upsert, columns-param, missing-default, safe-update, safe-delete, max-affected |
@@ -198,6 +206,21 @@ sub-features present per area (second segment, as on disk):
   **1189**, whose `source:` moved off `Plan.hs#L855` onto the upstream
   assertion that actually spells out the `299` Warning
   (`QuerySpec.hs#L1187`), with the implementation line demoted to `notes:`.
+- **ordering** grew its band to **1200–1232** (33 cases, up from 27). The six new
+  ids are the newest in the tree and **none is a v16.0 behavior change** — every
+  one predates the pin and had simply never been modelled by this area:
+  **1227–1228** (`ordering/related/computed_relationship[_not_to_one_error]`,
+  related orders across a *computed* relationship and its PGRST118 rejection,
+  `RelatedQueriesSpec.hs#L35`/`#L128`; both carry `schema: test` because the
+  computed-relationship functions exist only there), **1229**
+  (`ordering/nulls/alongside_limits`, upstream's #4109 regression guard,
+  `RangeSpec.hs#L226` — pagination's twin 1276 carries no nulls clause),
+  **1230** (`ordering/mutation_representation/top_level`, `order=` over a PATCH's
+  returned representation, `UpdateSpec.hs#L443`, `schema: mutations`) and
+  **1231–1232** (`ordering/rpc/result[_desc]`, `order=` inlined into a function
+  result, `RangeSpec.hs#L30`). They added **no** fixture delta. The one
+  documented ordering surface still uncased — *Order in spread to-many* — is
+  recorded in [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → ordering*.
 - **select/filters/ordering/url_grammar** gained the embed **alias vs. legacy
   target name** rules (1028, 1138–1141, 1188–1190, 1224).
 - **auth** grew from 45 to 69 cases; the 19 that did not fit the full 1450–1499
@@ -205,7 +228,7 @@ sub-features present per area (second segment, as on disk):
 
 ## Case file shapes
 
-Most cases are HTTP request/response (**599**). The **config** area additionally
+Most cases are HTTP request/response (**605**). The **config** area additionally
 uses a **CLI** shape (`request.kind: cli`, `request.flag: "--dump-config"`)
 asserting on `expect.exit_code`, `expect.dump_contains`,
 `expect.dump_reparse_stable`, and `expect.stderr_contains` rather than an HTTP
@@ -221,8 +244,9 @@ does not know.
 
 Any case may carry a `config:` block — **114** do (110 non-empty; 1705, 1719,
 1727 and 1743 carry an empty `config: {}`), spread over six areas: config 45,
-auth 33, observability 20, select 10, openapi 4, errors 2. None of the nine new
-filters cases carries one. The harness boots a dedicated
+auth 33, observability 20, select 10, openapi 4, errors 2. Neither the nine new
+filters cases nor the six new ordering cases carries one, so this count is
+unchanged from the 637-case state. The harness boots a dedicated
 instance only for the ids listed in `@variant_case_ids`
 (`test/support/conformance_server.ex:58-59`, **18** ids: 1467–1473, 1491, 1493,
 1654, 1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764) plus every `kind: cli`
@@ -234,7 +258,7 @@ ten select cases **1129–1133, 1139, 1140, 1147–1149**; see
 
 `preconditions:` is parsed but **never executed** by the harness — treat it as
 declarative documentation, never as setup a case may depend on. It is present on
-636 of the 637 cases (case **1330** omits it, which the schema allows).
+642 of the 643 cases (case **1330** omits it, which the schema allows).
 
 **3** cases assert `expect.status_text` (**1508, 1510, 1511**) and are tagged
 `:pending` / excluded by `test/conformance/conformance_test.exs`, because `Req`

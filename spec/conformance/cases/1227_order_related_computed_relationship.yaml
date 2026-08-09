@@ -1,0 +1,31 @@
+id: 1227
+feature: ordering/related/computed_relationship
+request:
+  method: GET
+  path: /videogames?select=id,computed_designers(id)&order=computed_designers(id).desc
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - { "id": 3, "computed_designers": { "id": 2 } }
+    - { "id": 4, "computed_designers": { "id": 2 } }
+    - { "id": 1, "computed_designers": { "id": 1 } }
+    - { "id": 2, "computed_designers": { "id": 1 } }
+notes: >
+  A related order works across a COMPUTED relationship, not only a foreign-key
+  one: `computed_designers(test.videogames) RETURNS SETOF test.designers ROWS 1`
+  is a many-to-one computed relationship, so `order=computed_designers(id).desc`
+  is a valid related order (addRelatedOrders accepts it because relToParent is
+  to-one, Plan.hs#L881-L885) and sorts videogames by the computed designer's id.
+  Fixture: designers 1 "Sid Meier" (videogames 1, 2) and 2 "Hironobu Sakaguchi"
+  (videogames 3, 4), so desc puts designer 2's games first; ties keep the
+  scan order, matching the upstream assertion byte for byte.
+  `schema: test` rather than `ordering` because the computed-relationship
+  functions take composite arguments of `test.videogames`/`test.designers` and
+  exist only in the `test` schema of the consolidated fixture DB (they are not
+  mirrored into the per-area schemas); the same objects back cases 1136/1137.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L35

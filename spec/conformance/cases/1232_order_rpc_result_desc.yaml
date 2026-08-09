@@ -1,0 +1,48 @@
+id: 1232
+feature: ordering/rpc/result_desc
+request:
+  method: GET
+  path: /rpc/getitemrange?order=id.desc&min=0&max=15
+  headers: { Accept: application/json }
+schema: ordering
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Range: "0-14/*"
+  body_exact:
+    - { "id": 15 }
+    - { "id": 14 }
+    - { "id": 13 }
+    - { "id": 12 }
+    - { "id": 11 }
+    - { "id": 10 }
+    - { "id": 9 }
+    - { "id": 8 }
+    - { "id": 7 }
+    - { "id": 6 }
+    - { "id": 5 }
+    - { "id": 4 }
+    - { "id": 3 }
+    - { "id": 2 }
+    - { "id": 1 }
+notes: >
+  Discriminating twin of case 1231: the direction clause must actually reach the
+  function's result set. Upstream's own RPC-order assertion (RangeSpec.hs:30,
+  cited below) uses the ascending form, whose expected document coincides with
+  the relation's natural order, so it cannot distinguish "order applied" from
+  "order ignored"; this case sends `order=id.desc` against the same function.
+  The direction on an RPC is documented public surface — v16 docs
+  `references/api/functions.rst` L283 shows
+  `/rpc/best_films_2017?rating=gt.8&order=title.desc` and L290 states that
+  filters, order and limits inline into a function — and upstream exercises a
+  descending RPC order directly at JsonOperatorSpec.hs:318
+  (`/rpc/returns_complex?select=val->r&val->i=gt.0.5&order=val->>i.desc`), a
+  request this fixture DB cannot host (no `returns_complex`; see the
+  `order.rpc_result` gap in spec/ordering.yaml).
+
+  The expected body is therefore DERIVED, not copied from an upstream document:
+  `ordering.getitemrange(0,15)` returns `ordering.items` ids 1..15 (the
+  consolidated fixture's whole table), reversed here by the desc clause. The
+  count-less window stays `0-14/*`.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RangeSpec.hs#L30

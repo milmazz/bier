@@ -1,0 +1,27 @@
+id: 1228
+feature: ordering/related/computed_relationship_not_to_one_error
+request:
+  method: GET
+  path: /designers?select=id,computed_videogames(id)&order=computed_videogames(id).desc
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    code: "PGRST118"
+    details: "'designers' and 'computed_videogames' do not form a many-to-one or one-to-one relationship"
+    hint: null
+    message: "A related order on 'computed_videogames' is not possible"
+notes: >
+  The to-one requirement for a related order applies to computed relationships
+  too: `computed_videogames(test.designers) RETURNS SETOF test.videogames`
+  carries no `ROWS 1`, so it is one-to-many and
+  `order=computed_videogames(id).desc` fails with 400 PGRST118 (Plan.hs#L886,
+  `RelatedOrderNotToOne (qiName from) name`). The details/message name the
+  relation as addressed in the query string, i.e.
+  `fromMaybe relName relAlias` (Plan.hs#L883). Same schema rationale as
+  case 1227.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/RelatedQueriesSpec.hs#L128

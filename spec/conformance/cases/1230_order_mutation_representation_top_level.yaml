@@ -1,0 +1,41 @@
+id: 1230
+feature: ordering/mutation_representation/top_level
+request:
+  method: PATCH
+  path: /no_pk?order=a.desc
+  headers:
+    Content-Type: application/json
+    Prefer: return=representation
+  body: { "b": "1" }
+schema: mutations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Preference-Applied: return=representation
+  body_exact:
+    - { "a": null, "b": "1" }
+    - { "a": "2", "b": "1" }
+    - { "a": "1", "b": "1" }
+notes: >
+  `order` is not read-only: it also orders the rows a mutation returns under
+  `Prefer: return=representation`. Mirrors UpdateSpec.hs:443 ("with ordering on
+  top-level resource") byte-for-byte — same path, same body, same expected
+  document. `a.desc` carries no nulls clause, so PostgreSQL's DESC default
+  (NULLS FIRST) puts the NULL row first, which is exactly what upstream asserts
+  and what this area's `defaults` block models.
+
+  Fixture/determinism: `mutations.no_pk` is an isolated real table (the loader's
+  `isolate_mutations`), holding exactly (NULL,NULL), ('1','0'), ('2','0') — the
+  same three rows upstream seeds. The filterless PATCH therefore updates all
+  three. It is allowed because `no_pk` is not in the harness's
+  `db_safe_update_tables` (only `safe_update_items`/`safe_delete_items` carry
+  the pg-safeupdate guard), matching upstream, where the same request succeeds.
+  The sibling cases that write to this table (1352, 1379, 1394 insert; 1386's
+  PUT is rejected) cannot perturb the row set regardless of ExUnit's randomized
+  within-module order: the shared conformance instance runs with
+  `db_tx_end: :rollback` and every mutation transaction is aborted after the
+  response is computed, with no `Prefer: tx=commit` override path — and none of
+  those cases sends `tx=commit` anyway.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L443
