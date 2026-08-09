@@ -12,6 +12,8 @@ defmodule Bier.Plugs.FallbackController do
 
   import Plug.Conn
 
+  alias Bier.Plugs.Vary
+
   @impl Plug
   def init(config), do: config
 
@@ -547,6 +549,7 @@ defmodule Bier.Plugs.FallbackController do
     code = body_code(body)
 
     conn
+    |> Vary.mark_error()
     |> put_resp_content_type("application/json", "utf-8")
     |> put_resp_header("content-length", Integer.to_string(byte_size(response)))
     |> maybe_proxy_status(code)

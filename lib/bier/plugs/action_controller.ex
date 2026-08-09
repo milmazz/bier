@@ -435,7 +435,7 @@ defmodule Bier.Plugs.ActionController do
     count_mode = Pagination.count_mode(conn)
     config = effective_config(config, relation)
 
-    with {:ok, prefs} <- Bier.Preferences.parse_read(conn, pool),
+    with {:ok, prefs} <- Bier.Preferences.parse_read(conn),
          {:ok, plan} <- parse(conn, config),
          {:ok, %{body: body, count: count}} <-
            Bier.Cancellation.run(conn, config, fn ->

@@ -117,12 +117,7 @@ defmodule Bier.QueryExecutor do
     result =
       Postgrex.transaction(pool, fn tx ->
         Bier.Auth.with_context(tx, context, config, fn tx ->
-          set_local_timezone(tx, timezone)
-
-          case Postgrex.query(tx, sql, params) do
-            {:ok, result} -> result
-            {:error, err} -> Postgrex.rollback(tx, err)
-          end
+          run_with_timezone(tx, sql, params, timezone)
         end)
       end)
 
@@ -137,12 +132,7 @@ defmodule Bier.QueryExecutor do
 
   defp query_with_timezone(conn, sql, params, timezone) do
     Postgrex.transaction(conn, fn tx ->
-      set_local_timezone(tx, timezone)
-
-      case Postgrex.query(tx, sql, params) do
-        {:ok, result} -> result
-        {:error, err} -> Postgrex.rollback(tx, err)
-      end
+      run_with_timezone(tx, sql, params, timezone)
     end)
     |> case do
       {:ok, result} -> {:ok, result}
@@ -150,14 +140,30 @@ defmodule Bier.QueryExecutor do
     end
   end
 
-  # `Prefer: timezone=<name>` shifts timestamptz rendering. The name is validated
-  # against pg_timezone_names before we get here, so a `SET LOCAL TIME ZONE`
-  # inside the request transaction is safe; the literal is single-quote escaped.
+  # Apply the request's `Prefer: timezone` (if any) and run the read, inside the
+  # caller's transaction. Either statement failing rolls the transaction back
+  # with the Postgrex error so it reaches the error envelope unchanged.
+  defp run_with_timezone(tx, sql, params, timezone) do
+    with :ok <- set_local_timezone(tx, timezone),
+         {:ok, result} <- Postgrex.query(tx, sql, params) do
+      result
+    else
+      {:error, err} -> Postgrex.rollback(tx, err)
+    end
+  end
+
+  # `Prefer: timezone=<value>` shifts timestamptz rendering. PostgREST v16.0 no
+  # longer screens the value against pg_timezone_names — PostgreSQL is the judge,
+  # so a value it rejects (an unknown zone, a leap-seconds offset) must surface
+  # as its own SQLSTATE 22023 error rather than raising. The literal is
+  # single-quote escaped.
   defp set_local_timezone(_tx, nil), do: :ok
 
   defp set_local_timezone(tx, timezone) do
-    Postgrex.query!(tx, "SET LOCAL TIME ZONE '#{String.replace(timezone, "'", "''")}'", [])
-    :ok
+    case Postgrex.query(tx, "SET LOCAL TIME ZONE '#{String.replace(timezone, "'", "''")}'", []) do
+      {:ok, _result} -> :ok
+      {:error, _err} = error -> error
+    end
   end
 
   defp resolve_count(_conn, _rel, _plan, _rels, :none, _opts, body, exact) do

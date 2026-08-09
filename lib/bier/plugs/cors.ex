@@ -22,6 +22,11 @@ defmodule Bier.Plugs.Cors do
   For a CORS preflight (`OPTIONS` carrying `Access-Control-Request-Method`) the
   response additionally advertises the allowed methods, headers, exposed
   headers, and a 24h max-age — the fixed set PostgREST configures.
+
+  No `Vary: Origin` is emitted even when the origin is echoed: PostgREST builds
+  its policy with `corsVaryOrigin = False` (`Cors.hs`), leaving `Vary` entirely
+  to `Bier.Plugs.Vary`'s single funnel, which would otherwise be suppressed on
+  exactly the requests that carry an `Origin`.
   """
 
   @behaviour Plug
@@ -62,7 +67,6 @@ defmodule Bier.Plugs.Cors do
       conn
       |> put_resp_header("access-control-allow-origin", origin)
       |> put_resp_header("access-control-allow-credentials", "true")
-      |> put_resp_header("vary", "Origin")
       |> put_preflight_headers()
     else
       # Origin not in the allowlist: emit no Access-Control-Allow-Origin header.
