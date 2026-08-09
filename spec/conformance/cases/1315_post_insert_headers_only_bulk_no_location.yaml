@@ -1,0 +1,42 @@
+id: 1315
+feature: representations/post/return-headers-only-bulk-no-location
+request:
+  method: POST
+  path: /complex_items
+  headers:
+    Prefer: "return=headers-only"
+    Content-Type: application/json
+  body:
+    - { "id": 200, "name": "Doscientos" }
+    - { "id": 201, "name": "Doscientos Uno" }
+schema: representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Range: "*/*"
+    Content-Length: "0"
+    Preference-Applied: "return=headers-only"
+  headers_absent: [Content-Type, Location]
+  body_exact: ""
+notes: >-
+  return=headers-only emits a Location header ONLY when the insert affected
+  exactly one row. The SQL builder wraps the location expression in
+  `CASE WHEN pg_catalog.count(_postgrest_t) = 1 THEN coalesce(<locationF>, <no
+  location>) ELSE <no location> END` (Statements.hs#L45-L52, the guard itself at
+  #L48), so a bulk insert of two rows evaluates the ELSE arm and yields the
+  empty `array[]::text[]` (SqlFragment.hs#L102-L103). Response.hs#L91-L93 then
+  suppresses the header because `rsLocation` is null. Everything else is
+  unchanged from the single-row headers-only response (case 1304): 201, empty
+  body, Content-Length 0 (prepended unconditionally by the MutationCreate clause,
+  Response.hs#L116), Content-Range "*/*" for the insert range base 1 0 with no
+  count preference (Response.hs#L100-L101), and the
+  Preference-Applied: return=headers-only echo (Response.hs#L113,
+  Preferences.hs#L222). DERIVED FROM SOURCE for the headers-only half: v16.0's
+  bulk-insert it-block "returns 201 but no location header"
+  (InsertSpec.hs#L268-L281) sends NO Prefer header, so it exercises the Nothing
+  branch rather than the count=1 guard; grepping v16.0's test/spec for
+  "headers-only" finds no bulk variant. complex_items is one of the five
+  relations this area's fixture isolates as a real table (seeded ids 1..3), so
+  ids 200/201 are free and the insert affects exactly two rows.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Query/Statements.hs#L48

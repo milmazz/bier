@@ -1,0 +1,39 @@
+id: 1326
+feature: representations/rpc/return-token-not-echoed
+request:
+  method: POST
+  path: /rpc/add_them
+  headers:
+    Content-Type: application/json
+    Accept: application/json
+    Prefer: "return=representation"
+  body: { "a": 3, "b": 4 }
+schema: rpc
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  headers_absent: [Preference-Applied]
+  body_exact: 7
+notes: >-
+  An RPC invocation ignores `return=` entirely and never echoes it, even though
+  POST /rpc/<fn> looks like a mutation on the wire. A function call plans as a
+  CallReadPlan (Plan.hs#L211-L212), and responsePreferences pattern-matches
+  MutateReadPlan{} only — every other plan gets preferRepresentation = Nothing
+  (Response.hs#L281-L283). The RPC dispatch builds its prefHeader from that
+  rewritten set (Response.hs#L184), so with no other preference applied
+  prefsVals is empty and prefAppliedHeader returns Nothing
+  (Preferences.hs#L174-L175): no Preference-Applied header. The call itself is
+  unaffected — 200 with the scalar body 7, exactly as for the same function
+  invoked by GET. Cases 1402/1403 pin that GET form
+  (`GET /rpc/add_them?a=3&b=4`), which is a DIFFERENT arm of callReadPlan's
+  invMethod handling: `InvRead _` takes its parameter keys and its arguments
+  from the query string (DirectArgs), while this case's `Inv` takes them from
+  the JSON body via iColumns (Plan.hs#L213-L215, args at #L220-L223). Only the
+  header behavior is shared. DERIVED FROM SOURCE: grepping
+  v16.0's test/spec/Feature/Query/RpcSpec.hs for "return=" finds no matches, so
+  no upstream it-block sends the token to an RPC; the absence assertion rests on
+  the cited dispatch. This is the RPC half of the "echoed only for mutations"
+  rule that case 1325 pins for plain reads.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L281

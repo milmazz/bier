@@ -1,0 +1,36 @@
+id: 1327
+feature: representations/prefer/preference-applied-fixed-order
+request:
+  method: POST
+  path: /complex_items?select=id,name
+  headers:
+    Prefer: "count=exact, return=representation"
+    Content-Type: application/json
+  body: { "id": 204, "name": "Doscientos Cuatro" }
+schema: representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Range: "*/1"
+    Preference-Applied: "return=representation, count=exact"
+  headers_absent: [Location]
+  body_exact: [{ "id": 204, "name": "Doscientos Cuatro" }]
+notes: >-
+  Preference-Applied composes the applied preferences into ONE header value
+  joined with ", " in a FIXED order — resolution, missing, representation, count,
+  transaction, handling, timezone, max-affected — independent of the order the
+  client sent them (Preferences.hs#L178-L188, header assembled at #L172-L176).
+  This case sends `count=exact` BEFORE `return=representation` and still expects
+  "return=representation, count=exact", which is what makes it discriminating:
+  case 1300 sends the two tokens already in output order, so it cannot tell a
+  fixed-order implementation from one that merely echoes request order. Upstream
+  asserts this exact composed value (InsertSpec.hs#L101, DeleteSpec.hs#L33) but
+  always with the request tokens supplied in output order, as separate Prefer
+  headers; the reversed-order variant is DERIVED FROM the cited prefsVals
+  ordering. Everything else is the ordinary Full arm of the MutationCreate
+  dispatch: 201, the &select-shaped array body, Content-Type, and Content-Range
+  "*/1" because count=exact makes the insert range base 1 0 report the total
+  (Response.hs#L100-L101, #L111).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L179

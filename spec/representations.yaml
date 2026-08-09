@@ -10,14 +10,25 @@
 # Prefer header parser in PostgREST/ApiRequest/Preferences.hs, cross-checked
 # against the Feature test specs.
 #
-# Re-sync note (v14.12 -> v16.0): no behavior in this area changed. The v16.0
-# source tree moved the library modules from `src/PostgREST/...` to
+# Re-sync note (v14.12 -> v16.0): no behavior in this area changed —
+# re-verified by diffing both pins rather than carried over. The v16.0 source
+# tree moved the library modules from `src/PostgREST/...` to
 # `src/library/PostgREST/...`, and every dispatch clause lost two trailing
 # `_` parameters from `actionResponse` (the `schema`/`negotiatedByProfile`
 # arguments are now read off `ApiRequest`), so all line anchors shifted. The
 # `return=` case arms, the status rules, the header sets, and
 # `responsePreferences`/`prefAppliedHeader` are byte-identical between the two
-# pins.
+# pins. The four Feature specs this area cites (Insert/Update/Delete/Upsert)
+# differ only in harness plumbing — `spec :: SpecWith ((), Application)` became
+# `spec :: SpecWithConfig` and the `Network.Wai (Application)` import went away,
+# shifting InsertSpec by 3 lines and Update/Delete/UpsertSpec by 1-2 — plus one
+# InsertSpec change outside this area: the generated-column error block dropped
+# its `actualPgVersion < pgVersion140` branch (InsertSpec.hs#L554-L559), which
+# shifts every InsertSpec anchor after it by a further 7 lines. The only
+# `Preferences.hs` behavior change in the window is `Prefer: timezone` (v16.0
+# dropped the `TimezoneNames` schema-cache check from `fromHeaders`), which does
+# not touch `return=`. No `return=`-related entry appears in the v16.0
+# changelog.
 
 version: v16.0
 
@@ -62,12 +73,55 @@ preference:
       - handling
       - timezone
       - max-affected
+    # The order is FIXED by the prefsVals list, not by the order the client
+    # sent the tokens: `Prefer: count=exact, return=representation` still yields
+    # `Preference-Applied: return=representation, count=exact`.
+    independent_of_request_order: true
+    case: 1327
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L179-L188
   # Only mutation plans (MutateReadPlan) echo return= at all. For RPC
   # (CallReadPlan) and plain reads, preferRepresentation is forced to Nothing
   # before the header is built.
   echoed_only_for_mutations:
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L281-L283
+    # A GET on a relation plans as WrappedReadPlan and an RPC call as
+    # CallReadPlan; both build prefHeader from the rewritten preference set, so
+    # `Prefer: return=...` alone yields NO Preference-Applied header on either.
+    # It is not an error either: the token is in acceptedPrefs, so it never
+    # reaches invalidPrefs and cannot trip the handling=strict guard.
+    read_dispatch_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L63
+    rpc_dispatch_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L184
+    cases: [1325, 1326]
+
+  # --- How the return= token is parsed out of the Prefer header(s) ----------
+  parsing:
+    # Every Prefer header is split on ',' and each token stripped, preserving
+    # REQUEST order across multiple Prefer headers.
+    tokenization_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L152-L153
+    duplicate_token:
+      rule: "first occurrence in request order wins"
+      # parsePrefs walks the request tokens and returns the first that is a key
+      # of prefMap — so `return=minimal, return=representation` resolves to None
+      # even though Full is listed first in `parsePrefs [Full, None, HeadersOnly]`.
+      mechanism_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L165-L167
+      # Upstream doctests: "If a preference is set more than once, only the
+      # first is used" (tx=commit,tx=rollback => Just Commit; and the same
+      # across separate headers for resolution=).
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L100
+      case: 1318
+    unknown_value:
+      rule: >-
+        An unrecognized return= value (e.g. return=bogus) is IGNORED, not
+        rejected: preferRepresentation is Nothing, the response is the
+        no-token response, and the token is never echoed. It is recorded in
+        invalidPrefs, which raises 400 PGRST122 only when handling=strict is
+        also present.
+      # prefMap is keyed by exactly the three canonical tokens.
+      lookup_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L133
+      invalid_prefs_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/ApiRequest/Preferences.hs#L140
+      # The strict guard, per plan kind: reads #L199, mutations #L207, RPC #L231.
+      source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Plan.hs#L207
+      case: 1319
   # When return= is absent the dispatch treats it as the Nothing branch, which
   # is identical to None (empty body, no Preference-Applied: return=...).
   default_when_absent:
@@ -112,8 +166,39 @@ actions:
       location_emit_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L91-L99
       # Consequently a plain POST (no Prefer) or a POST with
       # return=representation carries NO Location, even on a table with a PK.
-      location_absent_without_headers_only: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L745
+      # Both halves are asserted upstream against test.projects, a TABLE whose
+      # PK is `id`: the no-Prefer half is the "requesting no representation"
+      # it-block (matchHeaderAbsent hLocation at #L165), the
+      # return=representation half is "includes related data after insert"
+      # (matchHeaderAbsent hLocation at #L99). Do NOT cite InsertSpec.hs#L745
+      # for this: that it-block lives under `describe "Inserting into VIEWs"`
+      # and posts to /compound_pk_view, so it proves the rule only for a view.
+      location_absent_without_headers_only: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L157
+      location_absent_with_representation_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L99
+      # Even WITH return=headers-only there are two further suppressions, each
+      # sufficient on its own; when they fire rsLocation is the empty
+      # `array[]::text[]` (noLocationF) and Response.hs emits no header.
+      location_suppressed_when:
+        bulk_insert:
+          rule: "affected rows != 1 => no Location (the CASE guard's ELSE arm)"
+          source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Query/Statements.hs#L48
+          case: 1315
+        relation_without_pk:
+          rule: >-
+            No PK columns => locationF's `WHERE json_data.key IN ('')` matches
+            nothing, array_agg returns NULL, and the coalesce falls through to
+            noLocationF.
+          source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Query/Statements.hs#L49
+          location_builder_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Query/SqlFragment.hs#L223-L231
+          no_location_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Query/SqlFragment.hs#L102-L103
+          cases: [1316, 1317]
       Content-Range: "*/N when count=exact else */* ; insert range base is 1 0"
+      # `Just . RangeQuery.contentRangeH 1 0 $ if shouldCount (preferCount ...)
+      # then Just rsQueryTotal else Nothing` — unconditionally present (it is a
+      # `Just`, not a `catMaybes` candidate), with the total filled in only when
+      # a count preference applies. Cased by 1300/1327 (*/1 with count=exact)
+      # and by 1304/1309/1315/1319 (*/* without).
+      content_range_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Response.hs#L100-L101
       # Unlike PATCH/DELETE/PUT, the insert clause prepends Content-Length
       # unconditionally, so an empty body still reports Content-Length: 0.
       Content-Length: "always present; 0 for the empty-body resolutions"
@@ -277,9 +362,18 @@ notes:
       A composite primary key yields a multi-filter Location, e.g.
       Location: /with_multiple_pks?pk1=eq.1&pk2=eq.2. A nullable PK column
       renders as `is.null` in the Location, e.g.
-      /test_null_pk_competitors_sponsors?id=eq.1&sponsor_id=is.null.
+      /test_null_pk_competitors_sponsors?id=eq.1&sponsor_id=is.null — locationF
+      builds each pair as
+      `key || '=' || coalesce('eq.' || value, 'is.null')`, so a NULL value in a
+      key column becomes `is.null` rather than `eq.`.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L756
     null_pk_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L783
+    null_pk_mechanism_source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Query/SqlFragment.hs#L226
+    # NOT covered by a conformance case: a base table can never have a NULL key
+    # column (PRIMARY KEY implies NOT NULL), so `is.null` is only reachable
+    # through a VIEW whose key columns are inferred from more than one base
+    # table (upstream's test_null_pk_competitors_sponsors is a LEFT JOIN view
+    # with an INSTEAD OF-style rule). Recorded as a gap; see gaps below.
   - claim: >-
       PATCH with return=representation that matches zero rows returns 200 with
       an empty JSON array body, not 204.
@@ -298,3 +392,11 @@ notes:
       PUT (single upsert) with return=representation that REPLACES an existing
       row returns 200 and echoes Preference-Applied: return=representation.
     source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpsertSpec.hs#L557
+
+# --- Gaps -------------------------------------------------------------------
+gaps:
+  - "The `is.null` rendering of a NULL key column in the headers-only Location (https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L783, block L783-L794, asserting Location: /test_null_pk_competitors_sponsors?id=eq.1&sponsor_id=is.null) has no conformance case, and it is not merely a missing table. The mechanism is citable — locationF emits `key || '=' || coalesce('eq.' || value, 'is.null')` at src/library/PostgREST/Query/SqlFragment.hs#L226 — but it is UNREACHABLE on a base table, because PRIMARY KEY implies NOT NULL. Upstream reaches it only through a view: test_null_pk_competitors_sponsors is `SELECT c.id, s.id AS sponsor_id FROM competitors c LEFT JOIN sponsors s ON c.sponsor_id = s.id` plus an `ON INSERT ... DO INSTEAD` rule (test/spec/fixtures/schema.sql#L754-L763), and the two-column Location proves PostgREST treats BOTH view columns as key columns because each traces back to a different base table's PK. Casing it therefore also pins multi-base-table view-key inference, which is select/url_grammar territory rather than representations. loader_exposure: `competitors`, `sponsors` and the rule-backed `test_null_pk_competitors_sponsors` view would have to be created and exposed under the `representations` area schema; note the area's isolate_representations hardcodes its real-table list (items, projects, clients, complex_items, auto_incrementing_pk) and everything else is a plain view mirror of test.*, so a fixtures delta alone would not reproduce upstream's rule-based insert path."
+  - "`with_multiple_pks` (https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L756, block L756-L767) and `compound_pk_view` (#L770-L781) are the upstream targets for the composite-PK headers-only Location, and neither relation exists in the consolidated fixture database. No case was added for them because the rule they assert is already pinned by case 1309, which derives the identical claim (Location: /car_models?name=eq.Enzo&year=eq.2021, InsertSpec.hs#L142-L154) onto car_models. Recorded so the omission reads as a deliberate de-duplication rather than an oversight. CORRECTION (this pass): an earlier revision of this entry said the `compound_pk_view` leg 'additionally carries a view-specific angle (key columns inferred through a view) that 1309 does not cover'. That is FALSE. Only `test.car_models` is a table (fixtures.sql#L711-L715, seeded empty); car_models is not in isolate_representations' real-table list (items, projects, clients, complex_items, auto_incrementing_pk — lib/mix/tasks/bier.fixtures.load.ex:460), so under `schema: representations` the target is `representations.car_models`, the plain mirror VIEW `CREATE VIEW \"representations\".\"car_models\" AS SELECT * FROM test.\"car_models\"` (same file, line 417). Case 1309 therefore already exercises composite key-column inference THROUGH A VIEW, which is exactly `compound_pk_view`'s angle. What remains genuinely uncovered is narrower and is the is.null gap above: key columns inferred through a view over MORE THAN ONE base table, where the two columns trace back to two different PKs and one of them can be NULL."
+  - "No upstream it-block asserts Content-Range on a PATCH/DELETE that ALSO sends Prefer: count=exact, so the `0-(N-1)/N` and `*/N` halves of the per-action Content-Range entries are modeled from Response.hs#L122-L124 and #L161 rather than from a test. The count=exact half IS cased for POST (1300, 1327, Content-Range */1) and for DELETE (1320, DeleteSpec.hs#L27-L34, Content-Range */1); only the multi-row PATCH form `0-(N-1)/N` is uncased here — the mutations band owns the multi-row-update Content-Range case."
+  - "operator_action: the frozen harness never executes an HTTP case's `preconditions:` list (test/support/conformance_case.ex parses the key and nothing runs it). Only one case in this band carries a non-empty one — 1305, whose `ALTER SEQUENCE test.auto_incrementing_pk_id_seq RESTART WITH 2` is BOTH inert and mis-qualified: it names test.* while the case runs under `schema: representations`. It passes anyway because lib/mix/tasks/bier.fixtures.load.ex's isolate_representations gives representations.auto_incrementing_pk its own sequence and setvals it to 2, and the loader comment says so explicitly. If preconditions are ever wired up, that statement must be re-qualified to representations.* first or it will reset the shared test.* sequence other areas depend on. CORRECTION (this pass): an earlier revision of this entry claimed 'Every case added this pass carries `preconditions: []`'. That is FALSE — case 1330 (spec/conformance/cases/1330_put_upsert_insert_201.yaml) carries no `preconditions` key at all; where the key would go it has a free-text YAML comment explaining that its target id must not pre-exist. It is schema-valid (`preconditions` is not in case.schema.json's `required` list) and it is the ONLY case in the whole tree missing the key, which spec/conformance/INDEX.md also records. Accurate statement: 31 of this area's 32 cases carry `preconditions: []`, 1330 omits the key, and all 32 are valid against the loaded state as-is."
+  - "needed_assertion: nothing. Every behavior cased this pass was expressible with the existing case.schema.json keys (status, headers, headers_absent, body_exact). Recorded explicitly so a later pass does not re-derive the question: the one shape that came close was 'Preference-Applied must be exactly this string, with no additional tokens', which `headers:` already gives — it compares the full header value, not a substring."
