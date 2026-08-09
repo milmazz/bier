@@ -1,0 +1,34 @@
+id: 1824
+feature: domain_representations/write/view_post_headers_only
+request:
+  method: POST
+  path: /datarep_todos_computed
+  headers:
+    Prefer: "return=headers-only"
+    Content-Type: application/json
+  body_json:
+    {
+      "id": 5,
+      "name": "party",
+      "label_color": "#001100",
+      "due_at": "2018-01-03T11:00:00+00",
+    }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Location: "/datarep_todos_computed?id=eq.5"
+    Content-Range: "*/*"
+    Content-Length: "0"
+    Preference-Applied: "return=headers-only"
+  headers_absent: [Content-Type]
+  body_exact: ""
+notes: >
+  Upstream InsertSpec "on updatable view" > "parses values in POST body". The
+  `json AS <domain>` parsers are resolved from the VIEW's column types, so an
+  insert through the auto-updatable datarep_todos_computed parses "#001100" the
+  same way the base table does; the write reaches test.datarep_todos underneath.
+  Location is keyed on the view's inherited primary key (id), which PostgREST
+  resolves through the view's column dependencies.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L855

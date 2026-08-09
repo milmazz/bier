@@ -1,0 +1,33 @@
+id: 1821
+feature: domain_representations/filter/pattern_operator_unsupported
+request:
+  method: GET
+  path: /datarep_todos?select=id,name&label_color=ilike.%23*100
+  headers: { Accept: application/json }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 404
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_jsonpath:
+    - { path: "$.code", equals: "42883" }
+notes: >
+  Pattern operators (like/ilike) are deliberately NOT wired to data
+  representations: SqlFragment.hs formats them through the `OpQuant` arm
+  (`OpILike -> fmtQuant quant $ unknownLiteral (T.map star val)`,
+  SqlFragment.hs#L388), which — unlike the `Op` arm at L384 — never calls
+  `pgFmtUnknownLiteralForField`, so the `text AS color` parser is not applied
+  and the raw pattern reaches Postgres as `label_color ~~* '#%100'`. Postgres
+  then raises 42883 ("operator does not exist: ... color ~~* unknown"), which
+  PostgREST maps to 404 (Error.hs#L584-L586, the "undefined function" arm).
+  The upstream it-block exists only to prove PostgREST does not panic and adds
+  no inappropriate SQL. Only `code` and the status are asserted: upstream
+  branches the body on the server version (details/hint move between the two on
+  PG >= 19, QuerySpec.hs#L1657-L1665) and the `message` is search_path
+  dependent — upstream's test config has `configDbExtraSearchPath = []`
+  (SpecHelper.hs#L139) so the type prints qualified as `public.color`, while a
+  deployment that keeps `public` on the search path prints a bare `color`.
+  The `#` of the upstream request is sent as `%23`; the server percent-decodes
+  it back to the identical logical request.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1655

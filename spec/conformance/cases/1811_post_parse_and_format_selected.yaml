@@ -20,6 +20,7 @@ expect:
   status: 201
   headers:
     Content-Type: application/json; charset=utf-8
+    Content-Range: "*/*"
   body_exact: [{ "id": 5, "label_color": "#001100" }]
-notes: "POST body color value parsed via CREATE CAST (json AS color); the selected column is re-formatted via color AS json on return=representation (round trip). Mirrors InsertSpec.hs 'parses values in POST body and formats individually selected values in return=representation'."
+notes: "POST body color value parsed via CREATE CAST (json AS color); the selected column is re-formatted via color AS json on return=representation (round trip). Upstream asserts Content-Range \"*/*\" alongside the Content-Type on this POST (InsertSpec.hs#L821), exactly as its updatable-view twin (case 1825) does. Mirrors InsertSpec.hs 'parses values in POST body and formats individually selected values in return=representation'."
 source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L814

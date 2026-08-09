@@ -1,0 +1,32 @@
+id: 1825
+feature: domain_representations/write/view_post_format_selected
+request:
+  method: POST
+  path: /datarep_todos_computed?select=id,label_color
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Prefer: return=representation
+  body_json:
+    {
+      "id": 5,
+      "name": "party",
+      "label_color": "#001100",
+      "due_at": "2018-01-03T11:00:00+00",
+    }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Range: "*/*"
+  body_exact: [{ "id": 5, "label_color": "#001100" }]
+notes: >
+  Upstream InsertSpec "on updatable view" > "parses values in POST body and
+  formats individually selected values in return=representation". The view
+  round-trips a domain value exactly as the table does (case 1811): the body's
+  "#001100" is parsed by `json AS color` on the way in and re-formatted by
+  `color AS json` on the way out, and the explicit ?select restricts the
+  returned document to the two named columns.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L870

@@ -1,0 +1,49 @@
+id: 1832
+feature: domain_representations/write/patch_bulk_format_all_columns
+request:
+  method: PATCH
+  path: /datarep_todos_computed?id=lt.4
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Prefer: return=representation
+  body_json: { "label_color": "#221100", "due_at": "2019-01-03T11:00:00Z" }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Range: "0-2/*"
+    Preference-Applied: return=representation
+  body_exact:
+    [
+      {
+        "id": 1,
+        "name": "Report",
+        "label_color": "#221100",
+        "dark_color": "#110880",
+        "due_at": "2019-01-03T11:00:00Z",
+      },
+      {
+        "id": 2,
+        "name": "Essay",
+        "label_color": "#221100",
+        "dark_color": "#110880",
+        "due_at": "2019-01-03T11:00:00Z",
+      },
+      {
+        "id": 3,
+        "name": "Algebra",
+        "label_color": "#221100",
+        "dark_color": "#110880",
+        "due_at": "2019-01-03T11:00:00Z",
+      },
+    ]
+notes: >
+  Upstream UpdateSpec "for multiple rows" > "parses values in payload and formats
+  values in return=representation". Same three-row patch as case 1831 but with
+  no ?select, so the full row — every domain column plus the view's computed
+  dark_color — is formatted for each returned row. Body verified against a
+  freshly loaded bier_test.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L696

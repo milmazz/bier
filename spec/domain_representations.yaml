@@ -8,12 +8,13 @@
 #   * CREATE CAST (json AS <domain>) -- write in:  JSON request body -> domain
 #   * CREATE CAST (text AS <domain>) -- parse:     query-string filter values
 # Covered: a domain rendered via a registered `<domain> AS json` cast, the
-# inverse `json AS <domain>` cast on insert, the `text AS <domain>` cast used
-# for filter values (including IN / NOT IN predicates and filters targeting an
-# embedded relation), formatting through embeds/views/computed columns, manual
-# ::cast layered on top, NULL handling, ?columns interaction, and the DEFAULT
-# behaviour when no `<domain> AS json` cast exists (the base type's plain JSON
-# rendering).
+# inverse `json AS <domain>` cast on insert and update, the `text AS <domain>`
+# cast used for filter values (including IN / NOT IN predicates and filters
+# targeting an embedded relation), formatting through embeds/views/computed
+# columns, manual ::cast layered on top, NULL handling, ?columns interaction,
+# the pattern operators that are deliberately NOT wired to representations, and
+# the DEFAULT behaviour when no `<domain> AS json` cast exists (the base type's
+# plain JSON rendering, plus column-default-beats-domain-default).
 #
 # Every entry carries a `source` URL with a line anchor into PostgREST v16.0.
 # Behaviors that could not be traced to a real source line are recorded under
@@ -22,18 +23,57 @@
 # v14.12 -> v16.0 re-sync notes (the diff, for the record):
 #   * The area is behaviorally UNCHANGED. `src/library/PostgREST/SchemaCache/
 #     Representations.hs` differs only by a dropped `{-# LANGUAGE DeriveGeneric
-#     #-}` pragma; the `dataRepresentations` catalog query in `SchemaCache.hs`
-#     (pg_cast where castcontext='i' AND castmethod='f' AND either side is a
-#     domain and the other is json/text) is byte-identical; the resolver
-#     (`withTransformer`/`withOutputFormat`/`withTextParse`/`withJsonParse` in
-#     `Plan.hs`) is unchanged; the `datarep_*` fixture DDL and seed rows are
+#     #-}` pragma (v14.12 keeps the module at `src/PostgREST/...`; v16.0 moved
+#     the whole tree under `src/library/`); the `dataRepresentations` catalog
+#     query in `SchemaCache.hs` (pg_cast where castcontext='i' AND
+#     castmethod='f' AND either side is a domain and the other is json/text) is
+#     byte-identical; the resolver (`withTransformer`/`withOutputFormat`/
+#     `withTextParse`/`withJsonParse` in `Plan.hs`) is unchanged; the
+#     `datarep_*` and `devil_int`/`evil_friends*` fixture DDL and seed rows are
 #     unchanged; `docs/references/api/domain_representations.rst` is unchanged.
-#   * Two upstream requests gained an explicit `&order=id` (the two embed tests
-#     and the cross-relation filter test) — same expected bodies, deterministic
-#     top-level ordering. Cases 1807/1816/1818 carry the v16.0 request.
-#   * The one intentionally-unsupported behavior (ilike on a data-rep column)
-#     now asserts a PostgreSQL-version-dependent error body and no longer pins
-#     Content-Length; it stays unmodeled (see gaps).
+#   * Three upstream requests gained an explicit `&order=id` (the two embed
+#     tests and the cross-relation filter test) — same expected bodies,
+#     deterministic top-level ordering. v14.12 QuerySpec.hs L1600/L1604/L1638
+#     carry no `order`; the same three requests at v16.0 QuerySpec.hs
+#     L1612/L1616/L1650 all do, which is why cases 1807, 1816 AND 1818 each
+#     carry `&order=id`.
+#   * The intentionally-unsupported ilike behavior now asserts a
+#     PostgreSQL-version-dependent error body and no longer pins Content-Length;
+#     case 1821 asserts only the version-independent part (status + code).
+#
+# Coverage notes for THIS pass (the v16.0 re-sync of this area):
+#   * The whole write half of the area (InsertSpec's "on updatable view"
+#     context, its headers-only POST, and the entire UpdateSpec "Data
+#     representations" PATCH block) had been left unmodeled on the earlier pass
+#     under the belief that Bier's conformance harness could not isolate
+#     mutations. That is false: the shared conformance instance runs with
+#     `db_tx_end: :rollback` (test/support/conformance_server.ex) and
+#     `Bier.Mutation.finish_tx/3` aborts every mutation transaction after the
+#     response is computed, which is the same isolation upstream gets from
+#     `configDbTxRollbackAll = True`. Cases 1823-1836 model that block; the old
+#     `mutation_isolation` gap is retired below.
+#   * Every expected body in this area was re-derived against a freshly loaded
+#     `bier_test` (`mix bier.fixtures.load`), by calling the representation
+#     functions directly. Note that `<domain>::json` does NOT work in
+#     PostgreSQL — the cast is registered but the coercion machinery smashes the
+#     domain first — which is why PostgREST calls the cast's underlying FUNCTION
+#     (`pgFmtCallUnary`, SqlFragment.hs#L259) instead of emitting a `::` cast.
+#   * Upstream asserts data-representation behavior at FOUR sites, not three:
+#     QuerySpec.hs L1540-L1670, InsertSpec.hs L797-L908 (+ L562/L571),
+#     UpdateSpec.hs L646-L737, and ComputedRelsSpec.hs L105-L144. The first
+#     three are fully cased below. The fourth is NOT modeled and is not covered
+#     by any other area either; see the gaps
+#     `domain_representations.computed_rels_datarep_response` (blocked on
+#     `Prefer: tx=commit` + the single-request case shape) and
+#     `domain_representations.designers_titlecasetext_fixture_divergence`
+#     (blocked on `test.designers.name` being plain `text` in the consolidated
+#     seed where upstream uses the `public.titlecasetext` domain).
+#   * TWO FIXTURE HAND-OFFS leave this area not-yet-green on a plain
+#     `mix bier.fixtures.load`: case 1822 needs the un-folded
+#     `test.evil_friends_with_column_default` from
+#     spec/conformance/fixtures/domain_representations.delta.sql, and the
+#     titlecasetext divergence above. Both are recorded as gaps with the exact
+#     DDL; neither is an implementation defect.
 #
 # Convention for `source_url`: raw.githubusercontent.com line anchors, pinned to
 # the v16.0 tag, matching the form mandated by spec/case.schema.json. Each #Lnn
@@ -197,7 +237,31 @@ entries:
     source_line: 1649
     cases: [1818]
 
-  # --- write: json AS domain cast ------------------------------------------
+  - entry_id: domain_representations.filter_pattern_operator_unsupported
+    claim: >
+      Pattern operators (like/ilike, with or without a quantifier) are
+      deliberately NOT wired to data representations: SqlFragment formats them
+      through the OpQuant arm, which never calls pgFmtUnknownLiteralForField, so
+      the `text AS <domain>` parser is skipped and the raw pattern reaches
+      Postgres. `label_color=ilike.#*100` therefore raises 42883 ("operator does
+      not exist: ... color ~~* unknown"), which PostgREST surfaces as 404. The
+      upstream test exists only to prove PostgREST neither panics nor injects
+      inappropriate SQL.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1655
+    source_line: 1655
+    cases: [1821]
+
+  # --- write: json AS domain cast (INSERT) ----------------------------------
+  - entry_id: domain_representations.parse_post_body_headers_only
+    claim: >
+      The `json AS <domain>` parsers run on a POST body even when nothing is
+      returned: a `Prefer: return=headers-only` insert of "#001100" into a color
+      column succeeds with 201 + Location, which it could not do if the value
+      reached the integer base type unparsed.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L799
+    source_line: 799
+    cases: [1823]
+
   - entry_id: domain_representations.parse_post_body_select_shaped
     claim: >
       On POST with return=representation, JSON body values for domain columns
@@ -237,6 +301,139 @@ entries:
     source_line: 845
     cases: [1820]
 
+  # --- write: INSERT through an updatable view ------------------------------
+  - entry_id: domain_representations.view_parse_post_body_headers_only
+    claim: >
+      The write-side casts are resolved from the target relation's column types
+      whether that relation is a table or an updatable VIEW: a headers-only POST
+      through datarep_todos_computed parses the domain values and answers 201
+      with a Location keyed on the primary key the view inherits from its base
+      table. That key inheritance is resolved by the schema cache's
+      `allViewsKeyDependencies` statement, whose SQL is a `with recursive` CTE,
+      so the DEPTH of the view chain does not matter (source_view_keys below —
+      the it-block itself only exercises a one-level view). That is what makes
+      case 1824 legitimate: it asserts the same Location through Bier's
+      TWO-level mirror, domain_representations.datarep_todos_computed ->
+      test.datarep_todos_computed -> test.datarep_todos, a depth upstream never
+      exercises.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L855
+    source_line: 855
+    source_view_keys: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/SchemaCache.hs#L825
+    source_view_keys_line: 825
+    cases: [1824]
+
+  - entry_id: domain_representations.view_parse_post_body_select_shaped
+    claim: >
+      A POST through an updatable view with return=representation and an
+      explicit ?select round-trips the domain value exactly as the table does:
+      parsed by `json AS <domain>` in, re-formatted by `<domain> AS json` out.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L870
+    source_line: 870
+    cases: [1825]
+
+  - entry_id: domain_representations.view_parse_post_body_computed_column
+    claim: >
+      The representation of an insert through a view includes the view's
+      COMPUTED column and formats it too: dark_color = (label_color/2)::color
+      renders "#000880" for an inserted "#001100".
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L880
+    source_line: 880
+    cases: [1826]
+
+  - entry_id: domain_representations.view_columns_param_uses_defaults
+    claim: >
+      ?columns= on an updatable view behaves as it does on a table: unlisted
+      JSON keys are never parsed (so a deliberately invalid due_at is ignored)
+      and the omitted domain columns take the base table's DEFAULT, formatted
+      through the representation cast.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L891
+    source_line: 891
+    cases: [1827]
+
+  - entry_id: domain_representations.view_columns_param_unknown_column
+    claim: >
+      The ?columns= schema-cache check is relation-kind agnostic: a POST through
+      an updatable VIEW whose ?columns= names a missing column fails with 400
+      PGRST204 naming the VIEW ("Could not find the 'helicopters' column of
+      'datarep_todos_computed' in the schema cache") before any body value is
+      handed to a `json AS <domain>` cast, so the deliberately invalid
+      label_color in the body never surfaces and no row is written through the
+      view. Same assertion as the table form (case 1820) and as the PATCH form
+      against this same view (case 1834).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L901
+    source_line: 901
+    cases: [1836]
+
+  # --- write: json AS domain cast (UPDATE) ----------------------------------
+  - entry_id: domain_representations.patch_parse_payload_headers_only
+    claim: >
+      The `json AS <domain>` parsers run on a PATCH payload as well; with
+      return=headers-only the response is 204 with no Content-Type and no
+      Content-Length, but still carries Content-Range for the matched row.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L648
+    source_line: 648
+    cases: [1828]
+
+  - entry_id: domain_representations.patch_format_selected
+    claim: >
+      PATCH with return=representation and an explicit ?select parses the
+      payload's domain values and re-formats the selected ones on the way out.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L659
+    source_line: 659
+    cases: [1829]
+
+  - entry_id: domain_representations.patch_format_all_columns
+    claim: >
+      PATCH with return=representation and no ?select formats every column of
+      the patched row, the view's computed dark_color included.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L670
+    source_line: 670
+    cases: [1830]
+
+  - entry_id: domain_representations.patch_bulk_format_selected
+    claim: >
+      A single PATCH payload applied to several rows parses once and formats
+      each returned row; Content-Range spans all matched rows.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L681
+    source_line: 681
+    cases: [1831]
+
+  - entry_id: domain_representations.patch_bulk_format_all_columns
+    claim: >
+      The same multi-row PATCH without ?select returns every column of every
+      patched row, all formatted through their representation casts.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L696
+    source_line: 696
+    cases: [1832]
+
+  - entry_id: domain_representations.patch_columns_param_ignores_other_keys
+    claim: >
+      ?columns= on a PATCH restricts which JSON keys are parsed: an invalid
+      value under an unlisted key is never handed to its `json AS <domain>` cast
+      and the corresponding stored column comes back unchanged.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L711
+    source_line: 711
+    cases: [1833]
+
+  - entry_id: domain_representations.patch_columns_param_unknown_column
+    claim: >
+      A PATCH whose ?columns= names a column missing from the schema cache fails
+      with 400 PGRST204 naming the target relation, before any body value is
+      parsed.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L724
+    source_line: 724
+    cases: [1834]
+
+  - entry_id: domain_representations.patch_no_rows_matched
+    claim: >
+      A PATCH whose filter matches no row answers 200 (not 404, and not the 400
+      the write-side cast would raise on the invalid value carried in the body):
+      the parse lives in the LATERAL pgrst_body subquery of the UPDATE, which
+      never has to produce a value when the target scan is empty.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L733
+    source_line: 733
+    cases: [1835]
+
   # --- default behaviour: no domain AS json cast ---------------------------
   - entry_id: domain_representations.no_cast_uses_base_type
     claim: >
@@ -249,6 +446,17 @@ entries:
     source_line: 562
     cases: [1814]
 
+  - entry_id: domain_representations.column_default_beats_domain_default
+    claim: >
+      When the column itself carries a DEFAULT, that default wins over the
+      domain's DEFAULT under Prefer: missing=default —
+      evil_friends_with_column_default.id (domain devil_int DEFAULT 666, column
+      DEFAULT 420) comes back as 420, still rendered with the base int type's
+      plain JSON since devil_int has no representation cast.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L571
+    source_line: 571
+    cases: [1822]
+
 # ---------------------------------------------------------------------------
 # gaps: behaviors observed in the area but NOT modeled as conformance cases
 # because they could not be pinned to a stable, unambiguous source line, are
@@ -256,14 +464,21 @@ entries:
 # with the current case/harness contract.
 # ---------------------------------------------------------------------------
 gaps:
-  - id: domain_representations.ilike_unsupported
+  - id: domain_representations.ilike_error_body
     note: >
-      Pattern operators (ilike/like) are intentionally NOT supported on
-      data-representation columns; the upstream test only asserts PostgREST does
-      not panic and surfaces the raw Postgres "operator does not exist" error.
-      In v16.0 the asserted body became PostgreSQL-version-dependent (the
-      details/hint split differs on PG >= 19) and the Content-Length assertion
-      was dropped, so there is no single stable expected body. Left unmodeled.
+      needed_assertion: the ilike-on-a-data-rep-column behavior is now modeled
+      (case 1821), but only its version-independent half: status 404 and
+      `code` 42883. The rest of the upstream envelope cannot be pinned. Upstream
+      itself branches the body on the server version — on PG < 19 the operator
+      hint lands in `hint` with `details` null, on PG >= 19 it splits across
+      `details` and `hint` (QuerySpec.hs#L1657-L1665) — and the `message` is
+      search_path dependent: upstream's test config sets
+      `configDbExtraSearchPath = []` (SpecHelper.hs#L139) so the type prints as
+      "public.color", whereas a deployment that keeps `public` on the search
+      path (as Bier's conformance server does) prints a bare "color". Pinning
+      details/hint/message would need either per-PG-version case variants or a
+      regex body assertion (`expect.body_matches`), neither of which the case
+      contract has.
     source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1655
 
   - id: domain_representations.star_and_explicit_mix
@@ -274,31 +489,220 @@ gaps:
       both appear, and PostgREST emits both. `expect.body_exact` is parsed as
       YAML/JSON into a map, so duplicate keys collapse and the assertion cannot
       be written. This needs a raw-body-equality assertion for JSON responses
-      (an `expect.body_raw_json` that compares the exact wire bytes, or
-      `body_contains` over the serialized object) before the case can be added.
+      (an `expect.body_raw_json` that compares the exact wire bytes) before the
+      case can be added; `body_contains` would be a strictly weaker assertion
+      and is not used as a substitute.
     source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/QuerySpec.hs#L1603
 
   - id: domain_representations.mutation_isolation
     note: >
-      The whole upstream PATCH block (UpdateSpec.hs "Data representations",
-      L646-L744: parses values in a PATCH body, formats individually selected
-      values, formats a computed column on return=representation, bulk PATCH
-      with ?columns=, PGRST204 on an unknown ?columns entry, and the
-      no-rows-matched case) plus the InsertSpec "on updatable view" context and
-      the headers-only POST are NOT modeled. Every one of them mutates rows
-      1..4 of datarep_todos / datarep_todos_computed, which the read cases
-      1800-1810 and 1815-1819 assert on. Upstream can do this because its test
-      app runs with `configDbTxRollbackAll = True` (SpecHelper.hs#L176), i.e.
-      every request's transaction is rolled back; Bier's conformance harness
-      runs one shared instance with `async: true` and no per-request rollback,
-      so these cases would be order-dependent. NOTE this already affects the
-      three existing mutation cases 1811/1812/1813 (all POST id=5 into
-      datarep_todos, so at most one can succeed) and case 1806 (an unfiltered
-      read of datarep_todos_computed that sees any leftover row). Modeling this
-      block needs the harness to gain per-case rollback (PostgREST's
-      db-tx-end=rollback-allow-override + `Prefer: tx=rollback`, or a fixture
-      reload between mutation cases).
+      RESOLVED on this pass — recorded here so the earlier reasoning is not
+      re-derived. A previous pass left the whole write half of the area
+      unmodeled (UpdateSpec.hs L646-L736, the InsertSpec "on updatable view"
+      context, and the headers-only POST) on the theory that Bier's harness runs
+      one shared instance with `async: true` and no per-request rollback, so
+      mutations would leak into the read cases. That is not how the harness
+      works: `test/support/conformance_server.ex` configures the shared instance
+      with `db_tx_end: :rollback`, and `Bier.Mutation.finish_tx/3`
+      (lib/bier/mutation.ex) aborts the transaction once the response has been
+      computed — the same isolation upstream gets from
+      `configDbTxRollbackAll = True` (SpecHelper.hs#L176). Cases 1823-1835 now
+      model that block, and the previously-suspected collision between
+      1811/1812/1813 (three POSTs of id=5 into datarep_todos) does not occur:
+      all of them, plus 1823, pass together against the shared instance.
     source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/SpecHelper.hs#L176
+
+  - id: domain_representations.view_mirror_hides_column_defaults
+    note: >
+      loader_exposure: the area schemas that `mix bier.fixtures.load` builds are
+      auto-updatable views (`CREATE VIEW <area>.<rel> AS SELECT * FROM
+      test.<rel>`), and that indirection silently changes DEFAULT resolution for
+      a DOMAIN-typed column. PostgreSQL resolves a column missing from an INSERT
+      against the VIEW's column first; if the domain has a DEFAULT it is found
+      there and written as an explicit value, so the base table's column DEFAULT
+      never fires. Verified against a freshly loaded bier_test: inserting
+      (name) into test.evil_friends_with_column_default yields id 420 (the
+      column default), while inserting through a `SELECT * FROM` view over it
+      yields 666 (the domain default). Case 1822 therefore carries
+      `schema: test` rather than `schema: domain_representations`; that label is
+      also the faithful one, since upstream's db-schemas is plain `test`. If
+      this area ever needs its own writable, isolated relations under the
+      `domain_representations` profile, the loader would have to build them as
+      REAL TABLES the way `isolate_representations`/`isolate_mutations` already
+      do for their areas — a view mirror cannot express this behavior.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L3232
+
+  - id: domain_representations.update_spec_ordering_block_belongs_to_ordering
+    note: >
+      Cross-reference, recorded so the omission is not re-flagged as arbitrary.
+      Upstream's `describe "Data representations"` in UpdateSpec.hs ends with a
+      `context "with ordering"` whose single it-block ("works with request
+      method PATCH and embedded resource") patches `/web_content` with
+      `web_content.order=name.asc`. It sits inside the datarep describe block
+      only by placement: `web_content` has NO domain-typed column and the
+      assertion is about ordering an EMBEDDED representation on a mutation, not
+      about any `<domain> AS json` / `json AS <domain>` cast. It is therefore
+      modeled by the ordering area, not here — `spec/ordering.yaml` entry
+      `order.mutation_representation` claims it and cites this exact anchor as
+      the "PATCH, embedded order" sibling, with its own gap for the missing
+      `web_content` fixture.
+      COMPLETENESS OF THIS AREA (corrected — the earlier wording said "the three
+      upstream datarep blocks" and thereby silently excluded a fourth site).
+      PostgREST v16.0 asserts data-representation behavior at FOUR places:
+      (1) QuerySpec.hs L1540-L1670 `describe "Data representations"`;
+      (2) InsertSpec.hs L797-L908 `describe "Data representations"`, plus the
+          two missing=default domain it-blocks at L562 and L571;
+      (3) UpdateSpec.hs L646-L737 `describe "Data representations"` (its
+          trailing `context "with ordering"`, L738-L749, belongs to ordering as
+          argued above);
+      (4) ComputedRelsSpec.hs L105-L144, the single it-block "applies data
+          representations to response".
+      Every it-block in (1), (2) and (3) has a case in this area. The it-block
+      in (4) has NO case and is NOT modeled by any other area — spec/select.yaml
+      only claims ComputedRelsSpec L13 and L49 (cases 1136/1137) and
+      spec/ordering.yaml only claims RelatedQueriesSpec L35/L128 (cases
+      1227/1228). Its exclusion is recorded, with reasons, in the two gaps
+      `domain_representations.computed_rels_datarep_response` and
+      `domain_representations.designers_titlecasetext_fixture_divergence` below.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L739
+
+  - id: domain_representations.computed_rels_datarep_response
+    note: >
+      NOT MODELED — the fourth upstream data-representations site,
+      ComputedRelsSpec.hs L105-L144, `it "applies data representations to
+      response"` ("A smoke test for data reps in the presence of computed
+      relations"). It is a SIX-request sequence over `test.designers`, whose
+      `name` column is upstream typed as the data-representation domain
+      `public.titlecasetext` (`titlecasetext AS json` = to_json(INITCAP(...)),
+      and NO `json AS titlecasetext` and NO `text AS titlecasetext` cast, so a
+      write stores the raw lower-case text while every read title-cases it):
+        L110 PATCH /designers?select=name,videogames:computed_videogames(name)&id=eq.1
+             (Prefer: return=representation, tx=commit) body {"name":"sidney k. meier"}
+             -> 200 [{"name":"Sidney K. Meier","videogames":[{"name":"Civilization I"},
+                     {"name":"Civilization II"}]}]
+             i.e. the `<domain> AS json` cast is applied to a PATCH
+             representation that also pulls in a COMPUTED RELATIONSHIP, and the
+             computed embed does not disturb it;
+        L118 GET /designers?select=id&name=eq.Sidney%20K.%20Meier      -> []
+        L123 GET /designers?select=id,name&name=eq.sidney%20k.%20meier -> [{"id":1,"name":"Sidney K. Meier"}]
+             i.e. the POSITIVE half of case 1809's claim: with no
+             `text AS <domain>` cast the query-string filter value is compared
+             against the STORED value, not against the formatted one (1809 only
+             shows the negative half — no JSON-parser fallback, so the raw value
+             reaches the base type and errors);
+        L129 GET /videogames?select=name,designer:computed_designers(*)&id=eq.1
+             -> [{"name":"Civilization I","designer":{"id":1,"name":"Sidney K. Meier"}}]
+             i.e. the representation is applied when reading BACK THROUGH a
+             computed relationship, with a star select inside the computed embed;
+        L136/L141 two PATCHes that reset the fixture.
+      Two independent blockers, either one sufficient:
+        (a) TRANSACTION SEMANTICS. Three of the six requests carry
+            `Prefer: tx=commit` (L111, L137, L142). Upstream honors it —
+            SpecHelper.hs sets `configDbTxAllowOverride = True` (#L175) with
+            `configDbTxRollbackAll = True` (#L176) — so the L110 PATCH COMMITS
+            and the L118/L123/L129 reads observe the stored lower-case name from
+            separate transactions. Bier's conformance harness boots the shared
+            instance with `db_tx_end: :rollback` and no allow-override
+            (test/support/conformance_server.ex), which is exactly what makes
+            cases 1811-1836 safe but also means `tx=commit` cannot be honored.
+            Compounding this, spec/case.schema.json carries a SINGLE `request`
+            (properties: config,id,feature,request,schema,preconditions,expect,
+            notes,source) with no step/sequence key, so a sequence whose later
+            assertions depend on an earlier request having committed cannot be
+            expressed at all. Only the L110 PATCH is single-request expressible,
+            since its own 200 body is computed inside the mutation's transaction
+            and does not depend on the commit.
+        (b) FIXTURE. Even that single L110 request is unrunnable on the
+            consolidated seed, because `test.designers.name` is plain `text`
+            there and no titlecasetext domain/cast exists — see the companion
+            gap `domain_representations.designers_titlecasetext_fixture_divergence`.
+            A PATCH of "sidney k. meier" would simply return "sidney k. meier".
+      No substitute relation exists: upstream ships no computed relationship
+      over any `datarep_*` relation (schema.sql defines only datarep_todos,
+      datarep_next_two_todos and the datarep_todos_computed VIEW), so
+      designers/videogames + titlecasetext is the only fixture that expresses
+      "data representations in the presence of computed relations".
+      TO CLOSE THIS GAP the harness owner needs both: the fixture fold described
+      in the companion gap, and either a `Prefer: tx=commit`-capable harness
+      profile or a multi-step case shape. With only the fixture fold, the L110
+      PATCH alone becomes a legitimate single-request case in this area's
+      [1837..1849] range.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/ComputedRelsSpec.hs#L105
+
+  - id: domain_representations.designers_titlecasetext_fixture_divergence
+    note: >
+      FIXTURE DIVERGENCE (hand-off to the fixture-fold step, not a citation
+      defect). Upstream types `designers.name` as a data-representation DOMAIN:
+      `CREATE DOMAIN public.titlecasetext AS text` (schema.sql#L2726), a
+      `"json"(public.titlecasetext) RETURNS json` function returning
+      `to_json(INITCAP($1::text))` (#L2728-L2730), `CREATE CAST
+      (public.titlecasetext AS json) ... AS IMPLICIT` (#L2732), and
+      `CREATE TABLE designers (id int primary key, name public.titlecasetext)`
+      (#L2735-L2738), seeded (1,'Sid Meier'), (2,'Hironobu Sakaguchi')
+      (data.sql#L789). Bier's consolidated seed instead declares
+      `CREATE TABLE test.designers (id integer PRIMARY KEY, name text)`
+      (spec/conformance/fixtures.sql#L683-L686) and defines NO titlecasetext
+      domain, function or cast at all; the fan-out fragment records the
+      simplification deliberately ("designers.name uses a titlecasetext domain
+      upstream; simplified to text here since no data-representation behavior is
+      asserted by the cited L15/L43 tests" —
+      spec/conformance/fixtures/select.sql#L226-L228). Verified against a
+      freshly loaded bier_test on this pass: `format_type` of
+      `test.designers.name` is `text`, and
+      `select count(*) from pg_type where typname='titlecasetext'` is 0.
+      WHY IT IS INVISIBLE TODAY: no existing case can tell the difference. The
+      only four cases touching these relations are select 1136/1137 and ordering
+      1227/1228; 1227/1228 never select `name`, and 1136/1137 do but survive
+      only because the seed values are ALREADY title-cased, so INITCAP is
+      idempotent on them ('Sid Meier' -> 'Sid Meier', 'Hironobu Sakaguchi' ->
+      'Hironobu Sakaguchi'). The divergence becomes observable only for a
+      request that writes a lower-case name, which is precisely upstream
+      ComputedRelsSpec.hs#L110.
+      NOT FOLDED INTO spec/conformance/fixtures/domain_representations.delta.sql
+      on this pass because restoring it is not a NEW-OBJECT addition, which is
+      all a delta may carry (spec/conformance/fixtures/README.md): the domain,
+      the json function and the cast are new, but making them matter requires
+      `ALTER TABLE test.designers ALTER COLUMN name TYPE public.titlecasetext`
+      on a relation `fixtures.sql` already owns, and that relation is shared
+      with the select and ordering areas. The exact DDL the fold needs, faithful
+      to upstream and rendered against the consolidated `test` schema:
+        DROP DOMAIN IF EXISTS public.titlecasetext CASCADE;
+        CREATE DOMAIN public.titlecasetext AS text;
+        CREATE OR REPLACE FUNCTION "json"(public.titlecasetext) RETURNS json AS $$
+          SELECT to_json(INITCAP($1::text));
+        $$ LANGUAGE SQL IMMUTABLE;
+        CREATE CAST (public.titlecasetext AS json) WITH FUNCTION "json"(public.titlecasetext) AS IMPLICIT;
+        ALTER TABLE test.designers ALTER COLUMN name TYPE public.titlecasetext;
+      Expected blast radius, checked on this pass: cases 1136/1137/1227/1228
+      keep their exact bodies (INITCAP is idempotent on both seed rows, and
+      1137's `designer.name=like.*Hironobu*` still resolves because a domain
+      over `text` smashes to `text` for `~~` operator resolution — unlike the
+      `color` domain over `integer` in case 1821, which is why THAT one 404s).
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L2725
+
+  - id: domain_representations.column_default_fixture_not_yet_folded
+    note: >
+      ACTION REQUIRED AT THE FIXTURE-FOLD STEP — this area cannot be run green
+      until the fold lands. Case 1822 is NOT RUNNABLE against a currently-loaded
+      bier_test, and a failure there is a fixture-pipeline state, not an
+      implementation bug.
+      The case targets `test.evil_friends_with_column_default`, which does not
+      exist in the consolidated seed: `spec/conformance/fixtures.sql` defines
+      only `test.evil_friends` (fixtures.sql#L883), and the new table lives
+      solely in the un-folded
+      `spec/conformance/fixtures/domain_representations.delta.sql`. Verified on
+      this pass against the loaded database:
+      `select to_regclass('test.evil_friends_with_column_default')` returns
+      NULL, so the request answers 404, not the asserted 201 +
+      [{"id":420,"name":"Demon"}]. The delta DDL itself is correct and matches
+      upstream `test/spec/fixtures/schema.sql#L3232-L3235` verbatim (rendered
+      against the `public.devil_int` domain fixtures.sql already defines); what
+      is missing is the pipeline's fixture-fold step, which folds area deltas
+      into fixtures.sql after the fan-out (see
+      spec/conformance/fixtures/README.md). Re-check `to_regclass` before
+      triaging a 1822 failure. Nothing in this area's spec files needs to change
+      when the fold lands.
+    source_url: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/fixtures/schema.sql#L3232
 
   - id: domain_representations.arrays_and_composites
     note: >

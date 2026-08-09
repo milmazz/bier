@@ -1,0 +1,42 @@
+id: 1836
+feature: domain_representations/write/view_columns_param_unknown_column
+request:
+  method: POST
+  path: /datarep_todos_computed?columns=id,label_color,helicopters&select=id,name,label_color,due_at
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Prefer: return=representation
+  body_json:
+    {
+      "due_at": "2019-01-03T11:00:00+00",
+      "smth": "here",
+      "label_color": "invalid",
+      "fake_id": 13,
+    }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    {
+      "code": "PGRST204",
+      "details": null,
+      "hint": null,
+      "message":
+        "Could not find the 'helicopters' column of 'datarep_todos_computed' in the schema cache",
+    }
+notes: >
+  Upstream InsertSpec "on updatable views with ?columns parameter" > "fails
+  without parsing anything if at least one specified column doesn't exist" —
+  the updatable-VIEW twin of case 1820 (same request against the table
+  datarep_todos) and the POST twin of case 1834 (the PATCH form against this
+  same view). The ?columns check runs against the schema cache for the target
+  relation whether that relation is a table or a view, so the unknown
+  'helicopters' entry is rejected with PGRST204 naming the VIEW
+  (datarep_todos_computed), before any body value is handed to a
+  `json AS <domain>` cast: the body's "label_color": "invalid" would fail that
+  cast and that error never surfaces, and no row is written through the view.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L901
