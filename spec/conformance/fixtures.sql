@@ -193,6 +193,22 @@
 --       Deliberately no aggregate over the new domain and no GRANT (the routine
 --       is exercised on the no-auth instance), which is what keeps cases 1623
 --       (test.add_them, scalar) and 1624 (test.get_lines, SETOF) at 406.
+--
+-- 2026-08-09  domain_representations.delta.sql -> test.evil_friends_with_column_default
+--             (section 4, immediately after its sibling test.evil_friends, which
+--             is where the shared public.devil_int domain is already satisfied).
+--             No name collided with an existing object, so nothing was renamed:
+--   * The delta's sole object: `id public.devil_int DEFAULT 420, name text` —
+--       a COLUMN default over the domain's own DEFAULT 666, mirroring upstream
+--       schema.sql#L3232-L3235 (v16.0). Case 1822.
+--   * No seed rows (the section 8 note is extended) and no GRANT (section 9
+--       untouched): case 1822 POSTs its own row on the no-auth instance as the
+--       owning role, exactly like test.evil_friends / case 1814.
+--   * The loader still view-mirrors it into the mirrored area schemas like any
+--       other `test` relation; harmless, and NOT what case 1822 targets — the
+--       case is deliberately labelled `schema: test` because an auto-updatable
+--       view resolves the missing INSERT column against the VIEW's devil_int
+--       default (666) before the base table's column default (420) can fire.
 -- ----------------------------------------------------------------------------
 
 BEGIN;
@@ -882,6 +898,21 @@ CREATE TABLE test.datarep_next_two_todos (
 
 CREATE TABLE test.evil_friends(
   id   public.devil_int,
+  name text
+);
+
+-- evil_friends_with_column_default (domain_representations.delta.sql): the same
+-- cast-less devil_int domain (int DEFAULT 666) as test.evil_friends above, but
+-- the COLUMN carries its own DEFAULT 420. That conflict is the whole point of
+-- the fixture — with `Prefer: missing=default` the column is left out of the
+-- INSERT target list and Postgres applies the COLUMN default, which wins over
+-- the domain default (case 1822 expects 420; case 1814 gets 666 from
+-- test.evil_friends, whose column has no default of its own). Mirrors upstream
+-- test/spec/fixtures/schema.sql#L3232-L3235 (v16.0). Like evil_friends it is
+-- seeded EMPTY (section 8) and takes no GRANT (section 9): case 1822 runs on
+-- the no-auth instance as the owning role.
+CREATE TABLE test.evil_friends_with_column_default (
+  id   public.devil_int DEFAULT 420,
   name text
 );
 
@@ -1938,7 +1969,9 @@ INSERT INTO test.datarep_todos VALUES (4, 'Opus Magnum', NULL, NULL);
 
 INSERT INTO test.datarep_next_two_todos VALUES (1, 2, 3, 'school related');
 INSERT INTO test.datarep_next_two_todos VALUES (2, 1, 3, 'do these first');
--- evil_friends intentionally has NO seed rows.
+-- evil_friends intentionally has NO seed rows; neither does
+-- evil_friends_with_column_default (case 1822 POSTs the only row it needs, and
+-- the instance runs with db_tx_end: :rollback).
 
 -- test.arrays (ordering.delta.sql) — upstream test/spec/fixtures/data.sql rows.
 INSERT INTO test.arrays (id, numbers, numbers_mult) VALUES
@@ -2123,4 +2156,27 @@ COMMIT;
 -- it ensures that when lib/ narrows handler discovery to the return-type domain
 -- and 1623 flips to passing, 1622 stays reachable instead of breaking. Under
 -- the old `RETURNS bytea` transcription those two cases could not both be green.
+--
+-- 2026-08-09 (domain_representations delta fold): re-verified end to end with
+-- `mix bier.fixtures.load` — drops/recreates bier_test, loads this file with
+-- `psql -v ON_ERROR_STOP=1 -f`, then mirrors the area schemas; clean, zero
+-- errors. Catalog checks on the loaded DB: test.evil_friends_with_column_default
+-- resolves, its `id` is devil_int with column default 420 (`name` has none), and
+-- it holds 0 seed rows.
+--
+-- The default-precedence claim was verified directly, in a rolled-back
+-- transaction on the loaded DB: `insert into test.evil_friends_with_column_default
+-- (name) values ('Demon')` yields id 420 (column default wins), while the same
+-- insert through the auto-updatable mirror
+-- `domain_representations.evil_friends_with_column_default` yields 666 (the view
+-- supplies the DOMAIN default as an explicit value first). That asymmetry is
+-- precisely why case 1822 is labelled `schema: test` and not this area's mirror.
+--
+-- Regression check (whole suite, A/B against the pre-fold file, same DB): 101
+-- failing before, 100 after. The sets differ by exactly ONE id — 1822 flipped to
+-- passing — and NOTHING regressed. This is the first fold that is itself a
+-- green-maker: 1822 was answering 404 only because the relation did not exist.
+-- The 3 domain_representations cases still failing (1819 unknown-column error
+-- shape, 1824 view POST headers-only, 1835 PATCH no-rows-matched) are lib/ gaps
+-- that touch other relations entirely.
 -- ============================================================================

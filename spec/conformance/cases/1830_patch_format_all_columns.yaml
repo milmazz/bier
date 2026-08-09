@@ -1,0 +1,37 @@
+id: 1830
+feature: domain_representations/write/patch_format_all_columns
+request:
+  method: PATCH
+  path: /datarep_todos_computed?id=eq.2
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Prefer: return=representation
+  body_json: { "label_color": "#221100", "due_at": "2019-01-03T11:00:20Z" }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Range: "0-0/*"
+    Preference-Applied: return=representation
+  body_exact:
+    [
+      {
+        "id": 2,
+        "name": "Essay",
+        "label_color": "#221100",
+        "dark_color": "#110880",
+        "due_at": "2019-01-03T11:00:20Z",
+      },
+    ]
+notes: >
+  Upstream UpdateSpec "for a single row" > "parses values in payload and formats
+  values in return=representation". The full representation of the patched row
+  formats every domain column, the view's COMPUTED dark_color included:
+  0x221100 / 2 = 0x110880 -> "#110880". due_at is parsed from the "…Z" literal by
+  `json AS isodate` and rendered back with the trailing Z, preserving the
+  :20 seconds that distinguish this it-block from case 1829's payload. Body
+  verified against a freshly loaded bier_test.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L670

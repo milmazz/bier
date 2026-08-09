@@ -1,9 +1,9 @@
 # Conformance case index
 
-Cross-reference of the **746** conformance cases under `spec/conformance/cases/`.
-Pinned target: **PostgREST v16.0** (all 746 `source:` URLs, re-derived on disk
+Cross-reference of the **762** conformance cases under `spec/conformance/cases/`.
+Pinned target: **PostgREST v16.0** (all 762 `source:` URLs, re-derived on disk
 this pass by parsing each case's `source:` value and extracting its tag —
-`{'v16.0': 746}`, no other value).
+`{'v16.0': 762}`, no other value).
 
 Each case is one YAML file `NNNN_<slug>.yaml` validated against
 [`../case.schema.json`](../case.schema.json). Cases are grouped into 17 feature
@@ -47,7 +47,7 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 >   area's only free primary ids are 1328, 1329 and 1334–1349. An earlier
 >   revision of this page described 1315–1319 and 1325–1329 as empty spacing;
 >   that was stale — always re-derive the band from the `feature:` prefix.
-> - **content_negotiation** (new this pass) uses **12400–12401** on top of its
+> - **content_negotiation** uses **12400–12401** on top of its
 >   now-full primary band **1600–1649** (all 50 primary ids are in use; 1647,
 >   1648 and 1649 took the last three). **12402+ is free.** It is the tree's
 >   **fourth** 5-digit band and the **only one that lands in an empty lexical
@@ -56,9 +56,20 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 >   with nothing. That is luck, not design — `content_negotiation.yaml` declares
 >   no overflow range, exactly as `operators.yaml` and `mutations.yaml` do not.
 >
-> **There are now FOUR 5-digit bands, so `ls spec/conformance/cases/` is actively
+> **There are still FOUR 5-digit bands, so `ls spec/conformance/cases/` is actively
 > misleading — always `ls | sort -n`.** The `feature:` prefix remains
 > authoritative; an id's numeric neighbourhood never decides its area.
+>
+> **The domain_representations pass opened NO fifth band and left the area
+> contiguous, which is the first time an area that grew by 16 cases did not have
+> to make a band decision.** Its primary band had room: **1800–1820 → 1800–1836**,
+> unbroken, with **1837–1849 free** before the area's slice ends. That is worth
+> naming because the four 5-digit bands all came from areas whose primary band
+> filled at 50 while nobody was watching the headroom — **the domain_representations
+> band is 50 wide (1800–1849) and is now 74 % used**, so the next substantial pass
+> here *will* face follow-up 19's question. The `computed_rels_datarep_response`
+> gap already reserves **[1837..1849]** in prose for the case it would enable, which
+> is the closest thing in the tree to an area declaring its own headroom.
 >
 > **An id was REUSED this pass, which no previous pass has done, and it is the
 > single most misleading thing on disk if you read ids as stable handles.**
@@ -132,17 +143,32 @@ disk now; read the `feature:` prefix if a row ever looks ambiguous.
 | **openapi** | **39** | **1650–1688** | `fixtures/openapi.sql` (**no delta** — the v16.0 re-sync added six cases, rewrote the other 33 and touched **no** fixture object; `fixtures.sql` does not appear in `git status`) | `test` (38), `openapi_no_comment` (1 — case 1654) |
 | config | 45 | 1700–1744 | `fixtures/config.sql` | `config` (45) |
 | observability | 22 | 1750–1771 | `fixtures/observability.sql` (**no delta** — the v16.0 re-sync added two cases and zero fixture objects; its `.sql` change is a comment-only provenance re-pin) | `observability` (22) |
-| domain_representations | 21 | 1800–1820 | `fixtures/domain_representations.sql` | `domain_representations` (21) |
+| **domain_representations** | **37** | **1800–1836** | `fixtures/domain_representations.sql` + `fixtures/domain_representations.delta.sql` (`test.evil_friends_with_column_default`, folded 2026-08-09 — the channel was opened, used and emptied inside a single pass, a first) | `domain_representations` (36), `test` (1 — case **1822**, and the label is load-bearing: see **Label caveats**) |
 
-Total: **746 cases**, **17 areas**, **17 fixture fragments**
-(plus **7** `*.delta.sql` write channels, all currently **comment-only** —
+Total: **762 cases**, **17 areas**, **17 fixture fragments**
+(plus **8** `*.delta.sql` write channels, all currently **comment-only** —
 re-verified mechanically this pass: stripping comment and blank lines leaves zero
-lines in every one of the seven. Each carries a single
+lines in every one of the eight. Each carries a single
 `-- Folded into ../fixtures.sql on <date> …` provenance line and no DDL. **Three**
-are dated 2026-08-08 (`headers`, `ordering`, `rpc`); **four** are dated 2026-08-09
-(`content_negotiation`, `url_grammar`, `errors`, `operators`). **There is still no
+are dated 2026-08-08 (`headers`, `ordering`, `rpc`); **five** are dated 2026-08-09
+(`content_negotiation`, `url_grammar`, `errors`, `operators`, and — new —
+`domain_representations`). **There is still no
 `mutations.delta.sql` and no `representations.delta.sql`.** See
 [`fixtures/README.md`](fixtures/README.md) for who may write which file).
+
+**The domain_representations re-sync DID add a fixture object**, unlike the three
+passes before it. `test.evil_friends_with_column_default`
+(`id public.devil_int DEFAULT 420, name text`) lands in `fixtures.sql` section 4
+beside its sibling `test.evil_friends`; no seeds, no GRANT, no name collision.
+It exists to make one precedence rule observable — with `Prefer: missing=default`
+the **COLUMN** default (420) beats the DOMAIN default (666), which case **1822**
+asserts and case **1814** contrasts against `test.evil_friends`, whose column
+carries no default of its own. **Read the `schema: test` label on 1822 before
+moving it**: the loader view-mirrors this table into the area schemas like any
+other `test` relation, and an auto-updatable view resolves the missing INSERT
+column against the *view's* `devil_int` default first — so the mirror answers
+**666** and the base table answers **420**. The mirror is not wrong, it is a
+different question, and only the base table expresses upstream's.
 
 **`content_negotiation.delta.sql` is the first channel to be folded TWICE, and
 its second fold is the first in the tree to CHANGE an existing definition rather
@@ -264,7 +290,7 @@ grep -h '^feature:' spec/conformance/cases/1800_format_single_domain_column.yaml
   > spelling out **`Accept-Profile`** itself — spelling out `Content-Profile` is
   > not enough. Of the fourteen `multi` cases, **1005, 1006, 1007, 1008, 1011 and
   > 1012** receive `Accept-Profile: multi` (re-derived mechanically at the
-  > 746-case state). Three of the six expect success (**1005**/**1008** → 200,
+  > 762-case state). Three of the six expect success (**1005**/**1008** → 200,
   > **1011** → 201) and so depend on the allowlist. Recorded in
   > [`../COVERAGE.md`](../COVERAGE.md) → *Open verification findings*: a genuine
   > finding, not a bookkeeping note, because 1008's own `notes:` claim "no
@@ -296,6 +322,27 @@ grep -h '^feature:' spec/conformance/cases/1800_format_single_domain_column.yaml
   mirror of `test`, so the write goes to the loader-isolated `mutations.no_pk`
   real table; the case's `feature:` prefix (not its label) is what puts it in
   the ordering area.
+- **`test` appears under `domain_representations`** — exactly once, case
+  **1822**, and it is the tree's first label chosen to *avoid* the area's own
+  mirror rather than to reach an object the mirror lacks. **Read this before
+  "fixing" it to `domain_representations`.** The relation
+  (`test.evil_friends_with_column_default`) exists in both places and both
+  requests succeed; they simply answer differently. `id` is `public.devil_int`
+  (`integer DEFAULT 666`) and the COLUMN adds `DEFAULT 420`. With
+  `Prefer: missing=default` the column is left out of the INSERT target list, and:
+  - against the **base table**, PostgreSQL applies the **column** default → **420**
+    (upstream's assertion, and what the case expects);
+  - against the **area mirror** (`CREATE VIEW … AS SELECT * FROM test.…`), the
+    missing column is resolved against the *view's* column first, where the DOMAIN
+    default is found and written as an explicit value → **666**.
+
+  Verified both ways against a freshly loaded `bier_test`. The label is also the
+  faithful one: upstream's `db-schemas` for this block is plain `test`. **A view
+  mirror cannot express this behavior at all**, so if the area ever needs its own
+  writable isolated relations, the loader would have to build them as REAL TABLES
+  the way `isolate_representations` / `isolate_mutations` already do — a loader
+  change, not a fixtures delta. Recorded in `domain_representations.yaml`'s
+  `loader_exposure` gap entry.
 - **The whole errors area carries `schema: test`**, including cases **1523**
   (`POST /infinite_inserts`) and **1524** (`GET /infinite_recursion`), whose
   objects were folded through `errors.delta.sql`. Both were created in `test`,
@@ -355,7 +402,7 @@ spread), which — unlike PGRST128 — really is asserted by no case and modelle
 no area file. It belongs to `select`; see
 [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → select*.
 
-> Re-checked at the 746-case state: `grep -rl PGRST128 spec/` matches
+> Re-checked at the 762-case state: `grep -rl PGRST128 spec/` matches
 > `rpc.yaml` (entry `rpc.prefer.max_affected.returns_single`),
 > `conformance/cases/1441_rpc_max_affected_returns_single.yaml`, this INDEX and
 > `COVERAGE.md`. `grep -rl PGRST127 spec/` still matches exactly two files —
@@ -450,9 +497,44 @@ sub-features present per area (second segment, as on disk):
 | **openapi** | **1650–1688** | root (10 — incl. the document's own `/` path item **1687** and the document-level `produces`/`consumes` list **1688**, both anchored at the generator because no upstream Feature it-block reads either), rpc (8 — incl. the all-OUT args schema that emits neither `properties` nor `required` **1683**, its INOUT-with-no-DEFAULT complement **1684**, and the IMMUTABLE half of the volatility switch **1685**), table (5 — incl. the shared `preferParams` definition and its **suppressed empty enum** **1686**), comments (5), types (4), mode (4), security (2), defaults (1). **No sub-feature exists for the `/rpc/*` per-operation `produces`/`responses` pair or for `$.parameters.on_conflict`**; see [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → openapi* |
 | config | 1700–1744 | dump-config, sources, aliases, validation, coercion, parsing, precedence, db-max-rows, db-tx-end, db-extra-search-path, app-settings, server-cors-allowed-origins, cli, client-error-verbosity, server-reuseport, url-use-legacy-target-names, admin-server-unix-socket |
 | observability | 1750–1771 | server-timing (incl. **1770**, the exact five-metric render), trace-header, log-level, server (**1771**, the `Server: postgrest/…` version header — the tree's only `Server:` assertion) |
-| domain_representations | 1800–1820 | read, write, filter, default |
+| **domain_representations** | **1800–1836** | **write** (18 — the area's largest sub-feature after this pass, and all but four are new: headers-only POST on a table **1823** and on the updatable view **1824**, POST-through-view formatting incl. the computed column **1825**/**1826**, `?columns=` on that view **1827**/**1836**, and the entire PATCH block **1828–1835** — single, bulk, `?columns=`, unknown column, and no-rows-matched), read (11), filter (6 — incl. **1821**, the `ilike`-on-a-datarep-column 404/`42883` that proves pattern operators are deliberately NOT wired to representations), default (2 — no-cast-uses-base-type **1814** and **column-default-beats-domain-default 1822**, the area's only `schema: test` case). **No sub-feature exists for data representations in the presence of COMPUTED RELATIONSHIPS** (upstream `ComputedRelsSpec.hs#L105`), which is blocked by `Prefer: tx=commit` *and* by the single-`request` case shape; see [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → domain_representations* |
 
 ### v16.0 additions worth knowing
+
+- **domain_representations** grew from **21 to 37** cases and is the tree's
+  **seventeenth and final** audited area — ✅ *pass*, **0 citation defects**,
+  **one** non-blocking missing-coverage finding, the smallest in the tree.
+  **Sixteen cases added (1821–1836), three rewritten (1811–1813), one fixture
+  object authored AND folded, one delta channel opened and emptied.** With this
+  pass **every area carries a v16.0 verdict and every verdict reports 0 citation
+  defects.** Four things about this pass are worth carrying forward:
+  - **Its largest single output came from retiring a recorded gap that claimed
+    the work was IMPOSSIBLE.** `domain_representations.mutation_isolation` held
+    that the area's whole write half could not be modelled because the shared
+    conformance instance cannot isolate mutations. It can:
+    `test/support/conformance_server.ex` sets `db_tx_end: :rollback` and
+    `Bier.Mutation.finish_tx/3` aborts every mutation transaction after the
+    response is computed — the same isolation upstream gets from
+    `configDbTxRollbackAll = True`. **The claim survived a full prior re-sync
+    unchallenged.** Fourteen cases (1823–1836) came out of retiring it. If you
+    read a gap entry that says a case *cannot* be written, check the harness
+    before believing it.
+  - **Case 1822's `schema:` label is load-bearing against its own area**, and it
+    is the first case in the tree of which that is true. `schema: test`, not
+    `domain_representations`, because the area's auto-updatable view mirror
+    resolves a missing INSERT column against the *view's* domain default (666)
+    before the base table's column default (420) can fire. Both halves were
+    verified by inserting on a live database. See **Label caveats**.
+  - **It is the first pass to open, use and empty a delta channel in one go.**
+    `domain_representations.delta.sql` carried
+    `test.evil_friends_with_column_default`, was folded into `fixtures.sql`, and
+    is back to its provenance line — so the channel's *steady state* was restored
+    within the pass rather than by a later one.
+  - **Its `gaps:` key went 5 → 10, and three of the five new entries argue that a
+    case should NOT be written** — a cross-reference handing an upstream block to
+    the *ordering* area, a fixture-divergence hand-off with the exact DDL and
+    blast radius a future fold needs, and a `loader_exposure` entry (a key with no
+    precedent) recording the view-mirror default-resolution trap above.
 
 - **openapi** grew from **33 to 39** cases and is the tree's **sixteenth**
   audited area — ⚠️ *revise*, **0 citation defects**, **two** missing-coverage
@@ -820,7 +902,7 @@ sub-features present per area (second segment, as on disk):
 
 ## Case file shapes
 
-Most cases are HTTP request/response (**702**). The **config** area additionally
+Most cases are HTTP request/response (**724**). The **config** area additionally
 uses a **CLI** shape (`request.kind: cli`, `request.flag: "--dump-config"`)
 asserting on `expect.exit_code`, `expect.dump_contains`,
 `expect.dump_reparse_stable`, and `expect.stderr_contains` rather than an HTTP
@@ -836,10 +918,12 @@ does not know.
 
 Any case may carry a `config:` block — **116** do (112 non-empty; 1705, 1719,
 1727 and 1743 carry an empty `config: {}`), spread over six areas: config 45,
-auth 33, observability 21, select 10, openapi 4, errors 3. **The count did not
-move for a FIFTH consecutive pass**: none of the operators re-sync's 37 new
+auth 33, observability 21, select 10, openapi 4, errors 3 (that breakdown counts
+the key's *presence*, so it sums to 116). **The count did not
+move for a SIXTH consecutive pass**: none of the operators re-sync's 37 new
 cases, the rpc re-sync's 3, the mutations re-sync's 17, the representations
-re-sync's 8, the content_negotiation re-sync's 6 or the openapi re-sync's 6
+re-sync's 8, the content_negotiation re-sync's 6, the openapi re-sync's 6 or the
+domain_representations re-sync's 16
 declares a `config:` block, because none of those areas is
 config-gated — a useful contrast with `select`, whose ten config-carrying cases
 all need `db-aggregates-enabled` or `url-use-legacy-target-names` and none of
@@ -864,8 +948,8 @@ case. On any other HTTP case the `config:` block is **inert** — it documents t
 upstream configuration the assertion depends on, but the case still runs against
 a shared instance. Mechanically, **60** HTTP cases carry a non-empty `config:`
 outside `@variant_case_ids` (re-derived on disk this pass against the harness's
-live 18-id list), now out of **708** HTTP cases; most simply restate what the
-shared instance already provides.
+live 18-id list), now out of **724** HTTP cases (762 − 38 CLI); most simply
+restate what the shared instance already provides.
 
 > **The openapi pass turned that inertness into a WITHDRAWN case, which is the
 > clearest demonstration of the gate this document has.** A case pinning
@@ -882,6 +966,19 @@ different kind**: it declares no `config:` at all, yet ten of its seventeen new
 cases rely on the shared instance's `db_tx_end: :rollback` to contain writes
 through un-isolated view mirrors — an *undeclared* dependency, which is worse
 than an ignored one because nothing mechanical can surface it.
+
+> **The domain_representations band inherits that same undeclared dependency for
+> FOURTEEN cases, and it is the first pass to write the dependency down.** Cases
+> **1823–1836** POST and PATCH against `datarep_todos` and the auto-updatable
+> `datarep_todos_computed`, neither of which the loader isolates as a real table;
+> they are contained solely by `db_tx_end: :rollback`
+> (`test/support/conformance_server.ex`) plus `Bier.Mutation.finish_tx/3`. What
+> is new is that `domain_representations.yaml`'s retired `mutation_isolation`
+> gap now **states the mechanism explicitly**, naming both files and the upstream
+> equivalent (`configDbTxRollbackAll = True`, `SpecHelper.hs#L176`). That is the
+> nearest thing in the tree to the write-containment declaration
+> [`../COVERAGE.md`](../COVERAGE.md) → follow-up 27 asks for — recorded in a gap
+> entry rather than in the case shape, which is where it belongs long-term.
 The instances where the declared config *diverges* from the shared instance, and
 the assertion therefore depends on it, are case **1742**, the ten select cases
 **1129–1133, 1139, 1140, 1147–1149**, the three errors cases **1517, 1518, 1522**
@@ -894,14 +991,16 @@ assertions are log-level-independent statuses, so they still hold — see
 
 `preconditions:` is parsed but **never executed** by the harness — treat it as
 declarative documentation, never as setup a case may depend on. It is present on
-**745** of the 746 cases (case **1330** is still the only omission, which the
+**761** of the 762 cases (case **1330** is still the only omission, which the
 schema allows), and **42** of those carry a *non-empty* list — **25 of the 42 in
 the mutations area alone**, which makes it by far the heaviest user of a key that
-does nothing. Full non-empty distribution, re-derived at the 746-case state:
+does nothing. Full non-empty distribution, re-derived at the 762-case state and
+**unchanged**:
 mutations **25**, content_negotiation **11**, pagination **4**,
-url_grammar **1**, representations **1**. All six new openapi cases
-correctly carry `preconditions: []`, as all six content_negotiation, all 17
-mutations and all 8 representations cases did before them — a convention four
+url_grammar **1**, representations **1**. All sixteen new domain_representations
+cases correctly carry `preconditions: []`, as all six openapi, all six
+content_negotiation, all 17
+mutations and all 8 representations cases did before them — a convention five
 consecutive passes have now followed and nobody has written down.
 
 > **The openapi pass is the first to REMOVE non-empty preconditions, and it
@@ -935,19 +1034,19 @@ deferral; `case.schema.json` itself has no `pending` field. (Earlier revisions o
 this file claimed 6 such cases, listing 1509, 1513 and 1514 as well — those three
 only *mention* `status_text` in `notes:` or in an expected `hint:` string and
 carry no `expect.status_text` key, so they run normally. Re-verified at the
-**746**-case state: still exactly three.)
+**762**-case state: still exactly three.)
 
 **13** cases use the HTTP `HEAD` method (1020, 1272, 1274, 1275, 1277, 1284,
 1425, 1681, 1756, 1760, 1761, 1762, 1771) and **every one expects a 2xx** —
-re-derived mechanically at the 746-case state. No case in the tree issues a HEAD
+re-derived mechanically at the 762-case state. No case in the tree issues a HEAD
 request that errors, which is the tree's only *request-shape* blind spot; see
 [`../COVERAGE.md`](../COVERAGE.md) → *Known gaps → errors*. **The count has now
-not moved in eight re-syncs while the tree grew by 70 cases**, and this pass is
-another clean miss: all six new openapi cases are `GET /`, and the band already
-owns a HEAD case (**1681**, `HEAD /` asserting no `Content-Length`) that it left
-untouched. Full method
-distribution at **746**: GET **510**, POST **107**, CLI **38**, PATCH **27**,
-DELETE **21**, PUT **18**, HEAD **13**, OPTIONS **12**.
+not moved in nine re-syncs while the tree grew by 86 cases.** This pass is the
+first with a structural excuse: fourteen of its sixteen new cases are mutations,
+and a HEAD on a mutation is not a shape upstream asserts anywhere. Full method
+distribution at **762**: GET **511**, POST **114**, CLI **38**, PATCH **35**,
+DELETE **21**, PUT **18**, HEAD **13**, OPTIONS **12** (sums to 762). **PATCH
+27 → 35 is the largest single-pass growth that method has had.**
 
 ## Looking up a case
 

@@ -1,0 +1,34 @@
+id: 1835
+feature: domain_representations/write/patch_no_rows_matched
+request:
+  method: PATCH
+  path: /datarep_todos_computed?id=eq.2001&columns=label_color
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Prefer: return=representation
+  body_json:
+    {
+      "due_at": "2019-01-03T11:00:00Z",
+      "smth": "here",
+      "label_color": "invalid",
+      "fake_id": 13,
+    }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 200
+notes: >
+  Upstream UpdateSpec "with ?columns parameter" > "ignores json keys and gives
+  200 if no record updated". Same payload as case 1834 — an invalid
+  label_color plus unknown keys — but here ?columns names only real columns, so
+  the request survives the schema-cache check and reaches the UPDATE. No row
+  matches id=eq.2001, and the response is 200 rather than 404 and rather than
+  the 400 the `json AS color` cast would raise on "invalid": the parse lives in
+  the LATERAL pgrst_body subquery of `UPDATE … SET … FROM (…) pgrst_payload,
+  LATERAL (…) pgrst_body WHERE …` (QueryBuilder.hs#L152-L153,
+  SqlFragment.hs#L316), so with no matching target row it never has to produce a
+  value. Upstream asserts the status and nothing else (`shouldRespondWith` 200 at
+  UpdateSpec.hs#L736), so this case does the same; the response body is not
+  pinned.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L733

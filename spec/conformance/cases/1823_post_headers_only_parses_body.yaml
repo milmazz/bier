@@ -1,0 +1,35 @@
+id: 1823
+feature: domain_representations/write/post_headers_only_parses_body
+request:
+  method: POST
+  path: /datarep_todos
+  headers:
+    Prefer: "return=headers-only"
+    Content-Type: application/json
+  body_json:
+    {
+      "id": 5,
+      "name": "party",
+      "label_color": "#001100",
+      "due_at": "2018-01-03T11:00:00+00",
+    }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Location: "/datarep_todos?id=eq.5"
+    Content-Range: "*/*"
+    Content-Length: "0"
+    Preference-Applied: "return=headers-only"
+  headers_absent: [Content-Type]
+  body_exact: ""
+notes: >
+  Upstream InsertSpec "parses values in POST body" (regular table). The point of
+  the case is that the `json AS <domain>` parsers run even when nothing is
+  returned: "#001100" is not a valid integer literal, so without the color
+  parser the insert would fail with "invalid input syntax for type integer"
+  (upstream comment at InsertSpec.hs#L800-L801). A successful 201 with
+  return=headers-only therefore proves the write-side casts were installed.
+  Location is keyed on the PK of the inserted row.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L799

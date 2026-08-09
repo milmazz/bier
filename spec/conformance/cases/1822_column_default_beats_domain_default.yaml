@@ -1,0 +1,48 @@
+id: 1822
+feature: domain_representations/default/column_default_beats_domain_default
+request:
+  method: POST
+  path: /evil_friends_with_column_default?columns=id,name
+  headers:
+    Prefer: "return=representation, missing=default"
+    Accept: application/json
+    Content-Type: application/json
+  body_json: { "name": "Demon" }
+schema: test
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Preference-Applied: "missing=default, return=representation"
+  body_exact: [{ "id": 420, "name": "Demon" }]
+notes: >
+  Upstream InsertSpec "inserts a COLUMN default before a DOMAIN default with
+  missing=default". `evil_friends_with_column_default.id` is the domain
+  devil_int (int DEFAULT 666, no `<domain> AS json` cast) but the COLUMN also
+  carries `default 420` (schema.sql#L3232-L3235). The id key is omitted from
+  the body, so `Prefer: missing=default` leaves the column out of the INSERT
+  target list and Postgres applies the COLUMN default, which wins over the
+  domain default: the returned representation is 420, not the 666 that case
+  1814 gets from the same domain on a column with no default of its own.
+  Because devil_int has no representation cast, the value still serializes with
+  the base int type's plain JSON rendering (a bare number).
+  NOTE the `schema: test` label (rather than this area's `domain_representations`
+  mirror) is load-bearing and is the only case in this area that needs it: the
+  area schemas are auto-updatable views over `test`, and PostgreSQL resolves a
+  missing INSERT column against the VIEW's column first — devil_int's domain
+  default 666 is found there and written as an explicit value, so the base
+  table's column default 420 never fires and the mirror answers 666. Verified
+  against a freshly loaded bier_test: inserting into the base table yields 420,
+  inserting into a `SELECT * FROM test....` view over it yields 666. Upstream
+  posts to the table itself (its db-schemas is plain `test`), so `schema: test`
+  is the faithful shape here.
+  NOT RUNNABLE UNTIL THE FIXTURE FOLD: `test.evil_friends_with_column_default`
+  is a NEW object that exists only in
+  spec/conformance/fixtures/domain_representations.delta.sql — the consolidated
+  spec/conformance/fixtures.sql defines only `test.evil_friends` (#L883). Until
+  the pipeline folds the delta in, `select
+  to_regclass('test.evil_friends_with_column_default')` is NULL on a loaded
+  bier_test and this case answers 404, not 201. Check that before treating a
+  1822 failure as an implementation bug; the delta DDL matches upstream
+  schema.sql#L3232-L3235 verbatim.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L571

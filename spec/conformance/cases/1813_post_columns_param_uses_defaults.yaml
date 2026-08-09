@@ -20,6 +20,7 @@ expect:
   status: 201
   headers:
     Content-Type: application/json; charset=utf-8
+    Content-Range: "*/*"
   body_exact:
     [
       {
@@ -29,5 +30,5 @@ expect:
         "due_at": "2018-01-01T00:00:00Z",
       },
     ]
-notes: "?columns=id,label_color parses only those keys; name and due_at not listed, so due_at takes the table DEFAULT isodate '2018-01-01' formatted as 2018-01-01T00:00:00Z and the bad due_at value is ignored. Mirrors InsertSpec.hs 'ignores json keys not included in ?columns; parses only the ones specified'."
+notes: "?columns=id,label_color parses only those keys; name and due_at not listed, so due_at takes the table DEFAULT isodate '2018-01-01' formatted as 2018-01-01T00:00:00Z and the bad due_at value is ignored. Upstream asserts Content-Range \"*/*\" alongside the Content-Type on this POST (InsertSpec.hs#L842), exactly as its updatable-view twin (case 1827) does. Mirrors InsertSpec.hs 'ignores json keys not included in ?columns; parses only the ones specified'."
 source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L835

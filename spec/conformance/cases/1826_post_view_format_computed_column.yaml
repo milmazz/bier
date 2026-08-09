@@ -1,0 +1,43 @@
+id: 1826
+feature: domain_representations/write/view_post_format_computed_column
+request:
+  method: POST
+  path: /datarep_todos_computed
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Prefer: return=representation
+  body_json:
+    {
+      "id": 5,
+      "name": "party",
+      "label_color": "#001100",
+      "due_at": "2018-01-03T11:00:00+00",
+    }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 201
+  headers:
+    Content-Type: application/json; charset=utf-8
+    Content-Range: "*/*"
+  body_exact:
+    [
+      {
+        "id": 5,
+        "name": "party",
+        "label_color": "#001100",
+        "due_at": "2018-01-03T11:00:00Z",
+        "dark_color": "#000880",
+      },
+    ]
+notes: >
+  Upstream InsertSpec "on updatable view" > "parses values in POST body and
+  formats values in return=representation". The returned representation of an
+  insert through the view includes the view's COMPUTED column, and that column
+  is formatted by the representation cast too: dark_color is
+  (label_color / 2)::color, i.e. 0x001100 / 2 = 0x000880, rendered "#000880".
+  due_at is parsed from "2018-01-03T11:00:00+00" by `json AS isodate` and read
+  back through `isodate AS json`, which rewrites the +00:00 offset to "Z".
+  Body verified against a freshly loaded bier_test.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/InsertSpec.hs#L880

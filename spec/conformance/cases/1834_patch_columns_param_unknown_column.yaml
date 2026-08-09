@@ -1,0 +1,38 @@
+id: 1834
+feature: domain_representations/write/patch_columns_param_unknown_column
+request:
+  method: PATCH
+  path: /datarep_todos_computed?id=eq.2&columns=label_color,helicopters
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+    Prefer: return=representation
+  body_json:
+    {
+      "due_at": "2019-01-03T11:00:00Z",
+      "smth": "here",
+      "label_color": "invalid",
+      "fake_id": 13,
+    }
+schema: domain_representations
+preconditions: []
+expect:
+  status: 400
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    {
+      "code": "PGRST204",
+      "details": null,
+      "hint": null,
+      "message":
+        "Could not find the 'helicopters' column of 'datarep_todos_computed' in the schema cache",
+    }
+notes: >
+  Upstream UpdateSpec "with ?columns parameter" > "fails if at least one
+  specified column doesn't exist" — the PATCH twin of case 1820. The unknown
+  ?columns entry is rejected with PGRST204 naming the target relation
+  (datarep_todos_computed) before any body value is parsed: the body's
+  "label_color": "invalid" would fail the `json AS color` cast, and that error
+  never surfaces.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/UpdateSpec.hs#L724
