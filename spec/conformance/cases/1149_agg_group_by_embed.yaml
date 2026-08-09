@@ -1,0 +1,32 @@
+id: 1149
+feature: select/aggregate/group-by-embed
+request:
+  method: GET
+  path: /project_invoices?select=project_id,total:invoice_total.sum(),projects(name)&order=project_id
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+config:
+  db-aggregates-enabled: true
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact:
+    - {"project_id":1,"total":300,"projects":{"name":"Windows 7"}}
+    - {"project_id":2,"total":1200,"projects":{"name":"Windows 10"}}
+    - {"project_id":3,"total":3200,"projects":{"name":"IOS"}}
+    - {"project_id":4,"total":4100,"projects":{"name":"OSX"}}
+notes: >
+  "allows the use of an JSON-embedded relationship column as part of the group
+  by" (AggregateFunctionsSpec.hs:92) — "Grouping by an Embedded Resource" in the
+  docs. Distinct from case 1131 (implicit GROUP BY over plain columns only) and
+  from case 1133 (the aggregate living inside the embed): here the many-to-one
+  embed `projects(name)` is itself part of the grouping and renders as a JSON
+  object next to the aggregate. project_invoices.project_id -> projects.id is a
+  plain FK, so the embed is a single object, not an array. Verified live against
+  bier_test: grouping test.project_invoices by project_id gives sums
+  300/1200/3200/4100 for projects Windows 7 / Windows 10 / IOS / OSX. Requires
+  db-aggregates-enabled = true (see the harness_exposure gap in
+  spec/select.yaml).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L92

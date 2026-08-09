@@ -1,0 +1,23 @@
+id: 1143
+feature: select/composite/arrow
+request:
+  method: GET
+  path: /fav_numbers?select=num->i
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"i":0.5},{"i":0.6}]
+notes: >
+  "obtains a composite type field" (JsonOperatorSpec.hs:150, first request).
+  `num` is test.complex (r,i double precision), NOT json/jsonb, so PostgREST
+  emits `to_jsonb(num)->'i'` (SqlFragment.pgFmtField, cfToJson branch); the
+  json value 0.5 is returned as a number. The last path segment `i` becomes the
+  JSON key. Upstream sends no `order=`; the two seed rows are inserted by a
+  single INSERT (fixtures.sql: ROW(0.5,0.5),'A' then ROW(0.6,0.6),'B') and no
+  case mutates test.fav_numbers, so physical order is stable — kept verbatim to
+  match upstream's request byte for byte.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/JsonOperatorSpec.hs#L150

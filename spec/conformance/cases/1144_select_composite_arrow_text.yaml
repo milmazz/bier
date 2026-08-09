@@ -1,0 +1,19 @@
+id: 1144
+feature: select/composite/arrow-text
+request:
+  method: GET
+  path: /fav_numbers?select=num->>i
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"i":"0.5"},{"i":"0.6"}]
+notes: >
+  "obtains a composite type field" (JsonOperatorSpec.hs:150, second request):
+  the `->>` form of case 1143 extracts the composite field as text, so the same
+  values come back quoted. Verified against a freshly loaded bier_test:
+  `select to_jsonb(num)->>'i' from test.fav_numbers` => 0.5, 0.6.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/JsonOperatorSpec.hs#L150

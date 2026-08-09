@@ -1,0 +1,22 @@
+id: 1148
+feature: select/aggregate/alias-input-cast-result-cast
+request:
+  method: GET
+  path: /trash_details?select=s:jsonb_col->>key::integer.sum()::text
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+config:
+  db-aggregates-enabled: true
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"s":"24"}]
+notes: >
+  "allows the combination of an alias, a before cast, and an after cast"
+  (AggregateFunctionsSpec.hs:86): output alias `s`, input cast `::integer`
+  before `.sum()`, result cast `::text` after it. Same 10+6+8 = 24 seed as case
+  1147, rendered as the JSON string "24". Requires db-aggregates-enabled = true
+  (see the harness_exposure gap in spec/select.yaml).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L86

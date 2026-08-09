@@ -1,0 +1,26 @@
+id: 1147
+feature: select/aggregate/cast-aggregated-column
+request:
+  method: GET
+  path: /trash_details?select=jsonb_col->>key::integer.sum()
+  headers: { Accept: application/json }
+schema: test
+preconditions: []
+config:
+  db-aggregates-enabled: true
+expect:
+  status: 200
+  headers:
+    Content-Type: application/json; charset=utf-8
+  body_exact: [{"sum":24}]
+notes: >
+  "allows you to cast the input argument of the aggregate"
+  (AggregateFunctionsSpec.hs:83). The `::integer` sits BEFORE the `.sum()`
+  suffix, so it casts the aggregate's input (the text produced by `->>key`),
+  not its result — the sibling of case 1132, which casts the result. Seed:
+  test.trash_details jsonb_col = {"key":10}, {"key":6}, {"key":8}
+  (fixtures.sql), so 10+6+8 = 24; verified live against bier_test with
+  `select sum((jsonb_col->>'key')::integer) from test.trash_details` => 24.
+  Requires db-aggregates-enabled = true (see the harness_exposure gap in
+  spec/select.yaml).
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/AggregateFunctionsSpec.hs#L83

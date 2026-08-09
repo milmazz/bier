@@ -21,5 +21,10 @@ expect:
 notes: >
   Spreading the far table inside the junction embed (users_tasks(...tasks(*)))
   drops the junction columns, leaving only the task columns
-  (SpreadQueriesSpec.hs:78).
+  (SpreadQueriesSpec.hs:78). Anchor deviates from the usual it-line convention:
+  L78 is the second `get` inside the it-block `it "can include or exclude
+  attributes of the junction on a m2m"` (SpreadQueriesSpec.hs:64); the block's
+  first `get` (L65) asserts the keep-junction form
+  (users_tasks(*,...tasks(*))), so only L78 demonstrates this case's request
+  and body.
 source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/Query/SpreadQueriesSpec.hs#L78
