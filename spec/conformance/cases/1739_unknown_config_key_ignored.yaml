@@ -1,0 +1,23 @@
+id: 1739
+feature: config/parsing/unknown-key-ignored
+request:
+  kind: cli
+  flag: "--dump-config"
+schema: config
+config:
+  file:
+    not-existing: "should succeed"
+preconditions: []
+expect:
+  exit_code: 0
+  dump_contains:
+    - 'db-schemas = "public"'
+notes: >
+  A config-file key PostgREST does not know is ignored, not fatal: the upstream
+  defaults golden input carries the literal line `not-existing = "should
+  succeed"` (configs/defaults.config#L4, with the comment "not existing config
+  options should not break tests") and its expected dump
+  (configs/expected/defaults.config) is the plain default set. The same holds
+  for in-database settings: db_config.sql#L22 sets `pgrst.not_existing` and the
+  expected golden never mentions it.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/configs/defaults.config#L4

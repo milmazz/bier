@@ -10,8 +10,10 @@ request:
     Access-Control-Request-Headers: Content-Type
 schema: config
 config:
-  db-schemas: test
-  db-anon-role: postgrest_test_anonymous
+  # Only the CORS key is declared: the assertions do not depend on the exposed
+  # schema list or the anon role, and declaring `db-schemas: test` would
+  # contradict the `schema: config` profile label the harness sends as
+  # Accept-Profile.
   server-cors-allowed-origins: "http://example.com, http://example2.com"
 preconditions: []
 expect:

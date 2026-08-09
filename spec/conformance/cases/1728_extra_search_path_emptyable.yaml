@@ -12,5 +12,5 @@ expect:
   exit_code: 0
   dump_contains:
     - 'db-extra-search-path = ""'
-notes: "db-extra-search-path is emptyable: an empty string yields an empty list (not the default ['public']). Source Config.hs splitOnCommasEmptyable (#L502-L504) reached via optStringEmptyable (#L444-L445)."
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L502
+notes: "db-extra-search-path is emptyable: an empty string yields an empty list (not the default ['public']). Source Config.hs splitOnCommasEmptyable (#L503-L504) reached via optStringEmptyable (#L444-L445)."
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/src/library/PostgREST/Config.hs#L503

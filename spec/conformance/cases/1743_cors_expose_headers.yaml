@@ -1,0 +1,25 @@
+id: 1743
+feature: config/server-cors-allowed-origins/expose-headers
+request:
+  method: GET
+  path: /items
+  headers:
+    Origin: http://example.com
+schema: config
+# Upstream runs this it-block under plain baseCfg; the Expose-Headers list is
+# hard-coded in the CORS policy and independent of every config key, so nothing
+# is declared here (db-schemas/db-anon-role would only contradict the `config`
+# profile label the harness sends as Accept-Profile).
+config: {}
+preconditions: []
+expect:
+  status: 200
+  headers:
+    Access-Control-Expose-Headers: "Content-Encoding, Content-Location, Content-Range, Content-Type, Date, Location, Server, Transfer-Encoding, Range-Unit"
+notes: >
+  A regular (non-preflight) request that carries an Origin header gets the
+  fixed Access-Control-Expose-Headers list back; the list is hard-coded in the
+  CORS policy (Cors.hs#L36-#L37) and is not affected by
+  server-cors-allowed-origins. Mirrors CorsSpec.hs "exposes necesssary response
+  headers to regular request", which asserts any body and status 200.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/spec/Feature/CorsSpec.hs#L30
