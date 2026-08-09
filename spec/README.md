@@ -13,10 +13,13 @@ that compatibility means, case by case, so it can be checked automatically.
 Everything here targets **PostgREST v16.0** (docs:
 [postgrest.org/en/v16](https://postgrest.org/en/v16/)). Every conformance case
 carries a `source:` URL pinned to the `v16.0` git tag with a `#L<line>` anchor,
-fetchable via `raw.githubusercontent.com`. All **668** cases are pinned to
+fetchable via `raw.githubusercontent.com`. All **670** cases are pinned to
 `v16.0` — verified on disk this pass (a prefix-aware sweep of every PostgREST
 URL across `spec/*.yaml`, `spec/*.md`, `spec/conformance/*.md` and the case files
-found **1857** references and **exactly one tag**). When bumping the target
+found **1874** references across **689** files and **exactly one tag**; the
+verification's own narrower pattern counted **1801**, the difference being
+`blob/`- and `tree/`-prefixed links — see `COVERAGE.md` → *Validation status*,
+which reports both rather than reconciling them). When bumping the target
 version, re-pin the sources and re-run the review pass.
 
 > **`case.schema.json` does not enforce the pin.** Its `source` pattern is
@@ -31,35 +34,45 @@ version, re-pin the sources and re-run the review pass.
 > and the tag. Sweep with a prefix-aware pattern
 > (`postgrest/(raw/|blob/|tree/)?<tag>`) or the count is wrong.
 
-> **`v14.12` in prose is not a stale pin.** **104** bare `v14.12` occurrences
+> **`v14.12` in prose is not a stale pin.** **110** bare `v14.12` occurrences
 > remain across the 17 area model files (`url_grammar.md` 15, `pagination.yaml`
-> 14, `errors.yaml` 13, `auth.yaml` 10, `config.yaml` 9, and the rest fewer),
-> plus **25** across 24 case files. Sampling them shows deliberate
-> v14.12→v16.0 change notes ("the block is byte-identical to v14.12, only the
-> `src/library/` path and line numbers move"). Verified this pass: **zero** of
-> them carries a `v14.12` *URL* — they are comparative prose, not citations.
-> (This count deliberately excludes `README.md`, `COVERAGE.md` and
+> 14, `errors.yaml` 13, `observability.yaml` 12, `auth.yaml` 10, `config.yaml` 9,
+> and the rest fewer), plus **25** across 24 case files. Sampling them shows
+> deliberate v14.12→v16.0 change notes ("the block is byte-identical to v14.12,
+> only the `src/library/` path and line numbers move"). Verified this pass:
+> **zero** of them carries a `v14.12` *URL* — they are comparative prose, not
+> citations. (This count deliberately excludes `README.md`, `COVERAGE.md` and
 > `conformance/INDEX.md`, which the synthesis phase rewrites; counting files
 > against themselves is not a measurement.)
 >
-> Three such notes have been **corrected** rather than carried forward, one per
+> **Four** such notes have been **corrected** rather than carried forward, one per
 > re-sync: case 1029's claim that the query parser was "byte-identical between
 > the pins" (false at the module level — the body is unchanged with an +8 line
 > offset, but the header is not); case 1016's claim that no v16.0 Feature-spec
 > line existed for the PUT-`limit` rule (`UpsertSpec.hs#L295` asserts it in both
-> pins); and, this pass, `pagination.yaml`'s "no pagination behavior changed
-> between the pins", narrowed to "no *asserted* behavior changed" after the
-> re-sync found four traceable-but-unmodeled behaviors. Treat comparative prose
-> as a claim to re-verify, not as settled fact.
+> pins); `pagination.yaml`'s "no pagination behavior changed between the pins",
+> narrowed to "no *asserted* behavior changed" after the re-sync found four
+> traceable-but-unmodeled behaviors; and, this pass, `observability.yaml`'s claim
+> that the OPTIONS Server-Timing "subset" was *unchanged on the wire from
+> v14.12*. The *unchanged* half was true; the *subset* half was false at **both**
+> pins, and `lib/` had implemented it. Treat comparative prose as a claim to
+> re-verify, not as settled fact — the failure mode is a claim that is right about
+> the delta and wrong about the behavior.
 
-> **Fixture provenance comments are still on the old pin.** Eight files under
-> `conformance/fixtures/` carry **51** `v14.12` URLs in `--` provenance comments
-> (re-counted on disk this pass: `ordering.sql` 27, `observability.sql` 7,
-> `errors.sql` 5, `auth.sql` 4, `mutations.sql` 3, `config.sql` 2, `filters.sql`
-> 2, `rpc.sql` 1). Those files are historical provenance and explicitly
-> non-authoritative (the live artifact is `conformance/fixtures.sql`), so the
-> re-sync left them alone — but do not read "single tag" above as covering
-> `*.sql`. See `COVERAGE.md` → *Validation status*.
+> **Fixture provenance comments are mostly still on the old pin — but no longer
+> all of them.** **Seven** files under `conformance/fixtures/` carry **44**
+> `v14.12` URLs in `--` provenance comments (re-counted on disk this pass:
+> `ordering.sql` 27, `errors.sql` 5, `auth.sql` 4, `mutations.sql` 3,
+> `config.sql` 2, `filters.sql` 2, `rpc.sql` 1). `observability.sql` carried
+> **7** last pass and now carries **zero**: the observability re-sync re-pinned
+> its whole header block to `v16.0` raw URLs, a comment-only change with every
+> anchored line number verified unchanged across the pins. It is the first
+> fixture fragment re-pinned to v16.0, and whether that becomes the pattern for
+> the other seven is an open decision (`COVERAGE.md` → follow-up 14). These files
+> are historical provenance and explicitly non-authoritative (the live artifact is
+> `conformance/fixtures.sql`), so the re-syncs otherwise leave them alone — but do
+> not read "single tag" above as covering `*.sql`. See `COVERAGE.md` →
+> *Validation status*.
 
 > **v16 source-layout note.** v16 moved the library sources from
 > `src/PostgREST/…` to `src/library/PostgREST/…` (a new `src/executable/` tree
@@ -77,7 +90,7 @@ spec/
 ├── <area>.yaml | url_grammar.md   # 17 per-area behavior models (the "why")
 └── conformance/
     ├── INDEX.md               # area <-> id band <-> fixture cross-reference
-    ├── cases/NNNN_<slug>.yaml # 668 conformance cases (the "what", machine-checkable)
+    ├── cases/NNNN_<slug>.yaml # 670 conformance cases (the "what", machine-checkable)
     ├── fixtures.sql           # the authoritative merged DDL+seed set
     ├── fixtures_local.sql     # human-owned harness supplement
     └── fixtures/              # per-area fragments + write-channel deltas (see its README)
@@ -98,21 +111,22 @@ There are two layers:
    `postgrest_version: v16.0`, and `url_grammar.md` states it in prose
    ("Version pinned: **PostgREST v16.0**"). Do not grep for a single spelling.
 
-   > **Correction, counted on disk this pass: the gap list is not universal, and
-   > earlier revisions of this file overstated it twice.** This file used to say
-   > every model closes "with an explicit gap list", then narrowed the exception
-   > to `errors.yaml` alone. Both were wrong. **Four** of the 17 models carry no
-   > `gaps:` key anywhere: `errors.yaml` (which records coverage under
-   > `coverage:`, its open items inline, and a `harness_gate:` key naming the
-   > Bier-side wiring three of its cases need) and — the part that was missed —
+   > **Counted on disk this pass: the gap list is not universal.** **Four** of the
+   > 17 models carry no `gaps:` key anywhere: `errors.yaml` (which records
+   > coverage under `coverage:`, its open items inline, and a `harness_gate:` key
+   > naming the Bier-side wiring three of its cases need) and
    > `content_negotiation.yaml`, `operators.yaml` and `representations.yaml`,
    > which record **no gap list at all, under any key**. `url_grammar.md` uses a
    > `## Gaps` markdown section rather than a YAML key. Read the model; do not
-   > assume the shape. All three silent models are also among the areas with no
-   > recorded v16.0 adversarial verdict, which is worth knowing before reading
-   > their silence as "no gaps" (see *Review status*).
+   > assume the shape. All three silent models are also among the **seven** areas
+   > with no recorded v16.0 adversarial verdict, which is worth knowing before
+   > reading their silence as "no gaps" (see *Review status*). The contrast is
+   > `observability.yaml`, which carries **16** `gaps:` entries — two of them
+   > `needed_assertion:` entries naming missing *harness capabilities* rather than
+   > missing cases. A long gap list is a sign of a model that has been read
+   > adversarially, not of an area in worse shape.
 
-2. **Conformance cases** — 668 YAML files under `conformance/cases/`. Each is one
+2. **Conformance cases** — 670 YAML files under `conformance/cases/`. Each is one
    concrete scenario: a request and the exact response (status, headers, body)
    PostgREST produces. These are the machine-checkable contract.
 
@@ -141,16 +155,19 @@ source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/...#L<n>
 
 The schema's `required` list is six keys — `id`, `feature`, `request`, `schema`,
 `expect`, `source` — but in practice `notes` is universal too: all seven are
-present on all **668** cases, verified mechanically this pass by intersecting key
-sets rather than by trusting the schema.
-`preconditions` is present on 667 (case **1330** omits it);
-`config` is present on **115** (four of those — 1705, 1719, 1727, 1743 — are the
-empty `config: {}`). The config count is **unchanged** this pass: the pagination
-re-sync added eleven cases and not one of them declares a `config:` block.
+present on all **670** cases, verified mechanically this pass by intersecting key
+sets rather than by trusting the schema. The complete key vocabulary on disk is
+exactly those seven plus `preconditions` and `config`; nothing else appears.
+`preconditions` is present on **669** (case **1330** omits it);
+`config` is present on **116** (four of those — 1705, 1719, 1727, 1743 — are the
+empty `config: {}`). The config count moved by exactly one this pass: the
+observability re-sync's case **1770** declares `server-timing-enabled: true`,
+which the shared instance already provides. Its other new case, **1771**, carries
+no `config:` at all — the `Server:` header it asserts is gated by no config key.
 
 Two request shapes are supported:
 
-- **HTTP** (the common case, **630** cases): `request.method` + `request.path`,
+- **HTTP** (the common case, **632** cases): `request.method` + `request.path`,
   with optional `request.headers` / `request.body` / `request.body_raw` /
   `request.body_json`. The **auth** area may add `request.jwt` to have the runner
   mint and send a signed token (32 cases do; case 11809 instead spells out a
@@ -225,9 +242,19 @@ are currently **comment-only** — each holds a single
 `-- Folded into ../fixtures.sql on <date> (…); empty until the next delta.`
 provenance line and no DDL, i.e. empty as a write channel. Four carry the
 2026-08-08 date; two carry 2026-08-09 (`url_grammar.delta.sql` and
-`errors.delta.sql`). **The pagination re-sync added no seventh channel**: its
-eleven new cases needed no fixture object at all, and `pagination.delta.sql` does
-not exist.
+`errors.delta.sql`). **Neither of the last two re-syncs added a seventh
+channel**: pagination's eleven new cases and observability's two needed no
+fixture object at all, and neither `pagination.delta.sql` nor
+`observability.delta.sql` exists.
+
+> **One existing fragment *was* edited, and the exception is narrow enough to
+> state precisely.** The observability re-sync modified
+> `conformance/fixtures/observability.sql` — **comment-only**: it re-pinned the
+> header's provenance URLs from `blob/v14.12` to `raw/v16.0` (all seven anchored
+> line numbers verified unchanged) and added two missing provenance lines for
+> objects the file already created. No DDL, no seed row, no object added, removed
+> or altered. That is the only kind of edit to an existing fragment a re-sync has
+> made; anything touching *objects* still goes through a `<area>.delta.sql`.
 
 See [`conformance/INDEX.md`](conformance/INDEX.md) for the full
 area ↔ id-band ↔ fixture ↔ label map.
@@ -243,7 +270,7 @@ the CI lint gate. The area models guide implementation; the cases are the
 pass/fail contract.
 
 > `CLAUDE.md` still says "532 cases". That is stale relative to this tree, which
-> holds **668**.
+> holds **670**.
 
 Everything under `spec/` and `test/` is **frozen ground truth** for
 implementation work: fix `lib/` to match the cases, never edit the cases to
@@ -267,13 +294,18 @@ print("OK" if not bad else f"{bad} errors")
 PY
 ```
 
-All **668** cases currently parse and validate, with **no duplicate ids** (and
-every `NNNN_` filename prefix equals the in-file `id:`). Remember the caveat
-above: a clean run proves shape, not pin — the `source` pattern accepts any tag.
-The validator was proved live, not vacuous, by negative controls on a mutated
-copy of a pristine case (unknown key, dropped required key, wrong `id` type, and
-a malformed `source` were all caught); the one control it **fails** is the
-stale-pin rewrite, which is why the URL sweep above exists.
+All **670** cases currently parse and validate, with **no duplicate ids** (670
+files, 670 distinct ids, and every `NNNN_` filename prefix equals the in-file
+`id:`). The schema itself was checked first this pass —
+`Draft202012Validator.check_schema(...)` reports it a valid draft 2020-12 schema —
+under python3 3.14 / PyYAML 6.0.3 / jsonschema 4.26.0. Remember the caveat above:
+a clean run proves shape, not pin — the `source` pattern accepts any tag. The
+validator was proved live, not vacuous, by negative controls on a mutated copy of
+a pristine case (unknown key, dropped required key, wrong `id` type, and a
+malformed `source` were all caught); the one control it **fails** is the
+stale-pin rewrite, which is why the URL sweep above exists. Those controls were
+run in an earlier pass and are not repeated every time — the failure they record
+is a property of the schema's `source` pattern, which has not changed.
 
 ## Review status
 
@@ -283,32 +315,47 @@ line and confirming it still asserts what the case claims — is summarized
 per area in [`COVERAGE.md`](COVERAGE.md), together with the open gaps and the
 machine-verification results for this pass.
 
-**Nine** areas carry a recorded v16.0 adversarial verdict so far. Eight —
+**Ten** areas carry a recorded v16.0 adversarial verdict so far. Nine —
 **auth**, **headers**, **config**, **select**, **filters**, **ordering**,
-**url_grammar** and now **pagination** — are ⚠️ *revise* with **zero citation
-defects** (every finding is a missing-coverage or mis-modelled-rule gap, itemized
-in `COVERAGE.md` → *Known gaps*). The ninth, **errors**, remains the tree's only
-✅ *pass*. The other **8** areas have not been re-audited at this pin; run
-`bier-spec-audit` over them before treating their citations as verified.
+**url_grammar**, **pagination** and now **observability** — are ⚠️ *revise* with
+**zero citation defects** (every finding is a missing-coverage or mis-modelled-rule
+gap, itemized in `COVERAGE.md` → *Known gaps*). The tenth, **errors**, remains the
+tree's only ✅ *pass*. The other **7** areas — `operators`, `representations`,
+`mutations`, `rpc`, `content_negotiation`, `openapi`, `domain_representations` —
+have not been re-audited at this pin; run `bier-spec-audit` over them before
+treating their citations as verified.
 
-> **The pagination verdict is the one to read as a warning about the other 8.**
-> Its findings were not merely "a case is missing": one modelled *rule* was
-> **wrong** — the Range header was documented as *overriding* limit/offset, when
-> `getRanges` **intersects** them — and the single upstream it-block on the
-> subject (`RangeSpec.hs#L194`, case 1261) is the one shape where the two rules
-> coincide, so no existing case could have caught it. A green suite is not
-> evidence that a model is right.
+> **Two verdicts should be read as warnings about the remaining 7, and the second
+> is the sharper one.**
+>
+> The **pagination** findings were not merely "a case is missing": one modelled
+> *rule* was **wrong** — the Range header was documented as *overriding*
+> limit/offset, when `getRanges` **intersects** them — and the single upstream
+> it-block on the subject (`RangeSpec.hs#L194`, case 1261) is the one shape where
+> the two rules coincide, so no existing case could have caught it.
+>
+> The **observability** findings went one step further: the modelled rule that
+> `OPTIONS` responses omit the `plan` and `transaction` Server-Timing metrics was
+> false at **both** pins, three cases asserted it, **and `lib/` implemented it**
+> (`lib/bier/plugs/observability.ex:159`). Spec and implementation agreed with
+> each other and with nothing upstream, so the suite was green on an invented
+> behavior. A green suite is not evidence that a model is right; it is not even
+> evidence that the behavior exists.
 
-Note what "zero citation defects" does *not* mean: **42** cases anchor their
+Note what "zero citation defects" does *not* mean: **46** cases anchor their
 `source:` at implementation code under `src/library/PostgREST/…` rather than at
 an upstream `it`-block, so their expected bodies are derived rather than
-transcribed (re-counted at the 668-case state). The count moved 36 → 42 because
-the pagination re-sync added six such cases (**1283–1288**), each stating in its
-`notes:` that PostgREST's own suite never exercises the shape. Two cases have
-been moved *off* implementation code so far — **1189** during the filters
-re-sync and **1016** during the url_grammar re-sync. Separately, case **1279** is
-the tree's **first and only case anchored at the documentation** rather than at
-either the test suite or the source
+transcribed (re-counted at the 670-case state). The count moved 36 → 42 → **46**:
+pagination added six (**1283–1288**), each stating in its `notes:` that
+PostgREST's own suite never exercises the shape, and observability added two new
+ones (**1770** at the `Performance.hs` doctest, **1771** at `setServerName`) while
+**re-anchoring three existing cases onto implementation code** (1757, 1768, 1769,
+whose retracted claim could only be refuted at the control flow) and one *off* it
+(1767 → `test_io.py#L523`). Three cases have been moved off implementation code in
+total — **1189** (filters), **1016** (url_grammar) and **1767** (observability) —
+so the motion is now bidirectional and each direction is a finding worth reading.
+Separately, case **1279** is the tree's **first and only case anchored at the
+documentation** rather than at either the test suite or the source
 (`docs/references/api/pagination_count.rst#L52`, the open-ended `Range: 10-`
 paragraph). The rest are behaviors upstream never asserts black-box, and each
 says so in its `notes:`.

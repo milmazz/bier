@@ -1,5 +1,5 @@
 id: 1765
-feature: observability/log-level/404-logged-at-warn
+feature: observability/log-level/404-status-signal
 request:
   method: GET
   path: /unknown
@@ -11,8 +11,19 @@ preconditions: []
 expect:
   status: 404
 notes: >
-  Drives the log-level filter: at warn, responses with status >= 400 are
-  logged, so a 404 on an unknown relation is logged (but would NOT be at
-  error). Asserts the 404 status the filter keys on; stdout emission verified
-  at io level. Mirrors test_io.py:552-560 (test_log_level, warn branch).
-source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_io.py#L552
+  Upstream `test_log_level` (the anchored parametrized test) drives one request
+  per status class and then counts stdout lines per level; at warn, responses
+  with status >= 400 are logged, so the `GET /unknown` 404 IS logged
+  (test_io.py#L552-L560, 2 lines) whereas at error it is not
+  (test_io.py#L546-L551, 1 line).
+  WHAT THIS CASE ACTUALLY ASSERTS: only the 404 status that the filter keys on.
+  It does NOT exercise log-level at all, for two reasons: (a) the harness has no
+  stdout capture (see observability.yaml gaps, `needed_assertion: log_capture`),
+  and (b) the `config:` block below is INERT — `Bier.ConformanceServer`'s
+  `@variant_case_ids` (test/support/conformance_server.ex:58) lists only 1758,
+  1763 and 1764 from the 1750-1799 band, so this case runs against the shared
+  instance's `log_level: :error`, not warn. The `config:` block is retained as a
+  record of the upstream configuration the log-line assertion would need. The
+  asserted 404 is independent of log-level, so the case is sound as written —
+  it is simply narrower than its feature name suggests.
+source: https://raw.githubusercontent.com/PostgREST/postgrest/v16.0/test/io/test_io.py#L523
