@@ -373,7 +373,7 @@ defmodule Bier.Rpc do
                Negotiation.resolve(conn, ActionController.read_producers(config)),
              {:ok, plan} <- parse_plan(conn, config, fn_def) do
           conn
-          |> Warning.record(config, plan)
+          |> Warning.record(plan)
           |> run_setof_rel(config, fn_def, ret_rel, args, plan, media, relations)
         end
 

@@ -120,15 +120,17 @@ defmodule Bier.Pagination do
   defp bounds(from, to), do: {from, to}
 
   # One `[0-9]*` group: absent (`nil`), its value, or `:error` when the whole
-  # header fails the pattern.
+  # header fails the pattern. The bytes are checked directly rather than with
+  # `Integer.parse/1`, which accepts a leading sign — `Integer.parse("+5")` is
+  # `{5, ""}`, so `Range: +0-5` used to be honored where the upstream pattern
+  # ignores it (#102).
   defp digits(""), do: nil
 
-  defp digits(s) do
-    case Integer.parse(s) do
-      {n, ""} when n >= 0 -> n
-      _ -> :error
-    end
-  end
+  defp digits(s), do: if(all_digits?(s), do: String.to_integer(s), else: :error)
+
+  defp all_digits?(""), do: true
+  defp all_digits?(<<char, rest::binary>>) when char in ?0..?9, do: all_digits?(rest)
+  defp all_digits?(_other), do: false
 
   @doc """
   Apply the `Range` header and the `db-max-rows` cap to a parsed plan.

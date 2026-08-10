@@ -20,7 +20,7 @@ defmodule Bier.Plugs.Warning do
     * **One header per response, from a single funnel.** Upstream builds it in
       `toWaiResponse` from the whole plan, so several legacy matches collapse
       into one header whose replacement list is comma-joined — hence a
-      `register_before_send/2` callback fed by `record/3` rather than a header
+      `register_before_send/2` callback fed by `record/2` rather than a header
       set at each rendering site.
 
     * **It is a deprecation notice, not an error.** Addressing the embed by its
@@ -56,9 +56,11 @@ defmodule Bier.Plugs.Warning do
   resolving the request's embed paths. A no-op when the request used no legacy
   target name — including when `url-use-legacy-target-names` is off, since then
   the legacy spelling is an error rather than a warning and nothing resolves.
+  Which is why the config is not a parameter: the gating already happened during
+  resolution, so there is nothing left here to gate on.
   """
-  @spec record(Plug.Conn.t(), map(), map()) :: Plug.Conn.t()
-  def record(conn, _config, plan) do
+  @spec record(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def record(conn, plan) do
     case Map.get(plan, :legacy_target_names, []) do
       [] -> conn
       pairs -> assign(conn, @assign, pairs)

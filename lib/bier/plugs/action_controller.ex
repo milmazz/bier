@@ -485,7 +485,7 @@ defmodule Bier.Plugs.ActionController do
 
     with {:ok, plan} <- parse(conn, config) do
       conn
-      |> Warning.record(config, plan)
+      |> Warning.record(plan)
       |> Plan.explain(pool, relation, plan, media)
     end
   end
@@ -498,7 +498,7 @@ defmodule Bier.Plugs.ActionController do
 
     with {:ok, prefs} <- Bier.Preferences.parse_read(conn),
          {:ok, plan} <- parse(conn, config),
-         conn = Warning.record(conn, config, plan),
+         conn = Warning.record(conn, plan),
          {:ok, %{body: body, count: count}} <-
            Bier.Cancellation.run(conn, config, fn ->
              QueryExecutor.run(pool, relation, plan, relations,

@@ -14,14 +14,30 @@ defmodule Bier.Fuzzy do
   before indexing.
   """
 
+  # Longest `term` that is scored at all. Scoring is O(|term| · |candidate|) per
+  # candidate and `term` is request-supplied — an unknown relation or routine
+  # name straight off the URL — where upstream amortizes the work in a prebuilt
+  # `FuzzySet`. PostgreSQL identifiers stop at NAMEDATALEN-1 = 63 bytes, so
+  # nothing past this length can be the name the client meant; refusing to score
+  # it bounds the per-404 cost without giving up a hint anyone would recognize
+  # (#102).
+  @max_term_length 64
+
   @doc """
   The best-scoring candidate for `term`, or `nil` when none reaches `min_score`.
 
   Ties are broken by candidate name so the hint is stable across schema-cache
   reloads (a `FuzzySet` is likewise deterministic, but its insertion order is
   not something Bier's introspection guarantees).
+
+  A `term` longer than #{@max_term_length} characters is not scored at all and
+  yields `nil` — see the note above the constant.
   """
   @spec best_match(String.t(), [String.t()], float()) :: String.t() | nil
+  def best_match(term, _candidates, _min_score)
+      when byte_size(term) > @max_term_length,
+      do: nil
+
   def best_match(term, candidates, min_score) do
     normalized = normalize(term)
 

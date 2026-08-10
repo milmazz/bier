@@ -176,6 +176,15 @@ defmodule Bier.Mutation do
   # matching element here reproduces both halves: a trailing element for a
   # different key is ignored, while a payload that matches the URL zero times (or
   # more than once) is the PK-mismatch error.
+  #
+  # The MORE-THAN-ONCE half is an APPROXIMATION, not mirrored behavior (#102).
+  # Upstream has no up-front check: it attempts every matching element and the
+  # write itself fails — two elements carrying the same primary key hit the
+  # unique index (`23505`), or `ON CONFLICT` collides with itself and raises
+  # `21000`. Bier returns PGRST115 before touching the database, which is a
+  # better-shaped error for the same request but a different SQLSTATE and
+  # message. Nothing in the frozen suite pins that case; if a case ever does,
+  # this is the branch to revisit.
   defp put_row(plan, rows, relation) do
     url_pk = Map.new(plan.filters, fn %{column: col, value: v} -> {col, v} end)
 
@@ -224,7 +233,7 @@ defmodule Bier.Mutation do
   # and RPC (`Bier.Rpc.exec/4`) — otherwise a write runs as the connecting role
   # with no `request.*` GUCs and no privilege check, a security gap (#73).
   defp run(conn, %Write{} = write, sql, params) do
-    conn = Warning.record(conn, write.config, write.plan)
+    conn = Warning.record(conn, write.plan)
     pool = Bier.Registry.via(write.config.name, Postgrex)
     relations = Bier.SchemaCache.relations(write.config.name)
     context = conn.assigns[:bier_auth]
