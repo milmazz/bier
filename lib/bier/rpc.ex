@@ -40,20 +40,38 @@ defmodule Bier.Rpc do
   # through a mirror label (e.g. `rpc`).
   @mirror_schemas ~w(rpc operators ordering pagination representations mutations config domain_representations)
 
-  @doc "Resolve and run an RPC in the (already resolved) profile `schema`."
+  @doc """
+  Resolve and run an RPC in the (already resolved) profile `schema`.
+
+  The `Prefer` header is parsed with the same reader the relation path uses: a
+  call plans as a `CallReadPlan`, and `responsePreferences` masks only the
+  mutation-only preferences, passing count/handling/timezone through for every
+  plan (`Response.hs#L296`). So an RPC echoes `Preference-Applied: count=exact`
+  exactly like `GET /items` does — even for `count=planned`, which has no effect
+  on a call — while `return=` is never echoed. The header goes on the request
+  conn before the routine runs, so every success shape (setof, scalar, octet,
+  void) carries it and an error path, which answers from the untouched conn in
+  `Bier.Plugs.ActionController`, does not.
+  """
   def dispatch(conn, config, schema, fn_name) do
-    with :ok <- check_method(conn) do
+    with :ok <- check_method(conn),
+         {:ok, supplied} <- supplied_args(conn),
+         {:ok, prefs} <- Bier.Preferences.parse_read(conn) do
       functions = Bier.SchemaCache.functions(config.name)
       overloads = Map.get(functions, {schema, fn_name}, [])
 
-      with {:ok, supplied} <- supplied_args(conn) do
-        case resolve_overload(overloads, supplied) do
-          {:ok, fn_def, args} ->
-            run_resolved(conn, config, fn_def, args)
+      case resolve_overload(overloads, supplied) do
+        {:ok, fn_def, args} ->
+          conn
+          |> Bier.Preferences.put_applied(prefs.applied)
+          # Stash the requested zone for `exec/4` to apply inside the call's
+          # transaction. Echoing `timezone=` in Preference-Applied without
+          # applying it would claim a preference we did not honor.
+          |> Plug.Conn.assign(:bier_timezone, prefs.timezone)
+          |> run_resolved(config, fn_def, args)
 
-          :error ->
-            {:error, {:rpc_not_found, not_found(schema, fn_name, supplied, overloads)}}
-        end
+        :error ->
+          {:error, {:rpc_not_found, not_found(schema, fn_name, supplied, overloads)}}
       end
     end
   end
@@ -343,7 +361,7 @@ defmodule Bier.Rpc do
   # client-disconnect watcher like any relation read.
   defp run_setof_rel(conn, config, fn_def, ret_rel, args, plan, media, relations) do
     pool = Bier.Registry.via(config.name, Postgrex)
-    count_mode = Pagination.count_mode(conn)
+    count_mode = Pagination.call_count_mode(conn)
     exec_args = Enum.map(args, fn {n, t, _v?, val} -> {n, t, value_for_named(val)} end)
 
     result =
@@ -414,7 +432,7 @@ defmodule Bier.Rpc do
   # setof results render as a (possibly paginated) array with Content-Range.
   defp render_result(conn, %{ret_kind: kind} = _fn_def, body, media, guc)
        when kind in [:setof_record, :setof_scalar] do
-    count_mode = Pagination.count_mode(conn)
+    count_mode = Pagination.call_count_mode(conn)
     count = if count_mode == :none, do: 0, else: Response.row_count(body)
 
     conn = Bier.Guc.put_headers(conn, guc)
@@ -431,7 +449,7 @@ defmodule Bier.Rpc do
   end
 
   defp render_result(conn, _fn_def, body, media, guc) do
-    count_mode = Pagination.count_mode(conn)
+    count_mode = Pagination.call_count_mode(conn)
     out = body_for(conn, body)
 
     conn
@@ -520,8 +538,10 @@ defmodule Bier.Rpc do
     config = instance_config(conn)
     auth = ActionController.auth_setup(conn, config)
 
+    timezone = conn.assigns[:bier_timezone]
+
     Bier.Cancellation.run(conn, config, fn ->
-      exec_transaction(pool, read_only?, auth, sql, params)
+      exec_transaction(pool, read_only?, auth, sql, params, timezone)
     end)
     |> case do
       {:ok, {result, guc}} -> {:ok, result, guc}
@@ -530,12 +550,16 @@ defmodule Bier.Rpc do
     end
   end
 
-  defp exec_transaction(pool, read_only?, auth, sql, params) do
+  defp exec_transaction(pool, read_only?, auth, sql, params, timezone) do
     Bier.ServerTiming.measure(:transaction, fn ->
       Postgrex.transaction(pool, fn tx ->
         if read_only?, do: Postgrex.query!(tx, "SET TRANSACTION READ ONLY", [])
         apply_auth(tx, auth)
-        query_then_read_gucs(tx, sql, params)
+
+        case Bier.QueryExecutor.set_local_timezone(tx, timezone) do
+          :ok -> query_then_read_gucs(tx, sql, params)
+          {:error, err} -> Postgrex.rollback(tx, err)
+        end
       end)
     end)
   end

@@ -157,9 +157,15 @@ defmodule Bier.QueryExecutor do
   # so a value it rejects (an unknown zone, a leap-seconds offset) must surface
   # as its own SQLSTATE 22023 error rather than raising. The literal is
   # single-quote escaped.
-  defp set_local_timezone(_tx, nil), do: :ok
+  @doc """
+  Apply `Prefer: timezone` to an open transaction. Public so the RPC path
+  (`Bier.Rpc`) applies it through the same escaping and the same error shape
+  rather than duplicating the statement.
+  """
+  @spec set_local_timezone(term(), String.t() | nil) :: :ok | {:error, term()}
+  def set_local_timezone(_tx, nil), do: :ok
 
-  defp set_local_timezone(tx, timezone) do
+  def set_local_timezone(tx, timezone) do
     case Postgrex.query(tx, "SET LOCAL TIME ZONE '#{String.replace(timezone, "'", "''")}'", []) do
       {:ok, _result} -> :ok
       {:error, _err} = error -> error

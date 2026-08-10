@@ -27,8 +27,29 @@ defmodule Bier.Registry do
   """
   @spec config(Bier.name()) :: Bier.Config.t()
   def config(name) do
-    [{_pid, config}] = Registry.lookup(__MODULE__, name)
+    {:ok, config} = fetch_config(name)
     config
+  end
+
+  @doc """
+  Retrieves the configuration for a Bier instance, or `:error` when no such
+  instance is registered
+
+  Same lookup as `config/1`, for callers that must tolerate an unregistered name
+  (e.g. an error raised before the request reached a live instance) instead of
+  raising.
+
+  ## Examples
+
+      Bier.Registry.fetch_config(Bier)
+      #=> {:ok, %Bier.Config{}}
+  """
+  @spec fetch_config(Bier.name()) :: {:ok, Bier.Config.t()} | :error
+  def fetch_config(name) do
+    case Registry.lookup(__MODULE__, name) do
+      [{_pid, config}] -> {:ok, config}
+      [] -> :error
+    end
   end
 
   @doc """
