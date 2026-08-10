@@ -27,10 +27,17 @@ defmodule Bier.Plugs.Cors do
   carried `Access-Control-Request-Headers`: wai-cors' `hdrRequestHeader`
   returns no header at all for the `Nothing` case (see `put_allow_headers/1`).
 
-  No `Vary: Origin` is emitted even when the origin is echoed: PostgREST builds
-  its policy with `corsVaryOrigin = False` (`Cors.hs`), leaving `Vary` entirely
-  to `Bier.Plugs.Vary`'s single funnel, which would otherwise be suppressed on
-  exactly the requests that carry an `Origin`.
+  This plug sets no `Vary` header of its own. It would suppress the v16 default
+  on exactly the requests that carry an `Origin` — `put_resp_header/3` replaces,
+  and `Bier.Plugs.Vary`'s funnel skips a response that already has a `Vary`.
+  Instead the funnel reads the `Access-Control-Allow-Origin` this plug wrote and
+  appends `Origin` to the default when the value is an *echo* rather than the
+  wildcard, so a CORS response carries the union
+  `Vary: Accept, Prefer, Range, Origin`. That is a deliberate divergence from
+  PostgREST, which builds its policy with `corsVaryOrigin = False` (`Cors.hs`)
+  and therefore names no `Vary` at all on a response whose
+  `Access-Control-Allow-Origin` depends on the request — see #98 and the
+  README's "Deliberate divergences from PostgREST".
   """
 
   @behaviour Plug
@@ -83,11 +90,24 @@ defmodule Bier.Plugs.Cors do
     end
   end
 
+  @doc """
+  True when the request is a CORS preflight: an `OPTIONS` carrying
+  `Access-Control-Request-Method`.
+
+  Public so `Bier.Plugs.Vary` can leave preflight responses alone without
+  restating the predicate — upstream answers a preflight inside the wai-cors
+  middleware, before the funnel that appends `Vary` runs at all.
+  """
+  @spec preflight?(Plug.Conn.t()) :: boolean()
+  def preflight?(conn) do
+    conn.method == "OPTIONS" and get_req_header(conn, "access-control-request-method") != []
+  end
+
   # Preflight extras are only meaningful when the request is an actual preflight
   # (OPTIONS with Access-Control-Request-Method). Other requests just carry the
   # allow-origin / expose-headers.
   defp put_preflight_headers(conn) do
-    if conn.method == "OPTIONS" and get_req_header(conn, "access-control-request-method") != [] do
+    if preflight?(conn) do
       conn
       |> put_resp_header("access-control-allow-methods", @allow_methods)
       |> put_allow_headers()

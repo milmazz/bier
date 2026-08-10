@@ -375,6 +375,34 @@ The `spec/` tree (behavior models + `COVERAGE.md`) and
 `docs/CONFORMANCE_IMPL.md` document the model and the build. Known feature gaps
 are tracked as GitHub issues (observability/telemetry, admin/health endpoints, …).
 
+### Deliberate divergences from PostgREST
+
+PostgREST is the ground truth, and every divergence from it is a bug — with the
+short list of exceptions below, where matching upstream would mean reproducing a
+defect. Each is unconstrained by the frozen suite (no case pins the behavior
+either way) and each is recorded here so it is not mistaken for drift.
+
+**`Vary: Origin` on CORS responses.** `Bier.Plugs.Cors` echoes the request's
+`Origin` into `Access-Control-Allow-Origin` rather than sending `*`, and a
+response whose headers depend on a request header must name that header in
+`Vary` (RFC 9111 §4.1). PostgREST builds its CORS policy with
+`corsVaryOrigin = False` (`Cors.hs`), so it names nothing: a shared cache may
+serve a response stamped `Access-Control-Allow-Origin: https://a.example` to a
+request from `https://b.example`. Bier emits the union —
+`Vary: Accept, Prefer, Range, Origin` — appended inside the `Bier.Plugs.Vary`
+funnel so the v16 default is not suppressed. A wildcard
+`Access-Control-Allow-Origin: *` is not an echo and stays bare, and CORS
+**preflight** responses are consciously left alone: upstream answers them in the
+wai-cors middleware, before the funnel that appends `Vary` runs at all
+(`spec/COVERAGE.md` records that leg as uncovered by any case), so changing them
+would be inventing behavior rather than correcting it. See #98.
+
+**CSV quoting.** Bier's CSV writer is RFC 4180. Upstream builds CSV bodies from
+PostgreSQL's `record_out` text with the parentheses stripped (`asCsvF`), which
+backslash-escapes and leaves embedded newlines unquoted — a value containing
+either yields malformed CSV. Bier renders the *cells* in SQL (so column order
+and numeric text are PostgreSQL's) but keeps its own quoting. See #110.
+
 ## Benchmarks
 
 `bench/http/` contains a k6 harness that benchmarks Bier against PostgREST
