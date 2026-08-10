@@ -115,11 +115,19 @@ defmodule Bier.Preferences do
 
   Returns:
 
-    * `{:ok, %{timezone: tz | nil, applied: [token]}}` — the timezone to hand to
-      PostgreSQL (nil when none was requested) and the tokens to echo in
-      `Preference-Applied`.
+    * `{:ok, %{timezone: tz | nil, handling: :strict | :lenient | nil,
+      max_affected: integer | nil, applied: [token]}}` — the timezone to hand to
+      PostgreSQL (nil when none was requested), the `handling` and
+      `max-affected` preferences the caller may need to enforce, and the tokens
+      to echo in `Preference-Applied`.
     * `{:error, {:invalid_prefs, details}}` — `handling=strict` with one or more
       invalid preferences; `details` is the `"Invalid preferences: a, b"` string.
+
+  `handling`/`max_affected` are reported but not echoed here beyond
+  `handling=`: `max-affected` constrains how many rows a statement may affect,
+  which only a plan that affects rows can honor, so it is the caller's job to
+  enforce it (`Bier.Rpc` rejects it outright on a routine that cannot return a
+  set, `Bier.Mutation` counts the affected rows).
   """
   def parse_read(conn) do
     tokens = tokens(conn)
@@ -134,6 +142,8 @@ defmodule Bier.Preferences do
       {:ok,
        %{
          timezone: timezone,
+         handling: handling,
+         max_affected: max_affected_value(tokens),
          applied: applied_tokens(count_token(tokens), handling, timezone)
        }}
     end
@@ -151,6 +161,21 @@ defmodule Bier.Preferences do
     Enum.find_value(tokens, fn
       "timezone=" <> tz -> tz
       _ -> nil
+    end)
+  end
+
+  # `max-affected=<n>`: free-form like `timezone=`, so it is matched by prefix.
+  # A non-integer value is not a usable cap and leaves the preference unset.
+  defp max_affected_value(tokens) do
+    Enum.find_value(tokens, fn
+      "max-affected=" <> value ->
+        case Integer.parse(value) do
+          {n, ""} -> n
+          _ -> nil
+        end
+
+      _ ->
+        nil
     end)
   end
 

@@ -16,25 +16,42 @@ defmodule Bier.CustomMedia do
 
   alias Bier.MediaType
   alias Bier.Negotiation
+  alias Bier.Plugs.ActionController
   alias Bier.QueryExecutor, as: QE
 
   @doc """
   Try to satisfy a relation GET via a custom media handler aggregate keyed on
   the relation. Returns a `Plug.Conn` if handled, or `:no_handler`.
+
+  `lookupHandler` gates BOTH of its relation-keyed probes behind
+  `when' defaultSelect` (`Plan/Negotiate.hs#L76-L77`): a relation-scoped handler
+  aggregates the relation's whole ROW type, so it can only serve a request that
+  projects the default select list. An explicit `?select=` drops it out of
+  negotiation entirely and the request falls back to the built-in producers —
+  which, for a media type none of them emits, is a 406 (case 1646).
   """
   def maybe_relation(conn, config, relation) do
-    handlers = handlers(config.name)
-    accepts = Negotiation.accept(conn) |> MediaType.parse_accept()
-
-    match =
-      Enum.find_value(accepts, fn mt ->
-        Enum.find(handlers, &relation_handler?(&1, mt, relation))
-      end)
-
-    case match do
+    case relation_handler(conn, config, relation) do
       nil -> :no_handler
       handler -> run_relation_aggregate(conn, config, relation, handler)
     end
+  end
+
+  defp relation_handler(conn, config, relation) do
+    if default_select?(conn) do
+      handlers = handlers(config.name)
+      accepts = Negotiation.accept(conn) |> MediaType.parse_accept()
+
+      Enum.find_value(accepts, fn mt ->
+        Enum.find(handlers, &relation_handler?(&1, mt, relation))
+      end)
+    end
+  end
+
+  defp default_select?(conn) do
+    conn.query_string
+    |> URI.query_decoder()
+    |> Enum.all?(fn {key, _value} -> key != "select" end)
   end
 
   @doc """
@@ -52,8 +69,15 @@ defmodule Bier.CustomMedia do
 
   # ---- relation aggregate (e.g. ov_json override) -------------------------
 
+  # The handler replaces the read query's aggregate, not the read query itself:
+  # the rows it folds are the request's filtered/ordered/paged rows, so
+  # `/projects?id=in.(1,2)` hands the aggregate exactly those two rows
+  # (case 1644).
   defp run_relation_aggregate(conn, config, relation, handler) do
-    run_aggregate(conn, config, handler, QE.qrel(relation), & &1)
+    with {:ok, plan} <- ActionController.parse(conn, config),
+         {:ok, source, params} <- QE.build_media_source(relation, plan) do
+      run_aggregate(conn, config, handler, "(#{source}) __s(__r)", params, & &1)
+    end
   end
 
   # ---- function returning a media-type domain (Any handler) ---------------
@@ -100,18 +124,19 @@ defmodule Bier.CustomMedia do
         # The anyelement aggregate path prepends a 0x01 SOH control byte to the
         # serialized output, mirroring PostgREST's "-- TODO SOH" behavior
         # (CustomMediaSpec, case 1636).
-        run_aggregate(conn, config, handler, qfn_call(fn_def), &soh/1)
+        run_aggregate(conn, config, handler, "#{qfn_call(fn_def)} __r", [], &soh/1)
     end
   end
 
-  # Run the handler aggregate over `source` (a relation or a function call) and
-  # send its serialized output, decorated by `transform`, as the response body.
-  defp run_aggregate(conn, config, handler, source, transform) do
+  # Run the handler aggregate over `from_sql` (a relation source or a function
+  # call, already aliased so its rows bind to `__r`) and send its serialized
+  # output, decorated by `transform`, as the response body.
+  defp run_aggregate(conn, config, handler, from_sql, params, transform) do
     pool = Bier.Registry.via(config.name, Postgrex)
     agg = "#{QE.quote_ident(handler.agg_schema)}.#{QE.quote_ident(handler.agg_name)}"
-    sql = "SELECT #{agg}(__r)::text FROM #{source} __r"
+    sql = "SELECT #{agg}(__r)::text FROM #{from_sql}"
 
-    case Postgrex.query(pool, sql, []) do
+    case Postgrex.query(pool, sql, params) do
       {:ok, %Postgrex.Result{rows: [[value]]}} ->
         send_custom(conn, handler.media_type, transform.(value))
 

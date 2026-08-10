@@ -275,6 +275,29 @@ defmodule Bier.QueryExecutor do
     {:ok, sql, Enum.reverse(state.params)}
   end
 
+  @doc """
+  Build the row source a custom media handler aggregates over.
+
+  A relation-scoped handler is an aggregate over the relation's whole ROW type,
+  so its projection is always the default select list (an explicit `?select=`
+  takes the handler out of negotiation entirely — see `Bier.CustomMedia`). Only
+  the request's filters, order and limit/offset window narrow the set.
+
+  The rows are projected as the whole-row reference `__t`, so the derived table
+  has a single column carrying the relation's composite type and the aggregate's
+  argument type still matches; a bare `SELECT *` would degrade it to `record`.
+  """
+  @spec build_media_source(Relation.t(), map()) :: {:ok, String.t(), [term()]}
+  def build_media_source(%Relation{} = relation, plan) do
+    state = %State{relation: relation, alias_name: nil}
+    {where_sql, state} = build_where(plan[:filters] || [], state)
+    {limit_sql, state} = build_limit(plan, state)
+    order_sql = build_order(plan[:order] || [], relation)
+
+    sql = "SELECT __t FROM #{qrel(relation)} __t" <> where_sql <> order_sql <> limit_sql
+    {:ok, sql, Enum.reverse(state.params)}
+  end
+
   # A top-level leaf filter whose column names a selected embed is an embed
   # null-filter, not a real column on the relation; skip it for counting.
   defp embed_null_filter?(%{logic: _}, _select), do: false
@@ -447,11 +470,19 @@ defmodule Bier.QueryExecutor do
 
     try do
       with :ok <- validate_embed_filters(plan) do
+        # The request's filters are the mutation statement's own WHERE clause, so
+        # the representation must not re-apply them over the CTE. `order` is a
+        # different matter: PostgREST plans a mutation as a `MutateReadPlan`
+        # whose read half is an ordinary ReadPlan rendered over `pgrst_source`,
+        # and `readPlanToQuery` emits its ORDER BY there — so `?order=` shapes a
+        # `return=representation` body exactly as it shapes a GET (case 1230).
+        repr_plan = %{plan | filters: []}
+
         result =
           if advanced_select?(plan.select, relation) or advanced_order?(plan, relation) do
-            build_advanced(relation, %{plan | filters: [], order: []}, state)
+            build_advanced(relation, repr_plan, state)
           else
-            build_simple(relation, %{plan | filters: [], order: []}, state)
+            build_simple(relation, repr_plan, state)
           end
 
         {:ok, repr_sql, params} = result

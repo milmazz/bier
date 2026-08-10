@@ -62,19 +62,39 @@ defmodule Bier.Rpc do
 
       case resolve_overload(overloads, supplied) do
         {:ok, fn_def, args} ->
-          conn
-          |> Bier.Preferences.put_applied(prefs.applied)
-          # Stash the requested zone for `exec/4` to apply inside the call's
-          # transaction. Echoing `timezone=` in Preference-Applied without
-          # applying it would claim a preference we did not honor.
-          |> Plug.Conn.assign(:bier_timezone, prefs.timezone)
-          |> run_resolved(config, fn_def, args)
+          with :ok <- check_max_affected(prefs, fn_def) do
+            conn
+            |> Bier.Preferences.put_applied(prefs.applied)
+            # Stash the requested zone for `exec/4` to apply inside the call's
+            # transaction. Echoing `timezone=` in Preference-Applied without
+            # applying it would claim a preference we did not honor.
+            |> Plug.Conn.assign(:bier_timezone, prefs.timezone)
+            |> run_resolved(config, fn_def, args)
+          end
 
         :error ->
-          {:error, {:rpc_not_found, not_found(schema, fn_name, supplied, overloads)}}
+          {:error,
+           {:rpc_not_found, not_found(conn, schema, fn_name, supplied, overloads, functions)}}
       end
     end
   end
+
+  # PGRST128: `max-affected` caps how many rows a statement may affect, which is
+  # only meaningful for a routine that can return more than one. PostgREST
+  # decides this in `callReadPlan`, before the routine runs —
+  # `failMaxAffectedRpcReturnsSingle (Just (PreferMaxAffected _), Just Strict)
+  # rout = if funcReturnsSingle rout then Left …` (`Plan.hs#L238`) — and
+  # `funcReturnsSingle` is true for EVERY non-set return type, `void` included
+  # (`Routine.hs#L102-105`, #L122-124). `handling=lenient` (or no handling)
+  # leaves the preference inert, exactly as it does on a mutation.
+  defp check_max_affected(%{max_affected: cap, handling: :strict}, fn_def)
+       when is_integer(cap) do
+    if returns_set?(fn_def), do: :ok, else: {:error, :max_affected_rpc_single}
+  end
+
+  defp check_max_affected(_prefs, _fn_def), do: :ok
+
+  defp returns_set?(%{retset: retset}), do: retset == true
 
   @doc """
   Resolve the routine an `OPTIONS /rpc/<fn>` request targets.
@@ -88,12 +108,22 @@ defmodule Bier.Rpc do
   @spec resolve_routine(Plug.Conn.t(), map(), String.t(), String.t()) ::
           {:ok, map()} | {:error, term()}
   def resolve_routine(conn, config, schema, fn_name) do
-    overloads = Map.get(Bier.SchemaCache.functions(config.name), {schema, fn_name}, [])
+    functions = Bier.SchemaCache.functions(config.name)
+    overloads = Map.get(functions, {schema, fn_name}, [])
 
-    with {:ok, supplied} <- supplied_args(conn) do
+    with {:ok, supplied} <- supplied_args(conn),
+         {:ok, prefs} <- Bier.Preferences.parse_read(conn) do
       case resolve_overload(overloads, supplied) do
-        {:ok, fn_def, _args} -> {:ok, fn_def}
-        :error -> {:error, {:rpc_not_found, not_found(schema, fn_name, supplied, overloads)}}
+        {:ok, fn_def, _args} ->
+          # `failMaxAffectedRpcReturnsSingle` lives inside `callReadPlan`, which
+          # `ActRoutineInfo`'s `InvRead True` invocation traverses too — so the
+          # OPTIONS path rejects the same combination a GET would, rather than
+          # answering `Allow` for a request the invocation would refuse.
+          with :ok <- check_max_affected(prefs, fn_def), do: {:ok, fn_def}
+
+        :error ->
+          {:error,
+           {:rpc_not_found, not_found(conn, schema, fn_name, supplied, overloads, functions)}}
       end
     end
   end
@@ -117,21 +147,11 @@ defmodule Bier.Rpc do
   # uses for it (`ActRoutineInfo … (InvRead True)`), so its arguments come from
   # the query string like a GET's.
   defp supplied_args(%Plug.Conn{method: m} = conn) when m in ["GET", "HEAD", "OPTIONS"] do
-    pairs =
+    args =
       conn.query_string
       |> URI.query_decoder()
-      |> Enum.to_list()
-
-    {arg_pairs, _reserved} =
-      Enum.split_with(pairs, fn {k, _v} -> k not in @reserved end)
-
-    args =
-      Enum.reduce(arg_pairs, %{}, fn {k, v}, acc ->
-        Map.update(acc, k, {:scalar, v}, fn
-          {:scalar, prev} -> {:list, [prev, v]}
-          {:list, list} -> {:list, list ++ [v]}
-        end)
-      end)
+      |> Enum.reject(fn {k, _v} -> k in @reserved end)
+      |> repeated_args()
 
     {:ok, args}
   end
@@ -142,35 +162,68 @@ defmodule Bier.Rpc do
     cond do
       # An application/octet-stream body is NOT JSON: it is bound verbatim as the
       # whole single-unnamed parameter (e.g. a bytea function), with the raw bytes
-      # passed through a real bound parameter (cases 1622/1623).
+      # passed through a real bound parameter (case 1622).
       octet_stream?(conn) ->
         {:ok, %{__body__: {:single_unnamed_raw, raw}}}
+
+      # An application/x-www-form-urlencoded invocation binds its arguments from
+      # the form body through the same DirectArgs path a GET uses —
+      # `(Inv, MTUrlEncoded) -> DirectArgs $ maybe mempty (toRpcParams proc .
+      # payArray) iPayload` (`Plan.hs#L222`) — so a field repeated in the body
+      # feeds a VARIADIC parameter exactly as a repeated query parameter does
+      # (case 1442). There is no whole-body fallback: the form fields ARE the
+      # named arguments.
+      form_urlencoded?(conn) ->
+        {:ok, raw |> URI.query_decoder() |> repeated_args()}
 
       raw == "" ->
         {:ok, %{}}
 
       true ->
-        case Bier.json_library().decode(raw) do
-          {:ok, map} when is_map(map) ->
-            {:ok, body_object_args(map, raw)}
-
-          # An array body binds only its first object (PostgREST RpcSpec L860).
-          {:ok, [first | _]} when is_map(first) ->
-            {:ok, body_object_args(first, raw)}
-
-          {:ok, _other} ->
-            # Non-object body: only consumable by a single unnamed json param.
-            {:ok, %{__body__: {:single_unnamed, raw}}}
-
-          {:error, _} ->
-            {:error, :invalid_json}
-        end
+        json_body_args(raw)
     end
   end
 
-  defp octet_stream?(conn) do
+  # A JSON invocation binds the body object's top-level keys as named arguments,
+  # and keeps the raw body around as the single-unnamed-json/jsonb fallback.
+  defp json_body_args(raw) do
+    case Bier.json_library().decode(raw) do
+      {:ok, map} when is_map(map) ->
+        {:ok, body_object_args(map, raw)}
+
+      # An array body binds only its first object (PostgREST RpcSpec L860).
+      {:ok, [first | _]} when is_map(first) ->
+        {:ok, body_object_args(first, raw)}
+
+      {:ok, _other} ->
+        # Non-object body: only consumable by a single unnamed json param.
+        {:ok, %{__body__: {:single_unnamed, raw}}}
+
+      {:error, _} ->
+        {:error, :invalid_json}
+    end
+  end
+
+  # Fold `{key, value}` pairs into the supplied-argument map, collapsing a key
+  # that repeats into a `{:list, …}` in occurrence order. `URI.query_decoder/1`
+  # applies the same `+`-to-space and percent-decoding `parseSimpleQuery` does,
+  # so a query string and a form body fold identically.
+  defp repeated_args(pairs) do
+    Enum.reduce(pairs, %{}, fn {k, v}, acc ->
+      Map.update(acc, k, {:scalar, v}, fn
+        {:scalar, prev} -> {:list, [prev, v]}
+        {:list, list} -> {:list, list ++ [v]}
+      end)
+    end)
+  end
+
+  defp octet_stream?(conn), do: content_type?(conn, "application/octet-stream")
+
+  defp form_urlencoded?(conn), do: content_type?(conn, "application/x-www-form-urlencoded")
+
+  defp content_type?(conn, mime) do
     case get_req_header(conn, "content-type") do
-      [value | _] -> String.contains?(String.downcase(value), "application/octet-stream")
+      [value | _] -> String.contains?(String.downcase(value), mime)
       [] -> false
     end
   end
@@ -330,11 +383,10 @@ defmodule Bier.Rpc do
   end
 
   # Everything else: scalar / scalar-array / setof-scalar / composite /
-  # record / OUT params. We render the function result as JSON ourselves.
-  # A scalar RPC result can additionally be emitted as application/octet-stream
-  # (cases 1622/1623), which is not a generally-available table producer.
+  # record / OUT params. We render the function result as JSON ourselves,
+  # plus whatever media type the routine itself registers a handler for.
   defp run(conn, config, fn_def, args) do
-    producers = ActionController.read_producers(config) ++ [:octet]
+    producers = ActionController.read_producers(config) ++ routine_producers(fn_def)
 
     with {:ok, media} <- Negotiation.resolve(conn, producers) do
       pool = Bier.Registry.via(config.name, Postgrex)
@@ -382,6 +434,32 @@ defmodule Bier.Rpc do
         other
     end
   end
+
+  # The producers a routine adds on top of the generally-available read set.
+  #
+  # `initialMediaHandlers` — PostgREST's entire built-in handler map — holds
+  # exactly `*/*`, application/json, text/csv and application/geo+json
+  # (`SchemaCache.hs#L1016-L1021`); application/octet-stream is NOT among them.
+  # A routine registers a handler for it by RETURNING the DOMAIN named after the
+  # mime (`SchemaCache.hs#L1080-L1086`), which is the only way it becomes
+  # negotiable on a call: a routine returning plain `bytea` — or, as in case
+  # 1623, plain `integer` — is not negotiable as octet-stream, and neither is a
+  # routine merely because its result is scalar. Aggregate-registered media
+  # types are served earlier, by `Bier.CustomMedia`.
+  defp routine_producers(fn_def) do
+    if return_media_type(fn_def) == "application/octet-stream", do: [:octet], else: []
+  end
+
+  # The mime a routine's return-type DOMAIN names, or nil when the return type
+  # is not a mime-named domain. `format_type` renders the domain as
+  # `schema."name"` (or bare `"name"` when the schema is in the search path), so
+  # strip the qualification and the identifier quotes before testing the shape.
+  defp return_media_type(%{ret_type: type}) when is_binary(type) do
+    name = type |> String.split(".") |> List.last() |> String.trim("\"")
+    if String.contains?(name, "/"), do: name
+  end
+
+  defp return_media_type(_fn_def), do: nil
 
   # ---- result SQL shapes ---------------------------------------------------
 
@@ -610,36 +688,106 @@ defmodule Bier.Rpc do
     end)
   end
 
-  # Build the PGRST202 not-found envelope, reporting against the base `test`
-  # schema for mirror labels. The hint points at a real signature when the name
-  # exists but the supplied parameters did not match an overload.
-  defp not_found(schema, fn_name, supplied, overloads) do
+  # Build the PGRST202 not-found envelope (`Error.hs#L246-L272`), reporting
+  # against the base `test` schema for mirror labels.
+  #
+  # `argumentKeys` is a Set upstream, so the supplied names are reported sorted.
+  # `fmtPrms` renders them as a parenthesized list in the message and as
+  # " with parameter(s) …" in the details, and collapses BOTH to
+  # " without parameters" when nothing was supplied (case 1443). A JSON
+  # invocation also searched the whole-body (single unnamed json/jsonb) overload
+  # and says so (case 1439); a text/xml/octet-stream invocation binds no named
+  # arguments at all — `onlySingleParams` — so it names the parameter's type
+  # instead and carries no hint.
+  defp not_found(conn, schema, fn_name, supplied, overloads, functions) do
     reported = reported_schema(schema)
     named = supplied |> Map.drop([:__body__]) |> Map.keys() |> Enum.sort()
-    has_body? = Map.has_key?(supplied, :__body__)
-
-    params_str = Enum.join(named, ", ")
-    sig = "#{reported}.#{fn_name}(#{params_str})"
-
-    details_tail =
-      if has_body? and named != [], do: " or with a single unnamed json/jsonb parameter", else: ""
-
-    details =
-      "Searched for the function #{reported}.#{fn_name} with parameters #{params_str}" <>
-        "#{details_tail}, but no matches were found in the schema cache."
+    func = "#{reported}.#{fn_name}"
+    single_body = single_body_param(conn)
 
     %{
       code: "PGRST202",
-      message: "Could not find the function #{sig} in the schema cache",
-      details: details,
-      hint: hint_signature(reported, fn_name, overloads, named)
+      message:
+        "Could not find the function #{func}#{message_params(named, single_body)}" <>
+          " in the schema cache",
+      details:
+        "Searched for the function #{func}#{details_params(named, single_body, conn)}," <>
+          " but no matches were found in the schema cache.",
+      hint: not_found_hint(schema, reported, fn_name, overloads, named, functions, single_body)
     }
+  end
+
+  # `onlySingleParams`: a POST whose Content-Type is one of the three
+  # single-unnamed-parameter body types (Error.hs#L253-L258).
+  @single_body_types [
+    {"text/plain", "text"},
+    {"text/xml", "xml"},
+    {"application/octet-stream", "bytea"}
+  ]
+
+  defp single_body_param(%Plug.Conn{method: "POST"} = conn) do
+    Enum.find_value(@single_body_types, fn {mime, kind} ->
+      if content_type?(conn, mime), do: kind
+    end)
+  end
+
+  defp single_body_param(_conn), do: nil
+
+  defp message_params(_named, kind) when is_binary(kind), do: ""
+  defp message_params([], nil), do: " without parameters"
+  defp message_params(named, nil), do: "(" <> Enum.join(named, ", ") <> ")"
+
+  defp details_params(_named, kind, _conn) when is_binary(kind),
+    do: " with a single unnamed #{kind} parameter"
+
+  defp details_params(named, nil, conn), do: fmt_params(named) <> json_body_tail(conn)
+
+  defp fmt_params([]), do: " without parameters"
+  defp fmt_params([one]), do: " with parameter #{one}"
+  defp fmt_params(named), do: " with parameters " <> Enum.join(named, ", ")
+
+  # A JSON invocation searched the single-unnamed-json/jsonb overload too. The
+  # request media type defaults to application/json when the POST carries no
+  # Content-Type, exactly as `iContentMediaType` does.
+  defp json_body_tail(%Plug.Conn{method: "POST"} = conn) do
+    if get_req_header(conn, "content-type") == [] or content_type?(conn, "application/json"),
+      do: " or with a single unnamed json/jsonb parameter",
+      else: ""
+  end
+
+  defp json_body_tail(_conn), do: ""
+
+  # `noRpcHint` (`Error.hs#L372`) has two arms, chosen by whether the name
+  # matched any routine at all. With no same-named overload it fuzzy-matches the
+  # PROC NAME against the requested schema's routines, keeping the single best
+  # above `getFuzzyHint`'s 0.75 minimum score (`Error.hs#L397-L403`) — case
+  # 1443. With same-named overloads it keeps the name and hints the closest
+  # parameter list among them (case 1433). `onlySingleParams` suppresses the
+  # hint entirely.
+  @rpc_hint_min_score 0.75
+
+  defp not_found_hint(_schema, _reported, _fn_name, _overloads, _named, _functions, kind)
+       when is_binary(kind),
+       do: nil
+
+  defp not_found_hint(schema, reported, fn_name, [], _named, functions, nil) do
+    candidates = for {{^schema, name}, _overloads} <- functions, do: name
+
+    case Bier.Fuzzy.best_match(fn_name, candidates, @rpc_hint_min_score) do
+      nil -> nil
+      match -> "Perhaps you meant to call the function #{reported}.#{match}"
+    end
+  end
+
+  defp not_found_hint(_schema, reported, fn_name, overloads, named, _functions, nil) do
+    hint_signature(reported, fn_name, overloads, named)
   end
 
   # The closest real signature for an existing function name, rendered as
   # `<schema>.<fn>(arg, arg)`. PostgREST only hints when an overload shares at
   # least one parameter name with what was supplied (e.g. add_them(a,b) for a
   # call carrying a, b, smthelse); a wholly-disjoint signature gets no hint.
+  # `listToText` sorts the parameter list it renders.
   defp hint_signature(reported, fn_name, overloads, named_keys) do
     supplied = MapSet.new(named_keys)
 
@@ -654,7 +802,7 @@ defmodule Bier.Rpc do
         nil
 
       fn_def ->
-        arg_names = Enum.map_join(fn_def.args, ", ", & &1.name)
+        arg_names = fn_def.args |> Enum.map(& &1.name) |> Enum.sort() |> Enum.join(", ")
         "Perhaps you meant to call the function #{reported}.#{fn_name}(#{arg_names})"
     end
   end
