@@ -36,8 +36,8 @@ recreates a local `bier_test` database and loads
 
 ## The golden rule: `test/**` and `spec/**` are frozen
 
-The conformance suite (532 cases in `spec/`, executed by
-`test/conformance/conformance_test.exs`) encodes real PostgREST v14.12
+The conformance suite (762 cases in `spec/`, executed by
+`test/conformance/conformance_test.exs`) encodes real PostgREST v16.0
 behavior, with each case citing its upstream source. It is **ground truth**:
 
 * Fix `lib/` to match the cases — never edit `test/**` or `spec/**`.

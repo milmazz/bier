@@ -33,7 +33,7 @@ is Phase 2 (the Tester) and is out of scope here.
 
 ## 2. Pinned target
 
-- **PostgREST `v14.12`** — the single version this run specs. (Override via
+- **PostgREST `v16.0`** — the single version this run specs. (Override via
   `args.pinned` at launch.) Reaching parity with one pinned version is
   the priority; chasing upstream drift comes later (the Spec-Drift Auditor).
 - Sources of truth, in priority order:
@@ -121,14 +121,14 @@ Derived from `AGENT_PLAN.md` §5.1. One agent owns one row and writes that row's
 
 Restrict a run to a subset of areas with `args.areas` (e.g.
 `{areas: ["select", "rpc"]}`); pick the PostgREST version with `args.pinned`
-(default `v14.12` — it also derives the docs major-version URL).
+(default `v16.0` — it also derives the docs major-version URL).
 
 ## 5. Agent contracts
 
 ### B/C · Research agent (one per area)
 - **Reads**: the area's PostgREST docs page(s); `test/spec/Feature/**` + fixtures
-  + `src/**` for that area (via `git clone --depth 1 --branch v14.12` or raw
-  `WebFetch` of `raw.githubusercontent.com/PostgREST/postgrest/v14.12/...`).
+  + `src/**` for that area (via `git clone --depth 1 --branch v16.0` or raw
+  `WebFetch` of `raw.githubusercontent.com/PostgREST/postgrest/v16.0/...`).
 - **Writes** (only under `spec/`):
   - `spec/<key>.yaml` — the area's behavior model (see `AGENT_PLAN.md` §5.1 shapes).
   - `spec/conformance/cases/NNNN_<slug>.yaml` — ≥1 black-box case per public
@@ -220,7 +220,7 @@ web / headless session can't launch the workflow runtime.
      paste a prompt containing the keyword **workflow**:
      ```
      Run a workflow that executes docs/workflows/bier-spec.md: spec-research
-     fan-out for PostgREST v14.12, one subagent per feature area writing spec/,
+     fan-out for PostgREST v16.0, one subagent per feature area writing spec/,
      a fresh adversarial reviewer re-auditing each area's cited sources, then
      consolidate fixtures and synthesize COVERAGE.md. Write only under spec/.
      ```
