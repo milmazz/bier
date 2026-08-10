@@ -82,7 +82,24 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
     db = cfg[:database]
 
     run_psql!(psql, cfg, "postgres", ~s(DROP DATABASE IF EXISTS "#{db}";))
-    run_psql!(psql, cfg, "postgres", ~s(CREATE DATABASE "#{db}";))
+
+    # Collation is pinned, not inherited. A bare CREATE DATABASE takes its
+    # locale from template1, which differs per environment — `C` on a typical
+    # local install, a linguistic locale in the postgres/postgis Docker images
+    # CI uses. That makes every collation-sensitive ORDER BY environment
+    # dependent: case 1606 (`/simple_pk?order=k.desc`) expects `xyyx` before
+    # `xYYx`, which holds under byte ordering (`Y` 0x59 < `y` 0x79) and fails
+    # under a linguistic collation that sorts case at a lower priority.
+    #
+    # `C` is the right pin rather than an arbitrary one: the frozen cases are
+    # transcribed from PostgREST's own suite, whose expected orderings are
+    # byte-ordered. TEMPLATE template0 is required to override the locale.
+    run_psql!(
+      psql,
+      cfg,
+      "postgres",
+      ~s(CREATE DATABASE "#{db}" TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C';)
+    )
   end
 
   defp load_fixtures(psql, cfg, fixtures) do
