@@ -16,7 +16,7 @@ defmodule Bier.HttpServerStarter do
     # the introspection snapshot lives in persistent_term (read-mostly),
     # keyed by the instance name — see Bier.SchemaCache. The catch-all router
     # forwards everything to ActionController.
-    cache = Bier.SchemaCache.load!(name, conn, schemas)
+    cache = Bier.SchemaCache.load!(name, conn, schemas, conf.db_extra_search_path)
 
     {:module, plug, _binary, _} = Bier.RouterBuilder.build(conf, cache.relations)
 
