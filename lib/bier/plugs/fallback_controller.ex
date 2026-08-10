@@ -229,6 +229,20 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
+  # ---- max-affected on a routine that cannot return a set (400 PGRST128) ---
+  # Raised by `Bier.Rpc` before the routine runs: `max-affected` with
+  # `handling=strict` caps the rows a statement may affect, which a routine
+  # returning a single value can never satisfy meaningfully.
+  def call(conn, {:error, :max_affected_rpc_single}) do
+    error(conn, 400, %{
+      code: "PGRST128",
+      message:
+        "Function must return SETOF or TABLE when max-affected preference is used with handling=strict",
+      details: nil,
+      hint: nil
+    })
+  end
+
   # A request presents a JWT but the server has no secret configured to verify
   # it (PostgREST returns 500). Drives the log-level=error access-log case.
   def call(conn, {:error, :jwt_unconfigured}) do
