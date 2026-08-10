@@ -62,7 +62,9 @@ defmodule Bier.ConformanceServer do
   # without a variant they assert against the wrong configuration. Both are
   # served by the generic `translate/1` clause — no variant_extra_opts/1 needed.
   @variant_case_ids [1139, 1467, 1468, 1469, 1470, 1471, 1472, 1473] ++
-                      [1491, 1493, 1654, 1677, 1678, 1680, 1682, 1703, 1742, 1758, 1763, 1764]
+                      [1491, 1493, 1498, 1499, 1654, 1677, 1678, 1680, 1682, 1703, 1742] ++
+                      [1758, 1763, 1764] ++
+                      [11800, 11802, 11803, 11804, 11805, 11807, 11818]
 
   def url_for(%Bier.ConformanceCase{id: id}) when id in @variant_case_ids,
     do: :persistent_term.get({__MODULE__, :variant, id})
@@ -91,8 +93,11 @@ defmodule Bier.ConformanceServer do
         variant_base
         # Each variant serves a single low-traffic case, so a small pool keeps
         # the combined connection count of all instances under Postgres'
-        # max_connections.
-        |> Keyword.merge(pool_size: 2)
+        # max_connections (100 by default, including in CI). One connection is
+        # enough for a single request, and at 29 variants a pool of 2 exceeded
+        # the ceiling once the bulk and auth instances (10 each) and the unit
+        # tests' own async instances are counted.
+        |> Keyword.merge(pool_size: 1)
         |> Keyword.merge(translate(config))
         |> Keyword.merge(variant_extra_opts(id))
 
