@@ -41,7 +41,7 @@ defmodule Bier.JWT do
 
   alias Bier.JWT.RoleClaim
 
-  @default_role_claim_path [{:key, "role"}]
+  @default_role_claim_path [{:name, :dot, "role"}]
 
   @doc """
   Verify the bearer token from the `Authorization` header.
@@ -51,9 +51,9 @@ defmodule Bier.JWT do
     * a present, valid token          -> `{:ok, %{role:, claims:, claims_json:}}`
     * a present, invalid token        -> `{:error, reason}`
 
-  `role_claim_path` is the parsed `jwt-role-claim-key` JSPath
+  `role_claim_path` is the parsed `jwt-role-claim-key` JSON Path
   (`Bier.JWT.RoleClaim`) locating the role inside the claims; it defaults to
-  PostgREST's `.role`.
+  PostgREST's `$.role`.
   """
   @spec verify(String.t() | nil, String.t() | nil, String.t() | nil, RoleClaim.path()) ::
           {:ok, :anonymous}

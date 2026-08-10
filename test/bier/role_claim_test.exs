@@ -1,72 +1,110 @@
 defmodule Bier.RoleClaimTest do
-  # jwt-role-claim-key (issue #49, conformance case 1711): the JSPath grammar,
-  # canonical dump form, and claim extraction mirror PostgREST v14.12's
-  # PostgREST.Config.JSPath (pRoleClaimKey / dumpJSPath) and Auth walk.
+  # jwt-role-claim-key (issue #49, conformance case 1711): the JSON Path
+  # grammar, canonical dump form and claim extraction mirror PostgREST v16.0's
+  # PostgREST.Config.JSPath, which delegates to `aeson-jsonpath` (RFC 9535).
+  # v16.0 retired the v14.12 leading-dot JSPath DSL wholesale (issue #93), so
+  # every expression here starts with the root identifier `$`.
   use ExUnit.Case, async: true
 
   alias Bier.JWT.RoleClaim
 
   describe "parse/1 accepts PostgREST's grammar" do
     test "default path" do
-      assert {:ok, [{:key, "role"}]} = RoleClaim.parse(".role")
+      assert {:ok, [{:name, :dot, "role"}]} = RoleClaim.parse(~S|$.role|)
     end
 
-    test "bare keys allow alphanumerics, underscore, $ and @" do
-      assert {:ok, [{:key, "a1_$@"}]} = RoleClaim.parse(".a1_$@")
+    test "the dotted shorthand takes letters, digits and underscore" do
+      assert {:ok, [{:name, :dot, "a1_b"}]} = RoleClaim.parse(~S|$.a1_b|)
     end
 
-    test "nested keys and array indexes" do
-      assert {:ok, [{:key, "realm"}, {:key, "roles"}, {:idx, 0}]} =
-               RoleClaim.parse(".realm.roles[0]")
+    test "nested names and array indexes, negative counting from the end" do
+      assert {:ok, [{:name, :dot, "realm"}, {:name, :dot, "roles"}, {:index, 0}]} =
+               RoleClaim.parse(~S|$.realm.roles[0]|)
+
+      assert {:ok, [{:name, :dot, "realm"}, {:name, :dot, "roles"}, {:index, -1}]} =
+               RoleClaim.parse(~S|$.realm.roles[-1]|)
     end
 
-    test "quoted keys admit dashes and spaces, and may be empty" do
-      assert {:ok, [{:key, "my-role key"}]} = RoleClaim.parse(~s(."my-role key"))
-      assert {:ok, [{:key, ""}]} = RoleClaim.parse(~s(.""))
+    test "a name with anything but letters/digits/underscore needs the bracket selector" do
+      # The v14.12 spelling `.roles."write-role"` is gone; v16 wants
+      # `$.roles["write-role"]`. Both quote styles are RFC 9535 name selectors.
+      assert {:ok, [{:name, :dot, "roles"}, {:name, :bracket, "write-role"}]} =
+               RoleClaim.parse(~S|$.roles["write-role"]|)
+
+      assert {:ok, [{:name, :bracket, "write-role"}]} = RoleClaim.parse(~S|$['write-role']|)
     end
 
-    test "a path may start with an index" do
-      assert {:ok, [{:idx, 2}, {:key, "role"}]} = RoleClaim.parse("[2].role")
+    test "filter selectors, parenthesized or bare" do
+      assert {:ok, [{:name, :dot, "roles"}, {:filter, {:paren, comparison}}]} =
+               RoleClaim.parse(~S|$.roles[?(@ == "admin")]|)
+
+      assert {:comparison, {:query, :current, []}, :eq, {:lit, "admin"}} = comparison
+
+      assert {:ok, [{:name, :dot, "roles"}, {:filter, ^comparison}]} =
+               RoleClaim.parse(~S|$.roles[?@ == "admin"]|)
     end
 
-    test "filter expressions, only in final position" do
-      assert {:ok, [{:key, "roles"}, {:filter, :eq, "admin"}]} =
-               RoleClaim.parse(~s|.roles[?(@ == "admin")]|)
+    test "search() replaces the retired ^== / ==^ / *== operators" do
+      # v14.12's `.roles[?(@ ^== "postgrest_test_")]` migrates to the RFC 9535
+      # search() function over a regex (PostgREST #4984).
+      assert {:ok, [{:name, :dot, "roles"}, {:filter, filter}]} =
+               RoleClaim.parse(~S|$.roles[?search(@, "^postgrest_test_")]|)
 
-      assert {:ok, [{:key, "r"}, {:filter, :not_eq, "x"}]} = RoleClaim.parse(~s|.r[?(@ != "x")]|)
+      assert {:search, {:query, :current, []}, {:lit, "^postgrest_test_"}} = filter
+    end
 
-      assert {:ok, [{:key, "r"}, {:filter, :starts_with, "x"}]} =
-               RoleClaim.parse(~s|.r[?(@ ^== "x")]|)
+    test "the bare root identifier is a valid query selecting the claims object" do
+      # Syntactically fine (RFC 9535 root identifier, no segments); it just
+      # never yields a role, since the claims object is not a string.
+      assert {:ok, []} = RoleClaim.parse(~S|$|)
+      assert RoleClaim.extract(%{"role" => "x"}, []) == nil
+    end
 
-      assert {:ok, [{:key, "r"}, {:filter, :ends_with, "x"}]} =
-               RoleClaim.parse(~s|.r[?(@ ==^ "x")]|)
+    test "a filter comparable may be a singular query with a bracketed name" do
+      assert {:ok, [{:name, :dot, "a"}, {:filter, {:paren, comparison}}]} =
+               RoleClaim.parse(~S|$.a[?(@["x-y"] == "z")]|)
 
-      assert {:ok, [{:key, "r"}, {:filter, :contains, "x"}]} =
-               RoleClaim.parse(~s|.r[?(@ *== "x")]|)
-
-      # Spaces around the operator are optional (parsec P.spaces), and other
-      # ASCII whitespace is accepted like isSpace.
-      assert {:ok, [{:key, "r"}, {:filter, :eq, "x"}]} = RoleClaim.parse(~s|.r[?(@=="x")]|)
-      assert {:ok, [{:key, "r"}, {:filter, :eq, "x"}]} = RoleClaim.parse(".r[?(@\f==\v\"x\")]")
+      assert {:comparison, {:query, :current, [{:name, :bracket, "x-y"}]}, :eq, {:lit, "z"}} =
+               comparison
     end
   end
 
   describe "parse/1 rejects what PostgREST rejects, with the pinned message" do
-    test "missing leading dot (case 1711's value)" do
+    test "the v14.12 leading-dot spelling is now an error (case 1711's value)" do
+      assert {:error, "failed to parse role-claim-key value (.role.other)"} =
+               RoleClaim.parse(".role.other")
+
       assert {:error, "failed to parse role-claim-key value (role.other)"} =
                RoleClaim.parse("role.other")
     end
 
-    test "empty input, bad index, trailing garbage, non-final filter" do
+    test "empty input, bad index, trailing garbage, unterminated quoting" do
       for bad <- [
             "",
-            ".",
-            ".a[",
-            ".a[b]",
-            ".a]",
-            ~s|.a[?(@ == "x")].b|,
-            ".a b",
-            ~s(."unterminated)
+            "$.",
+            "$.a[",
+            "$.a[b]",
+            "$.a]",
+            "$.a b",
+            # A quoted name is a BRACKET selector; `."x"` is not RFC 9535.
+            ~S|$.""|,
+            ~S|$["unterminated|
+          ] do
+        assert {:error, "failed to parse role-claim-key value (" <> _} = RoleClaim.parse(bad),
+               "expected rejection of #{inspect(bad)}"
+      end
+    end
+
+    test "the unmodelled RFC 9535 constructs are hard rejects (see #99)" do
+      # Descendant segments, wildcards, slices, comma multi-selectors and the
+      # logical combinators parse upstream but are outside Bier's hand-written
+      # subset, and a rejection aborts startup rather than degrading.
+      for bad <- [
+            ~S|$..role|,
+            ~S|$.roles[*]|,
+            ~S|$.roles[0:2]|,
+            ~S|$.roles[0,1]|,
+            ~S{$.roles[?(@ == "a" || @ == "b")]}
           ] do
         assert {:error, "failed to parse role-claim-key value (" <> _} = RoleClaim.parse(bad),
                "expected rejection of #{inspect(bad)}"
@@ -74,64 +112,113 @@ defmodule Bier.RoleClaimTest do
     end
   end
 
-  describe "dump/1 renders PostgREST's canonical form" do
-    test "keys are always quoted (1705/1707 dump shape)" do
-      {:ok, path} = RoleClaim.parse(".role")
-      assert RoleClaim.dump(path) == ~s(."role")
-
-      {:ok, path} = RoleClaim.parse(".aliased")
-      assert RoleClaim.dump(path) == ~s(."aliased")
+  describe "dump/1 renders the canonical RFC 9535 form" do
+    test "the dotted shorthand stays dotted (1705/1707 dump shape)" do
+      # Case 1705 pins `jwt-role-claim-key = "$$.role"` and 1707 `"$$.aliased"`;
+      # the `$` -> `$$` half is the config layer's escaping, not dump/1's.
+      assert dumped(~S|$.role|) == ~S|$.role|
+      assert dumped(~S|$.aliased|) == ~S|$.aliased|
     end
 
-    test "indexes and filters round-trip" do
-      {:ok, path} = RoleClaim.parse(~s(.realm.roles[0]))
-      assert RoleClaim.dump(path) == ~s(."realm"."roles"[0])
+    test "bracketed names and string literals render single-quoted" do
+      assert dumped(~S|$.roles["write-role"]|) == ~S|$.roles['write-role']|
+      assert dumped(~S|$.realm.roles[0]|) == ~S|$.realm.roles[0]|
+      assert dumped(~S|$.roles[?(@ == "admin")]|) == ~S|$.roles[?(@ == 'admin')]|
+      assert dumped(~S|$.roles[?search(@, "^pg_")]|) == ~S|$.roles[?search(@, '^pg_')]|
+    end
 
-      {:ok, path} = RoleClaim.parse(~s|.roles[?(@=="admin")]|)
-      assert RoleClaim.dump(path) == ~s|."roles"[?(@ == "admin")]|
+    test "a filter keeps the parenthesization it was written with" do
+      assert dumped(~S|$.roles[?(@ == "a")]|) == ~S|$.roles[?(@ == 'a')]|
+      assert dumped(~S|$.roles[?@ == "a"]|) == ~S|$.roles[?@ == 'a']|
+    end
+
+    test "quoting is escaped so the dump re-parses (case 1726's rule)" do
+      # Upstream's dumpQuery is write-only and emits text its own parser
+      # rejects. Bier re-reads its own dump (Bier.CLI.Config canonicalizes
+      # through dump/1 and hands the result to Bier.start_link/1), so the
+      # enclosing quote is escaped, and a bare `"` is escaped to its \\u form
+      # because it would otherwise not survive dumpJSPath's `"` -> `\"` rewrite
+      # and the config reader's undo of it.
+      assert dumped(~S|$["it's"]|) == ~S|$['it\'s']|
+      assert dumped(~S|$.a[?(@ == "it's")]|) == ~S|$.a[?(@ == 'it\'s')]|
+
+      # Spelled with a real escape so the expectation is unambiguous: the dump
+      # holds the six literal characters ", not a `"`.
+      assert dumped(~S|$['a"b']|) == "$['a" <> "\\u0022" <> "b']"
+
+      # The property that matters: every dump re-parses to the same path.
+      for input <- [
+            ~S|$["it's"]|,
+            ~S|$['a"b']|,
+            ~S|$.a[?(@ == "it's")]|,
+            ~S|$.a[?(@["x-y"] == "z")]|
+          ] do
+        {:ok, path} = RoleClaim.parse(input)
+        assert {:ok, ^path} = RoleClaim.parse(RoleClaim.dump(path)), "round trip #{input}"
+      end
+    end
+
+    test "a singular-query name is bracketed unless it is a bare shorthand" do
+      # dumpQuery always dots it, which mangles `@["x-y"]` into `@.x-y`.
+      assert dumped(~S|$.a[?(@["x-y"] == "z")]|) == ~S|$.a[?(@['x-y'] == 'z')]|
+      assert dumped(~S|$.a[?(@.b == "z")]|) == ~S|$.a[?(@.b == 'z')]|
     end
   end
 
   describe "extract/2" do
-    test "walks nested keys and indexes; only non-empty strings are roles" do
+    test "walks names and indexes; only non-empty strings are roles" do
       claims = %{"realm" => %{"roles" => ["writer", "admin"]}}
-      {:ok, path} = RoleClaim.parse(".realm.roles[1]")
-      assert RoleClaim.extract(claims, path) == "admin"
 
-      {:ok, path} = RoleClaim.parse(".realm.roles[9]")
-      assert RoleClaim.extract(claims, path) == nil
+      assert extracted(claims, ~S|$.realm.roles[1]|) == "admin"
+      assert extracted(claims, ~S|$.realm.roles[-1]|) == "admin"
+      assert extracted(claims, ~S|$.realm.roles[9]|) == nil
+      assert extracted(claims, ~S|$.realm|) == nil
+      assert extracted(claims, ~S|$.missing|) == nil
 
-      {:ok, path} = RoleClaim.parse(".realm")
-      assert RoleClaim.extract(claims, path) == nil
-
-      {:ok, path} = RoleClaim.parse(".missing")
-      assert RoleClaim.extract(claims, path) == nil
-
-      {:ok, path} = RoleClaim.parse(".role")
-      assert RoleClaim.extract(%{"role" => ""}, path) == nil
-      assert RoleClaim.extract(%{"role" => 42}, path) == nil
+      assert extracted(%{"role" => ""}, ~S|$.role|) == nil
+      assert extracted(%{"role" => 42}, ~S|$.role|) == nil
     end
 
     test "filters select the first matching string element of an array" do
       claims = %{"roles" => ["one", "two", "twenty"]}
 
       checks = [
-        {~s|.roles[?(@ == "two")]|, "two"},
-        {~s|.roles[?(@ != "one")]|, "two"},
-        {~s|.roles[?(@ ^== "tw")]|, "two"},
-        {~s|.roles[?(@ ==^ "enty")]|, "twenty"},
-        {~s|.roles[?(@ *== "went")]|, "twenty"},
-        {~s|.roles[?(@ == "absent")]|, nil}
+        {~S|$.roles[?(@ == "two")]|, "two"},
+        {~S|$.roles[?(@ != "one")]|, "two"},
+        {~S|$.roles[?search(@, "^tw")]|, "two"},
+        {~S|$.roles[?search(@, "enty$")]|, "twenty"},
+        {~S|$.roles[?search(@, "went")]|, "twenty"},
+        {~S|$.roles[?(@ == "absent")]|, nil}
       ]
 
       for {expr, expected} <- checks do
-        {:ok, path} = RoleClaim.parse(expr)
-        assert RoleClaim.extract(claims, path) == expected, "path #{expr}"
+        assert extracted(claims, expr) == expected, "path #{expr}"
       end
 
-      # A filter over a non-array yields no role.
-      {:ok, path} = RoleClaim.parse(~s|.roles[?(@ == "x")]|)
-      assert RoleClaim.extract(%{"roles" => "not-a-list"}, path) == nil
+      # A filter over a non-array, non-object yields no role.
+      assert extracted(%{"roles" => "not-a-list"}, ~S|$.roles[?(@ == "x")]|) == nil
     end
+
+    test "a filter over an object selects members in ascending name order" do
+      # RFC 9535 leaves object member order implementation-defined but requires
+      # one fixed choice; plain Elixir map iteration is unspecified and changes
+      # with map size, which would resolve identical claims to different roles
+      # across boots. Sorting by member name is what Bier pins.
+      claims = %{"roles" => %{"b" => "beta", "a" => "alpha", "c" => "gamma"}}
+      assert extracted(claims, ~S|$.roles[?search(@, "a")]|) == "alpha"
+
+      big = Map.new(1..40, fn i -> {"k#{i}", "role#{i}"} end)
+      assert extracted(%{"roles" => big}, ~S|$.roles[?search(@, "^role")]|) == "role1"
+    end
+  end
+
+  defp dumped(input) do
+    {:ok, path} = RoleClaim.parse(input)
+    RoleClaim.dump(path)
+  end
+
+  defp extracted(claims, input) do
+    {:ok, path} = RoleClaim.parse(input)
+    RoleClaim.extract(claims, path)
   end
 end

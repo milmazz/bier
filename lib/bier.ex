@@ -301,11 +301,15 @@ defmodule Bier do
       ],
       jwt_role_claim_key: [
         type: :string,
-        default: env(:jwt_role_claim_key, ".role"),
+        default: env(:jwt_role_claim_key, "$.role"),
         doc: """
-        JSPath to the database role inside the JWT claims (PostgREST
-        jwt-role-claim-key), e.g. `.role` (default) or `."https://example.com/roles"[0]`.
-        An expression that does not parse aborts startup.
+        RFC 9535 JSON Path to the database role inside the JWT claims
+        (PostgREST jwt-role-claim-key), e.g. `$.role` (default),
+        `$["https://example.com/roles"][0]` or
+        `$.roles[?search(@, "^app_")]`. Every expression starts with the root
+        identifier `$` — PostgREST v16.0 replaced the v14.12 leading-dot JSPath
+        DSL with standard JSON Path — and an expression that does not parse
+        aborts startup.
         """
       ],
       jwt_cache_max_entries: [

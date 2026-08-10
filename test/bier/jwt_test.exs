@@ -45,13 +45,13 @@ defmodule Bier.JWTTest do
 
   describe "jwt-role-claim-key (verify/4)" do
     test "extracts the role from a custom nested path" do
-      {:ok, path} = Bier.JWT.RoleClaim.parse(".realm.roles[1]")
+      {:ok, path} = Bier.JWT.RoleClaim.parse("$.realm.roles[1]")
       token = forge_hs256(%{"realm" => %{"roles" => ["writer", "admin"]}}, @hs_secret)
       assert {:ok, %{role: "admin"}} = JWT.verify(token, @hs_secret, nil, path)
     end
 
     test "a token whose claims miss the custom path yields a nil role" do
-      {:ok, path} = Bier.JWT.RoleClaim.parse(".realm.roles[1]")
+      {:ok, path} = Bier.JWT.RoleClaim.parse("$.realm.roles[1]")
       token = forge_hs256(%{"role" => "alice"}, @hs_secret)
       assert {:ok, %{role: nil}} = JWT.verify(token, @hs_secret, nil, path)
     end
@@ -107,66 +107,66 @@ defmodule Bier.JWTTest do
 
   describe "validate_claims/3 (per-request half)" do
     test "extracts the role from valid claims" do
-      role_path = [{:key, "role"}]
+      role_path = [{:name, :dot, "role"}]
 
       assert {:ok, "postgrest_test_author"} =
                JWT.validate_claims(%{"role" => "postgrest_test_author"}, nil, role_path)
     end
 
     test "no role claim yields nil (anon fallback happens in Auth)" do
-      role_path = [{:key, "role"}]
+      role_path = [{:name, :dot, "role"}]
       assert {:ok, nil} = JWT.validate_claims(%{"id" => "jdoe"}, nil, role_path)
     end
 
     test "an expired exp is rejected even without re-verifying the signature" do
-      role_path = [{:key, "role"}]
+      role_path = [{:name, :dot, "role"}]
       assert {:error, :expired} = JWT.validate_claims(%{"exp" => 1}, nil, role_path)
     end
 
     test "an exp within the 30s clock-skew allowance is still accepted" do
-      role_path = [{:key, "role"}]
+      role_path = [{:name, :dot, "role"}]
       exp = System.system_time(:second) - 20
 
       assert {:ok, nil} = JWT.validate_claims(%{"exp" => exp}, nil, role_path)
     end
 
     test "an exp beyond the 30s clock-skew allowance is rejected" do
-      role_path = [{:key, "role"}]
+      role_path = [{:name, :dot, "role"}]
       exp = System.system_time(:second) - 45
 
       assert {:error, :expired} = JWT.validate_claims(%{"exp" => exp}, nil, role_path)
     end
 
     test "an nbf within the 30s clock-skew allowance is accepted" do
-      role_path = [{:key, "role"}]
+      role_path = [{:name, :dot, "role"}]
       nbf = System.system_time(:second) + 20
 
       assert {:ok, nil} = JWT.validate_claims(%{"nbf" => nbf}, nil, role_path)
     end
 
     test "an nbf beyond the 30s clock-skew allowance is rejected as not yet valid" do
-      role_path = [{:key, "role"}]
+      role_path = [{:name, :dot, "role"}]
       nbf = System.system_time(:second) + 45
 
       assert {:error, :not_yet_valid} = JWT.validate_claims(%{"nbf" => nbf}, nil, role_path)
     end
 
     test "an iat within the 30s clock-skew allowance is accepted" do
-      role_path = [{:key, "role"}]
+      role_path = [{:name, :dot, "role"}]
       iat = System.system_time(:second) + 20
 
       assert {:ok, nil} = JWT.validate_claims(%{"iat" => iat}, nil, role_path)
     end
 
     test "an iat beyond the 30s clock-skew allowance is rejected as issued at future" do
-      role_path = [{:key, "role"}]
+      role_path = [{:name, :dot, "role"}]
       iat = System.system_time(:second) + 45
 
       assert {:error, :issued_at_future} = JWT.validate_claims(%{"iat" => iat}, nil, role_path)
     end
 
     test "audience mismatch is rejected when jwt-aud is configured" do
-      role_path = [{:key, "role"}]
+      role_path = [{:name, :dot, "role"}]
 
       assert {:error, :not_in_audience} =
                JWT.validate_claims(%{"aud" => "other"}, "expected", role_path)
@@ -178,7 +178,7 @@ defmodule Bier.JWTTest do
       token =
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicG9zdGdyZXN0X3Rlc3RfYXV0aG9yIiwiaWQiOiJqZG9lIn0.B-lReuGNDwAlU1GOC476MlO0vAt9JNoHIlxg2vwMaO0"
 
-      role_path = [{:key, "role"}]
+      role_path = [{:name, :dot, "role"}]
 
       assert {:ok, %{role: "postgrest_test_author", claims: _, claims_json: _}} =
                JWT.verify(token, @hs_secret, nil, role_path)

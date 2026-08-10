@@ -19,6 +19,13 @@ defmodule Bier.CLI.Config do
   @entries [
     %{key: "db-uri", env: "PGRST_DB_URI", kind: :string, default: "postgresql://", aliases: []},
     %{
+      key: "client-error-verbosity",
+      env: "PGRST_CLIENT_ERROR_VERBOSITY",
+      kind: {:enum_str, :client_error_verbosity},
+      default: "verbose",
+      aliases: []
+    },
+    %{
       key: "db-schemas",
       env: "PGRST_DB_SCHEMAS",
       kind: :csv,
@@ -76,6 +83,13 @@ defmodule Bier.CLI.Config do
       aliases: ["db-pool-timeout"]
     },
     %{
+      key: "db-prepared-statements",
+      env: "PGRST_DB_PREPARED_STATEMENTS",
+      kind: :bool,
+      default: true,
+      aliases: []
+    },
+    %{
       key: "db-tx-end",
       env: "PGRST_DB_TX_END",
       kind: {:enum_atom, :db_tx_end},
@@ -98,6 +112,20 @@ defmodule Bier.CLI.Config do
     },
     %{key: "server-port", env: "PGRST_SERVER_PORT", kind: :int, default: 3000, aliases: []},
     %{key: "server-host", env: "PGRST_SERVER_HOST", kind: :string, default: "!4", aliases: []},
+    %{
+      key: "server-reuseport",
+      env: "PGRST_SERVER_REUSEPORT",
+      kind: :bool,
+      default: false,
+      aliases: []
+    },
+    %{
+      key: "url-use-legacy-target-names",
+      env: "PGRST_URL_USE_LEGACY_TARGET_NAMES",
+      kind: :bool,
+      default: true,
+      aliases: []
+    },
     %{
       key: "server-unix-socket",
       env: "PGRST_SERVER_UNIX_SOCKET",
@@ -127,6 +155,20 @@ defmodule Bier.CLI.Config do
       aliases: []
     },
     %{
+      key: "admin-server-unix-socket",
+      env: "PGRST_ADMIN_SERVER_UNIX_SOCKET",
+      kind: :opt_string,
+      default: :unset,
+      aliases: []
+    },
+    %{
+      key: "admin-server-unix-socket-mode",
+      env: "PGRST_ADMIN_SERVER_UNIX_SOCKET_MODE",
+      kind: :string,
+      default: "660",
+      aliases: []
+    },
+    %{
       key: "jwt-secret",
       env: "PGRST_JWT_SECRET",
       kind: :opt_string,
@@ -145,7 +187,7 @@ defmodule Bier.CLI.Config do
       key: "jwt-role-claim-key",
       env: "PGRST_JWT_ROLE_CLAIM_KEY",
       kind: :string,
-      default: ".role",
+      default: "$.role",
       aliases: ["role-claim-key"]
     },
     %{
@@ -239,6 +281,10 @@ defmodule Bier.CLI.Config do
     openapi_mode: %{
       values: ["follow-privileges", "ignore-privileges", "disabled"],
       message: "Invalid openapi-mode. Check your configuration."
+    },
+    client_error_verbosity: %{
+      values: ["minimal", "verbose"],
+      message: "Invalid client-error-verbosity. Check your configuration."
     }
   }
 
@@ -248,18 +294,19 @@ defmodule Bier.CLI.Config do
 
   # Keys settable from the in-database config source (`ALTER ROLE ... SET
   # pgrst.*`): upstream's dbSettingsNames whitelist (Config/Database.hs,
-  # v14.12) intersected with the keys Bier implements. Upstream-only names not
-  # mirrored here: db_aggregates_enabled, db_pre_config, db_prepared_statements,
-  # db_hoisted_tx_settings, jwt_cache_max_lifetime (Bier's
-  # jwt-cache-max-entries is a different knob). Everything else — notably
-  # server-* bind settings and db-uri — is non-reloadable and ignored when set
-  # via the database (case 1725).
+  # v16.0) intersected with the keys Bier implements. Upstream-only names not
+  # mirrored here: db_aggregates_enabled, db_pre_config, db_hoisted_tx_settings,
+  # jwt_cache_max_lifetime (Bier's jwt-cache-max-entries is a different knob).
+  # Everything else — notably server-* bind settings and db-uri — is
+  # non-reloadable and ignored when set via the database (case 1725).
   @db_settable_keys ~w(
+    client-error-verbosity
     db-anon-role db-extra-search-path db-max-rows db-plan-enabled
-    db-pre-request db-root-spec db-schemas db-tx-end
+    db-pre-request db-prepared-statements db-root-spec db-schemas db-tx-end
     jwt-aud jwt-role-claim-key jwt-secret jwt-secret-is-base64
     openapi-mode openapi-security-active openapi-server-proxy-uri
     server-cors-allowed-origins server-trace-header server-timing-enabled
+    url-use-legacy-target-names
   )
 
   @doc """
@@ -312,20 +359,24 @@ defmodule Bier.CLI.Config do
     end
   end
 
-  # Mirrors PostgREST's coerceBool: case-insensitive "true" and any positive
-  # integer (as a string or number) are truthy; everything else is false.
+  # Mirrors PostgREST's coerceBool (Config.hs): the value's *alpha* characters
+  # are title-cased and read as a Haskell Bool, so "true", "TRUE" and even the
+  # doubly-quoted "\"true\"" all parse (cases 1741). When that yields nothing —
+  # e.g. the value is all digits — the whole value is read as an Integer and
+  # `> 0` decides, making "1"/"2" true and "0" false (case 1740). Anything else
+  # is Nothing, which `resolve/5` turns into the key's default.
   def coerce(:bool, v) when is_boolean(v), do: {:ok, v}
 
   def coerce(:bool, v) when is_integer(v), do: {:ok, v > 0}
 
   def coerce(:bool, v) do
-    s = v |> to_string() |> String.downcase()
+    s = to_string(v)
 
-    truthy =
-      s == "true" or
-        match?({n, ""} when n > 0, Integer.parse(s))
-
-    {:ok, truthy}
+    case s |> String.replace(~r/[^[:alpha:]]/u, "") |> String.downcase() do
+      "true" -> {:ok, true}
+      "false" -> {:ok, false}
+      _other -> {:ok, bool_from_integer(s)}
+    end
   end
 
   def coerce(:csv, v), do: {:ok, split_csv(to_string(v))}
@@ -350,6 +401,13 @@ defmodule Bier.CLI.Config do
     %{values: values, message: message} = Map.fetch!(@enum_strs, name)
     s = to_string(v)
     if s in values, do: {:ok, s}, else: {:error, message}
+  end
+
+  defp bool_from_integer(s) do
+    case Integer.parse(s) do
+      {int, ""} -> int > 0
+      _other -> :unset
+    end
   end
 
   defp parse_int(v) when is_integer(v), do: {:ok, v}
@@ -397,9 +455,11 @@ defmodule Bier.CLI.Config do
   @app_settings_env_prefix "PGRST_APP_SETTINGS_"
   @app_settings_key_prefix "app.settings."
 
-  # PostgREST folds PGRST_APP_SETTINGS_<NAME> env vars (name lowercased) over
-  # the file's app.settings.* entries, env winning per name (Config.hs
-  # parseAppSettings). Values are kept as text — they end up as GUC values.
+  # PostgREST folds PGRST_APP_SETTINGS_<NAME> env vars over the file's
+  # app.settings.* entries, env winning per name (Config.hs parseAppSettings).
+  # `normalize` only strips the PGRST_APP_SETTINGS_ prefix and prepends
+  # "app.settings.", so the remainder is kept VERBATIM — no case folding
+  # (case 1729). Values are kept as text — they end up as GUC values.
   defp put_app_settings({:error, _} = err, _env, _file), do: err
 
   defp put_app_settings({:ok, resolved}, env, file) do
@@ -410,7 +470,7 @@ defmodule Bier.CLI.Config do
 
     from_env =
       for {@app_settings_env_prefix <> name, value} <- env, name != "", into: %{} do
-        {String.downcase(name), to_string(value)}
+        {name, to_string(value)}
       end
 
     {:ok, Map.put(resolved, "app.settings", Map.merge(from_file, from_env))}
@@ -482,8 +542,9 @@ defmodule Bier.CLI.Config do
   defp validate({:ok, resolved}) do
     with :ok <- run_validator(resolved, "jwt-secret", &Bier.Config.validate_jwt_secret/1),
          :ok <- run_validator(resolved, "jwt-aud", &Bier.Config.validate_jwt_aud/1),
-         :ok <-
-           run_validator(resolved, "server-unix-socket-mode", &Bier.Config.validate_socket_mode/1),
+         :ok <- validate_socket_mode(resolved, "server-unix-socket-mode"),
+         :ok <- validate_socket_mode(resolved, "admin-server-unix-socket-mode"),
+         :ok <- run_validator(resolved, "db-schemas", &Bier.Config.validate_db_schemas/1),
          :ok <-
            run_validator(resolved, "openapi-server-proxy-uri", &Bier.Config.validate_proxy_uri/1),
          :ok <- validate_secret_base64(resolved),
@@ -491,6 +552,12 @@ defmodule Bier.CLI.Config do
          :ok <- validate_admin_port(resolved) do
       {:ok, resolved}
     end
+  end
+
+  # Both socket-mode keys share PostgREST's parseSocketFileMode, which builds
+  # its failure message from the key name (cases 1714/1715 and 1738).
+  defp validate_socket_mode(resolved, key) do
+    run_validator(resolved, key, &Bier.Config.validate_socket_mode(&1, key))
   end
 
   # jwt-secret-is-base64=true with an undecodable secret is fatal even for
@@ -506,13 +573,11 @@ defmodule Bier.CLI.Config do
     end
   end
 
-  # jwt-role-claim-key parses as a JSPath (invalid is fatal, case 1711) and is
-  # re-serialized in PostgREST's canonical quoted form so `--dump-config`
-  # prints e.g. `.aliased` as `."aliased"` (case 1707). Known exotic edge: a
-  # quoted key containing a literal backslash gains show-style doubling here,
-  # and since the grammar has no escape form, the boot path re-parsing this
-  # canonical string would read the doubled form; PostgREST never re-parses
-  # its own dump, so upstream has no defined behavior to mirror.
+  # jwt-role-claim-key parses as an RFC 9535 JSON Path (invalid is fatal, case
+  # 1711) and is re-serialized in the canonical form aeson-jsonpath's dumpQuery
+  # produces. The extra `--dump-config` escaping dumpJSPath applies on top of
+  # that lives in `render_value/2`, because the escaped text is no longer a
+  # re-parseable JSON Path and this value is also handed to `to_start_opts/1`.
   defp canonicalize_role_claim_key(resolved) do
     case RoleClaim.parse(resolved["jwt-role-claim-key"]) do
       {:ok, path} ->
@@ -580,6 +645,7 @@ defmodule Bier.CLI.Config do
         db_plan_enabled: resolved["db-plan-enabled"],
         db_channel: resolved["db-channel"],
         db_channel_enabled: resolved["db-channel-enabled"],
+        url_use_legacy_target_names: resolved["url-use-legacy-target-names"],
         server_trace_header: resolved["server-trace-header"],
         server_timing_enabled: resolved["server-timing-enabled"]
       ]
@@ -753,8 +819,22 @@ defmodule Bier.CLI.Config do
     |> Map.new(fn {name, value} -> {@app_settings_key_prefix <> name, value} end)
     |> Map.merge(keyed)
     |> Enum.sort()
-    |> Enum.map(fn {key, value} -> [key, " = ", render(value), "\n"] end)
+    |> Enum.map(fn {key, value} -> [key, " = ", render_value(key, value), "\n"] end)
   end
+
+  # PostgREST's dump table renders jwt-role-claim-key as `q . dumpJSPath`
+  # (Config.hs): dumpJSPath escapes `"` -> `\"` and `$` -> `$$` (JSPath.hs) on
+  # the canonical query text — the `$$` being the config-file escape for a
+  # literal `$`, so the dump round-trips through a config file — and `q` then
+  # quotes and escapes `"` a second time.
+  defp render_value("jwt-role-claim-key", value) when is_binary(value) do
+    value
+    |> String.replace(~S("), ~S(\"))
+    |> String.replace("$", "$$")
+    |> quote_string()
+  end
+
+  defp render_value(_key, value), do: render(value)
 
   defp render(:unset), do: ~s("")
   defp render(value) when is_integer(value), do: Integer.to_string(value)

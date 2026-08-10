@@ -19,8 +19,19 @@ defmodule Bier.CLI.ConfigTest do
       assert Config.coerce(:bool, "2") == {:ok, true}
       assert Config.coerce(:bool, true) == {:ok, true}
       assert Config.coerce(:bool, "0") == {:ok, false}
-      assert Config.coerce(:bool, "no") == {:ok, false}
       assert Config.coerce(:bool, false) == {:ok, false}
+
+      # coerceBool reads the value's ALPHA characters title-cased, so the
+      # doubly-quoted form parses too (case 1741).
+      assert Config.coerce(:bool, ~S("true")) == {:ok, true}
+      assert Config.coerce(:bool, ~S("false")) == {:ok, false}
+
+      # Anything that is neither a readable Bool nor a readable Integer is
+      # Nothing upstream, which resolve/5 turns into the key's default — NOT
+      # false. "no"/"yes" are not Haskell Bool spellings (case 1740).
+      assert Config.coerce(:bool, "no") == {:ok, :unset}
+      assert Config.coerce(:bool, "yes") == {:ok, :unset}
+      assert Config.coerce(:bool, "") == {:ok, :unset}
     end
 
     test ":csv splits on commas" do
@@ -407,12 +418,16 @@ defmodule Bier.CLI.ConfigTest do
       assert "pgrst.jwt_secret" in names
       assert "pgrst.server_cors_allowed_origins" in names
 
+      # v16.0 additions to dbSettingsNames that Bier implements.
+      assert "pgrst.url_use_legacy_target_names" in names
+      assert "pgrst.server_timing_enabled" in names
+
       # Non-reloadable / unimplemented keys stay out.
       refute "pgrst.server_port" in names
       refute "pgrst.db_config" in names
       refute "pgrst.log_level" in names
 
-      assert length(names) == 18
+      assert length(names) == 21
     end
 
     test "dump output is reparse-stable (case 1726)" do
