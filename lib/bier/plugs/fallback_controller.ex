@@ -418,6 +418,18 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
+  # The same error for a name that is only addressable through the embed's
+  # alias (`url-use-legacy-target-names = false`): v16.0 adds `details` and
+  # points the `hint` at the alias to use instead (Error.hs L214/L220).
+  def call(conn, {:error, {:embed_not_selected, resource, alias_name}}) do
+    error(conn, 400, %{
+      code: "PGRST108",
+      message: "'#{resource}' is not an embedded resource in this request",
+      details: "Target names are not allowed in filters if they have an alias",
+      hint: "Change '#{resource}' to '#{alias_name}' in filters, orders or limits."
+    })
+  end
+
   # ---- pagination range errors (416 PGRST103) -----------------------------
   # A negative `limit` query param (NegativeLimit).
   def call(conn, {:error, :negative_limit}) do

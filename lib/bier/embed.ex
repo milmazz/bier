@@ -14,7 +14,7 @@ defmodule Bier.Embed do
     * `inner_join_where/6` — the extra `WHERE` predicate that an `!inner` embed
       (or an embedded filter that implies inner) adds to the *source* query so
       rows whose embedding is empty are dropped.
-    * `group_by/2` — the implicit `GROUP BY` clause when plain fields are mixed
+    * `group_by/3` — the implicit `GROUP BY` clause when plain fields are mixed
       with aggregates.
 
   Relationship resolution walks the foreign keys discovered by
@@ -47,11 +47,19 @@ defmodule Bier.Embed do
 
   Every legacy match is recorded in the plan's `:legacy_target_names` as a
   `{relation_name, alias}` pair (`relIsLegacyTargetNameMatch`), which
-  `Bier.Plugs.Warning` turns into the deprecation `Warning` header. With
-  `legacy?` false the relation-name spelling resolves to nothing, so it is
-  rejected as a filter on a resource that is not embedded.
+  `Bier.Plugs.Warning` turns into the deprecation `Warning` header.
+
+  A target name that resolves to no node is a 400 PGRST108 (`updateNode`'s
+  `NotEmbedded`), returned as `{:error, {:embed_not_selected, name}}` — or, when
+  the name would have resolved under the legacy rule (i.e. it is the relation
+  name of an *aliased* embed and `legacy?` is false),
+  `{:error, {:embed_not_selected, name, alias}}`, which carries the
+  alias-specific `details`/`hint` PostgREST builds from `findLegacyUsage`.
   """
-  @spec resolve_target_names(map(), boolean()) :: map()
+  @spec resolve_target_names(map(), boolean()) ::
+          {:ok, map()}
+          | {:error,
+             {:embed_not_selected, String.t()} | {:embed_not_selected, String.t(), String.t()}}
   def resolve_target_names(plan, legacy? \\ true) when is_map(plan) do
     paths =
       @embed_path_keys
@@ -60,14 +68,19 @@ defmodule Bier.Embed do
 
     {rewrites, legacy} = resolve_level(Map.get(plan, :select), paths, legacy?)
 
-    @embed_path_keys
-    |> Enum.reduce(plan, fn key, acc ->
-      case Map.get(acc, key) do
-        nil -> acc
-        map -> Map.put(acc, key, rekey(map, rewrites))
-      end
-    end)
-    |> Map.put(:legacy_target_names, Enum.uniq(legacy))
+    plan =
+      @embed_path_keys
+      |> Enum.reduce(plan, fn key, acc ->
+        case Map.get(acc, key) do
+          nil -> acc
+          map -> Map.put(acc, key, rekey(map, rewrites))
+        end
+      end)
+      |> Map.put(:legacy_target_names, Enum.uniq(legacy))
+
+    {:ok, plan}
+  catch
+    {:not_embedded, reason} -> {:error, reason}
   end
 
   defp rekey(map, rewrites) do
@@ -82,7 +95,7 @@ defmodule Bier.Embed do
     |> Enum.reduce({%{}, []}, fn {head, group}, {rewrites, legacy} ->
       case owner(nodes, head, legacy?) do
         :none ->
-          {rewrites, legacy}
+          throw({:not_embedded, not_embedded(nodes, head, legacy?)})
 
         {node, canonical, legacy_match?} ->
           tails = for [_ | rest] <- group, rest != [], do: rest
@@ -116,6 +129,20 @@ defmodule Bier.Embed do
         nil
     end)
   end
+
+  # The PGRST108 payload for an unresolvable target name. PostgREST's
+  # `findLegacyUsage` re-runs the lookup under the legacy rule *only* when the
+  # legacy rule is off; a name that then resolves must be the relation name of
+  # an aliased embed, so the error names the alias to use instead. With the
+  # legacy rule on there is nothing else to try and the plain form is used.
+  defp not_embedded(nodes, head, false) do
+    case owner(nodes, head, true) do
+      {%{alias: al}, _canonical, true} when is_binary(al) -> {:embed_not_selected, head, al}
+      _ -> {:embed_not_selected, head}
+    end
+  end
+
+  defp not_embedded(_nodes, head, _legacy?), do: {:embed_not_selected, head}
 
   defp canonical_name(e), do: e.alias || e.target
 
@@ -172,11 +199,15 @@ defmodule Bier.Embed do
     {[{expr, name}], state}
   end
 
-  defp build_node(%{kind: :agg} = a, _relation, al, _ef, state, _qe) do
+  # `AGG(<field>)::<result cast>` — PostgREST's `pgFmtApplyAggregate agg aggCast
+  # (pgFmtApplyCast cast (pgFmtTableCoerce table fld))`: the aggregated operand
+  # is an ordinary select field (json path, read representation and *input* cast
+  # included), and only the trailing cast applies to the aggregate's result.
+  defp build_node(%{kind: :agg} = a, relation, al, _ef, state, _qe) do
     inner =
       case a.column do
         nil -> "#{a.fun}(*)"
-        col -> "#{a.fun}(#{col_expr(al, col)})"
+        col -> "#{a.fun}(#{field_expr(agg_operand(a, col), relation, al)})"
       end
 
     inner = if a.cast, do: "#{inner}::#{QE.quote_type(a.cast)}", else: inner
@@ -195,6 +226,9 @@ defmodule Bier.Embed do
     build_embed(e, rel, relation, al, ef, state, qe)
   end
 
+  defp agg_operand(a, col),
+    do: %{column: col, json_path: a.json_path, cast: a.input_cast}
+
   defp star_pairs(relation, al) do
     Enum.map(relation.columns, fn c ->
       {star_col_expr(relation, al, c.name), c.name}
@@ -208,7 +242,7 @@ defmodule Bier.Embed do
       if col in relation.computed_columns do
         "#{QE.quote_ident(relation.schema)}.#{QE.quote_ident(col)}(#{QE.quote_ident(al)})"
       else
-        QE.column_expr_aliased(col, f.json_path, al)
+        QE.column_expr_aliased(col, f.json_path, al, relation)
       end
 
     # Apply the column's read representation before any explicit `::cast`,
@@ -566,7 +600,7 @@ defmodule Bier.Embed do
 
     join_sql = render_join(join, child_alias, al)
     from = from_clause(target, child_alias, rel, al)
-    col_expr = qe.column_expr_aliased(term.column, term.json_path, child_alias)
+    col_expr = qe.column_expr_aliased(term.column, term.json_path, child_alias, target)
 
     where = if join_sql == "", do: "", else: " WHERE " <> join_sql
     sub = "(SELECT #{col_expr} FROM #{from}#{where} LIMIT 1)"
@@ -574,35 +608,16 @@ defmodule Bier.Embed do
     {sub <> dir_nulls(term), state}
   end
 
-  # Computed-column / composite / plain order term.
+  # Computed-column / plain order term.
   defp build_order_term(%{column: col} = term, _select, relation, al, state, qe) do
     expr =
-      cond do
-        col in relation.computed_columns ->
-          "#{QE.quote_ident(relation.schema)}.#{QE.quote_ident(col)}(#{QE.quote_ident(al)})"
-
-        term.json_path != [] and composite_column?(relation, col) ->
-          composite_field_expr(al, col, term.json_path)
-
-        true ->
-          qe.column_expr_aliased(col, term.json_path, al)
+      if col in relation.computed_columns do
+        "#{QE.quote_ident(relation.schema)}.#{QE.quote_ident(col)}(#{QE.quote_ident(al)})"
+      else
+        qe.column_expr_aliased(col, term.json_path, al, relation)
       end
 
     {expr <> dir_nulls(term), state}
-  end
-
-  defp composite_column?(relation, col) do
-    case Enum.find(relation.columns, &(&1.name == col)) do
-      %{composite?: true} -> true
-      _ -> false
-    end
-  end
-
-  # Field access on a composite-typed column: `(alias."col")."field"`. The text
-  # arrow (`->>`) additionally casts to text, mirroring PostgREST.
-  defp composite_field_expr(al, col, [{kind, key}]) do
-    base = "(#{QE.quote_ident(al)}.#{QE.quote_ident(col)}).#{QE.quote_ident(key)}"
-    if kind == :arrow_text, do: "#{base}::text", else: base
   end
 
   defp dir_nulls(term) do
@@ -630,7 +645,7 @@ defmodule Bier.Embed do
   When the select mixes plain fields with aggregates, returns the implicit
   `GROUP BY` clause; otherwise `{"", ""}`.
   """
-  def group_by(nodes, al) do
+  def group_by(nodes, al, relation) do
     has_agg? = Enum.any?(nodes, &match?(%{kind: :agg}, &1))
 
     plain =
@@ -640,7 +655,9 @@ defmodule Bier.Embed do
       end)
 
     if has_agg? and plain != [] do
-      exprs = Enum.map_join(plain, ", ", &QE.column_expr_aliased(&1.column, &1.json_path, al))
+      exprs =
+        Enum.map_join(plain, ", ", &QE.column_expr_aliased(&1.column, &1.json_path, al, relation))
+
       {" GROUP BY " <> exprs, ""}
     else
       {"", ""}

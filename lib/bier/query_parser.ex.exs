@@ -174,33 +174,6 @@ defmodule Bier.QueryParser do
   defparsecp(:p_embed_parts, embed_head)
 
   # ---------------------------------------------------------------------------
-  # parse_aggregate grammar
-  # ---------------------------------------------------------------------------
-
-  agg_call_col =
-    optional(
-      name_token
-      |> unwrap_and_tag(:col)
-      |> ignore(string("."))
-    )
-
-  agg_call_fun =
-    ascii_char([?a..?z, ?_])
-    |> times(min: 1)
-    |> reduce({List, :to_string, []})
-    |> unwrap_and_tag(:fun)
-
-  agg_call_grammar =
-    agg_call_col
-    |> concat(agg_call_fun)
-    |> ignore(string("("))
-    |> ignore(repeat(ascii_char([?\s, ?\t, ?\n, ?\r, ?\f, ?\v])))
-    |> ignore(string(")"))
-    |> eos()
-
-  defparsecp(:p_agg_call, agg_call_grammar)
-
-  # ---------------------------------------------------------------------------
   # logic_prefix/1
   # ---------------------------------------------------------------------------
 
@@ -221,46 +194,6 @@ defmodule Bier.QueryParser do
     |> post_traverse(:capture_logic_rest)
 
   defparsecp(:p_logic_prefix, logic_grammar)
-
-  # ---------------------------------------------------------------------------
-  # aggregate?/1
-  # ---------------------------------------------------------------------------
-
-  ws0 = repeat(ascii_char([?\s, ?\t]))
-
-  agg_alias = optional(name_token |> ignore(string(":")))
-
-  agg_col =
-    optional(
-      name_token
-      |> ignore(string("."))
-      |> tag(:col)
-    )
-
-  agg_fun =
-    ascii_char([?a..?z, ?_])
-    |> times(min: 1)
-    |> reduce({List, :to_string, []})
-    |> unwrap_and_tag(:fun)
-
-  agg_cast =
-    optional(
-      ignore(string("::"))
-      |> ascii_string([?A..?Z, ?a..?z, ?0..?9, ?_, ?\s], min: 1)
-      |> unwrap_and_tag(:cast)
-    )
-
-  aggregate_grammar =
-    agg_alias
-    |> concat(agg_col)
-    |> concat(agg_fun)
-    |> ignore(string("("))
-    |> ignore(ws0)
-    |> ignore(string(")"))
-    |> concat(agg_cast)
-    |> eos()
-
-  defparsecp(:p_aggregate, aggregate_grammar)
 
   # ---------------------------------------------------------------------------
   # parse_scalar_select/1 (alias peel)
@@ -509,7 +442,7 @@ defmodule Bier.QueryParser do
   #
   #   %{kind: :field, ...}      -- scalar column / json-path / cast
   #   %{kind: :star}            -- `*`
-  #   %{kind: :agg, ...}        -- aggregate (col.fn() or count())
+  #   %{kind: :agg, ...}        -- aggregate (<field>.fn() or count())
   #   %{kind: :embed, ...}      -- related resource `rel(...)` / `rel!hint(...)`
   #                                 / spread `...rel(...)`
   def parse_select_tree(sel) do
@@ -549,22 +482,43 @@ defmodule Bier.QueryParser do
     end
   end
 
+  # PostgREST parses a select field as
+  # `[alias:]<field><json path>[::cast][.<agg>()][::agg cast]` (`pFieldSelect`),
+  # so an aggregate is an ordinary field reference that happens to carry a
+  # trailing call: the FIRST cast is the aggregate's *input* cast
+  # (`SUM(CAST(fld AS int))`) and the one after `()` casts its *result*
+  # (`SqlFragment.pgFmtSelectItem`).
   defp parse_aggregate(field) do
     {out_alias, rest} = split_alias(field)
+    {agg_cast, rest} = peel_agg_cast(rest)
 
-    {cast, rest} = peel_agg_cast(rest)
+    with {:ok, operand, fun} <- split_agg_call(rest),
+         {:ok, col, json_path, input_cast} <- parse_agg_operand(operand) do
+      {:ok,
+       %{
+         kind: :agg,
+         column: col,
+         json_path: json_path,
+         input_cast: input_cast,
+         fun: fun,
+         alias: out_alias,
+         cast: agg_cast
+       }}
+    else
+      _ -> {:error, {:select_parse, field}}
+    end
+  end
 
-    case parse_agg_call(rest) do
-      {:ok, nil, fun} ->
-        {:ok, %{kind: :agg, column: nil, fun: fun, alias: out_alias, cast: cast}}
+  # The aggregated operand: `""` for the field-less `count()` form, otherwise a
+  # field reference with an optional json path and input cast.
+  defp parse_agg_operand(""), do: {:ok, nil, [], nil}
 
-      {:ok, col, fun} ->
-        if valid_identifier?(col),
-          do: {:ok, %{kind: :agg, column: col, fun: fun, alias: out_alias, cast: cast}},
-          else: {:error, {:select_parse, field}}
+  defp parse_agg_operand(operand) do
+    {cast, rest} = peel_cast(operand)
 
-      :error ->
-        {:error, {:select_parse, field}}
+    case parse_field_ref(rest) do
+      {:ok, {col, json_path}} -> {:ok, col, json_path, cast}
+      :error -> :error
     end
   end
 
@@ -1223,21 +1177,60 @@ defmodule Bier.QueryParser do
   end
 
   @doc """
-  Parse an aggregate call `[col.]fun()` (the regex
-  `^(?:([a-zA-Z_][\\w ]*)\\.)?([a-z_]+)\\(\\s*\\)$`).
+  Split the trailing aggregate call off a select field.
 
-  Returns `{:ok, col_or_nil, fun}` (col is `nil` when there is no `col.` prefix)
-  or `:error`.
+  Returns `{:ok, operand, fun}` where `operand` is everything before the `.`
+  that introduces the call — `""` for the field-less `count()` form — and `fun`
+  is the aggregate name. `:error` when the string does not end in an empty call
+  `<fun>()`.
+
+  The operand is kept opaque here because PostgREST parses it as a full field
+  reference (`pField` plus an optional `::cast`), so it may carry a json path
+  and a cast: `jsonb_col->>key::integer.sum()`.
   """
-  @spec parse_agg_call(String.t()) :: {:ok, String.t() | nil, String.t()} | :error
-  def parse_agg_call(rest) when is_binary(rest) do
-    case p_agg_call(rest) do
-      {:ok, parsed, "", _, _, _} ->
-        {:ok, Keyword.get(parsed, :col), Keyword.fetch!(parsed, :fun)}
-
-      _ ->
-        :error
+  @spec split_agg_call(String.t()) :: {:ok, String.t(), String.t()} | :error
+  def split_agg_call(str) when is_binary(str) do
+    with {:ok, head} <- peel_empty_call(str),
+         {operand, fun} <- split_last_dot(head),
+         true <- agg_fun_name?(fun) do
+      {:ok, operand, fun}
+    else
+      _ -> :error
     end
+  end
+
+  # Peel a trailing empty call `(\s*)` off `str`, returning what precedes it.
+  defp peel_empty_call(str) do
+    with true <- String.ends_with?(str, ")"),
+         head = str |> binary_part(0, byte_size(str) - 1) |> String.trim_trailing(),
+         true <- String.ends_with?(head, "(") do
+      {:ok, binary_part(head, 0, byte_size(head) - 1)}
+    else
+      _ -> :error
+    end
+  end
+
+  # Split on the last `.`; a string without one is the field-less form, whose
+  # operand is empty. Json keys and unquoted identifiers cannot contain `.`, so
+  # the last `.` is always the call separator.
+  defp split_last_dot(str) do
+    case :binary.matches(str, ".") do
+      [] ->
+        {"", str}
+
+      matches ->
+        {pos, _} = List.last(matches)
+        {binary_part(str, 0, pos), binary_part(str, pos + 1, byte_size(str) - pos - 1)}
+    end
+  end
+
+  # `[a-z_]+` (non-empty) — the shape of an aggregate function name.
+  defp agg_fun_name?(""), do: false
+
+  defp agg_fun_name?(fun) do
+    fun
+    |> String.to_charlist()
+    |> Enum.all?(fn c -> c == ?_ or (c >= ?a and c <= ?z) end)
   end
 
   defp capture_logic_rest(rest, args, context, _line, _offset) do
@@ -1272,21 +1265,19 @@ defmodule Bier.QueryParser do
 
   @doc """
   True when a select field is an aggregate: `count()`, `col.sum()`,
-  `alias:col.sum()::cast`. A bare `name()` is an aggregate only when `name` is
-  a known aggregate function; otherwise it is an empty-projection embed. A
-  `col.fn()` form is always an aggregate.
+  `alias:col.sum()::cast`, `alias:col->>key::int.sum()::cast`. A bare `name()`
+  is an aggregate only when `name` is a known aggregate function; otherwise it
+  is an empty-projection embed. An `<operand>.fn()` form is always an aggregate.
   """
   @spec aggregate?(String.t()) :: boolean()
   def aggregate?(field) when is_binary(field) do
-    case p_aggregate(field) do
-      {:ok, parsed, "", _, _, _} ->
-        case Keyword.get(parsed, :col) do
-          nil -> Keyword.fetch!(parsed, :fun) in @agg_functions
-          _col -> true
-        end
+    {_out_alias, rest} = split_alias(field)
+    {_agg_cast, rest} = peel_agg_cast(rest)
 
-      _ ->
-        false
+    case split_agg_call(rest) do
+      {:ok, "", fun} -> fun in @agg_functions
+      {:ok, _operand, _fun} -> true
+      :error -> false
     end
   end
 
