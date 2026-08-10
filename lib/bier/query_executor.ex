@@ -318,7 +318,11 @@ defmodule Bier.QueryExecutor do
   returned relation supplies the column set for `select` and column filters.
 
   Options accept `:format` — `:json` (default) or `:geojson` (aggregate the
-  rows into a GeoJSON FeatureCollection via `ST_AsGeoJSON`), mirroring `run/5`.
+  rows into a GeoJSON FeatureCollection via `ST_AsGeoJSON`), mirroring `run/5` —
+  and `:auth`, the `{context, config}` tuple that makes the call run inside the
+  per-request auth transaction (`SET LOCAL ROLE`, `request.*` GUCs,
+  `db-pre-request`) exactly like a relation read. Without it the statement would
+  execute as the pool's connecting role — issue #108.
   """
   @spec run_function(term(), map(), Relation.t(), [tuple()], map(), keyword()) ::
           {:ok, %{body: String.t(), count: non_neg_integer()}} | {:error, term()}
@@ -326,16 +330,17 @@ defmodule Bier.QueryExecutor do
     count_mode = Keyword.get(opts, :count_mode, :none)
     relations = Keyword.get(opts, :relations, %{})
     format = Keyword.get(opts, :format, :json)
+    auth = Keyword.get(opts, :auth)
 
     try do
       case Bier.ServerTiming.measure(:plan, fn ->
              build_function(fn_def, ret_relation, args, plan, relations, format, count_mode)
            end) do
         {:ok, sql, params} ->
-          Bier.RequestLog.record(sql)
-
           Bier.ServerTiming.measure(:transaction, fn ->
-            case Postgrex.query(conn, sql, params) do
+            # `Prefer: timezone` is not threaded on this path (the RPC read plan
+            # does not carry it today); auth is what `query_read/5` is reused for.
+            case query_read(conn, sql, params, nil, auth) do
               {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
                 # planned/estimated counts are not needed by the RPC pagination
                 # cases; exact reuses the window count, which (with a non-empty
