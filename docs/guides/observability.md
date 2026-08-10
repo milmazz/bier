@@ -33,6 +33,8 @@ computed unless something is attached.
 | `[:bier, :pool, :status]` | `max`, `available`, `waiting` | `instance` | A periodic gauge sample of the Postgrex pool, emitted by `Bier.PoolMonitor` |
 | `[:bier, :pool, :checkout_timeout]` | `count` (always `1`) | `instance` | A request's pool checkout was dropped from the queue after timing out |
 | `[:bier, :query, :cancelled]` | `count` (always `1`) | `instance` | An in-flight query was cancelled at the PostgreSQL backend because the HTTP client disconnected (`Bier.Cancellation`; disable with `cancel_on_disconnect: false`) |
+| `[:bier, :jwt_cache, :lookup]` | `count` (always `1`) | `instance`, `hit` (boolean) | One consultation of the JWT verification cache |
+| `[:bier, :jwt_cache, :eviction]` | `count` (always `1`) | `instance` | One entry evicted by the cache's SIEVE hand |
 
 `schema` and `relation` on `[:bier, :request, :stop]` are `nil` for the root
 document, `OPTIONS`, and error responses that never resolve a target.
@@ -81,10 +83,22 @@ choice when one handler wants several events (e.g. both `[:bier, :pool,
 :status]` and `[:bier, :pool, :checkout_timeout]` feeding one gauge/counter
 reporter).
 
-### Not yet emitted
+### JWT cache
 
-`[:bier, :jwt_cache, …]` is not emitted: Bier verifies every JWT directly and
-has no verification cache to instrument (tracked as a follow-up).
+`[:bier, :jwt_cache, :lookup]` / `[:bier, :jwt_cache, :eviction]` are emitted
+only while the cache is live — `jwt_secret` configured **and**
+`jwt_cache_max_entries > 0` — matching PostgREST, which records no cache
+observations in its `JwtNoCache` mode. All lookups mirror
+`pgrst_jwt_cache_requests_total`, those with `hit: true` mirror
+`pgrst_jwt_cache_hits_total`, and evictions mirror
+`pgrst_jwt_cache_evictions_total`.
+
+### SSE events
+
+An instance with `events_channels` configured additionally emits the
+`[:bier, :events, …]` family (subscription span, per-notification fan-out
+count, listener connection status) — see the
+[Realtime events guide](realtime_events.md#telemetry).
 
 ## Server-Timing
 
@@ -226,7 +240,8 @@ lost connection has no SQLSTATE to map, so `Bier.Plugs.FallbackController`
 renders it as a generic `"PGRST"`-coded `500`, not `"PGRST001"` — the
 specific code is only in the log line. Every error response the fallback
 controller renders (whatever its code) carries the same
-`{code, message, details, hint}` JSON body plus a `Proxy-Status` response
+`{code, message, details, hint}` JSON body — or just `{code, message}` under
+`client_error_verbosity: "minimal"` — plus a `Proxy-Status` response
 header naming that code, mirroring PostgREST's `proxyStatusHeader`:
 
 ```http
