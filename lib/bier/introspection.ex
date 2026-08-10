@@ -28,6 +28,7 @@ defmodule Bier.Introspection do
     @type column :: %{
             name: String.t(),
             type: String.t(),
+            base_type: String.t(),
             pk?: boolean(),
             notnull?: boolean(),
             default: String.t() | nil,
@@ -78,6 +79,7 @@ defmodule Bier.Introspection do
             primary_key: [String.t()],
             foreign_keys: [foreign_key()],
             computed_columns: [String.t()],
+            computed_column_types: %{optional(String.t()) => String.t()},
             computed_relations: [map()],
             comment: String.t() | nil,
             methods: methods()
@@ -90,6 +92,7 @@ defmodule Bier.Introspection do
               primary_key: [],
               foreign_keys: [],
               computed_columns: [],
+              computed_column_types: %{},
               computed_relations: [],
               comment: nil,
               methods: nil
@@ -125,6 +128,7 @@ defmodule Bier.Introspection do
           %{
             name: c.name,
             type: c.type,
+            base_type: c.base_type,
             pk?: c.pk?,
             notnull?: c.notnull?,
             default: c.default,
@@ -156,8 +160,9 @@ defmodule Bier.Introspection do
           }
         end)
 
-      comp_cols =
-        comp_cols_by_rel |> Map.get({schema, name}, []) |> Enum.map(& &1.name)
+      comp_col_defs = Map.get(comp_cols_by_rel, {schema, name}, [])
+      comp_cols = Enum.map(comp_col_defs, & &1.name)
+      comp_col_types = Map.new(comp_col_defs, &{&1.name, &1.base_type})
 
       comp_rels =
         comp_rels_by_rel
@@ -180,6 +185,7 @@ defmodule Bier.Introspection do
          primary_key: pk,
          foreign_keys: fks,
          computed_columns: comp_cols,
+         computed_column_types: comp_col_types,
          computed_relations: comp_rels,
          comment: rel_comment
        }}
@@ -507,81 +513,109 @@ defmodule Bier.Introspection do
   defp relkind("m"), do: :view
   defp relkind(_), do: :table
 
+  # Resolves every type OID to the type its DOMAIN chain ultimately bottoms out
+  # in (a domain over a domain over … over a base type). PostgREST does the same
+  # walk — `WITH RECURSIVE` below PG17, `pg_basetype()` from PG17 — because the
+  # behaviors that key on a column's *base* type (the automatic `to_tsvector()`
+  # coercion for `fts`, cases 10229/10230) must see through the whole chain.
+  @base_types_cte """
+  WITH RECURSIVE bier_base_types(oid, base_oid) AS (
+    SELECT t.oid, t.oid FROM pg_type t WHERE t.typtype <> 'd'
+    UNION ALL
+    SELECT t.oid, b.base_oid
+    FROM pg_type t
+    JOIN bier_base_types b ON t.typbasetype = b.oid
+    WHERE t.typtype = 'd'
+  )
+  """
+
   defp query_columns(conn, schemas) do
-    sql = """
-    SELECT
-      n.nspname AS schema,
-      c.relname AS relation,
-      a.attname AS name,
-      format_type(a.atttypid, a.atttypmod) AS type,
-      a.attnum AS position,
-      a.attnotnull AS notnull,
-      -- The column default; falling back to the DOMAIN's own default when the
-      -- column itself has none (a DOMAIN ... DEFAULT applies to omitted columns
-      -- under Prefer: missing=default, case 1814).
-      COALESCE(
-        pg_get_expr(ad.adbin, ad.adrelid),
-        CASE WHEN at.typtype = 'd' THEN pg_get_expr(at.typdefaultbin, 0) END
-      ) AS default,
-      COALESCE(pk.is_pk, false) AS is_pk,
-      (at.typtype = 'c') AS is_composite,
-      -- Data-representation cast functions (only for DOMAIN-typed columns):
-      -- read = (<domain> AS json), write = (json AS <domain>),
-      -- text = (text AS <domain>). Each is ARRAY[schema, function] or NULL.
-      rd.fn AS read_fn,
-      wr.fn AS write_fn,
-      tx.fn AS text_fn,
-      col_description(c.oid, a.attnum::int) AS comment,
-      CASE WHEN at.typtype = 'e'
-           THEN (SELECT array_agg(e.enumlabel ORDER BY e.enumsortorder)
-                 FROM pg_enum e WHERE e.enumtypid = at.oid)
-      END AS enum_labels,
-      CASE WHEN at.typname IN ('bpchar','varchar') AND a.atttypmod > 4
-           THEN a.atttypmod - 4
-      END AS max_length
-    FROM pg_attribute a
-    JOIN pg_class c ON c.oid = a.attrelid
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    JOIN pg_type at ON at.oid = a.atttypid
-    LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
-    LEFT JOIN (
-      SELECT i.indrelid, a2.attnum, true AS is_pk
-      FROM pg_index i
-      JOIN pg_attribute a2 ON a2.attrelid = i.indrelid AND a2.attnum = ANY(i.indkey)
-      WHERE i.indisprimary
-    ) pk ON pk.indrelid = a.attrelid AND pk.attnum = a.attnum
-    LEFT JOIN LATERAL (
-      SELECT ARRAY[pn.nspname, p.proname] AS fn
-      FROM pg_cast ca
-      JOIN pg_proc p ON p.oid = ca.castfunc
-      JOIN pg_namespace pn ON pn.oid = p.pronamespace
-      WHERE ca.castsource = a.atttypid AND ca.casttarget = 'pg_catalog.json'::regtype
-        AND ca.castfunc <> 0 AND at.typtype = 'd'
-      LIMIT 1
-    ) rd ON true
-    LEFT JOIN LATERAL (
-      SELECT ARRAY[pn.nspname, p.proname] AS fn
-      FROM pg_cast ca
-      JOIN pg_proc p ON p.oid = ca.castfunc
-      JOIN pg_namespace pn ON pn.oid = p.pronamespace
-      WHERE ca.castsource = 'pg_catalog.json'::regtype AND ca.casttarget = a.atttypid
-        AND ca.castfunc <> 0 AND at.typtype = 'd'
-      LIMIT 1
-    ) wr ON true
-    LEFT JOIN LATERAL (
-      SELECT ARRAY[pn.nspname, p.proname] AS fn
-      FROM pg_cast ca
-      JOIN pg_proc p ON p.oid = ca.castfunc
-      JOIN pg_namespace pn ON pn.oid = p.pronamespace
-      WHERE ca.castsource = 'pg_catalog.text'::regtype AND ca.casttarget = a.atttypid
-        AND ca.castfunc <> 0 AND at.typtype = 'd'
-      LIMIT 1
-    ) tx ON true
-    WHERE n.nspname = ANY($1)
-      AND c.relkind = ANY(ARRAY['r','v','m','f','p'])
-      AND a.attnum > 0
-      AND NOT a.attisdropped
-    """
+    sql =
+      @base_types_cte <>
+        """
+        SELECT
+          n.nspname AS schema,
+          c.relname AS relation,
+          a.attname AS name,
+          format_type(a.atttypid, a.atttypmod) AS type,
+          -- PostgREST's `cfBaseType`: the declared type, except that a DOMAIN whose
+          -- (transitive) base type lives in pg_catalog is replaced by that base type.
+          CASE
+            WHEN at.typtype = 'd' AND bn.nspname = 'pg_catalog'
+            THEN format_type(bt.base_oid, NULL)
+            ELSE format_type(a.atttypid, a.atttypmod)
+          END AS base_type,
+          a.attnum AS position,
+          a.attnotnull AS notnull,
+          -- The column default; falling back to the DOMAIN's own default when the
+          -- column itself has none (a DOMAIN ... DEFAULT applies to omitted columns
+          -- under Prefer: missing=default, case 1814).
+          COALESCE(
+            pg_get_expr(ad.adbin, ad.adrelid),
+            CASE WHEN at.typtype = 'd' THEN pg_get_expr(at.typdefaultbin, 0) END
+          ) AS default,
+          COALESCE(pk.is_pk, false) AS is_pk,
+          (at.typtype = 'c') AS is_composite,
+          -- Data-representation cast functions (only for DOMAIN-typed columns):
+          -- read = (<domain> AS json), write = (json AS <domain>),
+          -- text = (text AS <domain>). Each is ARRAY[schema, function] or NULL.
+          rd.fn AS read_fn,
+          wr.fn AS write_fn,
+          tx.fn AS text_fn,
+          col_description(c.oid, a.attnum::int) AS comment,
+          CASE WHEN at.typtype = 'e'
+               THEN (SELECT array_agg(e.enumlabel ORDER BY e.enumsortorder)
+                     FROM pg_enum e WHERE e.enumtypid = at.oid)
+          END AS enum_labels,
+          CASE WHEN at.typname IN ('bpchar','varchar') AND a.atttypmod > 4
+               THEN a.atttypmod - 4
+          END AS max_length
+        FROM pg_attribute a
+        JOIN pg_class c ON c.oid = a.attrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_type at ON at.oid = a.atttypid
+        LEFT JOIN bier_base_types bt ON bt.oid = a.atttypid
+        LEFT JOIN pg_type bpt ON bpt.oid = bt.base_oid
+        LEFT JOIN pg_namespace bn ON bn.oid = bpt.typnamespace
+        LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+        LEFT JOIN (
+          SELECT i.indrelid, a2.attnum, true AS is_pk
+          FROM pg_index i
+          JOIN pg_attribute a2 ON a2.attrelid = i.indrelid AND a2.attnum = ANY(i.indkey)
+          WHERE i.indisprimary
+        ) pk ON pk.indrelid = a.attrelid AND pk.attnum = a.attnum
+        LEFT JOIN LATERAL (
+          SELECT ARRAY[pn.nspname, p.proname] AS fn
+          FROM pg_cast ca
+          JOIN pg_proc p ON p.oid = ca.castfunc
+          JOIN pg_namespace pn ON pn.oid = p.pronamespace
+          WHERE ca.castsource = a.atttypid AND ca.casttarget = 'pg_catalog.json'::regtype
+            AND ca.castfunc <> 0 AND at.typtype = 'd'
+          LIMIT 1
+        ) rd ON true
+        LEFT JOIN LATERAL (
+          SELECT ARRAY[pn.nspname, p.proname] AS fn
+          FROM pg_cast ca
+          JOIN pg_proc p ON p.oid = ca.castfunc
+          JOIN pg_namespace pn ON pn.oid = p.pronamespace
+          WHERE ca.castsource = 'pg_catalog.json'::regtype AND ca.casttarget = a.atttypid
+            AND ca.castfunc <> 0 AND at.typtype = 'd'
+          LIMIT 1
+        ) wr ON true
+        LEFT JOIN LATERAL (
+          SELECT ARRAY[pn.nspname, p.proname] AS fn
+          FROM pg_cast ca
+          JOIN pg_proc p ON p.oid = ca.castfunc
+          JOIN pg_namespace pn ON pn.oid = p.pronamespace
+          WHERE ca.castsource = 'pg_catalog.text'::regtype AND ca.casttarget = a.atttypid
+            AND ca.castfunc <> 0 AND at.typtype = 'd'
+          LIMIT 1
+        ) tx ON true
+        WHERE n.nspname = ANY($1)
+          AND c.relkind = ANY(ARRAY['r','v','m','f','p'])
+          AND a.attnum > 0
+          AND NOT a.attisdropped
+        """
 
     %Postgrex.Result{rows: rows} = Postgrex.query!(conn, sql, [schemas])
 
@@ -590,6 +624,7 @@ defmodule Bier.Introspection do
           relation,
           name,
           type,
+          base_type,
           position,
           notnull,
           default,
@@ -607,6 +642,7 @@ defmodule Bier.Introspection do
         relation: relation,
         name: name,
         type: type,
+        base_type: base_type,
         position: position,
         notnull?: notnull,
         default: default,
@@ -834,35 +870,46 @@ defmodule Bier.Introspection do
   #   * returns SETOF <other relation> => computed relationship (ROWS estimate
   #     decides cardinality: ROWS 1 => many-to-one single object).
   defp query_computed(conn, schemas) do
-    sql = """
-    SELECT
-      pn.nspname    AS schema,
-      arg_rel.relname AS relation,
-      p.proname     AS name,
-      p.proretset   AS retset,
-      ret_n.nspname AS ret_schema,
-      ret_rel.relname AS ret_relation,
-      p.prorows     AS rows,
-      ret_t.typtype AS ret_typtype
-    FROM pg_proc p
-    JOIN pg_namespace pn ON pn.oid = p.pronamespace
-    JOIN pg_type arg_t ON arg_t.oid = p.proargtypes[0]
-    JOIN pg_class arg_rel ON arg_rel.oid = arg_t.typrelid
-    JOIN pg_namespace arg_n ON arg_n.oid = arg_rel.relnamespace
-    JOIN pg_type ret_t ON ret_t.oid = p.prorettype
-    LEFT JOIN pg_class ret_rel ON ret_rel.oid = ret_t.typrelid
-    LEFT JOIN pg_namespace ret_n ON ret_n.oid = ret_rel.relnamespace
-    WHERE pn.nspname = ANY($1)
-      AND p.pronargs = 1
-      AND arg_t.typtype = 'c'
-      AND arg_n.nspname = ANY($1)
-    """
+    sql =
+      @base_types_cte <>
+        """
+        SELECT
+          pn.nspname    AS schema,
+          arg_rel.relname AS relation,
+          p.proname     AS name,
+          p.proretset   AS retset,
+          ret_n.nspname AS ret_schema,
+          ret_rel.relname AS ret_relation,
+          p.prorows     AS rows,
+          ret_t.typtype AS ret_typtype,
+          -- The computed field's `cfBaseType` (same rule as a column's, below).
+          CASE
+            WHEN ret_t.typtype = 'd' AND ret_bn.nspname = 'pg_catalog'
+            THEN format_type(ret_bt.base_oid, NULL)
+            ELSE format_type(p.prorettype, NULL)
+          END AS ret_base_type
+        FROM pg_proc p
+        JOIN pg_namespace pn ON pn.oid = p.pronamespace
+        JOIN pg_type arg_t ON arg_t.oid = p.proargtypes[0]
+        JOIN pg_class arg_rel ON arg_rel.oid = arg_t.typrelid
+        JOIN pg_namespace arg_n ON arg_n.oid = arg_rel.relnamespace
+        JOIN pg_type ret_t ON ret_t.oid = p.prorettype
+        LEFT JOIN bier_base_types ret_bt ON ret_bt.oid = p.prorettype
+        LEFT JOIN pg_type ret_bpt ON ret_bpt.oid = ret_bt.base_oid
+        LEFT JOIN pg_namespace ret_bn ON ret_bn.oid = ret_bpt.typnamespace
+        LEFT JOIN pg_class ret_rel ON ret_rel.oid = ret_t.typrelid
+        LEFT JOIN pg_namespace ret_n ON ret_n.oid = ret_rel.relnamespace
+        WHERE pn.nspname = ANY($1)
+          AND p.pronargs = 1
+          AND arg_t.typtype = 'c'
+          AND arg_n.nspname = ANY($1)
+        """
 
     %Postgrex.Result{rows: rows} = Postgrex.query!(conn, sql, [schemas])
 
     {cols, rels} =
       Enum.reduce(rows, {[], []}, fn
-        [schema, relation, name, retset, ret_schema, ret_relation, nrows, ret_typtype],
+        [schema, relation, name, retset, ret_schema, ret_relation, nrows, ret_typtype, ret_base],
         {cols, rels} ->
           cond do
             # SETOF composite that maps to a real relation => computed relationship
@@ -882,7 +929,10 @@ defmodule Bier.Introspection do
 
             # scalar, non-set => computed column
             not retset and ret_typtype != "c" ->
-              {[%{schema: schema, relation: relation, name: name} | cols], rels}
+              {[
+                 %{schema: schema, relation: relation, name: name, base_type: ret_base}
+                 | cols
+               ], rels}
 
             true ->
               {cols, rels}

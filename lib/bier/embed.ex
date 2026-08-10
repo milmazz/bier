@@ -272,6 +272,13 @@ defmodule Bier.Embed do
     segments = [embed_segment(e, rel)]
 
     {own_filters, deeper_filters} = pop_embed_filters(ef, segments)
+
+    # A filter of this embed whose column names one of ITS OWN embeds is a null
+    # filter on that nested resource (`child.grandchild=not.is.null`), not a
+    # column of `target`. `addNullEmbedFilters` recurses into the whole forest,
+    # so the rewrite is applied at every depth (case 1194).
+    own_filters = rewrite_null_embed_filters(own_filters, e.select, deeper_filters)
+
     {own_order, deeper_orders} = pop_embed_orders(state.embed_orders, segments)
     {own_limit, deeper_limits} = pop_embed_paged(state.embed_limits, segments)
     {own_offset, deeper_offsets} = pop_embed_paged(state.embed_offsets, segments)
@@ -293,13 +300,20 @@ defmodule Bier.Embed do
     {child_cols, child_laterals, state} =
       build_row_select(e.select, target, child_alias, deeper_filters, child_scope, qe)
 
+    # An `!inner` embedding NESTED inside this one propagates its filter up to
+    # here as well: a child row whose own inner embedding is empty is dropped
+    # from the array, which is what makes a two-level `!inner` chain shrink
+    # every level instead of only the deepest one (case 1192).
+    {nested_inner, state} =
+      inner_join_clauses(e.select, target, child_alias, deeper_filters, state, qe)
+
     # `own_filters` target the embed's own columns (e.g. `tasks.id=gte.5`), so
     # they must render while `state.relation` is still `target` — a coltype
     # lookup against the (already-restored) parent relation would silently
     # fall back to `:text` and bind a raw string where Postgres expects the
     # column's real type (e.g. integer), causing a Postgrex encode error (#72).
     {where_sql, state} =
-      build_embed_where(join, own_filters, child_alias, src_alias, state, qe)
+      build_embed_where(join, own_filters, nested_inner, child_alias, src_alias, state, qe)
 
     state = struct!(state, saved)
 
@@ -399,13 +413,13 @@ defmodule Bier.Embed do
 
   # ---- embed WHERE ---------------------------------------------------------
 
-  defp build_embed_where(join, own_filters, child_alias, src_alias, state, qe) do
+  defp build_embed_where(join, own_filters, extra, child_alias, src_alias, state, qe) do
     join_sql = render_join(join, child_alias, src_alias)
 
     {filt_sql, state} = render_filters(own_filters, child_alias, state, qe)
 
     combined =
-      [join_sql, filt_sql]
+      ([join_sql, filt_sql] ++ extra)
       |> Enum.reject(&(&1 == ""))
       |> Enum.join(" AND ")
 
@@ -452,29 +466,14 @@ defmodule Bier.Embed do
   # ---- inner join propagation ---------------------------------------------
 
   @doc """
-  Builds the WHERE predicate added to the *source* query for `!inner` embeds
-  (and embeds that carry a filter, which imply inner).
+  Builds the WHERE predicate added to the *source* query for `!inner` embeds.
+
+  The propagation is recursive: an `!inner` embed nested inside another one
+  contributes its own `EXISTS` inside the outer one, so a filter N levels down
+  drops non-matching rows at every level of the chain (case 1192).
   """
   def inner_join_where(nodes, %Relation{} = relation, al, embed_filters, state, qe) do
-    {clauses, state} =
-      Enum.flat_map_reduce(nodes, state, fn
-        %{kind: :embed} = e, st ->
-          rel = resolve_relationship(e, relation, st.relations)
-          {own_filters, _deeper} = pop_embed_filters(embed_filters, [embed_segment(e, rel)])
-          # Only an explicit `!inner` propagates an embedded filter to the parent
-          # (dropping parents with no matching child). The default (left) join
-          # applies the filter to the embedded rows only and keeps every parent
-          # row, with an empty array where nothing matches (case 1182 vs 1181).
-          if e.join == :inner do
-            {sql, st2} = exists_clause(e, rel, al, own_filters, st, qe)
-            {[sql], st2}
-          else
-            {[], st}
-          end
-
-        _other, st ->
-          {[], st}
-      end)
+    {clauses, state} = inner_join_clauses(nodes, relation, al, embed_filters, state, qe)
 
     where =
       case clauses do
@@ -483,46 +482,105 @@ defmodule Bier.Embed do
       end
 
     {where, state}
+  end
+
+  # The `!inner` EXISTS clauses contributed by one level of the select tree.
+  # Only an explicit `!inner` propagates an embedded filter to its parent
+  # (dropping parents with no matching child); the default (left) join applies
+  # the filter to the embedded rows only and keeps every parent row, with an
+  # empty array where nothing matches (case 1182 vs 1181).
+  defp inner_join_clauses(nodes, %Relation{} = relation, al, embed_filters, state, qe) do
+    Enum.flat_map_reduce(nodes, state, fn
+      %{kind: :embed, join: :inner} = e, st ->
+        rel = resolve_relationship(e, relation, st.relations)
+        {own, deeper} = pop_embed_filters(embed_filters, [embed_segment(e, rel)])
+        {sql, st2} = exists_clause(e, rel, al, own, deeper, st, qe)
+        {[sql], st2}
+
+      _other, st ->
+        {[], st}
+    end)
   end
 
   @doc """
-  Builds the WHERE predicate for null-filtering on embedded resources, i.e.
-  `<embed>=is.null` (anti-join: keep parents with NO related row) and
-  `<embed>=not.is.null` (semi-join: keep parents WITH a related row).
+  Rewrite every filter leaf whose column names one of `select`'s embeds into a
+  null-filter on that embedded resource (`<embed>=is.null` /
+  `<embed>=not.is.null`).
 
-  `filters` are leaf filter nodes whose `column` names a selected embed.
+  This is PostgREST's `addNullEmbedFilters` (`Plan.hs` L959-L972): it recurses
+  through `CoercibleExpr` before rewriting leaves, so a null filter may sit
+  inside an `and=()`/`or=()` group and two embeds can be OR-ed against each
+  other (case 1195); and it recurses into the whole read-plan forest, so the
+  rewrite applies at every nesting depth (case 1194).
+
+  The embed's OWN filters (`<embed>.<col>=…`, taken from `embed_filters`) are
+  carried on the rewritten node because PostgREST evaluates the null test
+  against the embed's *post-filter* aggregate — the embedded filter lives
+  inside the embed's LEFT JOIN LATERAL and shrinks the aggregate first, so an
+  embed whose rows were all filtered out aggregates to NULL (cases 1198/1199).
   """
-  def null_filter_where([], _select, _relation, _al, state, _qe), do: {"", state}
-
-  def null_filter_where(filters, select, relation, al, state, _qe) do
-    clauses =
-      Enum.map(filters, fn f ->
-        e = find_embed_node(select, f.column)
-        rel = resolve_relationship(e, relation, state.relations)
-        count_sql = related_count_subquery(e, rel, al)
-        # A correlated scalar `count(*)` subquery cannot be pulled up into a
-        # semi/anti-join, so the parent scan order is preserved (matching
-        # PostgREST's LATERAL-based null filtering). `> 0` keeps parents that
-        # HAVE a related row (semi-join); `= 0` keeps those with NONE (anti-join).
-        if embed_presence?(f), do: "#{count_sql} > 0", else: "#{count_sql} = 0"
-      end)
-
-    where =
-      case clauses do
-        [] -> ""
-        list -> " WHERE " <> Enum.join(list, " AND ")
-      end
-
-    {where, state}
+  def rewrite_null_embed_filters(filters, select, embed_filters)
+      when is_list(filters) and is_list(select) do
+    Enum.map(filters, &rewrite_null_node(&1, select, embed_filters))
   end
 
-  defp related_count_subquery(e, rel, src_alias) do
+  def rewrite_null_embed_filters(filters, _select, _embed_filters), do: filters
+
+  defp rewrite_null_node(%{logic: _, children: children} = node, select, embed_filters) do
+    %{node | children: Enum.map(children, &rewrite_null_node(&1, select, embed_filters))}
+  end
+
+  defp rewrite_null_node(%{column: col, json_path: []} = f, select, embed_filters) do
+    case find_embed_node(select, col) do
+      nil ->
+        f
+
+      e ->
+        {own, deeper} = pop_embed_filters(embed_filters, [e.alias || e.target])
+
+        %{
+          embed_null: e,
+          present?: embed_presence?(f),
+          filters: rewrite_null_embed_filters(own, e.select, deeper)
+        }
+    end
+  end
+
+  defp rewrite_null_node(node, _select, _embed_filters), do: node
+
+  @doc """
+  Render a node produced by `rewrite_null_embed_filters/3` against the current
+  scope (`state.relation` / `state.alias_name`).
+
+  A correlated scalar `count(*)` subquery cannot be pulled up into a semi/anti
+  join, so the parent scan order is preserved (matching PostgREST's
+  LATERAL-based null filtering, whose row order the frozen cases pin). `> 0`
+  keeps parents that HAVE a surviving related row; `= 0` keeps those with none.
+  """
+  def render_null_embed(%{embed_null: e, present?: present?, filters: filters}, state, qe) do
+    source = state.relation
+    rel = resolve_relationship(e, source, state.relations)
     %{relation: target, join_cond: join} = rel
-    child_alias = embed_alias(target.name, e.alias) <> "_n"
-    join_sql = render_join(join, child_alias, src_alias)
-    from = from_clause(target, child_alias, rel, src_alias)
-    where = if join_sql == "", do: "", else: " WHERE " <> join_sql
-    "(SELECT count(*) FROM #{from}#{where})"
+
+    seq = state.embed_seq + 1
+    state = %{state | embed_seq: seq}
+    child_alias = "#{embed_alias(target.name, e.alias)}_n#{seq}"
+
+    join_sql = render_join(join, child_alias, state.alias_name)
+    from = from_clause(target, child_alias, rel, state.alias_name)
+
+    # The embed's own filters address the TARGET's columns, so they must render
+    # with `state.relation` set to the target (see the #72 note in build_embed).
+    {filt_sql, state} =
+      render_filters(filters, child_alias, %{state | relation: target}, qe)
+
+    state = %{state | relation: source}
+
+    cond_sql = [join_sql, filt_sql] |> Enum.reject(&(&1 == "")) |> Enum.join(" AND ")
+    where = if cond_sql == "", do: "", else: " WHERE " <> cond_sql
+    count_sql = "(SELECT count(*) FROM #{from}#{where})"
+
+    {if(present?, do: "#{count_sql} > 0", else: "#{count_sql} = 0"), state}
   end
 
   # Whether the null-filter asks for a present related row (semi-join). Base
@@ -539,17 +597,30 @@ defmodule Bier.Embed do
     end)
   end
 
-  defp exists_clause(e, rel, src_alias, own_filters, state, qe) do
+  defp exists_clause(e, rel, src_alias, own_filters, deeper_filters, state, qe) do
     %{relation: target, join_cond: join} = rel
-    child_alias = embed_alias(target.name, e.alias) <> "_x"
+
+    seq = state.embed_seq + 1
+    state = %{state | embed_seq: seq}
+    child_alias = "#{embed_alias(target.name, e.alias)}_x#{seq}"
 
     join_sql = render_join(join, child_alias, src_alias)
-    {filt_sql, state} = render_filters(own_filters, child_alias, state, qe)
+
+    # Render the embed's own filters (and any nested `!inner` propagation) in
+    # the TARGET's scope, so column types resolve against the embedded relation.
+    source = state.relation
+    own_filters = rewrite_null_embed_filters(own_filters, e.select, deeper_filters)
+    {filt_sql, state} = render_filters(own_filters, child_alias, %{state | relation: target}, qe)
+
+    {nested, state} =
+      inner_join_clauses(e.select, target, child_alias, deeper_filters, state, qe)
+
+    state = %{state | relation: source}
 
     from = from_clause(target, child_alias, rel, src_alias)
 
     cond_sql =
-      [join_sql, filt_sql] |> Enum.reject(&(&1 == "")) |> Enum.join(" AND ")
+      ([join_sql, filt_sql] ++ nested) |> Enum.reject(&(&1 == "")) |> Enum.join(" AND ")
 
     sql =
       "EXISTS (SELECT 1 FROM #{from}" <>
