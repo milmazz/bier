@@ -65,10 +65,10 @@ defmodule Bier.Mutation do
       pref = preferences(conn, relation, plan)
 
       if rows == [] do
-        # Empty payload: insert nothing. Status 200 when an upsert resolution
-        # was requested, 201 otherwise (a plain bulk insert of zero rows).
-        status = if pref.resolution != nil, do: 200, else: 201
-        respond_empty_set(conn, media, pref, status)
+        # Empty payload: insert nothing. `isInsertIfGTZero` only degrades to 200
+        # for a merge-duplicates upsert (Response.hs#L104-L109); every other
+        # zero-row insert — plain or ignore-duplicates — stays 201.
+        respond_empty_set(conn, media, pref, insert_status(pref, true))
       else
         {sql, params} = insert_sql(relation, columns, rows, plan, pref)
         mutation = insert_mutation(relation, plan, pref, rows)
@@ -101,7 +101,7 @@ defmodule Bier.Mutation do
       if columns == [] do
         respond_empty_update(conn, pref)
       else
-        {set_sql, params} = set_clause(columns, row, relation)
+        {set_sql, params} = set_clause(columns, row, relation, pref.missing)
         {where_sql, params} = where_clause(plan.filters, relation, params)
 
         sql = "UPDATE #{qrel(relation)} SET #{set_sql}#{where_sql} RETURNING *"
@@ -128,10 +128,9 @@ defmodule Bier.Mutation do
          :ok <- validate_put(plan, relation),
          {:ok, rows} <- parse_body(conn, plan),
          {:ok, columns} <- resolve_columns(plan, rows, relation),
-         :ok <- validate_put_payload(plan, rows, relation) do
+         {:ok, row} <- put_row(plan, rows, relation) do
       pref = preferences(conn, relation, plan)
       pk = relation.primary_key
-      [row] = rows
 
       {sql, params} = upsert_sql(relation, columns, [row], pk, pref)
       write = write(config, relation, plan, media, pref, {:put, row, pk}, 200)
@@ -160,20 +159,41 @@ defmodule Bier.Mutation do
     end
   end
 
-  # The payload's PK values must equal the URL's PK filter values.
-  defp validate_put_payload(plan, [row], relation) do
-    url_pk =
-      Map.new(plan.filters, fn %{column: col, value: v} -> {col, v} end)
+  # The row a PUT actually writes.
+  #
+  # PostgREST does not reject a multi-element payload: `mutatePlanToQuery` hangs
+  # the URL's primary-key `eq` filters off the INSERT's own SELECT as
+  # `putConditions` (`QueryBuilder.hs#L125`), so payload elements whose key does
+  # not match the URL are simply never written. It then requires the statement to
+  # have affected exactly one row — `failPut` raises `PutMatchingPkError`
+  # (PGRST115) for any other count (`MainTx.hs#L205-L214`). Selecting the single
+  # matching element here reproduces both halves: a trailing element for a
+  # different key is ignored, while a payload that matches the URL zero times (or
+  # more than once) is the PK-mismatch error.
+  defp put_row(plan, rows, relation) do
+    url_pk = Map.new(plan.filters, fn %{column: col, value: v} -> {col, v} end)
 
-    matches? =
-      Enum.all?(relation.primary_key, fn col ->
-        to_string(Map.get(row, col)) == to_string(Map.get(url_pk, col))
-      end)
-
-    if matches?, do: :ok, else: {:error, :put_pk_mismatch}
+    case Enum.filter(rows, &put_row_matches?(&1, relation.primary_key, url_pk)) do
+      [row] -> {:ok, row}
+      _none_or_many -> {:error, :put_pk_mismatch}
+    end
   end
 
-  defp validate_put_payload(_plan, _rows, _relation), do: :ok
+  defp put_row_matches?(row, pk, url_pk) when is_map(row) do
+    Enum.all?(pk, fn col -> same_value?(Map.get(row, col), Map.get(url_pk, col)) end)
+  end
+
+  defp put_row_matches?(_row, _pk, _url_pk), do: false
+
+  # The URL filter value is always a string; the payload value is whatever JSON
+  # carried, so compare on the rendered text (as the SQL comparison does after
+  # the body column is coerced to the PK's type).
+  defp same_value?(payload, url), do: text_value(payload) == text_value(url)
+
+  defp text_value(nil), do: ""
+  defp text_value(value) when is_binary(value), do: value
+  defp text_value(value) when is_number(value) or is_boolean(value), do: to_string(value)
+  defp text_value(value), do: Bier.json_library().encode!(value)
 
   # ---- shared execution ----------------------------------------------------
 
@@ -431,25 +451,78 @@ defmodule Bier.Mutation do
 
   # ---- response shaping ----------------------------------------------------
 
-  # return=representation: emit the (shaped) rows as a body. PostgREST emits
-  # the Location header ONLY for return=headers-only — a representation or
-  # minimal response never carries a computed Location, even when the PK is in
-  # the selected output (live-verified against 14.12; InsertSpec matchHeaderAbsent).
-  defp respond(conn, %Write{pref: %{return: :representation} = pref} = write, outcome) do
-    %{body: body, count: count, existed: existed, guc: guc} = outcome
-    kind = mutation_kind(write.mutation)
+  # PostgREST has ONE `actionResponse` clause per mutation kind
+  # (`Response.hs#L85-L173`) and they differ in more than the body:
+  #
+  #   * only `MutationCreate` can emit a Location, and it prepends
+  #     `Content-Length` to EVERY arm, including the empty ones (#L116);
+  #   * `MutationSingleUpsert` (PUT) emits no `Content-Range` at all and its
+  #     empty arm carries the `Preference-Applied` header ALONE (#L153-L154);
+  #   * `MutationUpdate` / `MutationDelete` keep `Content-Range` on every arm but
+  #     add `Content-Length` only on `Just Full` (#L133, #L167).
+  #
+  # Mirror that split rather than folding the four kinds into one builder.
+  defp respond(conn, %Write{} = write, outcome) do
+    case mutation_kind(write.mutation) do
+      :insert -> respond_insert(conn, write, outcome)
+      :update -> respond_update(conn, write, outcome)
+      :delete -> respond_delete(conn, write, outcome)
+      :put -> respond_put(conn, write, outcome)
+    end
+  end
+
+  defp respond_insert(conn, %Write{pref: pref} = write, outcome) do
+    %{count: count, meta: meta, existed: existed, guc: guc} = outcome
+
+    conn
+    |> Bier.Guc.put_headers(guc)
+    |> put_insert_location(write.relation, pref, count, meta, guc)
+    |> put_resp_header("content-range", "*/#{total_part(pref, count)}")
+    |> put_pref_applied(pref)
+    |> finish(write, outcome, Bier.Guc.status(guc, insert_status(pref, existed)), :always)
+  end
+
+  defp respond_update(conn, %Write{pref: pref} = write, outcome) do
+    %{count: count, guc: guc} = outcome
+
+    conn
+    |> Bier.Guc.put_headers(guc)
+    |> put_resp_header("content-range", update_range(count, pref))
+    |> put_pref_applied(pref)
+    |> finish(write, outcome, Bier.Guc.status(guc, full_or_204(pref, 200)), :full_only)
+  end
+
+  defp respond_delete(conn, %Write{pref: pref} = write, outcome) do
+    %{count: count, guc: guc} = outcome
+
+    conn
+    |> Bier.Guc.put_headers(guc)
+    |> put_resp_header("content-range", "*/#{total_part(pref, count)}")
+    |> put_pref_applied(pref)
+    |> finish(write, outcome, Bier.Guc.status(guc, full_or_204(pref, 200)), :full_only)
+  end
+
+  defp respond_put(conn, %Write{pref: pref} = write, outcome) do
+    %{existed: existed, guc: guc} = outcome
+    full_status = if existed, do: 200, else: 201
+
+    conn
+    |> Bier.Guc.put_headers(guc)
+    |> put_pref_applied(pref)
+    |> finish(write, outcome, Bier.Guc.status(guc, full_or_204(pref, full_status)), :full_only)
+  end
+
+  # The shared tail of all four clauses: `Just Full` renders the (shaped) rows
+  # and adds Content-Type + Content-Length; every other representation sends an
+  # empty body. `content_length` says whether the EMPTY arms still carry
+  # `Content-Length: 0` — only `MutationCreate` does.
+  defp finish(conn, %Write{pref: %{return: :representation}} = write, outcome, status, _cl) do
     columns = ActionController.csv_columns(write.plan, write.relation)
 
-    case Render.render(write.media, body, columns: columns) do
+    case Render.render(write.media, outcome.body, columns: columns) do
       {:ok, payload} ->
-        status =
-          Bier.Guc.status(guc, representation_status(kind, count, existed, write.ok_status, pref))
-
         conn
-        |> Bier.Guc.put_headers(guc)
-        |> put_pref_applied(pref)
         |> put_resp_header("content-type", MediaType.content_type(write.media))
-        |> put_content_range(kind, count, pref)
         |> put_resp_header("content-length", Integer.to_string(:erlang.iolist_size(payload)))
         |> send_resp(status, payload)
 
@@ -458,106 +531,60 @@ defmodule Bier.Mutation do
     end
   end
 
-  # return=headers-only: empty body, but Location header pointing at the row.
-  defp respond(conn, %Write{pref: %{return: :headers_only} = pref} = write, outcome) do
-    %{count: count, meta: meta, existed: existed, guc: guc} = outcome
-    kind = mutation_kind(write.mutation)
-    status = Bier.Guc.status(guc, empty_status(kind, count, existed, write.ok_status, pref))
-
+  defp finish(conn, _write, _outcome, status, :always) do
     conn
-    |> Bier.Guc.put_headers(guc)
-    |> put_pref_applied(pref)
-    |> force_location(kind, write.relation, meta, guc)
-    |> put_content_range(kind, count, pref)
     |> put_resp_header("content-length", "0")
     |> send_resp(status, "")
   end
 
-  # return=minimal / no token: empty body, and (like representation) no
-  # computed Location — PostgREST reserves it for return=headers-only.
-  defp respond(conn, %Write{pref: pref} = write, outcome) do
-    %{count: count, existed: existed, guc: guc} = outcome
-    kind = mutation_kind(write.mutation)
-    status = Bier.Guc.status(guc, empty_status(kind, count, existed, write.ok_status, pref))
+  defp finish(conn, _write, _outcome, status, :full_only), do: send_resp(conn, status, "")
 
-    conn
-    |> Bier.Guc.put_headers(guc)
-    |> put_pref_applied(pref)
-    |> put_content_range(kind, count, pref)
-    |> put_content_length_for_empty(status)
-    |> send_resp(status, "")
-  end
+  # `MutationCreate` degrades to 200 in exactly ONE case: a merge-duplicates
+  # upsert that inserted nothing. `isInsertIfGTZero` tests
+  # `preferResolution == Just MergeDuplicates` (`Response.hs#L104-L109`), so an
+  # ignore-duplicates upsert stays 201 even when every row conflicted, and so
+  # does a plain insert of zero rows.
+  defp insert_status(%{resolution: :merge}, true), do: 200
+  defp insert_status(_pref, _nothing_inserted?), do: 201
 
-  # Status for representation responses: inserts are 201 when at least one row
-  # was created (200 for a zero-row upsert); put depends on insert vs replace;
-  # updates/deletes are 200.
-  # An upsert where every row already existed (nothing inserted) is 200; an
-  # upsert/insert that created at least one row is 201.
-  defp representation_status(:insert, _count, true, _ok, %{resolution: res}) when res != nil,
-    do: 200
+  # PATCH/PUT/DELETE answer 204 on every arm but `Just Full`
+  # (`Response.hs#L134-L135`, #L153-L154, #L168-L169) — `return=headers-only` is
+  # NOT special-cased there, it falls into the same catch-all as `return=minimal`.
+  defp full_or_204(%{return: :representation}, full_status), do: full_status
+  defp full_or_204(_pref, _full_status), do: 204
 
-  defp representation_status(:insert, count, _existed, _ok, %{resolution: res})
-       when count == 0 and res != nil,
-       do: 200
+  # Content-Range: `MutationUpdate` reports a read-style range over the mutated
+  # rows (`contentRangeH 0 (rsQueryTotal - 1)`, `Response.hs#L123`); insert and
+  # delete use the `1 0` base, which always renders as `*` (#L100, #L161).
+  defp update_range(count, pref) when count > 0,
+    do: "0-#{count - 1}/#{total_part(pref, count)}"
 
-  defp representation_status(:insert, _count, _existed, ok, _pref), do: ok
-
-  defp representation_status(:put, _count, existed, _ok, _pref),
-    do: if(existed, do: 200, else: 201)
-
-  defp representation_status(_kind, _count, _existed, _ok, _pref), do: 200
-
-  # Status for empty-body responses: inserts are 201; minimal PUT is always 204;
-  # other PUT depends on insert vs replace; updates/deletes are 204.
-  defp empty_status(:insert, _count, true, _ok, %{resolution: res}) when res != nil, do: 200
-  defp empty_status(:insert, _count, _existed, _ok, _pref), do: 201
-  defp empty_status(:put, _count, _existed, _ok, %{return: :minimal}), do: 204
-  defp empty_status(:put, _count, existed, _ok, _pref), do: if(existed, do: 200, else: 201)
-  defp empty_status(_kind, _count, _existed, _ok, _pref), do: 204
-
-  # Content-Range:
-  #   * insert / delete / put -> `*/<total>` (total only with count=exact).
-  #   * update -> `0-<rows-1>/<total>` (read-style range over mutated rows).
-  defp put_content_range(conn, :update, count, pref) do
-    range =
-      if count > 0 do
-        "0-#{count - 1}/#{total_part(pref, count)}"
-      else
-        "*/#{total_part(pref, count)}"
-      end
-
-    put_resp_header(conn, "content-range", range)
-  end
-
-  defp put_content_range(conn, _kind, count, pref) do
-    put_resp_header(conn, "content-range", "*/#{total_part(pref, count)}")
-  end
+  defp update_range(count, pref), do: "*/#{total_part(pref, count)}"
 
   defp total_part(%{count: :exact}, count), do: Integer.to_string(count)
   defp total_part(_pref, _count), do: "*"
 
-  # Location (headers-only responses only): from the mutated row's PK. A
-  # trigger-supplied response.headers Location (already on `conn`) wins.
-  defp force_location(conn, kind, relation, meta, guc) when kind in [:insert, :put] do
-    if guc_location?(guc) do
-      conn
+  # Location, from the mutated row's PK. `locF` builds one only for an INSERT
+  # with `return=headers-only`, and wraps it in
+  # `CASE WHEN pg_catalog.count(_postgrest_t) = 1 THEN … ELSE <no location> END`
+  # (`Statements.hs#L45-L52`) — a bulk insert evaluates the ELSE arm, so no
+  # Location is emitted for anything but a single created row. A
+  # trigger-supplied `response.headers` Location (already on `conn`) wins.
+  defp put_insert_location(conn, relation, %{return: :headers_only}, 1, meta, guc) do
+    with false <- guc_location?(guc),
+         values when is_map(values) <- pk_values(meta) do
+      query =
+        Enum.map_join(relation.primary_key, "&", fn col ->
+          "#{col}=eq.#{Map.get(values, col)}"
+        end)
+
+      put_resp_header(conn, "location", "/#{relation.name}?#{query}")
     else
-      case pk_values(meta) do
-        nil ->
-          conn
-
-        values ->
-          query =
-            Enum.map_join(relation.primary_key, "&", fn col ->
-              "#{col}=eq.#{Map.get(values, col)}"
-            end)
-
-          put_resp_header(conn, "location", "/#{relation.name}?#{query}")
-      end
+      _ -> conn
     end
   end
 
-  defp force_location(conn, _kind, _relation, _meta, _guc), do: conn
+  defp put_insert_location(conn, _relation, _pref, _count, _meta, _guc), do: conn
 
   # True when the response.headers GUC supplied a Location header.
   defp guc_location?(%{headers: headers}) when is_list(headers) do
@@ -576,12 +603,6 @@ defmodule Bier.Mutation do
   end
 
   defp pk_values(_), do: nil
-
-  # 201 empty bodies carry Content-Length: 0; 204 carries no Content-Length.
-  defp put_content_length_for_empty(conn, 204), do: conn
-
-  defp put_content_length_for_empty(conn, _status),
-    do: put_resp_header(conn, "content-length", "0")
 
   # Echo the recognized Prefer tokens that were honored, in PostgREST's canonical
   # order (not request order).
@@ -635,8 +656,16 @@ defmodule Bier.Mutation do
     Map.put(pref, :applied, applied_tokens(pref))
   end
 
+  # `parsePrefs` walks the REQUEST tokens in order and returns the first that is
+  # a known value for this preference — `head $ mapMaybe (flip Map.lookup $
+  # prefMap vals) prefs` (`Preferences.hs#L165-L167`). So when a client repeats a
+  # key the FIRST occurrence in the header wins ("If a preference is set more
+  # than once, only the first is used", `Preferences.hs#L98-L111`), never the
+  # order of the internal constructor list: `return=minimal, return=representation`
+  # resolves to minimal even though `Full` is listed first upstream.
   defp parse_pref(raw, tokens) do
-    Enum.find_value(tokens, fn {value, token} -> if token in raw, do: value end)
+    values = Map.new(tokens, fn {value, token} -> {token, value} end)
+    Enum.find_value(raw, &Map.get(values, &1))
   end
 
   defp parse_max_affected(raw) do
@@ -650,16 +679,17 @@ defmodule Bier.Mutation do
     end)
   end
 
-  # Build the Preference-Applied token list in PostgREST's canonical order:
-  # handling, resolution, missing, return, count, max-affected. max-affected is
-  # echoed only with handling=strict (lenient drops it).
+  # Build the Preference-Applied token list in PostgREST's canonical `prefsVals`
+  # order — resolution, missing, representation, count, transaction, handling,
+  # timezone, max-affected (`Preferences.hs#L179-L188`) — never request order.
+  # max-affected is echoed only with handling=strict (lenient drops it).
   defp applied_tokens(pref) do
     [
-      applied_token(@handling_tokens, pref.handling),
       applied_token(@resolution_tokens, pref.resolution),
       applied_token(@missing_tokens, pref.missing),
       applied_token(@return_tokens, pref.return),
       applied_token(@count_tokens, pref.count),
+      applied_token(@handling_tokens, pref.handling),
       max_affected_token(pref.handling, pref.max_affected)
     ]
     |> Enum.reject(&is_nil/1)
@@ -686,18 +716,31 @@ defmodule Bier.Mutation do
   defp parse_body(conn, plan) do
     raw = conn.assigns[:bier_raw_body] || ""
 
-    if csv_content?(conn) do
-      parse_csv(raw)
-    else
-      parse_json_body(raw, is_list(plan[:columns]))
+    cond do
+      content_type?(conn, "text/csv") -> parse_csv(raw)
+      content_type?(conn, "application/x-www-form-urlencoded") -> parse_form_body(raw)
+      true -> parse_json_body(raw, is_list(plan[:columns]))
     end
   end
 
-  defp csv_content?(conn) do
+  defp content_type?(conn, mime) do
     case get_req_header(conn, "content-type") do
-      [value | _] -> String.contains?(String.downcase(value), "text/csv")
+      [value | _] -> String.contains?(String.downcase(value), mime)
       [] -> false
     end
+  end
+
+  # An `application/x-www-form-urlencoded` body (an HTML form POST) is ONE row
+  # whose field names are the column names and whose values are all JSON strings:
+  # `getPayload`'s MTUrlEncoded arm builds `HM.fromList $ (identity *** JSON.String)
+  # <$> parseSimpleQuery reqBody` and takes the map's keys as the target columns
+  # (`Payload.hs`). `parseSimpleQuery` decodes `+` to a space and resolves percent
+  # escapes, and the HashMap keeps the last value of a repeated field — which is
+  # exactly `URI.decode_query/1`.
+  defp parse_form_body(raw) do
+    {:ok, [URI.decode_query(raw)]}
+  rescue
+    ArgumentError -> {:error, :invalid_json}
   end
 
   defp parse_csv(""), do: {:error, :invalid_json}
@@ -738,8 +781,13 @@ defmodule Bier.Mutation do
 
   defp split_csv_line(line), do: line |> String.split(",") |> Enum.map(&String.trim/1)
 
-  # An empty JSON body inserts a single all-defaults row (`{}`).
-  defp parse_json_body("", _has_columns?), do: {:ok, [%{}]}
+  # An EMPTY body is not an empty object: `getPayload` runs the raw bytes through
+  # `JSON.decode`, and `maybe (Left "Empty or invalid json") Right $ JSON.decode
+  # reqBody` (`Payload.hs`) turns the failure into the same generic PGRST102 a
+  # malformed body gets. Only an RPC invocation substitutes `{}` for an empty
+  # body (the `LBS.null reqBody && isProc` guard), and that path lives in
+  # `Bier.Rpc`.
+  defp parse_json_body("", _has_columns?), do: {:error, :invalid_json}
 
   defp parse_json_body(raw, has_columns?) do
     case Bier.json_library().decode(raw) do
@@ -844,29 +892,35 @@ defmodule Bier.Mutation do
   end
 
   # The SELECT-list extracting each target column from the jsonb element `_e`.
-  # json/jsonb columns keep their JSON structure (`->`); everything else is
-  # pulled as text (`->>`) and cast to the column type so Postgres parses
-  # arrays/numbers/etc. `missing=default` substitutes the column DEFAULT for a
-  # key the element omits.
   defp row_select_exprs(columns, relation, missing) do
-    Enum.map_join(columns, ", ", fn col ->
-      coltype = column_type(relation, col)
-      value_expr = extract_expr(col, coltype, relation)
+    Enum.map_join(columns, ", ", &column_value_expr(&1, relation, missing, "_e"))
+  end
 
-      case missing do
-        :default ->
-          default = column_default(relation, col) || "NULL"
-          "CASE WHEN _e ? #{pg_literal(col)} THEN #{value_expr} ELSE #{default} END"
+  # The value written to `col`, read out of the jsonb source `src`. json/jsonb
+  # columns keep their JSON structure (`->`); everything else is pulled as text
+  # (`->>`) and cast to the column type so Postgres parses arrays/numbers/etc.
+  #
+  # `missing=default` substitutes the column DEFAULT for a key the payload omits.
+  # `applyDefaults` is threaded into `fromJsonBodyF` for the Update plan exactly
+  # as it is for Insert (`QueryBuilder.hs#L123` vs #L153), so the preference is
+  # not insert-only: a PATCH whose `?columns=` names a column the JSON object
+  # leaves out writes that column's DEFAULT rather than NULL.
+  defp column_value_expr(col, relation, missing, src) do
+    value_expr = extract_expr(col, column_type(relation, col), relation, src)
 
-        _ ->
-          value_expr
-      end
-    end)
+    case missing do
+      :default ->
+        default = column_default(relation, col) || "NULL"
+        "CASE WHEN #{src} ? #{pg_literal(col)} THEN #{value_expr} ELSE #{default} END"
+
+      _ ->
+        value_expr
+    end
   end
 
   # The expression pulling `col` out of the jsonb source `src` (the per-row
   # element `_e` on INSERT/upsert, the bound payload on UPDATE).
-  defp extract_expr(col, type, relation, src \\ "_e") do
+  defp extract_expr(col, type, relation, src) do
     case QueryExecutor.write_rep_fn(relation, col) do
       # A DOMAIN with a `json AS <domain>` cast parses the raw JSON body value
       # through its cast function (cases 1811-1813); a plain `::<domain>` cast
@@ -929,13 +983,12 @@ defmodule Bier.Mutation do
 
   # SET col = <typed value> list for UPDATE; single-object body extracted from
   # one bound jsonb parameter.
-  defp set_clause(columns, row, relation) do
+  defp set_clause(columns, row, relation, missing) do
     payload = Bier.json_library().encode!(row)
 
     parts =
       Enum.map_join(columns, ", ", fn col ->
-        coltype = column_type(relation, col)
-        "#{q(col)} = #{extract_expr(col, coltype, relation, "$1::text::jsonb")}"
+        "#{q(col)} = #{column_value_expr(col, relation, missing, "($1::text::jsonb)")}"
       end)
 
     {parts, [payload]}
