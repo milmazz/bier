@@ -12,7 +12,10 @@ defmodule Bier.JWT do
     * no secret configured but a token is presented -> `:no_secret` (PGRST300, 500)
     * empty bearer token                            -> `:empty` (PGRST301, 401)
     * not exactly 3 dot-separated parts             -> `{:parts, n}` (PGRST301, 401)
-    * bad base64 / JSON / signature                 -> `:jwt_invalid` (PGRST301, 401)
+    * unreadable token structure                    -> `:bad_crypto` (PGRST301, 401)
+    * unsecured token (`alg: none`)                 -> `{:bad_algorithm, d}` (PGRST301, 401)
+    * no key verified the signature                 -> `:jwt_invalid` (PGRST301, 401)
+    * payload is not a JSON object                  -> `:claims_parse_failed` (PGRST303)
     * `exp` more than 30s in the past               -> `:expired` (PGRST303, 401)
     * `nbf` more than 30s in the future             -> `:not_yet_valid` (PGRST303, 401)
     * `iat` more than 30s in the future             -> `:issued_at_future` (PGRST303, 401)
@@ -20,12 +23,36 @@ defmodule Bier.JWT do
     * `aud` not a string / array of strings          -> `:aud_not_string` (PGRST303)
     * audience mismatch (when `jwt-aud` configured)  -> `:not_in_audience` (PGRST303)
 
+  ## The decode-stage taxonomy
+
+  PostgREST hands the token to Haskell `jose-jwt`'s `JWT.decode`, whose only
+  three failures it re-labels are `KeyError`, `BadAlgorithm` and `BadCrypto`
+  (`Auth/Jwt.hs` `jwtDecodeError`), each rendered as a distinct PGRST301 body.
+  The three arise as follows, and this module reproduces the same split:
+
+    * `parseJwt` (`Jose/Internal/Parser.hs`) collapses **every** structural
+      failure to `BadCrypto` — `first (const BadCrypto) $ parseOnly jwt bs`. It
+      base64url-decodes the header, JSON-decodes it into a recognized header
+      (`alg: none` is the unsecured header; anything else needs a string `alg`),
+      then base64url-decodes the payload and the signature. Any of those failing
+      is `:bad_crypto` here, `details: null` in the response.
+    * an unsecured header reaches `decode`, which — PostgREST passes no expected
+      encoding — throws `BadAlgorithm "JWT is unsecured but expected 'alg' was
+      not 'none'"`. That jose message is surfaced verbatim as the response
+      `details`, so it is carried in the error term.
+    * otherwise the key set is filtered by what can verify the header's `alg`
+      and each candidate is tried; nothing verifying is `KeyError`. Bier holds a
+      single configured key, so its "wrong secret", "wrong key type" and
+      "algorithm mismatch" outcomes are one bucket (`:jwt_invalid`), rendered
+      with jose's `"None of the keys was able to decode the JWT"` details.
+
   Signatures are verified through `:jose`. The configured secret selects the key:
   a JWK (a JSON object with `kty`, or a JWK Set) verifies asymmetric algorithms
   (RS*/ES*/PS*/EdDSA); any other secret is an HMAC `oct` key (HS256/384/512).
   Routing on the secret — not just the token's `alg` — keeps a public JWK from
-  ever being used as an HMAC key (an algorithm-confusion attempt is rejected), and
-  the fixed per-key-type allowlist also rejects `alg: none`.
+  ever being used as an HMAC key (an algorithm-confusion attempt is rejected).
+  `alg: none` never reaches that step: an unsecured token is rejected while the
+  token is still being parsed, so it can never authenticate.
 
   Returns `{:ok, %{role: role | nil, claims: map, claims_json: raw_json}}` where
   `claims_json` is the exact decoded payload JSON segment (re-encoded canonically)
@@ -110,11 +137,10 @@ defmodule Bier.JWT do
           {:ok, map(), String.t()} | {:error, atom() | {atom(), term()}}
   def decode_and_verify(token, secret) do
     case String.split(token, ".") do
-      [header_b64, payload_b64, _sig_b64] ->
-        with {:ok, header} <- decode_segment(header_b64),
-             :ok <- verify_signature(header, token, secret),
-             {:ok, payload_raw} <- decode_segment_raw(payload_b64),
-             {:ok, claims} <- decode_json(payload_raw) do
+      [header_b64, payload_b64, signature_b64] ->
+        with {:ok, payload_raw} <- parse_compact(header_b64, payload_b64, signature_b64),
+             :ok <- verify_signature(token, secret),
+             {:ok, claims} <- decode_claims(payload_raw) do
           {:ok, claims, Bier.json_library().encode!(claims)}
         end
 
@@ -138,6 +164,35 @@ defmodule Bier.JWT do
     end
   end
 
+  # ---- structural parse (jose-jwt `parseJwt`) ------------------------------
+
+  # jose's message for an unsecured token, surfaced verbatim as the response
+  # `details` (PostgREST Error.hs renders `BadAlgorithm dets`).
+  @unsecured_details "JWT is unsecured but expected 'alg' was not 'none'"
+
+  # Mirror of jose-jwt's compact-token parser, in its order: header segment,
+  # header object, then the payload and signature segments. Every failure it can
+  # produce is `BadCrypto`; the one exception is the unsecured header, which the
+  # parser accepts and `decode` then rejects as `BadAlgorithm`.
+  defp parse_compact(header_b64, payload_b64, signature_b64) do
+    with {:ok, header_raw} <- base64url_decode(header_b64),
+         {:ok, header} <- json_object(header_raw),
+         :ok <- check_header(header),
+         {:ok, payload_raw} <- base64url_decode(payload_b64),
+         {:ok, _signature} <- base64url_decode(signature_b64) do
+      {:ok, payload_raw}
+    else
+      :error -> {:error, :bad_crypto}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  # jose-jwt's `FromJSON JwtHeader`: `alg: "none"` is the unsecured header;
+  # every other header has to carry a string `alg` to parse at all.
+  defp check_header(%{"alg" => "none"}), do: {:error, {:bad_algorithm, @unsecured_details}}
+  defp check_header(%{"alg" => alg}) when is_binary(alg), do: :ok
+  defp check_header(_header), do: :error
+
   # ---- signature ----------------------------------------------------------
 
   @hmac_algs ~w(HS256 HS384 HS512)
@@ -146,11 +201,12 @@ defmodule Bier.JWT do
   # Verify the signature with `:jose`, routing on the SECRET rather than only the
   # token's `alg`: a JWK-shaped secret (a public key) is verified asymmetrically,
   # any other secret as an HMAC `oct` key. Each key type carries a fixed algorithm
-  # allowlist, so a token whose `alg` doesn't match the key type — `alg: none`, or
-  # an HS256 token presented against a public JWK (algorithm confusion) — is
-  # rejected. `JOSE.JWS.verify_strict/3` compares HMACs in constant time, and a
-  # malformed-key raise is caught here as an invalid token.
-  defp verify_signature(%{"alg" => alg}, token, secret) when is_binary(alg) do
+  # allowlist, so a token whose `alg` doesn't match the key type — an HS256 token
+  # presented against a public JWK (algorithm confusion) — is rejected, the same
+  # filtering jose-jwt's `canDecodeJws` does before it tries a key.
+  # `JOSE.JWS.verify_strict/3` compares HMACs in constant time, and a
+  # malformed-key raise is caught here as an unverifiable token.
+  defp verify_signature(token, secret) do
     {jwk, allowed} = key_and_algs(secret)
 
     case JOSE.JWS.verify_strict(jwk, allowed, token) do
@@ -160,8 +216,6 @@ defmodule Bier.JWT do
   rescue
     _ -> {:error, :jwt_invalid}
   end
-
-  defp verify_signature(_header, _token, _secret), do: {:error, :jwt_invalid}
 
   # Build the verification key + its algorithm allowlist from the configured
   # secret. A JWK (a JSON object with `kty`, or the first key of a JWK Set) is an
@@ -217,8 +271,10 @@ defmodule Bier.JWT do
   # A present `aud` must be a string or an array of strings — even when no
   # `jwt-aud` is configured (PostgREST type-checks the claim unconditionally).
   # Membership is only enforced when `jwt-aud` is configured: the token's `aud`
-  # must contain it. An absent `aud` with a configured audience is rejected; an
-  # empty-array `aud` is treated as "no audience" and ignored.
+  # must contain it. An `aud` that is absent or explicitly `null` is skipped
+  # rather than rejected — PostgREST reads it with `parseMaybe (.:? "aud")` and
+  # only applies `audMatchesCfg` when that yields a value — and an empty-array
+  # `aud` is likewise treated as "no audience" and ignored.
   defp validate_audience(claims, expected) do
     aud = Map.get(claims, "aud")
 
@@ -236,7 +292,7 @@ defmodule Bier.JWT do
   defp check_aud_type(_aud), do: {:error, :aud_not_string}
 
   defp check_aud_membership(_aud, expected) when is_nil(expected) or expected == "", do: :ok
-  defp check_aud_membership(nil, _expected), do: {:error, :jwt_invalid}
+  defp check_aud_membership(nil, _expected), do: :ok
   defp check_aud_membership([], _expected), do: :ok
 
   defp check_aud_membership(aud, expected) when is_binary(aud),
@@ -247,23 +303,20 @@ defmodule Bier.JWT do
 
   # ---- decoding helpers ---------------------------------------------------
 
-  defp decode_segment(b64) do
-    with {:ok, raw} <- decode_segment_raw(b64) do
-      decode_json(raw)
+  # The payload is only read once the signature verified, so a payload that
+  # base64-decoded but is not a JSON object is a *claims* failure, not a decode
+  # one: PostgREST's `parseClaims` yields `ParsingClaimsFailed` -> PGRST303.
+  defp decode_claims(payload_raw) do
+    case json_object(payload_raw) do
+      {:ok, claims} -> {:ok, claims}
+      :error -> {:error, :claims_parse_failed}
     end
   end
 
-  defp decode_segment_raw(b64) do
-    case base64url_decode(b64) do
-      {:ok, raw} -> {:ok, raw}
-      :error -> {:error, :jwt_invalid}
-    end
-  end
-
-  defp decode_json(raw) do
+  defp json_object(raw) do
     case Bier.json_library().decode(raw) do
       {:ok, map} when is_map(map) -> {:ok, map}
-      _ -> {:error, :jwt_invalid}
+      _other -> :error
     end
   end
 
