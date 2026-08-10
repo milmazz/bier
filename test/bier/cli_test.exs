@@ -26,20 +26,22 @@ defmodule Bier.CLITest do
   end
 
   test "--dump-config canonicalizes jwt-role-claim-key and resolves its alias" do
-    # Defaults: `.role` dumps in PostgREST's quoted form; is-base64 defaults off.
+    # Defaults: the v16.0 RFC 9535 default `$.role` dumps with the literal `$`
+    # doubled, because Data.Configurator reads `$$` as an escaped `$` when the
+    # file is read back (case 1705). is-base64 defaults off.
     result = CLI.run(["--dump-config"], env: @no_db)
     assert result.exit == 0
     stdout = IO.iodata_to_binary(result.stdout)
-    assert stdout =~ ~s|jwt-role-claim-key = ".\\"role\\""|
+    assert stdout =~ ~s|jwt-role-claim-key = "$$.role"|
     assert stdout =~ ~s(jwt-secret-is-base64 = false)
 
     # The deprecated `role-claim-key` alias resolves to the canonical key
-    # (case 1707's shape) and the value is re-serialized quoted.
+    # (case 1707's shape) and the value is re-serialized the same way.
     result =
-      CLI.run(["--dump-config"], env: Map.merge(@no_db, %{"PGRST_ROLE_CLAIM_KEY" => ".aliased"}))
+      CLI.run(["--dump-config"], env: Map.merge(@no_db, %{"PGRST_ROLE_CLAIM_KEY" => "$.aliased"}))
 
     assert result.exit == 0
-    assert IO.iodata_to_binary(result.stdout) =~ ~s|jwt-role-claim-key = ".\\"aliased\\""|
+    assert IO.iodata_to_binary(result.stdout) =~ ~s|jwt-role-claim-key = "$$.aliased"|
   end
 
   test "--dump-config rejects an invalid jwt-role-claim-key (case 1711 shape)" do
@@ -210,7 +212,11 @@ defmodule Bier.CLITest do
   end
 
   test "PGRST_APP_SETTINGS_* env vars dump as app.settings.* and env beats file (case 1729)" do
-    path = write_tmp_config(~s(app.settings.from_file = "file"\napp.settings.both = "file"\n))
+    # v16.0 keeps the name after the prefix VERBATIM: `normalize` only strips
+    # PGRST_APP_SETTINGS_ and prepends "app.settings.", with no case folding
+    # (Config.hs#L348). So a file key must be spelled the same way as the env
+    # var for the two to collide at all.
+    path = write_tmp_config(~s(app.settings.from_file = "file"\napp.settings.BOTH = "file"\n))
 
     env =
       Map.merge(@no_db, %{"PGRST_APP_SETTINGS_FOO" => "bar", "PGRST_APP_SETTINGS_BOTH" => "env"})
@@ -218,9 +224,13 @@ defmodule Bier.CLITest do
     result = CLI.run([path, "--dump-config"], env: env)
     assert result.exit == 0
     stdout = IO.iodata_to_binary(result.stdout)
-    assert stdout =~ ~s(app.settings.foo = "bar")
+    assert stdout =~ ~s(app.settings.FOO = "bar")
     assert stdout =~ ~s(app.settings.from_file = "file")
-    assert stdout =~ ~s(app.settings.both = "env")
+    assert stdout =~ ~s(app.settings.BOTH = "env")
+
+    # ...and a name differing only in case is a DIFFERENT setting, not an
+    # override of one. This is the v14.12 behavior that v16.0 dropped.
+    refute stdout =~ ~s(app.settings.foo = "bar")
   end
 
   test "db-pool-timeout aliases db-pool-max-idletime (case 1707 shape)" do

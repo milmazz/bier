@@ -100,18 +100,31 @@ defmodule Bier.ConfigTest do
   end
 
   describe "jwt_role_claim_key" do
-    test "parses into jwt_role_claim_path at boot (default .role)" do
+    test "parses into jwt_role_claim_path at boot (default $.role)" do
       config = Bier.Config.new!([], Bier.schema())
-      assert config.jwt_role_claim_path == [{:key, "role"}]
+      assert config.jwt_role_claim_path == [{:name, :dot, "role"}]
 
-      config = Bier.Config.new!([jwt_role_claim_key: ".realm.roles[0]"], Bier.schema())
-      assert config.jwt_role_claim_path == [{:key, "realm"}, {:key, "roles"}, {:idx, 0}]
+      config = Bier.Config.new!([jwt_role_claim_key: "$.realm.roles[0]"], Bier.schema())
+
+      assert config.jwt_role_claim_path == [
+               {:name, :dot, "realm"},
+               {:name, :dot, "roles"},
+               {:index, 0}
+             ]
     end
 
-    test "an invalid JSPath raises with PostgREST's message (case 1711)" do
+    test "an invalid JSON Path raises with PostgREST's message (case 1711)" do
       assert_raise ArgumentError, ~r/failed to parse role-claim-key value \(role\.other\)/, fn ->
         Bier.Config.new!([jwt_role_claim_key: "role.other"], Bier.schema())
       end
+
+      # v16.0 retired the leading-dot spelling, so v14.12's default is now
+      # itself a fatal value (case 1711 pins exactly this).
+      assert_raise ArgumentError,
+                   ~r/failed to parse role-claim-key value \(\.role\.other\)/,
+                   fn ->
+                     Bier.Config.new!([jwt_role_claim_key: ".role.other"], Bier.schema())
+                   end
     end
   end
 

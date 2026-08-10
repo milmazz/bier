@@ -11,6 +11,10 @@ defmodule Bier.Config do
 
   alias Bier.JWT.RoleClaim
 
+  # Schemas PostgREST v16.0 refuses to expose through `db-schemas`
+  # (Config.hs parseDbSchemas).
+  @restricted_db_schemas ~w(pg_catalog information_schema)
+
   @typedoc """
   Options given to `Bandit`
   """
@@ -116,7 +120,7 @@ defmodule Bier.Config do
     log_level: :error,
     log_query: false,
     jwt_secret_is_base64: false,
-    jwt_role_claim_path: [{:key, "role"}],
+    jwt_role_claim_path: [{:name, :dot, "role"}],
     jwt_cache_max_entries: 1000,
     events_channels: [],
     events_path: "events",
@@ -148,6 +152,7 @@ defmodule Bier.Config do
     with {:ok, conf} <- validate_schema(opts, schema),
          :ok <-
            validate_admin_server_port(conf[:admin_server_port], get_in(conf, [:router, :port])),
+         :ok <- validate_db_schemas(Keyword.get(conf, :db_schemas, [])),
          :ok <- validate_jwt_secret(conf[:jwt_secret]),
          :ok <- validate_jwt_aud(conf[:jwt_aud]),
          :ok <- validate_db_channel(conf[:db_channel]),
@@ -200,12 +205,12 @@ defmodule Bier.Config do
     end
   end
 
-  # jwt-role-claim-key: parse the JSPath once at boot and carry only the parsed
-  # path in the struct (per-request role extraction never re-parses; the raw
-  # text can be reconstructed with RoleClaim.dump/1). An invalid expression is
-  # fatal with PostgREST's message (conformance case 1711).
+  # jwt-role-claim-key: parse the JSON Path once at boot and carry only the
+  # parsed path in the struct (per-request role extraction never re-parses; the
+  # raw text can be reconstructed with RoleClaim.dump/1). An invalid expression
+  # is fatal with PostgREST's message (conformance case 1711).
   defp parse_jwt_role_claim_key(conf) do
-    case RoleClaim.parse(Keyword.get(conf, :jwt_role_claim_key, ".role")) do
+    case RoleClaim.parse(Keyword.get(conf, :jwt_role_claim_key, "$.role")) do
       {:ok, path} ->
         {:ok,
          conf |> Keyword.delete(:jwt_role_claim_key) |> Keyword.put(:jwt_role_claim_path, path)}
@@ -285,30 +290,52 @@ defmodule Bier.Config do
   end
 
   @doc """
-  Parse a `server-unix-socket-mode` value the way PostgREST does (Haskell's
-  `readOct`): the longest leading run of octal digits is the value — so `"599"`
-  reads as `5` (range error) while `"800"` has no octal prefix at all — and the
-  result must lie between `0o600` and `0o777`. Returns the integer file mode
-  for `File.chmod/2`. Mirrors conformance cases 1714/1715.
+  Parse a socket-mode value the way PostgREST does (Haskell's `readOct`): the
+  longest leading run of octal digits is the value — so `"599"` reads as `5`
+  (range error) while `"800"` has no octal prefix at all — and the result must
+  lie between `0o600` and `0o777`. Returns the integer file mode for
+  `File.chmod/2`.
+
+  `key` names the config key the value came from. PostgREST v16.0 applies the
+  same `parseSocketFileMode` to `server-unix-socket-mode` and the new
+  `admin-server-unix-socket-mode`, building both failure messages from the key
+  (Config.hs `parseSocketFileMode`), so the caller decides which key is
+  reported. Mirrors conformance cases 1714/1715 (server) and 1738 (admin).
   """
-  @spec parse_socket_mode(String.t()) :: {:ok, non_neg_integer()} | {:error, String.t()}
-  def parse_socket_mode(mode) when is_binary(mode) do
+  @spec parse_socket_mode(String.t(), String.t()) ::
+          {:ok, non_neg_integer()} | {:error, String.t()}
+  def parse_socket_mode(mode, key \\ "server-unix-socket-mode") when is_binary(mode) do
     case Integer.parse(mode, 8) do
       {value, _rest} when value >= 0o600 and value <= 0o777 ->
         {:ok, value}
 
       {_value, _rest} ->
-        {:error, "Invalid server-unix-socket-mode: needs to be between 600 and 777"}
+        {:error, "Invalid #{key}: needs to be between 600 and 777"}
 
       :error ->
-        {:error, "Invalid server-unix-socket-mode: not an octal"}
+        {:error, "Invalid #{key}: not an octal"}
     end
   end
 
-  @doc "Boolean-style wrapper over `parse_socket_mode/1` for the validation chain."
-  @spec validate_socket_mode(String.t()) :: :ok | {:error, String.t()}
-  def validate_socket_mode(mode) do
-    with {:ok, _value} <- parse_socket_mode(mode), do: :ok
+  @doc "Boolean-style wrapper over `parse_socket_mode/2` for the validation chain."
+  @spec validate_socket_mode(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def validate_socket_mode(mode, key \\ "server-unix-socket-mode") do
+    with {:ok, _value} <- parse_socket_mode(mode, key), do: :ok
+  end
+
+  @doc """
+  `db-schemas` may not expose Postgres' own catalog schemas. PostgREST v16.0
+  rejects `pg_catalog` and `information_schema` while parsing the key — after
+  the comma split, so a restricted name anywhere in the list aborts startup
+  (Config.hs `parseDbSchemas`). v14.12 accepted them and failed per request
+  instead. Mirrors conformance cases 1733/1734.
+  """
+  @spec validate_db_schemas([String.t()]) :: :ok | {:error, String.t()}
+  def validate_db_schemas(schemas) when is_list(schemas) do
+    case Enum.find(schemas, &(&1 in @restricted_db_schemas)) do
+      nil -> :ok
+      schema -> {:error, "db-schemas does not allow schema: '#{schema}'"}
+    end
   end
 
   @doc """

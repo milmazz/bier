@@ -3,9 +3,16 @@ defmodule Bier.CLI.ConfigFile do
   Parses the PostgREST-compatible config-file subset into a
   `%{kebab_key => raw_value}` map: `key = value` lines, `#` comments (whole
   lines or trailing a value, as configurator-pg allows), blank lines,
-  double-quoted strings (with `\\"` escapes), bare integers, and bare
-  `true`/`false`. A `#` inside a quoted string is literal. Raw values are
-  returned untyped; `Bier.CLI.Config` coerces them per the target key.
+  double-quoted strings (with `\\"` escapes and configurator's `$$` escape for
+  a literal `$`), bare integers, and bare `true`/`false`. A `#` inside a quoted
+  string is literal. Raw values are returned untyped; `Bier.CLI.Config` coerces
+  them per the target key.
+
+  The `$$` escape matters for `jwt-role-claim-key`: configurator treats `$` in
+  a quoted string as the start of an interpolation, so an RFC 9535 JSON Path
+  is written `"$$.role"` in a config file and read back as `$.role`
+  (conformance cases 1707/1726). Interpolation itself (`$(key)`) is not
+  modelled — PostgREST's own dumps never emit it.
   """
 
   @doc "Read and parse a config file. A missing file is a fatal error."
@@ -79,6 +86,8 @@ defmodule Bier.CLI.ConfigFile do
   end
 
   defp take_quoted(<<?\\, ?", rest::binary>>, acc), do: take_quoted(rest, [?" | acc])
+
+  defp take_quoted(<<?$, ?$, rest::binary>>, acc), do: take_quoted(rest, [?$ | acc])
 
   defp take_quoted(<<?", rest::binary>>, acc),
     do: {:ok, acc |> Enum.reverse() |> List.to_string(), rest}
