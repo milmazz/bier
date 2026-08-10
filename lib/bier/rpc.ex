@@ -484,25 +484,34 @@ defmodule Bier.Rpc do
       "coalesce(json_agg(ST_AsGeoJSON(t)::json), '[]'))::text FROM (#{inner}) t"
   end
 
-  defp result_sql(fn_def, from, _media), do: result_sql(fn_def, from)
-
   # Array-of-objects for setof-record / multi-OUT setof. Wrapping the call in a
   # `(SELECT * FROM fn())` subquery keeps `t` a proper composite row even for a
   # single OUT/TABLE column (a bare `FROM fn() t` collapses to the scalar).
-  defp result_sql(%{ret_kind: :setof_record}, from),
-    do: "SELECT coalesce(json_agg(t), '[]')::text FROM (SELECT * FROM #{from}) t"
+  defp result_sql(%{ret_kind: :setof_record}, from, media),
+    do: "SELECT #{agg_body("t", media)} FROM (SELECT * FROM #{from}) t"
 
   # Array-of-scalars for setof-scalar.
-  defp result_sql(%{ret_kind: :setof_scalar}, from),
-    do: "SELECT coalesce(json_agg(t._v), '[]')::text FROM (SELECT #{from} AS _v) t"
+  defp result_sql(%{ret_kind: :setof_scalar}, from, media),
+    do: "SELECT #{agg_body("t._v", media)} FROM (SELECT #{from} AS _v) t"
 
   # Single object for a composite / OUT-params single-row return.
-  defp result_sql(%{ret_kind: :composite}, from),
+  defp result_sql(%{ret_kind: :composite}, from, _media),
     do: "SELECT to_jsonb(t)::text FROM (SELECT * FROM #{from}) t"
 
   # Bare scalar (incl. scalar arrays) -> JSON value of the single returned value.
-  defp result_sql(_fn_def, from),
+  defp result_sql(_fn_def, from, _media),
     do: "SELECT to_jsonb(_v)::text FROM (SELECT #{from} AS _v) t"
+
+  # The array aggregate for the two set-returning shapes, with `nulls=stripped`
+  # applied in SQL (`json_strip_nulls`, upstream's `addNullsToSnip`) rather than
+  # by re-encoding in `Bier.Render` — a decode/encode round trip loses JSON key
+  # order and the exact numeric text PostgreSQL emitted (#109). Only these two
+  # shapes reach `Bier.Render`; the scalar/composite bodies are sent verbatim
+  # and never carried the strip.
+  defp agg_body(row, %MediaType{params: %{strip: true}}),
+    do: "coalesce(json_strip_nulls(json_agg(#{row})), '[]')::text"
+
+  defp agg_body(row, _media), do: "coalesce(json_agg(#{row}), '[]')::text"
 
   defp empty_body(%{ret_kind: kind}) when kind in [:setof_record, :setof_scalar], do: "[]"
   defp empty_body(_), do: "null"
