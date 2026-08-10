@@ -48,8 +48,11 @@ defmodule Bier.Render do
   # `nulls=stripped` array: `json_strip_nulls` already ran in the aggregate.
   defp do_render(%MediaType{symbol: :array_strip}, body, _opts), do: {:ok, body}
 
+  # CSV rows arrive as ordered `[key, value]` pair lists built by PostgreSQL
+  # (`QueryExecutor.csv_row_pairs/1`), so both the column order and the exact
+  # cell text are already decided by the time they get here.
   defp do_render(%MediaType{symbol: :csv}, body, opts) do
-    rows = decode(body)
+    rows = body |> decode() |> Enum.map(&row_pairs/1)
     columns = csv_columns(rows, Keyword.get(opts, :columns))
     {:ok, to_csv(rows, columns)}
   end
@@ -82,14 +85,27 @@ defmodule Bier.Render do
 
   defp encode(term), do: Bier.json_library().encode!(term)
 
-  # Determine CSV column order: use the explicit list when given, otherwise the
-  # union of keys across rows in first-seen order.
+  # One decoded row as its ordered `{key, value}` pairs. A set-returning scalar
+  # routine yields bare values with no columns at all, which stays an empty row
+  # (and therefore an empty CSV body), as before.
+  defp row_pairs(pairs) when is_list(pairs) do
+    Enum.flat_map(pairs, fn
+      [key, value] -> [{key, value}]
+      _ -> []
+    end)
+  end
+
+  defp row_pairs(_other), do: []
+
+  # Determine CSV column order: use the explicit list when given (relation
+  # reads, mutation representations and SETOF-relation RPC all supply one, and
+  # it is also what keeps the header present for an empty result), otherwise the
+  # union of the rows' own keys in their PostgreSQL-given order.
   defp csv_columns(_rows, columns) when is_list(columns) and columns != [], do: columns
 
   defp csv_columns(rows, _) do
     Enum.reduce(rows, [], fn row, acc ->
-      keys = if is_map(row), do: Map.keys(row), else: []
-      acc ++ Enum.reject(keys, &(&1 in acc))
+      acc ++ Enum.reject(Enum.map(row, &elem(&1, 0)), &(&1 in acc))
     end)
   end
 
@@ -100,7 +116,8 @@ defmodule Bier.Render do
 
     data =
       Enum.map_join(rows, "\n", fn row ->
-        Enum.map_join(columns, ",", fn col -> csv_cell(Map.get(row, col)) end)
+        cells = Map.new(row)
+        Enum.map_join(columns, ",", fn col -> csv_cell(Map.get(cells, col)) end)
       end)
 
     case data do
