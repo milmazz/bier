@@ -13,6 +13,9 @@ defmodule Bier.Auth do
     * `set_config('request.path', <path>, true)`;
     * `set_config('request.headers', <json of lowercased headers>, true)`;
     * `set_config('request.cookies', <json of cookie pairs>, true)`;
+    * `set_config('search_path', <request schema> : <db-extra-search-path>, true)`
+      — upstream's `searchPathSql` (`Query/PreQuery.hs`), the request's own
+      schema first;
     * one `set_config('app.settings.<name>', <value>, true)` per configured
       `app_settings` entry (PostgREST app.settings.*);
     * the `db-pre-request` proc (if configured), which may itself `SET ROLE` or
@@ -35,7 +38,11 @@ defmodule Bier.Auth do
           method: String.t(),
           path: String.t(),
           headers_json: String.t(),
-          cookies_json: String.t()
+          cookies_json: String.t(),
+          # The request's resolved schema, stamped by
+          # `Bier.Plugs.ActionController.maybe_auth/3` once the profile is known.
+          # nil for the endpoints that have no relation target (SSE events).
+          schema: String.t() | nil
         }
 
   @doc """
@@ -158,9 +165,28 @@ defmodule Bier.Auth do
           {:ok, any()} | {:error, term()}
   def with_context(tx, context, config, fun) do
     apply_context(tx, context)
+    apply_search_path(tx, context, config)
     apply_app_settings(tx, config)
     run_pre_request(tx, config)
     fun.(tx)
+  end
+
+  # db-extra-search-path, applied transaction-locally with the *request's*
+  # schema in front — upstream's `searchPathSql` composes
+  # `iSchema : configDbExtraSearchPath` (`Query/PreQuery.hs`), and
+  # `references/transactions.rst` documents it as "sets the search_path based on
+  # db-schemas and db-extra-search-path". The list is pre-quoted by
+  # `Bier.Config.search_path/1` (search_path takes an identifier list, so the
+  # names cannot be bound one by one) and then bound as a single parameter.
+  # Endpoints with no relation target (SSE events) leave the connection-level
+  # default from `Bier.postgrex_opts/1` in place.
+  defp apply_search_path(tx, context, %{db_extra_search_path: extras}) do
+    schemas = if context[:schema], do: [context.schema | extras], else: extras
+
+    case Bier.Config.search_path(schemas) do
+      nil -> :ok
+      value -> set_guc(tx, "search_path", value)
+    end
   end
 
   # Configured app.settings.* values become transaction-local GUCs readable

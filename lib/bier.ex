@@ -664,12 +664,28 @@ defmodule Bier do
       # db-pool-max-idletime (seconds) -> DBConnection's idle-connection
       # interval (milliseconds); nil defers to the driver default.
       idle_interval: conf.db_pool_max_idletime && conf.db_pool_max_idletime * 1000,
-      # PostgREST renders timestamptz in UTC by default; pin the session timezone
-      # so timestamptz output (and DOMAIN representations built on it) is stable
-      # and matches the reference DB regardless of the server's local TZ. A
-      # per-request `Prefer: timezone=` still overrides this via SET LOCAL.
-      parameters: [timezone: "UTC"]
+      parameters: connection_parameters(conf)
     ]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+  end
+
+  # Session-level defaults sent in the startup packet, both of which a request
+  # may still narrow transaction-locally:
+  #
+  #   * timezone — PostgREST renders timestamptz in UTC by default; pinning the
+  #     session timezone keeps timestamptz output (and DOMAIN representations
+  #     built on it) stable regardless of the server's local TZ. A per-request
+  #     `Prefer: timezone=` overrides it via SET LOCAL.
+  #   * search_path — db-extra-search-path, so the setting has an effect even on
+  #     instances that never open an auth transaction (issue #105). Only the
+  #     *extras* go here: `Bier.Auth` prepends the request's own schema inside
+  #     the request transaction, which is upstream's
+  #     `iSchema : configDbExtraSearchPath` (`Query/PreQuery.hs`), and keeping
+  #     the connection default free of the exposed schemas leaves boot
+  #     introspection — whose `format_type` output is search_path-sensitive —
+  #     reading exactly as it did before.
+  defp connection_parameters(%Bier.Config{} = conf) do
+    [timezone: "UTC", search_path: Bier.Config.search_path(conf.db_extra_search_path)]
     |> Enum.reject(fn {_k, v} -> is_nil(v) end)
   end
 

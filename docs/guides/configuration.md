@@ -169,6 +169,16 @@ used by the conformance harness (multi-schema profile routing, per-area row
 caps, safe-update emulation) — they have no `PGRST_*` counterpart and cannot
 be set from the standalone binary.
 
+`db_extra_search_path` is applied in two places. Every pooled connection
+starts with `search_path` set to the configured extras, so schemas listed here
+resolve unqualified even on instances with no auth configured. When auth *is*
+configured, the request transaction replaces it with the request's own schema
+followed by the extras — PostgREST's `iSchema : db-extra-search-path`. An
+instance with no auth serving a non-default `Accept-Profile` therefore keeps
+just the extras on the path; Bier fully qualifies every identifier it
+generates, so this only affects unqualified references inside your own function
+and view bodies.
+
 > Note: there is no `db_auth_schemas` option. Authentication (JWT
 > verification / role resolution) applies uniformly to every schema listed in
 > `db_schemas` when `jwt_secret` is configured — schemas are not individually
