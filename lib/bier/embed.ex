@@ -26,6 +26,105 @@ defmodule Bier.Embed do
   alias Bier.Introspection.Relation
   alias Bier.QueryExecutor, as: QE
 
+  # The plan keys whose map is keyed by an embed path.
+  @embed_path_keys [:embed_filters, :embed_orders, :embed_limits, :embed_offsets]
+
+  @doc """
+  Resolve the embed *target names* a request's filters, orders, limits and
+  offsets used, rewriting each path to the embed's canonical name.
+
+  PostgREST resolves `<target>.<...>` query params against the select tree with
+  `matchTarget`, which under `url-use-legacy-target-names = true` accepts either
+  the embed's alias or its relation name, and binds the param to the **first**
+  matching node (`Plan.hs` `updateNode … find`). Both spellings are normalised
+  here to `alias || relation`, the key the SQL builder routes on, so that:
+
+    * an aliased embed still answers to its relation name (`tasks.name` for
+      `the_tasks:tasks(...)`), and
+    * embedding the same relation twice keeps the two filters apart — the plain
+      node claims `tasks.` before the aliased node can (v16.0's "unexpected
+      results when embedding and filtering the same table more than once" fix).
+
+  Every legacy match is recorded in the plan's `:legacy_target_names` as a
+  `{relation_name, alias}` pair (`relIsLegacyTargetNameMatch`), which
+  `Bier.Plugs.Warning` turns into the deprecation `Warning` header. With
+  `legacy?` false the relation-name spelling resolves to nothing, so it is
+  rejected as a filter on a resource that is not embedded.
+  """
+  @spec resolve_target_names(map(), boolean()) :: map()
+  def resolve_target_names(plan, legacy? \\ true) when is_map(plan) do
+    paths =
+      @embed_path_keys
+      |> Enum.flat_map(&Map.keys(Map.get(plan, &1) || %{}))
+      |> Enum.uniq()
+
+    {rewrites, legacy} = resolve_level(Map.get(plan, :select), paths, legacy?)
+
+    @embed_path_keys
+    |> Enum.reduce(plan, fn key, acc ->
+      case Map.get(acc, key) do
+        nil -> acc
+        map -> Map.put(acc, key, rekey(map, rewrites))
+      end
+    end)
+    |> Map.put(:legacy_target_names, Enum.uniq(legacy))
+  end
+
+  defp rekey(map, rewrites) do
+    Map.new(map, fn {path, value} -> {Map.get(rewrites, path, path), value} end)
+  end
+
+  # Resolve one level of the select tree: group the paths by their head, hand
+  # each group to the node that owns it, then recurse with the tails.
+  defp resolve_level(nodes, paths, legacy?) when is_list(nodes) and paths != [] do
+    paths
+    |> Enum.group_by(&hd/1)
+    |> Enum.reduce({%{}, []}, fn {head, group}, {rewrites, legacy} ->
+      case owner(nodes, head, legacy?) do
+        :none ->
+          {rewrites, legacy}
+
+        {node, canonical, legacy_match?} ->
+          tails = for [_ | rest] <- group, rest != [], do: rest
+          {child_rewrites, child_legacy} = resolve_level(child_nodes(node), tails, legacy?)
+
+          rewrites =
+            Enum.reduce(group, rewrites, fn [_ | rest] = path, acc ->
+              Map.put(acc, path, [canonical | Map.get(child_rewrites, rest, rest)])
+            end)
+
+          {rewrites, legacy ++ legacy_pair(node, legacy_match?) ++ child_legacy}
+      end
+    end)
+  end
+
+  defp resolve_level(_nodes, _paths, _legacy?), do: {%{}, []}
+
+  # The first node the target name resolves to, mirroring `find` over the
+  # forest: a canonical (alias, else relation) match, or — only under the legacy
+  # rule — an aliased node addressed by its relation name.
+  defp owner(nodes, head, legacy?) do
+    Enum.find_value(nodes, :none, fn
+      %{kind: :embed} = e ->
+        cond do
+          canonical_name(e) == head -> {e, head, false}
+          legacy? and e.target == head -> {e, canonical_name(e), true}
+          true -> nil
+        end
+
+      _node ->
+        nil
+    end)
+  end
+
+  defp canonical_name(e), do: e.alias || e.target
+
+  defp child_nodes(%{select: select}) when is_list(select), do: select
+  defp child_nodes(_node), do: []
+
+  defp legacy_pair(%{alias: al, target: target}, true) when is_binary(al), do: [{target, al}]
+  defp legacy_pair(_node, _legacy_match?), do: []
+
   @doc """
   Build the named select list for a single row of `relation` (aliased as `al`),
   given the select `nodes`. Returns `{cols, laterals, state}`: `cols` is a list
@@ -133,17 +232,15 @@ defmodule Bier.Embed do
     child_alias = "#{target.name}_e#{seq}"
     out_name = e.alias || rel.embed_key
 
-    segment = embed_segment(e, rel)
-    {own_filters, deeper_filters} = pop_embed_filters(ef, segment)
+    # Filter/order/limit/offset keys have already been resolved to this embed's
+    # canonical name by `resolve_target_names/2` (which is where the alias vs
+    # relation-name spellings are reconciled), so routing is an exact match.
+    segments = [embed_segment(e, rel)]
 
-    # Embed order keys may reference the embed by its alias OR its real relation
-    # name / embed key (case 1212: `the_tasks:tasks(...)` ordered via `tasks.order`).
-    order_segments =
-      Enum.uniq([segment, e.target, rel.embed_key, e.alias]) |> Enum.reject(&is_nil/1)
-
-    {own_order, deeper_orders} = pop_embed_orders(state.embed_orders, order_segments)
-    {own_limit, deeper_limits} = pop_embed_paged(state.embed_limits, order_segments)
-    {own_offset, deeper_offsets} = pop_embed_paged(state.embed_offsets, order_segments)
+    {own_filters, deeper_filters} = pop_embed_filters(ef, segments)
+    {own_order, deeper_orders} = pop_embed_orders(state.embed_orders, segments)
+    {own_limit, deeper_limits} = pop_embed_paged(state.embed_limits, segments)
+    {own_offset, deeper_offsets} = pop_embed_paged(state.embed_offsets, segments)
 
     # Descend into the child scope (the embed's own relation + the embed-keyed
     # orders/limits/offsets routed deeper), then restore the parent scope —
@@ -329,7 +426,7 @@ defmodule Bier.Embed do
       Enum.flat_map_reduce(nodes, state, fn
         %{kind: :embed} = e, st ->
           rel = resolve_relationship(e, relation, st.relations)
-          {own_filters, _deeper} = pop_embed_filters(embed_filters, embed_segment(e, rel))
+          {own_filters, _deeper} = pop_embed_filters(embed_filters, [embed_segment(e, rel)])
           # Only an explicit `!inner` propagates an embedded filter to the parent
           # (dropping parents with no matching child). The default (left) join
           # applies the filter to the embedded rows only and keeps every parent
@@ -749,19 +846,8 @@ defmodule Bier.Embed do
     limit_sql <> offset_sql
   end
 
-  defp pop_embed_filters(embed_filters, segment) do
-    Enum.reduce(embed_filters, {[], %{}}, fn {path, nodes}, {own, deeper} ->
-      case path do
-        [^segment] ->
-          {own ++ nodes, deeper}
-
-        [^segment | rest] when rest != [] ->
-          {own, Map.put(deeper, rest, nodes)}
-
-        _ ->
-          {own, deeper}
-      end
-    end)
+  defp pop_embed_filters(embed_filters, segments) do
+    pop_embed_routed(embed_filters, segments, [], fn own, nodes -> own ++ nodes end)
   end
 
   # ---- error envelopes -----------------------------------------------------

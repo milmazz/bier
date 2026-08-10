@@ -28,6 +28,7 @@ defmodule Bier.Mutation do
 
   alias Bier.MediaType
   alias Bier.Plugs.ActionController
+  alias Bier.Plugs.Warning
   alias Bier.QueryExecutor
   alias Bier.Render
 
@@ -197,6 +198,7 @@ defmodule Bier.Mutation do
   # and RPC (`Bier.Rpc.exec/4`) — otherwise a write runs as the connecting role
   # with no `request.*` GUCs and no privilege check, a security gap (#73).
   defp run(conn, %Write{} = write, sql, params) do
+    conn = Warning.record(conn, write.config, write.plan)
     pool = Bier.Registry.via(write.config.name, Postgrex)
     relations = Bier.SchemaCache.relations(write.config.name)
     context = conn.assigns[:bier_auth]

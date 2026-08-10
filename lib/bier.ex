@@ -324,6 +324,17 @@ defmodule Bier do
         default: env(:server_cors_allowed_origins, nil),
         doc: "Comma-separated list of CORS allowed origins."
       ],
+      url_use_legacy_target_names: [
+        type: :boolean,
+        default: env(:url_use_legacy_target_names, true),
+        doc: """
+        When true (the PostgREST v16 default for url-use-legacy-target-names),
+        a filter/order/limit may still address an embedded resource by its
+        relation name even though the embed carries an alias; the response then
+        carries a deprecation `Warning` header naming the replacement. Set to
+        false to make the alias the only accepted spelling.
+        """
+      ],
       cancel_on_disconnect: [
         type: :boolean,
         default: env(:cancel_on_disconnect, true),

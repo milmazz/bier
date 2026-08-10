@@ -59,6 +59,15 @@ defmodule Bier.Plugs.Vary do
   @spec mark_error(Plug.Conn.t()) :: Plug.Conn.t()
   def mark_error(conn), do: assign(conn, @error_assign, true)
 
+  @doc """
+  True when `conn` was built by the error funnel (see `mark_error/1`).
+
+  Shared with the other headers `App.hs` appends in `toWaiResponse` — an error
+  response bypasses that funnel, so it carries none of them.
+  """
+  @spec error_response?(Plug.Conn.t()) :: boolean()
+  def error_response?(conn), do: conn.assigns[@error_assign] == true
+
   defp put_default_vary(conn) do
     if conn.assigns[@error_assign] || get_resp_header(conn, "vary") != [] do
       conn

@@ -37,6 +37,8 @@ defmodule Bier.RouterBuilder do
 
         plug(Bier.Plugs.Vary)
 
+        plug(Bier.Plugs.Warning)
+
         plug(Bier.Plugs.Observability)
 
         plug(Bier.Plugs.ReadBody)
