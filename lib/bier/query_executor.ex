@@ -155,18 +155,19 @@ defmodule Bier.QueryExecutor do
   # `Prefer: timezone=<value>` shifts timestamptz rendering. PostgREST v16.0 no
   # longer screens the value against pg_timezone_names — PostgreSQL is the judge,
   # so a value it rejects (an unknown zone, a leap-seconds offset) must surface
-  # as its own SQLSTATE 22023 error rather than raising. The literal is
-  # single-quote escaped.
+  # as its own SQLSTATE 22023 error rather than raising. `set_config/3` with
+  # is_local = true is transaction-scoped like SET LOCAL, but takes the value as
+  # a bind parameter — the header value never enters SQL text.
   @doc """
   Apply `Prefer: timezone` to an open transaction. Public so the RPC path
-  (`Bier.Rpc`) applies it through the same escaping and the same error shape
-  rather than duplicating the statement.
+  (`Bier.Rpc`) applies it through the same statement and the same error shape
+  rather than duplicating it.
   """
   @spec set_local_timezone(term(), String.t() | nil) :: :ok | {:error, term()}
   def set_local_timezone(_tx, nil), do: :ok
 
   def set_local_timezone(tx, timezone) do
-    case Postgrex.query(tx, "SET LOCAL TIME ZONE '#{String.replace(timezone, "'", "''")}'", []) do
+    case Postgrex.query(tx, "SELECT set_config('timezone', $1, true)", [timezone]) do
       {:ok, _result} -> :ok
       {:error, _err} = error -> error
     end
