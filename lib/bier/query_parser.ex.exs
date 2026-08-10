@@ -838,7 +838,7 @@ defmodule Bier.QueryParser do
   # Parse a single embed-targeted filter pair into `{:ok, embed_path, node}`.
   defp parse_embed_filter(key, val) do
     path = embed_path(key)
-    last = key |> String.split(".") |> List.last()
+    last = key |> split_key() |> List.last()
 
     cond do
       # `<embed>.or=(...)` / `<embed>.and=(...)`
@@ -870,7 +870,7 @@ defmodule Bier.QueryParser do
   # For `<embed>...not.and`/`<embed>...not.or`, returns `{embed_path, :and|:or}`
   # (the path with the trailing `not.<kw>` removed), else nil.
   defp embed_logic_negated(key) do
-    segments = String.split(key, ".")
+    segments = split_key(key)
 
     case Enum.split(segments, -2) do
       {head, ["not", kw]} when kw in ["and", "or"] and head != [] ->
@@ -884,7 +884,7 @@ defmodule Bier.QueryParser do
   # The embed path segments of a filter key, e.g. `clients.id` => ["clients"],
   # `a.b.col` => ["a", "b"]. A plain `col` (or json-path `col->x`) => [].
   defp embed_path(key) do
-    case String.split(key, ".") do
+    case split_key(key) do
       [_single] -> []
       segments -> Enum.drop(segments, -1)
     end
@@ -967,9 +967,10 @@ defmodule Bier.QueryParser do
         end
 
       true ->
-        # member is `col.op.value` possibly `col.not.op.value`
-        case String.split(member, ".", parts: 2) do
-          [col, opval] -> parse_filter_expr(String.trim(col), opval)
+        # member is `col.op.value` possibly `col.not.op.value`. The column may be
+        # a quoted field name, so the split is on the first *unquoted* dot.
+        case split_key(member) do
+          [col | [_ | _] = opval] -> parse_filter_expr(String.trim(col), Enum.join(opval, "."))
           _ -> :error
         end
     end
@@ -1298,20 +1299,110 @@ defmodule Bier.QueryParser do
   @spec parse_scalar_select(String.t()) :: {:ok, map()} | {:error, {:select_parse, String.t()}}
   def parse_scalar_select(field) when is_binary(field) do
     {col_alias, rest} = split_alias(field)
+    {cast, rest} = peel_cast(rest)
 
-    {cast, rest} =
-      case String.split(rest, "::", parts: 2) do
-        [r, c] -> {String.trim(c), String.trim(r)}
-        [r] -> {nil, String.trim(r)}
-      end
+    case parse_field_ref(rest) do
+      {:ok, {col, json_path}} ->
+        {:ok, %{kind: :field, column: col, alias: col_alias, cast: cast, json_path: json_path}}
 
-    with {:ok, {col, json_path}} <- parse_json_path(rest),
-         true <- valid_identifier?(col) do
-      {:ok, %{kind: :field, column: col, alias: col_alias, cast: cast, json_path: json_path}}
-    else
-      _ -> {:error, {:select_parse, field}}
+      :error ->
+        {:error, {:select_parse, field}}
     end
   end
+
+  # ---- field names (PostgREST `pFieldName`) ---------------------------------
+  #
+  # A field name is either a plain identifier or a **double-quoted value**
+  # (`pQuotedValue`): `"` … `"` with a backslash escaping the next character,
+  # taken verbatim. Quoting is how a column whose name carries a PostgREST
+  # reserved character (`. , : ( ) *`) or leading/inner/trailing spaces is
+  # addressed in `select`, in a filter key and in `order`.
+
+  # Parse a field reference — a field name plus an optional json path — as it
+  # appears in `select`, filters and `order`.
+  @spec parse_field_ref(String.t()) :: {:ok, {String.t(), list()}} | :error
+  defp parse_field_ref(raw) do
+    case peel_quoted(raw) do
+      {:ok, col, tail} ->
+        with {:ok, steps} <- parse_json_steps(tail), do: {:ok, {col, steps}}
+
+      :nomatch ->
+        with {:ok, {col, json_path}} <- parse_json_path(raw),
+             true <- valid_identifier?(col) do
+          {:ok, {col, json_path}}
+        else
+          _ -> :error
+        end
+    end
+  end
+
+  # Peel a leading quoted value off `str`, returning the unquoted content and
+  # whatever follows the closing quote. `:nomatch` when `str` does not start
+  # with a quote or the quote is never closed.
+  @spec peel_quoted(String.t()) :: {:ok, String.t(), String.t()} | :nomatch
+  defp peel_quoted(<<?", rest::binary>>), do: peel_quoted(rest, [])
+  defp peel_quoted(_str), do: :nomatch
+
+  defp peel_quoted(<<?\\, c::utf8, rest::binary>>, acc),
+    do: peel_quoted(rest, [<<c::utf8>> | acc])
+
+  defp peel_quoted(<<?", rest::binary>>, acc),
+    do: {:ok, acc |> Enum.reverse() |> IO.iodata_to_binary(), rest}
+
+  defp peel_quoted(<<c::utf8, rest::binary>>, acc),
+    do: peel_quoted(rest, [<<c::utf8>> | acc])
+
+  defp peel_quoted(<<>>, _acc), do: :nomatch
+
+  # The json-path tail of a field reference (`""` or `->a->>b`), validated by the
+  # same grammar `parse_json_path/1` applies to an unquoted column.
+  defp parse_json_steps(""), do: {:ok, []}
+
+  defp parse_json_steps("->" <> _ = path) do
+    case parse_json_path("_" <> path) do
+      {:ok, {"_", steps}} -> {:ok, steps}
+      _ -> :error
+    end
+  end
+
+  defp parse_json_steps(_tail), do: :error
+
+  # Split a select field's trailing `::cast` off. The `::` separator is only
+  # recognised *outside* a quoted field name, so `":arr->ow::cast"` stays one
+  # field rather than a field plus a cast.
+  defp peel_cast(rest) do
+    {quoted, tail} =
+      case peel_quoted(rest) do
+        {:ok, _name, tail} -> {binary_part(rest, 0, byte_size(rest) - byte_size(tail)), tail}
+        :nomatch -> {"", rest}
+      end
+
+    case String.split(tail, "::", parts: 2) do
+      [r, c] -> {String.trim(c), quoted <> String.trim(r)}
+      [r] -> {nil, quoted <> String.trim(r)}
+    end
+  end
+
+  @doc """
+  Split a `.`-delimited query-string key into its segments, treating a quoted
+  field name as atomic (`"a.dotted.column"` is one segment, `tasks.name` is two).
+  """
+  @spec split_key(String.t()) :: [String.t()]
+  def split_key(key) when is_binary(key), do: do_split_key(key, "", [], false)
+
+  defp do_split_key(<<>>, cur, acc, _quoted?), do: Enum.reverse([cur | acc])
+
+  defp do_split_key(<<?\\, c::utf8, rest::binary>>, cur, acc, true),
+    do: do_split_key(rest, cur <> <<?\\, c::utf8>>, acc, true)
+
+  defp do_split_key(<<?", rest::binary>>, cur, acc, quoted?),
+    do: do_split_key(rest, cur <> "\"", acc, not quoted?)
+
+  defp do_split_key(<<?., rest::binary>>, cur, acc, false),
+    do: do_split_key(rest, "", [cur | acc], false)
+
+  defp do_split_key(<<c::utf8, rest::binary>>, cur, acc, quoted?),
+    do: do_split_key(rest, cur <> <<c::utf8>>, acc, quoted?)
 
   defp capture_alias_rest(rest, args, context, _line, _offset) do
     pt_capture(rest, args, context, :rest)
@@ -1320,6 +1411,21 @@ defmodule Bier.QueryParser do
   @doc false
   @spec split_alias(String.t()) :: {String.t() | nil, String.t()}
   def split_alias(field) when is_binary(field) do
+    case peel_quoted(field) do
+      {:ok, name, rest} -> quoted_alias(field, name, rest)
+      :nomatch -> unquoted_alias(field)
+    end
+  end
+
+  # `"quoted alias":col` — the separator is a `:` not followed by another `:`
+  # (PostgREST's `aliasSeparator`), and the aliased field must be non-empty.
+  defp quoted_alias(_field, name, <<?:, next::utf8, _::binary>> = rest) when next != ?: do
+    {name, binary_part(rest, 1, byte_size(rest) - 1)}
+  end
+
+  defp quoted_alias(field, _name, _rest), do: {nil, field}
+
+  defp unquoted_alias(field) do
     case p_alias(field) do
       {:ok, parsed, "", _, _, _} ->
         rest = Keyword.fetch!(parsed, :rest)
@@ -1352,8 +1458,7 @@ defmodule Bier.QueryParser do
         _ -> {false, opval}
       end
 
-    with {:ok, {col, json_path}} <- parse_json_path(String.trim(col_raw)),
-         true <- valid_identifier?(col),
+    with {:ok, {col, json_path}} <- parse_field_ref(String.trim(col_raw)),
          {:ok, op, modifier, value} <- split_op_value(opval) do
       {:ok,
        %{
@@ -1433,11 +1538,10 @@ defmodule Bier.QueryParser do
   end
 
   defp parse_column_order_term(term) do
-    parts = String.split(term, ".")
+    parts = split_key(term)
     {col_part, modifiers} = {hd(parts), tl(parts)}
 
-    with {:ok, {col, json_path}} <- parse_json_path(col_part),
-         true <- valid_identifier?(col),
+    with {:ok, {col, json_path}} <- parse_field_ref(col_part),
          {:ok, dir, nulls} <- parse_order_modifiers(modifiers) do
       {:ok, %{column: col, json_path: json_path, dir: dir, nulls: nulls}}
     else

@@ -27,6 +27,7 @@ defmodule Bier.Rpc do
   alias Bier.Negotiation
   alias Bier.Pagination
   alias Bier.Plugs.ActionController
+  alias Bier.Plugs.Warning
   alias Bier.QueryExecutor
   alias Bier.QueryParser
   alias Bier.Response
@@ -57,6 +58,28 @@ defmodule Bier.Rpc do
     end
   end
 
+  @doc """
+  Resolve the routine an `OPTIONS /rpc/<fn>` request targets.
+
+  PostgREST's `ActRoutineInfo` runs the same `callReadPlan` resolution a read
+  invocation does (`ApiRequest.getAction` hands OPTIONS an `InvRead` method), so
+  the overload is picked from the query-string argument names and an
+  unresolvable signature is the usual PGRST202. Only the resolved routine is
+  returned: the info response needs nothing but its volatility.
+  """
+  @spec resolve_routine(Plug.Conn.t(), map(), String.t(), String.t()) ::
+          {:ok, map()} | {:error, term()}
+  def resolve_routine(conn, config, schema, fn_name) do
+    overloads = Map.get(Bier.SchemaCache.functions(config.name), {schema, fn_name}, [])
+
+    with {:ok, supplied} <- supplied_args(conn) do
+      case resolve_overload(overloads, supplied) do
+        {:ok, fn_def, _args} -> {:ok, fn_def}
+        :error -> {:error, {:rpc_not_found, not_found(schema, fn_name, supplied, overloads)}}
+      end
+    end
+  end
+
   # ---- method validation ---------------------------------------------------
 
   defp check_method(%Plug.Conn{method: m}) when m in ["GET", "HEAD", "POST"], do: :ok
@@ -72,7 +95,10 @@ defmodule Bier.Rpc do
   # arrays). The special `:single_unnamed` value carries the raw POST body. The
   # second element of the {:ok, ...} tuple is the *reserved* query params (the
   # query string with arg params removed) for shaping setof results.
-  defp supplied_args(%Plug.Conn{method: m} = conn) when m in ["GET", "HEAD"] do
+  # OPTIONS resolves the routine through the same read-invocation path PostgREST
+  # uses for it (`ActRoutineInfo … (InvRead True)`), so its arguments come from
+  # the query string like a GET's.
+  defp supplied_args(%Plug.Conn{method: m} = conn) when m in ["GET", "HEAD", "OPTIONS"] do
     pairs =
       conn.query_string
       |> URI.query_decoder()
@@ -275,7 +301,9 @@ defmodule Bier.Rpc do
         with {:ok, media} <-
                Negotiation.resolve(conn, ActionController.read_producers(config)),
              {:ok, plan} <- parse_plan(conn, config, fn_def) do
-          run_setof_rel(conn, config, fn_def, ret_rel, args, plan, media, relations)
+          conn
+          |> Warning.record(config, plan)
+          |> run_setof_rel(config, fn_def, ret_rel, args, plan, media, relations)
         end
 
       :error ->
@@ -551,8 +579,9 @@ defmodule Bier.Rpc do
       |> URI.encode_query()
 
     Bier.ServerTiming.measure(:parse, fn ->
-      with {:ok, plan} <- QueryParser.parse_request(reserved_qs) do
-        Pagination.apply_window(plan, conn, config.db_max_rows)
+      with {:ok, plan} <- QueryParser.parse_request(reserved_qs),
+           {:ok, plan} <- Pagination.apply_window(plan, conn, config.db_max_rows) do
+        {:ok, Bier.Embed.resolve_target_names(plan, config.url_use_legacy_target_names)}
       end
     end)
   end

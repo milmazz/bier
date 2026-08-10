@@ -27,6 +27,7 @@ defmodule Bier.Plugs.ActionController do
   alias Bier.Pagination
   alias Bier.Plan
   alias Bier.Plugs.FallbackController
+  alias Bier.Plugs.Warning
   alias Bier.QueryExecutor
   alias Bier.QueryParser
   alias Bier.Registry
@@ -51,11 +52,17 @@ defmodule Bier.Plugs.ActionController do
 
   defp dispatch(conn, config, relations) do
     case conn.path_info do
+      [] when conn.method == "OPTIONS" ->
+        dispatch_schema_info(conn, config)
+
       [] ->
         dispatch_root(conn, config)
 
+      ["rpc", fn_name] when conn.method == "OPTIONS" ->
+        dispatch_routine_info(conn, config, fn_name)
+
       _ when conn.method == "OPTIONS" ->
-        dispatch_options(conn, config, relations)
+        dispatch_relation_info(conn, config, relations)
 
       ["rpc", fn_name] ->
         with {:ok, schema, content_profile} <- resolve_profile(conn, config),
@@ -290,27 +297,61 @@ defmodule Bier.Plugs.ActionController do
     end)
   end
 
-  # OPTIONS on a relation: PostgREST answers 200 with an empty body and an
-  # `Allow` header of the supported methods (OptionsSpec). A writeable
-  # table/auto-updatable view advertises the full mutating set; the response
-  # carries no Content-Type. A request to an unknown relation still answers 200
-  # (preflight/observability OPTIONS cases) without an Allow header.
+  # ---- OPTIONS (the three "info" plans) -------------------------------------
+
+  # PostgREST answers OPTIONS from a no-DB *info* plan whose only payload is the
+  # `Allow` header: 200, empty body, `Content-Length: 0`, no `Content-Type`
+  # (`Response.hs` `respondInfo`). Which plan runs is decided by the resource the
+  # path resolves to — relation, routine, or the root schema — exactly as
+  # `ApiRequest.getAction` does, so each shape gets its own `Allow` value and its
+  # own not-found behavior.
+
+  # A relation advertises the full mutating set (`ActRelationInfo`); an unknown
+  # relation is a schema-cache miss, i.e. a 404 — the grammar accepts any single
+  # segment, the lookup is what fails (`Response.hs` `RelInfoPlan`).
   @writeable_allow "OPTIONS,GET,HEAD,POST,PUT,PATCH,DELETE"
 
-  defp dispatch_options(conn, config, relations) do
-    conn
-    |> maybe_allow_header(config, relations)
-    |> put_resp_header("content-length", "0")
-    |> send_resp(200, "")
-  end
+  # The root serves metadata only, so no mutating method is advertised
+  # (`Response.hs` `SchemaInfoPlan`).
+  @schema_info_allow "OPTIONS,GET,HEAD"
 
-  defp maybe_allow_header(conn, config, relations) do
+  # A routine's `Allow` is chosen purely by its volatility: a VOLATILE function
+  # may only be invoked with POST, anything else is also reachable with GET/HEAD
+  # (`Response.hs` `RoutineInfoPlan`).
+  @volatile_routine_allow "OPTIONS,POST"
+  @stable_routine_allow "OPTIONS,GET,HEAD,POST"
+
+  defp dispatch_relation_info(conn, config, relations) do
     with {:ok, schema, _profile} <- resolve_profile(conn, config),
          {:ok, _relation} <- resolve_relation(conn, schema, relations) do
-      put_resp_header(conn, "allow", @writeable_allow)
-    else
-      _ -> conn
+      respond_info(conn, @writeable_allow)
     end
+  end
+
+  # `getResource` maps the empty path to the root routine when `db-root-spec`
+  # names one, and to the schema resource otherwise; OPTIONS follows that split.
+  defp dispatch_schema_info(conn, config) do
+    case config.db_root_spec do
+      nil -> respond_info(conn, @schema_info_allow)
+      fn_name -> dispatch_routine_info(conn, config, fn_name)
+    end
+  end
+
+  defp dispatch_routine_info(conn, config, fn_name) do
+    with {:ok, schema, _profile} <- resolve_profile(conn, config),
+         {:ok, routine} <- Bier.Rpc.resolve_routine(conn, config, schema, fn_name) do
+      respond_info(conn, routine_allow(routine))
+    end
+  end
+
+  defp routine_allow(%{volatility: :volatile}), do: @volatile_routine_allow
+  defp routine_allow(_routine), do: @stable_routine_allow
+
+  defp respond_info(conn, allow) do
+    conn
+    |> put_resp_header("allow", allow)
+    |> put_resp_header("content-length", "0")
+    |> send_resp(200, "")
   end
 
   defp dispatch_relation(conn, config, relations) do
@@ -425,7 +466,9 @@ defmodule Bier.Plugs.ActionController do
     pool = Bier.Registry.via(config.name, Postgrex)
 
     with {:ok, plan} <- parse(conn, config) do
-      Plan.explain(conn, pool, relation, plan, media)
+      conn
+      |> Warning.record(config, plan)
+      |> Plan.explain(pool, relation, plan, media)
     end
   end
 
@@ -437,6 +480,7 @@ defmodule Bier.Plugs.ActionController do
 
     with {:ok, prefs} <- Bier.Preferences.parse_read(conn),
          {:ok, plan} <- parse(conn, config),
+         conn = Warning.record(conn, config, plan),
          {:ok, %{body: body, count: count}} <-
            Bier.Cancellation.run(conn, config, fn ->
              QueryExecutor.run(pool, relation, plan, relations,
@@ -587,8 +631,9 @@ defmodule Bier.Plugs.ActionController do
   @doc false
   def parse(conn, config) do
     Bier.ServerTiming.measure(:parse, fn ->
-      with {:ok, plan} <- QueryParser.parse_request(conn.query_string) do
-        Pagination.apply_window(plan, conn, config.db_max_rows)
+      with {:ok, plan} <- QueryParser.parse_request(conn.query_string),
+           {:ok, plan} <- Pagination.apply_window(plan, conn, config.db_max_rows) do
+        {:ok, Bier.Embed.resolve_target_names(plan, config.url_use_legacy_target_names)}
       end
     end)
   end
