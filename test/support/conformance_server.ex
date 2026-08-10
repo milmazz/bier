@@ -55,8 +55,14 @@ defmodule Bier.ConformanceServer do
   (`schema in ["auth","openapi"]` or the root document), else the `bulk`
   instance.
   """
-  @variant_case_ids [1467, 1468, 1469, 1470, 1471, 1472, 1473] ++
-                      [1491, 1493, 1654, 1677, 1678, 1680, 1682, 1703, 1758, 1763, 1764]
+  # 1139 and 1742 were added for the v16.0 re-sync: both declare a `config:`
+  # block the shared instance cannot honor (1139 needs
+  # url-use-legacy-target-names=false, 1742 needs an EMPTY
+  # server-cors-allowed-origins where the shared instances populate it), so
+  # without a variant they assert against the wrong configuration. Both are
+  # served by the generic `translate/1` clause — no variant_extra_opts/1 needed.
+  @variant_case_ids [1139, 1467, 1468, 1469, 1470, 1471, 1472, 1473] ++
+                      [1491, 1493, 1654, 1677, 1678, 1680, 1682, 1703, 1742, 1758, 1763, 1764]
 
   def url_for(%Bier.ConformanceCase{id: id}) when id in @variant_case_ids,
     do: :persistent_term.get({__MODULE__, :variant, id})
