@@ -1,5 +1,5 @@
 # Generated from lib/bier/query_parser.ex.exs, do not edit.
-# Generated at 2026-08-10 00:42:45Z.
+# Generated at 2026-08-10 03:19:53Z.
 
 defmodule Bier.QueryParser do
   @moduledoc """
@@ -447,394 +447,6 @@ defmodule Bier.QueryParser do
     {:ok, acc, rest, context, line, offset}
   end
 
-  @spec p_aggregate(binary, keyword) ::
-          {:ok, [term], rest, context, line, byte_offset}
-          | {:error, reason, rest, context, line, byte_offset}
-        when line: {pos_integer, byte_offset},
-             byte_offset: non_neg_integer,
-             rest: binary,
-             reason: String.t(),
-             context: map
-  defp p_aggregate(binary, opts \\ []) when is_binary(binary) do
-    context = Map.new(Keyword.get(opts, :context, []))
-    byte_offset = Keyword.get(opts, :byte_offset, 0)
-
-    line =
-      case Keyword.get(opts, :line, 1) do
-        {_, _} = line -> line
-        line -> {line, byte_offset}
-      end
-
-    case p_aggregate__0(binary, [], [], context, line, byte_offset) do
-      {:ok, acc, rest, context, line, offset} ->
-        {:ok, :lists.reverse(acc), rest, context, line, offset}
-
-      {:error, _, _, _, _, _} = error ->
-        error
-    end
-  end
-
-  defp p_aggregate__0(rest, acc, stack, context, line, offset) do
-    p_aggregate__4(rest, [], [{rest, context, line, offset}, acc | stack], context, line, offset)
-  end
-
-  defp p_aggregate__2(rest, acc, [_, previous_acc | stack], context, line, offset) do
-    p_aggregate__1(rest, acc ++ previous_acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__3(_, _, [{rest, context, line, offset} | _] = stack, _, _, _) do
-    p_aggregate__2(rest, [], stack, context, line, offset)
-  end
-
-  defp p_aggregate__4(rest, acc, stack, context, line, offset) do
-    p_aggregate__5(rest, [], [acc | stack], context, line, offset)
-  end
-
-  defp p_aggregate__5(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when (x0 >= 65 and x0 <= 90) or (x0 >= 97 and x0 <= 122) or x0 === 95 do
-    p_aggregate__6(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_aggregate__5(rest, _acc, stack, context, line, offset) do
-    [acc | stack] = stack
-    p_aggregate__3(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__6(<<x0::utf8, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when (x0 >= 65 and x0 <= 90) or (x0 >= 97 and x0 <= 122) or (x0 >= 48 and x0 <= 57) or
-              x0 === 95 or
-              x0 === 32 or (x0 >= 128 and x0 <= 1_114_111) do
-    p_aggregate__8(
-      rest,
-      [x0] ++ acc,
-      stack,
-      context,
-      comb__line,
-      comb__offset + byte_size(<<x0::utf8>>)
-    )
-  end
-
-  defp p_aggregate__6(rest, acc, stack, context, line, offset) do
-    p_aggregate__7(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__8(rest, acc, stack, context, line, offset) do
-    p_aggregate__6(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__7(rest, user_acc, [acc | stack], context, line, offset) do
-    _ = user_acc
-
-    p_aggregate__9(
-      rest,
-      [List.to_string(:lists.reverse(user_acc))] ++ acc,
-      stack,
-      context,
-      line,
-      offset
-    )
-  end
-
-  defp p_aggregate__9(<<":", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
-    p_aggregate__10(rest, [] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_aggregate__9(rest, acc, stack, context, line, offset) do
-    p_aggregate__3(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__10(rest, acc, [_, previous_acc | stack], context, line, offset) do
-    p_aggregate__1(rest, acc ++ previous_acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__1(rest, acc, stack, context, line, offset) do
-    p_aggregate__14(rest, [], [{rest, context, line, offset}, acc | stack], context, line, offset)
-  end
-
-  defp p_aggregate__12(rest, acc, [_, previous_acc | stack], context, line, offset) do
-    p_aggregate__11(rest, acc ++ previous_acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__13(_, _, [{rest, context, line, offset} | _] = stack, _, _, _) do
-    p_aggregate__12(rest, [], stack, context, line, offset)
-  end
-
-  defp p_aggregate__14(rest, acc, stack, context, line, offset) do
-    p_aggregate__15(rest, [], [acc | stack], context, line, offset)
-  end
-
-  defp p_aggregate__15(rest, acc, stack, context, line, offset) do
-    p_aggregate__16(rest, [], [acc | stack], context, line, offset)
-  end
-
-  defp p_aggregate__16(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when (x0 >= 65 and x0 <= 90) or (x0 >= 97 and x0 <= 122) or x0 === 95 do
-    p_aggregate__17(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_aggregate__16(rest, _acc, stack, context, line, offset) do
-    [_, acc | stack] = stack
-    p_aggregate__13(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__17(<<x0::utf8, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when (x0 >= 65 and x0 <= 90) or (x0 >= 97 and x0 <= 122) or (x0 >= 48 and x0 <= 57) or
-              x0 === 95 or
-              x0 === 32 or (x0 >= 128 and x0 <= 1_114_111) do
-    p_aggregate__19(
-      rest,
-      [x0] ++ acc,
-      stack,
-      context,
-      comb__line,
-      comb__offset + byte_size(<<x0::utf8>>)
-    )
-  end
-
-  defp p_aggregate__17(rest, acc, stack, context, line, offset) do
-    p_aggregate__18(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__19(rest, acc, stack, context, line, offset) do
-    p_aggregate__17(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__18(rest, user_acc, [acc | stack], context, line, offset) do
-    _ = user_acc
-
-    p_aggregate__20(
-      rest,
-      [List.to_string(:lists.reverse(user_acc))] ++ acc,
-      stack,
-      context,
-      line,
-      offset
-    )
-  end
-
-  defp p_aggregate__20(<<".", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
-    p_aggregate__21(rest, [] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_aggregate__20(rest, _acc, stack, context, line, offset) do
-    [acc | stack] = stack
-    p_aggregate__13(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__21(rest, user_acc, [acc | stack], context, line, offset) do
-    _ = user_acc
-    p_aggregate__22(rest, [col: :lists.reverse(user_acc)] ++ acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__22(rest, acc, [_, previous_acc | stack], context, line, offset) do
-    p_aggregate__11(rest, acc ++ previous_acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__11(rest, acc, stack, context, line, offset) do
-    p_aggregate__23(rest, [], [acc | stack], context, line, offset)
-  end
-
-  defp p_aggregate__23(rest, acc, stack, context, line, offset) do
-    p_aggregate__24(rest, [], [acc | stack], context, line, offset)
-  end
-
-  defp p_aggregate__24(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when (x0 >= 97 and x0 <= 122) or x0 === 95 do
-    p_aggregate__25(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_aggregate__24(rest, _acc, _stack, context, line, offset) do
-    {:error, "expected ASCII character in the range \"a\" to \"z\" or equal to \"_\"", rest,
-     context, line, offset}
-  end
-
-  defp p_aggregate__25(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when (x0 >= 97 and x0 <= 122) or x0 === 95 do
-    p_aggregate__27(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_aggregate__25(rest, acc, stack, context, line, offset) do
-    p_aggregate__26(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__27(rest, acc, stack, context, line, offset) do
-    p_aggregate__25(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__26(rest, user_acc, [acc | stack], context, line, offset) do
-    _ = user_acc
-
-    p_aggregate__28(
-      rest,
-      [List.to_string(:lists.reverse(user_acc))] ++ acc,
-      stack,
-      context,
-      line,
-      offset
-    )
-  end
-
-  defp p_aggregate__28(rest, user_acc, [acc | stack], context, line, offset) do
-    _ = user_acc
-
-    p_aggregate__29(
-      rest,
-      [
-        fun:
-          case :lists.reverse(user_acc) do
-            [one] -> one
-            many -> raise "unwrap_and_tag/3 expected a single token, got: #{inspect(many)}"
-          end
-      ] ++ acc,
-      stack,
-      context,
-      line,
-      offset
-    )
-  end
-
-  defp p_aggregate__29(<<"(", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
-    p_aggregate__30(rest, [] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_aggregate__29(rest, _acc, _stack, context, line, offset) do
-    {:error, "expected string \"(\"", rest, context, line, offset}
-  end
-
-  defp p_aggregate__30(rest, acc, stack, context, line, offset) do
-    p_aggregate__31(rest, [], [acc | stack], context, line, offset)
-  end
-
-  defp p_aggregate__31(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when x0 === 32 or x0 === 9 do
-    p_aggregate__33(rest, acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_aggregate__31(rest, acc, stack, context, line, offset) do
-    p_aggregate__32(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__33(rest, acc, stack, context, line, offset) do
-    p_aggregate__31(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__32(rest, user_acc, [acc | stack], context, line, offset) do
-    _ = user_acc
-    p_aggregate__34(rest, [] ++ acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__34(<<")", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
-    p_aggregate__35(rest, [] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_aggregate__34(rest, _acc, _stack, context, line, offset) do
-    {:error, "expected string \")\"", rest, context, line, offset}
-  end
-
-  defp p_aggregate__35(rest, acc, stack, context, line, offset) do
-    p_aggregate__39(rest, [], [{rest, context, line, offset}, acc | stack], context, line, offset)
-  end
-
-  defp p_aggregate__37(rest, acc, [_, previous_acc | stack], context, line, offset) do
-    p_aggregate__36(rest, acc ++ previous_acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__38(_, _, [{rest, context, line, offset} | _] = stack, _, _, _) do
-    p_aggregate__37(rest, [], stack, context, line, offset)
-  end
-
-  defp p_aggregate__39(rest, acc, stack, context, line, offset) do
-    p_aggregate__40(rest, [], [acc | stack], context, line, offset)
-  end
-
-  defp p_aggregate__40(<<"::", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
-    p_aggregate__41(rest, [] ++ acc, stack, context, comb__line, comb__offset + 2)
-  end
-
-  defp p_aggregate__40(rest, _acc, stack, context, line, offset) do
-    [acc | stack] = stack
-    p_aggregate__38(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__41(rest, acc, stack, context, line, offset) do
-    p_aggregate__42(rest, [], [acc | stack], context, line, offset)
-  end
-
-  defp p_aggregate__42(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when (x0 >= 65 and x0 <= 90) or (x0 >= 97 and x0 <= 122) or (x0 >= 48 and x0 <= 57) or
-              x0 === 95 or
-              x0 === 32 do
-    p_aggregate__43(rest, [<<x0::integer>>] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_aggregate__42(rest, _acc, stack, context, line, offset) do
-    [_, acc | stack] = stack
-    p_aggregate__38(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__43(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when (x0 >= 65 and x0 <= 90) or (x0 >= 97 and x0 <= 122) or (x0 >= 48 and x0 <= 57) or
-              x0 === 95 or
-              x0 === 32 do
-    p_aggregate__45(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_aggregate__43(rest, acc, stack, context, line, offset) do
-    p_aggregate__44(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__45(rest, acc, stack, context, line, offset) do
-    p_aggregate__43(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__44(rest, user_acc, [acc | stack], context, line, offset) do
-    _ = user_acc
-
-    p_aggregate__46(
-      rest,
-      [List.to_string(:lists.reverse(user_acc))] ++ acc,
-      stack,
-      context,
-      line,
-      offset
-    )
-  end
-
-  defp p_aggregate__46(rest, user_acc, [acc | stack], context, line, offset) do
-    _ = user_acc
-
-    p_aggregate__47(
-      rest,
-      [
-        cast:
-          case :lists.reverse(user_acc) do
-            [one] -> one
-            many -> raise "unwrap_and_tag/3 expected a single token, got: #{inspect(many)}"
-          end
-      ] ++ acc,
-      stack,
-      context,
-      line,
-      offset
-    )
-  end
-
-  defp p_aggregate__47(rest, acc, [_, previous_acc | stack], context, line, offset) do
-    p_aggregate__36(rest, acc ++ previous_acc, stack, context, line, offset)
-  end
-
-  defp p_aggregate__36(<<""::binary>>, acc, stack, context, comb__line, comb__offset) do
-    p_aggregate__48("", [] ++ acc, stack, context, comb__line, comb__offset)
-  end
-
-  defp p_aggregate__36(rest, _acc, _stack, context, line, offset) do
-    {:error, "expected end of string", rest, context, line, offset}
-  end
-
-  defp p_aggregate__48(rest, acc, _stack, context, line, offset) do
-    {:ok, acc, rest, context, line, offset}
-  end
-
   @spec p_logic_prefix(binary, keyword) ::
           {:ok, [term], rest, context, line, byte_offset}
           | {:error, reason, rest, context, line, byte_offset}
@@ -986,248 +598,6 @@ defmodule Bier.QueryParser do
   end
 
   defp p_logic_prefix__9(rest, acc, _stack, context, line, offset) do
-    {:ok, acc, rest, context, line, offset}
-  end
-
-  @spec p_agg_call(binary, keyword) ::
-          {:ok, [term], rest, context, line, byte_offset}
-          | {:error, reason, rest, context, line, byte_offset}
-        when line: {pos_integer, byte_offset},
-             byte_offset: non_neg_integer,
-             rest: binary,
-             reason: String.t(),
-             context: map
-  defp p_agg_call(binary, opts \\ []) when is_binary(binary) do
-    context = Map.new(Keyword.get(opts, :context, []))
-    byte_offset = Keyword.get(opts, :byte_offset, 0)
-
-    line =
-      case Keyword.get(opts, :line, 1) do
-        {_, _} = line -> line
-        line -> {line, byte_offset}
-      end
-
-    case p_agg_call__0(binary, [], [], context, line, byte_offset) do
-      {:ok, acc, rest, context, line, offset} ->
-        {:ok, :lists.reverse(acc), rest, context, line, offset}
-
-      {:error, _, _, _, _, _} = error ->
-        error
-    end
-  end
-
-  defp p_agg_call__0(rest, acc, stack, context, line, offset) do
-    p_agg_call__4(rest, [], [{rest, context, line, offset}, acc | stack], context, line, offset)
-  end
-
-  defp p_agg_call__2(rest, acc, [_, previous_acc | stack], context, line, offset) do
-    p_agg_call__1(rest, acc ++ previous_acc, stack, context, line, offset)
-  end
-
-  defp p_agg_call__3(_, _, [{rest, context, line, offset} | _] = stack, _, _, _) do
-    p_agg_call__2(rest, [], stack, context, line, offset)
-  end
-
-  defp p_agg_call__4(rest, acc, stack, context, line, offset) do
-    p_agg_call__5(rest, [], [acc | stack], context, line, offset)
-  end
-
-  defp p_agg_call__5(rest, acc, stack, context, line, offset) do
-    p_agg_call__6(rest, [], [acc | stack], context, line, offset)
-  end
-
-  defp p_agg_call__6(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when (x0 >= 65 and x0 <= 90) or (x0 >= 97 and x0 <= 122) or x0 === 95 do
-    p_agg_call__7(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_agg_call__6(rest, _acc, stack, context, line, offset) do
-    [_, acc | stack] = stack
-    p_agg_call__3(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_agg_call__7(<<x0::utf8, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when (x0 >= 65 and x0 <= 90) or (x0 >= 97 and x0 <= 122) or (x0 >= 48 and x0 <= 57) or
-              x0 === 95 or
-              x0 === 32 or (x0 >= 128 and x0 <= 1_114_111) do
-    p_agg_call__9(
-      rest,
-      [x0] ++ acc,
-      stack,
-      context,
-      comb__line,
-      comb__offset + byte_size(<<x0::utf8>>)
-    )
-  end
-
-  defp p_agg_call__7(rest, acc, stack, context, line, offset) do
-    p_agg_call__8(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_agg_call__9(rest, acc, stack, context, line, offset) do
-    p_agg_call__7(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_agg_call__8(rest, user_acc, [acc | stack], context, line, offset) do
-    _ = user_acc
-
-    p_agg_call__10(
-      rest,
-      [List.to_string(:lists.reverse(user_acc))] ++ acc,
-      stack,
-      context,
-      line,
-      offset
-    )
-  end
-
-  defp p_agg_call__10(rest, user_acc, [acc | stack], context, line, offset) do
-    _ = user_acc
-
-    p_agg_call__11(
-      rest,
-      [
-        col:
-          case :lists.reverse(user_acc) do
-            [one] -> one
-            many -> raise "unwrap_and_tag/3 expected a single token, got: #{inspect(many)}"
-          end
-      ] ++ acc,
-      stack,
-      context,
-      line,
-      offset
-    )
-  end
-
-  defp p_agg_call__11(<<".", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
-    p_agg_call__12(rest, [] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_agg_call__11(rest, acc, stack, context, line, offset) do
-    p_agg_call__3(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_agg_call__12(rest, acc, [_, previous_acc | stack], context, line, offset) do
-    p_agg_call__1(rest, acc ++ previous_acc, stack, context, line, offset)
-  end
-
-  defp p_agg_call__1(rest, acc, stack, context, line, offset) do
-    p_agg_call__13(rest, [], [acc | stack], context, line, offset)
-  end
-
-  defp p_agg_call__13(rest, acc, stack, context, line, offset) do
-    p_agg_call__14(rest, [], [acc | stack], context, line, offset)
-  end
-
-  defp p_agg_call__14(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when (x0 >= 97 and x0 <= 122) or x0 === 95 do
-    p_agg_call__15(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_agg_call__14(rest, _acc, _stack, context, line, offset) do
-    {:error, "expected ASCII character in the range \"a\" to \"z\" or equal to \"_\"", rest,
-     context, line, offset}
-  end
-
-  defp p_agg_call__15(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when (x0 >= 97 and x0 <= 122) or x0 === 95 do
-    p_agg_call__17(rest, [x0] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_agg_call__15(rest, acc, stack, context, line, offset) do
-    p_agg_call__16(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_agg_call__17(rest, acc, stack, context, line, offset) do
-    p_agg_call__15(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_agg_call__16(rest, user_acc, [acc | stack], context, line, offset) do
-    _ = user_acc
-
-    p_agg_call__18(
-      rest,
-      [List.to_string(:lists.reverse(user_acc))] ++ acc,
-      stack,
-      context,
-      line,
-      offset
-    )
-  end
-
-  defp p_agg_call__18(rest, user_acc, [acc | stack], context, line, offset) do
-    _ = user_acc
-
-    p_agg_call__19(
-      rest,
-      [
-        fun:
-          case :lists.reverse(user_acc) do
-            [one] -> one
-            many -> raise "unwrap_and_tag/3 expected a single token, got: #{inspect(many)}"
-          end
-      ] ++ acc,
-      stack,
-      context,
-      line,
-      offset
-    )
-  end
-
-  defp p_agg_call__19(<<"(", rest::binary>>, acc, stack, context, comb__line, comb__offset) do
-    p_agg_call__20(rest, [] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_agg_call__19(rest, _acc, _stack, context, line, offset) do
-    {:error, "expected string \"(\"", rest, context, line, offset}
-  end
-
-  defp p_agg_call__20(rest, acc, stack, context, line, offset) do
-    p_agg_call__21(rest, [], [acc | stack], context, line, offset)
-  end
-
-  defp p_agg_call__21(<<x0, rest::binary>>, acc, stack, context, comb__line, comb__offset)
-       when x0 === 32 or x0 === 9 or x0 === 10 or x0 === 13 or x0 === 12 or x0 === 11 do
-    p_agg_call__23(
-      rest,
-      acc,
-      stack,
-      context,
-      (
-        line = comb__line
-
-        case x0 do
-          10 -> {elem(line, 0) + 1, comb__offset + 1}
-          _ -> line
-        end
-      ),
-      comb__offset + 1
-    )
-  end
-
-  defp p_agg_call__21(rest, acc, stack, context, line, offset) do
-    p_agg_call__22(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_agg_call__23(rest, acc, stack, context, line, offset) do
-    p_agg_call__21(rest, acc, stack, context, line, offset)
-  end
-
-  defp p_agg_call__22(rest, user_acc, [acc | stack], context, line, offset) do
-    _ = user_acc
-    p_agg_call__24(rest, [] ++ acc, stack, context, line, offset)
-  end
-
-  defp p_agg_call__24(<<")", ""::binary>>, acc, stack, context, comb__line, comb__offset) do
-    p_agg_call__25("", [] ++ acc, stack, context, comb__line, comb__offset + 1)
-  end
-
-  defp p_agg_call__24(rest, _acc, _stack, context, line, offset) do
-    {:error, "expected string \")\", followed by end of string", rest, context, line, offset}
-  end
-
-  defp p_agg_call__25(rest, acc, _stack, context, line, offset) do
     {:ok, acc, rest, context, line, offset}
   end
 
@@ -2549,7 +1919,7 @@ defmodule Bier.QueryParser do
   #
   #   %{kind: :field, ...}      -- scalar column / json-path / cast
   #   %{kind: :star}            -- `*`
-  #   %{kind: :agg, ...}        -- aggregate (col.fn() or count())
+  #   %{kind: :agg, ...}        -- aggregate (<field>.fn() or count())
   #   %{kind: :embed, ...}      -- related resource `rel(...)` / `rel!hint(...)`
   #                                 / spread `...rel(...)`
   def parse_select_tree(sel) do
@@ -2589,22 +1959,43 @@ defmodule Bier.QueryParser do
     end
   end
 
+  # PostgREST parses a select field as
+  # `[alias:]<field><json path>[::cast][.<agg>()][::agg cast]` (`pFieldSelect`),
+  # so an aggregate is an ordinary field reference that happens to carry a
+  # trailing call: the FIRST cast is the aggregate's *input* cast
+  # (`SUM(CAST(fld AS int))`) and the one after `()` casts its *result*
+  # (`SqlFragment.pgFmtSelectItem`).
   defp parse_aggregate(field) do
     {out_alias, rest} = split_alias(field)
+    {agg_cast, rest} = peel_agg_cast(rest)
 
-    {cast, rest} = peel_agg_cast(rest)
+    with {:ok, operand, fun} <- split_agg_call(rest),
+         {:ok, col, json_path, input_cast} <- parse_agg_operand(operand) do
+      {:ok,
+       %{
+         kind: :agg,
+         column: col,
+         json_path: json_path,
+         input_cast: input_cast,
+         fun: fun,
+         alias: out_alias,
+         cast: agg_cast
+       }}
+    else
+      _ -> {:error, {:select_parse, field}}
+    end
+  end
 
-    case parse_agg_call(rest) do
-      {:ok, nil, fun} ->
-        {:ok, %{kind: :agg, column: nil, fun: fun, alias: out_alias, cast: cast}}
+  # The aggregated operand: `""` for the field-less `count()` form, otherwise a
+  # field reference with an optional json path and input cast.
+  defp parse_agg_operand(""), do: {:ok, nil, [], nil}
 
-      {:ok, col, fun} ->
-        if valid_identifier?(col),
-          do: {:ok, %{kind: :agg, column: col, fun: fun, alias: out_alias, cast: cast}},
-          else: {:error, {:select_parse, field}}
+  defp parse_agg_operand(operand) do
+    {cast, rest} = peel_cast(operand)
 
-      :error ->
-        {:error, {:select_parse, field}}
+    case parse_field_ref(rest) do
+      {:ok, {col, json_path}} -> {:ok, col, json_path, cast}
+      :error -> :error
     end
   end
 
@@ -3263,21 +2654,60 @@ defmodule Bier.QueryParser do
   end
 
   @doc """
-  Parse an aggregate call `[col.]fun()` (the regex
-  `^(?:([a-zA-Z_][\\w ]*)\\.)?([a-z_]+)\\(\\s*\\)$`).
+  Split the trailing aggregate call off a select field.
 
-  Returns `{:ok, col_or_nil, fun}` (col is `nil` when there is no `col.` prefix)
-  or `:error`.
+  Returns `{:ok, operand, fun}` where `operand` is everything before the `.`
+  that introduces the call — `""` for the field-less `count()` form — and `fun`
+  is the aggregate name. `:error` when the string does not end in an empty call
+  `<fun>()`.
+
+  The operand is kept opaque here because PostgREST parses it as a full field
+  reference (`pField` plus an optional `::cast`), so it may carry a json path
+  and a cast: `jsonb_col->>key::integer.sum()`.
   """
-  @spec parse_agg_call(String.t()) :: {:ok, String.t() | nil, String.t()} | :error
-  def parse_agg_call(rest) when is_binary(rest) do
-    case p_agg_call(rest) do
-      {:ok, parsed, "", _, _, _} ->
-        {:ok, Keyword.get(parsed, :col), Keyword.fetch!(parsed, :fun)}
-
-      _ ->
-        :error
+  @spec split_agg_call(String.t()) :: {:ok, String.t(), String.t()} | :error
+  def split_agg_call(str) when is_binary(str) do
+    with {:ok, head} <- peel_empty_call(str),
+         {operand, fun} <- split_last_dot(head),
+         true <- agg_fun_name?(fun) do
+      {:ok, operand, fun}
+    else
+      _ -> :error
     end
+  end
+
+  # Peel a trailing empty call `(\s*)` off `str`, returning what precedes it.
+  defp peel_empty_call(str) do
+    with true <- String.ends_with?(str, ")"),
+         head = str |> binary_part(0, byte_size(str) - 1) |> String.trim_trailing(),
+         true <- String.ends_with?(head, "(") do
+      {:ok, binary_part(head, 0, byte_size(head) - 1)}
+    else
+      _ -> :error
+    end
+  end
+
+  # Split on the last `.`; a string without one is the field-less form, whose
+  # operand is empty. Json keys and unquoted identifiers cannot contain `.`, so
+  # the last `.` is always the call separator.
+  defp split_last_dot(str) do
+    case :binary.matches(str, ".") do
+      [] ->
+        {"", str}
+
+      matches ->
+        {pos, _} = List.last(matches)
+        {binary_part(str, 0, pos), binary_part(str, pos + 1, byte_size(str) - pos - 1)}
+    end
+  end
+
+  # `[a-z_]+` (non-empty) — the shape of an aggregate function name.
+  defp agg_fun_name?(""), do: false
+
+  defp agg_fun_name?(fun) do
+    fun
+    |> String.to_charlist()
+    |> Enum.all?(fn c -> c == ?_ or (c >= ?a and c <= ?z) end)
   end
 
   defp capture_logic_rest(rest, args, context, _line, _offset) do
@@ -3312,21 +2742,19 @@ defmodule Bier.QueryParser do
 
   @doc """
   True when a select field is an aggregate: `count()`, `col.sum()`,
-  `alias:col.sum()::cast`. A bare `name()` is an aggregate only when `name` is
-  a known aggregate function; otherwise it is an empty-projection embed. A
-  `col.fn()` form is always an aggregate.
+  `alias:col.sum()::cast`, `alias:col->>key::int.sum()::cast`. A bare `name()`
+  is an aggregate only when `name` is a known aggregate function; otherwise it
+  is an empty-projection embed. An `<operand>.fn()` form is always an aggregate.
   """
   @spec aggregate?(String.t()) :: boolean()
   def aggregate?(field) when is_binary(field) do
-    case p_aggregate(field) do
-      {:ok, parsed, "", _, _, _} ->
-        case Keyword.get(parsed, :col) do
-          nil -> Keyword.fetch!(parsed, :fun) in @agg_functions
-          _col -> true
-        end
+    {_out_alias, rest} = split_alias(field)
+    {_agg_cast, rest} = peel_agg_cast(rest)
 
-      _ ->
-        false
+    case split_agg_call(rest) do
+      {:ok, "", fun} -> fun in @agg_functions
+      {:ok, _operand, _fun} -> true
+      :error -> false
     end
   end
 

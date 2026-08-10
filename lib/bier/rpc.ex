@@ -581,7 +581,7 @@ defmodule Bier.Rpc do
     Bier.ServerTiming.measure(:parse, fn ->
       with {:ok, plan} <- QueryParser.parse_request(reserved_qs),
            {:ok, plan} <- Pagination.apply_window(plan, conn, config.db_max_rows) do
-        {:ok, Bier.Embed.resolve_target_names(plan, config.url_use_legacy_target_names)}
+        Bier.Embed.resolve_target_names(plan, config.url_use_legacy_target_names)
       end
     end)
   end

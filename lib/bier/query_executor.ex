@@ -553,21 +553,10 @@ defmodule Bier.QueryExecutor do
     related_or_computed? =
       Enum.any?(plan.order || [], fn
         %{relation: _} -> true
-        %{column: col, json_path: jp} -> col in computed or composite_column?(relation, col, jp)
+        %{column: col} -> col in computed
       end)
 
     related_or_computed? or map_size(plan[:embed_orders] || %{}) > 0
-  end
-
-  # A non-empty json path on a composite-typed column needs `(col).field` access
-  # rather than the `->` json operator.
-  defp composite_column?(_relation, _col, []), do: false
-
-  defp composite_column?(relation, col, _json_path) do
-    case Enum.find(relation.columns, &(&1.name == col)) do
-      %{composite?: true} -> true
-      _ -> false
-    end
   end
 
   # ---- simple (flat) path --------------------------------------------------
@@ -575,7 +564,7 @@ defmodule Bier.QueryExecutor do
   defp build_simple(relation, plan, state) do
     {select_sql, state} = build_select(plan.select, relation, state)
     {where_sql, state} = build_where(plan.filters, state)
-    order_sql = build_order(plan.order)
+    order_sql = build_order(plan.order, relation)
     {limit_sql, state} = build_limit(plan, state)
 
     # `_bier_cols` projects ONLY the named select-list (filtered, ordered) — no
@@ -672,7 +661,7 @@ defmodule Bier.QueryExecutor do
     where_sql = combine_where(where_sql, inner_where)
     where_sql = combine_where(where_sql, null_where)
 
-    {group_sql, having} = Embed.group_by(plan.select, al)
+    {group_sql, having} = Embed.group_by(plan.select, al, relation)
 
     {order_sql, state} =
       Embed.build_order_advanced(plan.order, plan.select, relation, al, state, __MODULE__)
@@ -768,7 +757,7 @@ defmodule Bier.QueryExecutor do
   defp render_select_field(%{kind: :star}, _relation), do: "*"
 
   defp render_select_field(%{column: col, alias: al, cast: cast, json_path: path}, relation) do
-    expr = column_expr(col, path)
+    expr = column_expr(col, path, relation)
     # The read representation is applied first; an explicit `::cast` (case 1805)
     # then operates on the already-formatted JSON value.
     expr = if path == [] and relation, do: apply_read_rep(expr, relation, col), else: expr
@@ -831,10 +820,11 @@ defmodule Bier.QueryExecutor do
   end
 
   # Column expression qualified by the current relation alias, when present.
-  def qualified_column_expr(col, path, %State{alias_name: nil}), do: column_expr(col, path)
+  def qualified_column_expr(col, path, %State{alias_name: nil, relation: rel}),
+    do: column_expr(col, path, rel)
 
-  def qualified_column_expr(col, path, %State{alias_name: al}),
-    do: column_expr_aliased(col, path, al)
+  def qualified_column_expr(col, path, %State{alias_name: al, relation: rel}),
+    do: column_expr_aliased(col, path, al, rel)
 
   # is.null / is.not_null / is.true / is.false / is.unknown
   defp operator_sql("is", col, f, state) do
@@ -980,13 +970,13 @@ defmodule Bier.QueryExecutor do
 
   # ---- order ---------------------------------------------------------------
 
-  defp build_order([]), do: ""
+  defp build_order([], _relation), do: ""
 
-  defp build_order(terms) do
+  defp build_order(terms, relation) do
     " ORDER BY " <>
       Enum.map_join(terms, ", ", fn t ->
         dir = if t.dir == :desc, do: " DESC", else: " ASC"
-        column_expr(t.column, t.json_path) <> dir <> order_nulls(t.nulls)
+        column_expr(t.column, t.json_path, relation) <> dir <> order_nulls(t.nulls)
       end)
   end
 
@@ -1083,24 +1073,41 @@ defmodule Bier.QueryExecutor do
   defp array_of(type) when is_binary(type), do: type <> "[]"
   defp array_of(_), do: "text[]"
 
-  def column_expr(col, path), do: column_expr_base(quote_ident(col), path)
+  def column_expr(col, path, relation \\ nil),
+    do: column_expr_base(quote_ident(col), path, relation, col)
 
-  def column_expr_aliased(col, path, al),
-    do: column_expr_base("#{quote_ident(al)}.#{quote_ident(col)}", path)
+  def column_expr_aliased(col, path, al, relation \\ nil),
+    do: column_expr_base("#{quote_ident(al)}.#{quote_ident(col)}", path, relation, col)
 
-  defp column_expr_base(base_col, []), do: base_col
+  defp column_expr_base(base_col, [], _relation, _col), do: base_col
 
-  defp column_expr_base(base_col, path) do
+  defp column_expr_base(base_col, path, relation, col) do
     {init, [last]} = Enum.split(path, length(path) - 1)
 
     base =
-      Enum.reduce(init, base_col, fn {_kind, key}, acc ->
+      Enum.reduce(init, json_base(base_col, relation, col), fn {_kind, key}, acc ->
         "#{acc}->#{pg_literal_or_index(key)}"
       end)
 
     {kind, key} = last
     arrow = if kind == :arrow_text, do: "->>", else: "->"
     "(#{base}#{arrow}#{pg_literal_or_index(key)})"
+  end
+
+  # PostgREST's `cfToJson` (Plan.resolveTypeOrUnknown): a json path is applied
+  # to the bare column only when the column's nominal type is already
+  # `json`/`jsonb` — that keeps json indexes usable (PostgREST#2594). Every
+  # other type (composite, array, tsvector, …) is converted first, so
+  # `to_jsonb(col)->key` addresses a composite field or an array item with the
+  # same arrow syntax (SqlFragment.pgFmtField). A column the relation does not
+  # know (or an unknown relation) keeps the bare reference.
+  defp json_base(base_col, nil, _col), do: base_col
+
+  defp json_base(base_col, relation, col) do
+    case Enum.find(relation.columns, &(&1.name == col)) do
+      %{type: type} when type not in ["json", "jsonb"] -> "to_jsonb(#{base_col})"
+      _ -> base_col
+    end
   end
 
   defp pg_literal_or_index(key) do
