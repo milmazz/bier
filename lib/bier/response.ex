@@ -50,6 +50,12 @@ defmodule Bier.Response do
   defp response_body(%Plug.Conn{method: "HEAD"}, _body), do: ""
   defp response_body(_conn, body), do: body
 
+  # The 416 body is NOT produced by the error path: `Response.hs#L76` builds it
+  # inline while assembling the normal read response, by calling
+  # `Error.errorPayload configClientErrorVerbosity` on an OutOfBounds error. The
+  # configured verbosity therefore reaches it too — hence `Bier.ErrorPayload`
+  # rather than a local encode. (No `Proxy-Status` either, for the same reason:
+  # that header is assembled by `errorResponseFor`, which never runs here.)
   defp out_of_bounds(conn, offset, total) do
     body = %{
       message: "Requested range not satisfiable",
@@ -58,7 +64,8 @@ defmodule Bier.Response do
       hint: nil
     }
 
-    payload = Bier.json_library().encode!(body)
+    verbosity = Bier.ErrorPayload.verbosity_for(conn.assigns[:supervisor_name])
+    payload = Bier.ErrorPayload.encode(body, verbosity)
 
     conn
     |> put_resp_content_type("application/json", "utf-8")

@@ -33,12 +33,14 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
-  def call(conn, {:error, {:unknown_relation, schema, relation}}) do
+  # `hint` is the fuzzy "Perhaps you meant …" suggestion computed at resolution
+  # time (see `Bier.Plugs.ActionController`), nil when nothing scored high enough.
+  def call(conn, {:error, {:unknown_relation, schema, relation, hint}}) do
     error(conn, 404, %{
       code: "PGRST205",
       message: "Could not find the table '#{schema}.#{relation}' in the schema cache",
       details: nil,
-      hint: nil
+      hint: hint
     })
   end
 
@@ -431,18 +433,18 @@ defmodule Bier.Plugs.FallbackController do
   end
 
   # ---- pagination range errors (416 PGRST103) -----------------------------
-  # A negative `limit` query param (NegativeLimit).
+  # A negative `limit` query param, rejected by the query parser before any
+  # window is computed (NegativeLimit).
   def call(conn, {:error, :negative_limit}) do
-    range_not_satisfiable(conn, "Limit should be greater than or equal to zero.")
+    range_not_satisfiable(conn, range_details(:negative_limit))
   end
 
-  # A `Range` header whose lower boundary exceeds the upper boundary
-  # (LowerGTUpper / offside).
-  def call(conn, {:error, :range_offside}) do
-    range_not_satisfiable(
-      conn,
-      "The lower boundary must be lower than or equal to the upper boundary in the Range header."
-    )
+  # `isInvalidRange`: the top-level range (the Range header intersected with the
+  # limit/offset window) came out empty. `Bier.Pagination` picks the reason the
+  # way `InvalidRange` does — LowerGTUpper when the Range HEADER itself was
+  # empty (`Range: 1-0`), NegativeLimit otherwise.
+  def call(conn, {:error, {:invalid_range, reason}}) do
+    range_not_satisfiable(conn, range_details(reason))
   end
 
   # ---- query parsing errors (PGRST100) ------------------------------------
@@ -580,6 +582,13 @@ defmodule Bier.Plugs.FallbackController do
     )
   end
 
+  # The two `RangeError` details strings (Error.hs#L204-L205).
+  defp range_details(:negative_limit), do: "Limit should be greater than or equal to zero."
+
+  defp range_details(:lower_gt_upper),
+    do:
+      "The lower boundary must be lower than or equal to the upper boundary in the Range header."
+
   defp range_not_satisfiable(conn, details) do
     error(conn, 416, %{
       code: "PGRST103",
@@ -590,7 +599,7 @@ defmodule Bier.Plugs.FallbackController do
   end
 
   defp error(conn, status, body, opts \\ []) do
-    response = Bier.json_library().encode_to_iodata!(body) |> IO.iodata_to_binary()
+    response = Bier.ErrorPayload.encode(body, verbosity(conn))
     code = body_code(body)
 
     conn
@@ -623,4 +632,11 @@ defmodule Bier.Plugs.FallbackController do
   defp body_code(%{code: code}), do: code
   defp body_code(%{"code" => code}), do: code
   defp body_code(_), do: nil
+
+  # `client-error-verbosity` is applied once, in `App.hs#L154`, to every error
+  # the request pipeline produces. A request that never reached an instance
+  # (no `:supervisor_name` assign) falls back to the default.
+  defp verbosity(conn) do
+    Bier.ErrorPayload.verbosity_for(conn.assigns[:supervisor_name])
+  end
 end

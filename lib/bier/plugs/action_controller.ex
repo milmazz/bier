@@ -492,7 +492,7 @@ defmodule Bier.Plugs.ActionController do
              )
            end) do
       conn
-      |> put_preference_applied(prefs.applied)
+      |> Bier.Preferences.put_applied(prefs.applied)
       |> Response.render(body, count, plan, count_mode, media,
         columns: csv_columns(plan, relation)
       )
@@ -508,11 +508,6 @@ defmodule Bier.Plugs.ActionController do
       context -> {context, config}
     end
   end
-
-  defp put_preference_applied(conn, []), do: conn
-
-  defp put_preference_applied(conn, tokens),
-    do: put_resp_header(conn, "preference-applied", Enum.join(tokens, ", "))
 
   # ---- target resolution ---------------------------------------------------
 
@@ -614,12 +609,33 @@ defmodule Bier.Plugs.ActionController do
         relation = decode_segment(segment)
 
         case Map.fetch(relations, {schema, relation}) do
-          {:ok, rel} -> {:ok, rel}
-          :error -> {:error, {:unknown_relation, reported_schema(schema), relation}}
+          {:ok, rel} ->
+            {:ok, rel}
+
+          :error ->
+            {:error,
+             {:unknown_relation, reported_schema(schema), relation,
+              table_hint(schema, relation, relations)}}
         end
 
       _ ->
         {:error, :invalid_path}
+    end
+  end
+
+  # PGRST205's `hint` is a fuzzy suggestion, not a constant: `tableNotFoundHint`
+  # (Error.hs#L286 -> #L386) looks the requested name up in the FuzzySet built
+  # from the schema's relations and renders "Perhaps you meant the table
+  # '<schema>.<match>'" only when the best match clears `getFuzzyHint`'s
+  # `minScore` of 0.75 (Error.hs#L400). `details` stays null either way.
+  @table_hint_min_score 0.75
+
+  defp table_hint(schema, relation, relations) do
+    candidates = for {{^schema, name}, _rel} <- relations, do: name
+
+    case Bier.Fuzzy.best_match(relation, candidates, @table_hint_min_score) do
+      nil -> nil
+      match -> "Perhaps you meant the table '#{reported_schema(schema)}.#{match}'"
     end
   end
 

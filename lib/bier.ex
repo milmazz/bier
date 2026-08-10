@@ -224,6 +224,22 @@ defmodule Bier do
         default: env(:db_plan_enabled, false),
         doc: "Enables the application/vnd.pgrst.plan media type (PostgREST db-plan-enabled)."
       ],
+      client_error_verbosity: [
+        # A STRING enum, like `openapi_mode` below: PostgREST config values
+        # arrive as strings from the environment, a config file and the
+        # conformance harness's per-case `config:` blocks alike, and an atom
+        # enum would reject all three.
+        type: {:in, ["verbose", "minimal"]},
+        default: env(:client_error_verbosity, "verbose"),
+        doc: """
+        Shape of the client-facing error envelope (PostgREST
+        client-error-verbosity, new in v16.0). `:verbose` emits
+        `{code, message, details, hint}`; `:minimal` emits `{code, message}`
+        only — the `details` and `hint` members are OMITTED, not nulled. It
+        applies to every error the request pipeline renders, database errors
+        included, and to the 416 range body the read path builds inline.
+        """
+      ],
       db_tx_end: [
         type: {:in, [:commit, :rollback]},
         default: env(:db_tx_end, :commit),
