@@ -29,7 +29,7 @@
  *     retried at the tool-call layer) replace the old ```json-fence scraping.
  *   - Defaults to ALL areas on disk; restrict with args.areas (unknown keys are
  *     reported; a run matching zero areas aborts before any agent spawns).
- *     args.pinned selects the PostgREST version (default "v14.12").
+ *     args.pinned selects the PostgREST version (default "v16.0").
  *   - Fixtures: fixtures.sql is PRIMARY; fixers write new objects to per-area
  *     *.delta.sql files; fixtures_local.sql and the live loader inputs
  *     rpc.sql/headers.sql are untouchable (spec/conformance/fixtures/README.md).
@@ -55,7 +55,7 @@ export const meta = {
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
-const PINNED = (args && args.pinned) || "v14.12";
+const PINNED = (args && args.pinned) || "v16.0";
 const RAW = `https://raw.githubusercontent.com/PostgREST/postgrest/${PINNED}`;
 const DOCS = `https://postgrest.org/en/v${PINNED.replace(/^v/, "").split(".")[0]}/`;
 const MAX_FIX_ROUNDS = 1; // audit → fix → re-audit (one fix round)

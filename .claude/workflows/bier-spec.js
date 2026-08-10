@@ -33,7 +33,7 @@
  *   - The Verify phase turns "fixtures load" / "cases validate" / "citations
  *     point at the pinned version" / "referenced relations exist" into facts
  *     from real command output instead of agent self-reports.
- *   - Version-parametric: args.pinned (default "v14.12") drives every source
+ *   - Version-parametric: args.pinned (default "v16.0") drives every source
  *     URL including the docs major version; args.areas (e.g. ["select","rpc"])
  *     restricts the run to a subset (unknown keys are reported, and a run
  *     matching zero areas aborts before spawning any agent).
@@ -62,7 +62,7 @@ export const meta = {
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
-const PINNED = (args && args.pinned) || "v14.12"; // PostgREST version this run specs (override via args.pinned)
+const PINNED = (args && args.pinned) || "v16.0"; // PostgREST version this run specs (override via args.pinned)
 const REPO = "https://github.com/PostgREST/postgrest";
 const RAW = `https://raw.githubusercontent.com/PostgREST/postgrest/${PINNED}`;
 const DOCS = `https://postgrest.org/en/v${PINNED.replace(/^v/, "").split(".")[0]}/`;

@@ -1,7 +1,7 @@
 # Credo configuration. Run with `mix credo --strict` (the CI gate).
 #
 # Scope: `lib/` only. `test/**` and `spec/**` are the frozen conformance
-# harness (ground truth derived from PostgREST v14.12 — see
+# harness (ground truth derived from PostgREST v16.0 — see
 # docs/CONFORMANCE_IMPL.md) and must not be churned for style. The committed
 # `lib/bier/query_parser.ex` is GENERATED from its `.ex.exs` template via
 # `mix gen.parsers`, so only that generated output is excluded — the template
