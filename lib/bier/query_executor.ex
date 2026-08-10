@@ -424,6 +424,20 @@ defmodule Bier.QueryExecutor do
   defp from_source(relation, %State{from_override: nil}), do: qrel(relation)
   defp from_source(_relation, %State{from_override: src}), do: src
 
+  # The FROM source carrying the relation's own name as its SQL alias, so every
+  # column reference is qualified the way PostgREST's `pgFmtField` writes it
+  # (`"<rel>"."<col>"`). That qualification is observable: Postgres reports an
+  # unknown column of a qualified reference as `column <rel>.<col> does not
+  # exist` (case 1819) rather than `column "<col>" does not exist`. A plain
+  # relation source already carries that alias implicitly; a `from_override`
+  # (the mutation representation's `pgrst_source` CTE) needs it spelled out.
+  # `alias_name` is nil only on the flat RPC path, whose set-returning call is
+  # left unaliased and whose columns are rendered bare.
+  defp aliased_from(relation, %State{alias_name: nil} = state), do: from_source(relation, state)
+
+  defp aliased_from(relation, %State{alias_name: al} = state),
+    do: "#{from_source(relation, state)} #{quote_ident(al)}"
+
   @doc """
   Build a representation query whose source is a mutation CTE.
 
@@ -614,7 +628,7 @@ defmodule Bier.QueryExecutor do
     # attempt tripped on), and runs over the unlimited filtered set so it is the
     # exact total before LIMIT/OFFSET. See issues #17 and #31.
     cols =
-      "SELECT #{select_sql} FROM #{from_source(relation, state)}" <> where_sql <> order_sql
+      "SELECT #{select_sql} FROM #{aliased_from(relation, state)}" <> where_sql <> order_sql
 
     paged =
       "SELECT #{row_json(state.format)} AS _bier_row#{window_count_col(state)} " <>
@@ -765,7 +779,8 @@ defmodule Bier.QueryExecutor do
       sql =
         relation.columns
         |> Enum.map_join(", ", fn c ->
-          "#{apply_read_rep(quote_ident(c.name), relation, c.name)} AS #{quote_ident(c.name)}"
+          ref = qualified_column_expr(c.name, [], state)
+          "#{apply_read_rep(ref, relation, c.name)} AS #{quote_ident(c.name)}"
         end)
 
       {sql, state}
@@ -775,13 +790,19 @@ defmodule Bier.QueryExecutor do
   end
 
   defp build_select(fields, relation, state) do
-    {Enum.map_join(fields, ", ", &render_select_field(&1, relation)), state}
+    {Enum.map_join(fields, ", ", &render_select_field(&1, relation, state)), state}
   end
 
-  defp render_select_field(%{kind: :star}, _relation), do: "*"
+  defp render_select_field(%{kind: :star}, _relation, _state), do: "*"
 
-  defp render_select_field(%{column: col, alias: al, cast: cast, json_path: path}, relation) do
-    expr = column_expr(col, path, relation)
+  defp render_select_field(
+         %{column: col, alias: al, cast: cast, json_path: path},
+         relation,
+         state
+       ) do
+    # Qualified with the relation's SQL alias, exactly like the WHERE clause
+    # (`render_filter/2`) — see `aliased_from/2`.
+    expr = qualified_column_expr(col, path, state)
     # The read representation is applied first; an explicit `::cast` (case 1805)
     # then operates on the already-formatted JSON value.
     expr = if path == [] and relation, do: apply_read_rep(expr, relation, col), else: expr

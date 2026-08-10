@@ -34,6 +34,10 @@ defmodule Bier do
 
   @type name :: term()
 
+  # The PostgREST release this build is wire-conformant with (see
+  # `postgrest_version/0`); `spec/` is pinned to the same release.
+  @postgrest_version "16.0"
+
   # The option schema is built at runtime so that DB defaults are sourced from
   # application env. This matters because `Bier.ConformanceServer` starts an
   # instance passing only `:name` and `:router`; every DB/PostgREST setting must
@@ -680,6 +684,33 @@ defmodule Bier do
   """
   def json_library do
     Application.get_env(:bier, :json_library, JSON)
+  end
+
+  @doc """
+  The PostgREST release whose wire behavior this build reproduces.
+
+  PostgREST renders its own `prettyVersion` — the first two components of its
+  package version (`Version.hs`) — into three places on the wire: the `Server`
+  response header (`setServerName ("postgrest/" <> prettyVersion)`, `App.hs`),
+  the OpenAPI document's `info.version`, and (through `docsVersion`) the
+  `externalDocs` URL. Bier is a reimplementation, so those bytes must report the
+  PostgREST version it is conformant with rather than Bier's own `mix.exs`
+  version — a client reading `Server:` is asking which PostgREST dialect it is
+  talking to. Bump this constant when the conformance suite is re-synced to a
+  new PostgREST pin (see `docs/CONFORMANCE_IMPL.md`).
+  """
+  @spec postgrest_version() :: String.t()
+  def postgrest_version, do: @postgrest_version
+
+  @doc """
+  The documentation branch matching `postgrest_version/0` — `"v"` plus the
+  version's major component, as PostgREST's `docsVersion` builds it
+  (`Version.hs`). It selects the `externalDocs` URL of the OpenAPI document.
+  """
+  @spec postgrest_docs_version() :: String.t()
+  def postgrest_docs_version do
+    [major | _rest] = String.split(@postgrest_version, ".")
+    "v" <> major
   end
 
   @doc """

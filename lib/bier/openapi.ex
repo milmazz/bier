@@ -1,7 +1,8 @@
 defmodule Bier.OpenAPI do
   @moduledoc """
   Builds the Swagger 2.0 (OpenAPI 2.0) root document from an introspection
-  snapshot. Wire-format match to PostgREST v14.12 is the contract; see
+  snapshot. Wire-format match to PostgREST `Bier.postgrest_version/0` is the
+  contract; see
   spec/openapi.yaml and spec/conformance/cases/16*.yaml. An opt-in
   OpenAPI 3.0.3 translation of this document is available via the
   `openapi_version: "3.0"` config option (`Bier.OpenAPI.V3`).
@@ -36,7 +37,12 @@ defmodule Bier.OpenAPI do
 
     %{
       "swagger" => "2.0",
-      "info" => put_optional(%{"title" => title, "version" => "14.12"}, "description", desc),
+      "info" =>
+        put_optional(
+          %{"title" => title, "version" => Bier.postgrest_version()},
+          "description",
+          desc
+        ),
       "externalDocs" => %{
         "url" => "https://postgrest.org/en/#{input.docs_version}/references/api.html",
         "description" => "PostgREST Documentation"
@@ -187,7 +193,8 @@ defmodule Bier.OpenAPI do
     desc = [summary, description] |> Enum.reject(&is_nil/1) |> Enum.join("\n\n") |> nil_if_empty()
 
     schema =
-      %{"type" => "object", "properties" => props}
+      %{"type" => "object"}
+      |> put_properties(props)
       |> put_optional("description", desc)
       |> put_required(required)
 
@@ -398,10 +405,19 @@ defmodule Bier.OpenAPI do
     props = Map.new(rel.columns, fn col -> {col.name, property(col, rel)} end)
     required = for c <- rel.columns, c.notnull?, do: c.name
 
-    %{"type" => "object", "properties" => props}
+    %{"type" => "object"}
+    |> put_properties(props)
     |> put_optional("description", rel.comment)
     |> put_required(required)
   end
+
+  # The swagger2 encoder drops every field still equal to its aeson default
+  # (`| Just x == def = rest`, Data/Swagger/Internal/AesonUtils.hs), so a schema
+  # whose `properties` is the empty map — a routine with no input arguments
+  # (all-OUT parameters), whose `pdParams` is `[]` — emits neither the
+  # `properties` key nor the `required` key, only `type: object` (case 1683).
+  defp put_properties(map, props) when map_size(props) == 0, do: map
+  defp put_properties(map, props), do: Map.put(map, "properties", props)
 
   defp put_required(map, []), do: map
   defp put_required(map, required), do: Map.put(map, "required", required)
