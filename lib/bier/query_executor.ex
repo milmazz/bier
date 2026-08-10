@@ -629,9 +629,13 @@ defmodule Bier.QueryExecutor do
     al = state.alias_name
     aliased_from = "#{from_source(relation, state)} #{quote_ident(al)}"
 
-    # A top-level filter whose column names a selected embed is a null-filter on
-    # that embedded resource (semi/anti-join), not a real column filter.
-    {null_embed_filters, column_filters} = split_embed_null_filters(plan.filters, plan.select)
+    # A filter leaf whose column names a selected embed is a null-filter on that
+    # embedded resource (semi/anti-join), not a real column filter. The rewrite
+    # reaches leaves nested in `and=()`/`or=()` groups and carries each embed's
+    # own filters into the test, so the null test sees the embed's *post-filter*
+    # aggregate (PostgREST's `addNullEmbedFilters`).
+    column_filters =
+      Embed.rewrite_null_embed_filters(plan.filters, plan.select, plan.embed_filters || %{})
 
     {cols, laterals, state} =
       Embed.build_row_select(
@@ -655,11 +659,7 @@ defmodule Bier.QueryExecutor do
         __MODULE__
       )
 
-    {null_where, state} =
-      Embed.null_filter_where(null_embed_filters, plan.select, relation, al, state, __MODULE__)
-
     where_sql = combine_where(where_sql, inner_where)
-    where_sql = combine_where(where_sql, null_where)
 
     {group_sql, having} = Embed.group_by(plan.select, al, relation)
 
@@ -700,19 +700,6 @@ defmodule Bier.QueryExecutor do
         "FROM (#{paged}) _postgrest_t"
 
     {:ok, sql, Enum.reverse(state.params)}
-  end
-
-  # Separate `<embed>=is.null` / `<embed>=not.is.null` style filters (whose
-  # column names a selected embed) from ordinary column filters. Only logic-free
-  # leaf filters can name an embed this way.
-  defp split_embed_null_filters(filters, select) do
-    names = embed_filter_names(select)
-
-    Enum.split_with(filters, fn
-      %{logic: _} -> false
-      %{column: col} -> MapSet.member?(names, col)
-      _ -> false
-    end)
   end
 
   # The set of names an embed filter (or embed null-filter) may target: each
@@ -799,6 +786,13 @@ defmodule Bier.QueryExecutor do
     {" WHERE " <> Enum.join(clauses, " AND "), %{state | alias_name: prev}}
   end
 
+  # A null filter on an embedded resource, produced by
+  # `Embed.rewrite_null_embed_filters/3`; it renders as a correlated
+  # semi/anti-join over the embed's own (already filtered) rows.
+  def render_node(%{embed_null: _} = node, state) do
+    Embed.render_null_embed(node, state, __MODULE__)
+  end
+
   def render_node(%{logic: op, negate: neg, children: children}, state) do
     {parts, state} = Enum.map_reduce(children, state, &render_node/2)
     joiner = if op == :and, do: " AND ", else: " OR "
@@ -820,11 +814,47 @@ defmodule Bier.QueryExecutor do
   end
 
   # Column expression qualified by the current relation alias, when present.
-  def qualified_column_expr(col, path, %State{alias_name: nil, relation: rel}),
-    do: column_expr(col, path, rel)
+  # A computed field (a function over the relation's composite type) is a
+  # first-class filter target in PostgREST, so it is rendered as the qualified
+  # call `<schema>.<fn>(<row>)` — the same expression the select list uses —
+  # instead of a column reference (case 10228).
+  def qualified_column_expr(col, path, %State{alias_name: al, relation: rel}) do
+    cond do
+      computed_field?(rel, col) ->
+        row = quote_ident(al || rel.name)
+        base = "#{quote_ident(rel.schema)}.#{quote_ident(col)}(#{row})"
+        column_expr_base(base, path, rel, col)
 
-  def qualified_column_expr(col, path, %State{alias_name: al, relation: rel}),
-    do: column_expr_aliased(col, path, al, rel)
+      al == nil ->
+        column_expr(col, path, rel)
+
+      true ->
+        column_expr_aliased(col, path, al, rel)
+    end
+  end
+
+  defp computed_field?(%Relation{computed_columns: computed}, col), do: col in computed
+  defp computed_field?(_rel, _col), do: false
+
+  @doc """
+  The Postgres **base** type of a request field — a column's declared type with
+  its DOMAIN chain resolved (`cfBaseType`), or a computed field's return type.
+  `nil` when the relation does not know the name.
+  """
+  def field_base_type(%Relation{} = rel, col) do
+    cond do
+      computed_field?(rel, col) ->
+        Map.get(rel.computed_column_types, col)
+
+      c = Enum.find(rel.columns, &(&1.name == col)) ->
+        Map.get(c, :base_type) || c.type
+
+      true ->
+        nil
+    end
+  end
+
+  def field_base_type(_rel, _col), do: nil
 
   # is.null / is.not_null / is.true / is.false / is.unknown
   defp operator_sql("is", col, f, state) do
@@ -921,7 +951,7 @@ defmodule Bier.QueryExecutor do
         lang -> "#{fn_name}(#{pg_literal(lang)}::regconfig, #{ph})"
       end
 
-    {"#{col} @@ #{query}", state}
+    {"#{fts_operand(col, f, state)} @@ #{query}", state}
   end
 
   # Array/range structural operators. Cast the bound param to the column type.
@@ -931,6 +961,29 @@ defmodule Bier.QueryExecutor do
   end
 
   defp operator_sql(_op, _col, _f, _state), do: throw({:bad_request, :unknown_operator})
+
+  # `fts` does not require a tsvector operand: PostgREST sets `cfToTsVector` on
+  # the field of every fts-family filter whose BASE type is not already
+  # `tsvector` and `pgFmtField` then emits `to_tsvector(<field>)` around it. The
+  # exemption keys on the base type, so a DOMAIN over tsvector (however deeply
+  # nested) and a computed field returning tsvector are both left alone (cases
+  # 10229/10230/10228), while text and jsonb columns are wrapped (10220/10221).
+  # A `(language)` modifier configures the coercion as well as the tsquery
+  # constructor — it is consumed twice (cases 10222/10223).
+  defp fts_operand(col_sql, f, state) do
+    if fts_base_type(f, state) == "tsvector" do
+      col_sql
+    else
+      case f.modifier do
+        nil -> "to_tsvector(#{col_sql})"
+        lang -> "to_tsvector(#{pg_literal(lang)}::regconfig, #{col_sql})"
+      end
+    end
+  end
+
+  # A json path yields text/jsonb, never tsvector, so it always coerces.
+  defp fts_base_type(%{json_path: [_ | _]}, _state), do: nil
+  defp fts_base_type(%{column: col}, %State{relation: rel}), do: field_base_type(rel, col)
 
   defp cmp("eq"), do: "="
   defp cmp("neq"), do: "<>"
@@ -1109,9 +1162,20 @@ defmodule Bier.QueryExecutor do
   defp json_base(base_col, nil, _col), do: base_col
 
   defp json_base(base_col, relation, col) do
-    case Enum.find(relation.columns, &(&1.name == col)) do
-      %{type: type} when type not in ["json", "jsonb"] -> "to_jsonb(#{base_col})"
-      _ -> base_col
+    type =
+      if computed_field?(relation, col) do
+        Map.get(relation.computed_column_types, col)
+      else
+        case Enum.find(relation.columns, &(&1.name == col)) do
+          %{type: type} -> type
+          nil -> nil
+        end
+      end
+
+    case type do
+      nil -> base_col
+      t when t in ["json", "jsonb"] -> base_col
+      _other -> "to_jsonb(#{base_col})"
     end
   end
 
@@ -1119,13 +1183,21 @@ defmodule Bier.QueryExecutor do
     if Regex.match?(~r/^-?\d+$/, key), do: key, else: pg_literal(key)
   end
 
+  # PostgREST's `pListVal` keeps every element it parses, blanks included, and
+  # only the *wholly* empty list — the single blank element `[""]` produced by
+  # `in.()` / `in.(   )` — collapses to `= ANY('{}')` (SqlFragment `In vals`).
+  # A blank beside real values therefore survives into the array literal and is
+  # rejected by the column type (`22P02`, case 10205 vs 10200-10204).
   defp parse_in_list(value) do
     value
     |> String.trim()
     |> strip_parens()
     |> split_csv()
     |> Enum.map(&unquote_value/1)
-    |> Enum.reject(&(&1 == ""))
+    |> case do
+      [""] -> []
+      list -> list
+    end
   end
 
   defp strip_parens("(" <> rest) do
