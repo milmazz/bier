@@ -120,11 +120,18 @@ defmodule Bier.Plugs.ActionController do
     end
   end
 
+  # The root resource produces `[openapi, json, */*]` and ANY non-empty
+  # intersection with the Accept list resolves it (`inspectPlan`, Plan.hs#L247-250):
+  # the requested type is only a gate — a non-intersecting Accept (text/csv) is
+  # the 406 of case 1653. The negotiated type is then DISCARDED for the
+  # generated document, whose response hard-codes `toContentType MTOpenAPI`
+  # (Response.hs#L208), so `Accept: application/json` still answers
+  # `application/openapi+json; charset=utf-8` (case 1651). db-root-spec is the
+  # exception: it makes the root a ResourceRoutine (ApiRequest.hs#L119-124), so
+  # the function's value is served under the ordinary negotiated type (case 1682).
   defp render_root(conn, config) do
     case Negotiation.resolve(conn, [:openapi, :json]) do
       {:ok, media} ->
-        conn = put_resp_header(conn, "content-type", MediaType.content_type(media))
-
         cond do
           # openapi-mode = disabled: the root metadata endpoint is off (PGRST126).
           config.openapi_mode == "disabled" ->
@@ -132,10 +139,17 @@ defmodule Bier.Plugs.ActionController do
 
           # db-root-spec: serve the named DB function's JSON verbatim.
           config.db_root_spec ->
-            root_spec_body(conn, config)
+            conn
+            |> put_resp_header("content-type", MediaType.content_type(media))
+            |> root_spec_body(config)
 
           true ->
-            generated_root_doc(conn, config)
+            conn
+            |> put_resp_header(
+              "content-type",
+              MediaType.content_type(MediaType.for_symbol(:openapi))
+            )
+            |> generated_root_doc(config)
         end
 
       {:error, _} = err ->
@@ -225,7 +239,7 @@ defmodule Bier.Plugs.ActionController do
         server_scheme: config.router[:scheme],
         server_host: config.server_host,
         server_port: config.router[:port],
-        docs_version: "v14"
+        docs_version: Bier.postgrest_docs_version()
       })
 
     # openapi_version: "3.0" serves an OpenAPI 3.0.3 translation of the same

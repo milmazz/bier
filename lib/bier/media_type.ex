@@ -19,6 +19,19 @@ defmodule Bier.MediaType do
   @type t :: %__MODULE__{symbol: atom(), mime: String.t(), params: map()}
 
   @doc """
+  The media type a producer emits for `symbol` — the same struct `negotiate/2`
+  yields for that type.
+
+  Used where the response's Content-Type is fixed by the *resource* instead of
+  being negotiated: the generated root document always renders
+  `toContentType MTOpenAPI` whatever the request asked for
+  (`Response.hs` `actionResponse (MaybeDbResult InspectPlan …)`).
+  """
+  @spec for_symbol(atom()) :: t()
+  def for_symbol(symbol) when is_atom(symbol),
+    do: %__MODULE__{symbol: symbol, mime: mime_for(symbol)}
+
+  @doc """
   Parse one media type token (no q-value handling) into a struct, or `nil` for
   an unrecognized custom/unknown token (still tracked so `*/*` can rescue it).
   """
@@ -199,7 +212,7 @@ defmodule Bier.MediaType do
   end
 
   # The default media type a producer emits for `*/*` is its first available.
-  defp default_for([first | _]), do: %__MODULE__{symbol: first, mime: mime_for(first)}
+  defp default_for([first | _]), do: for_symbol(first)
 
   defp mime_for(:json), do: "application/json"
   defp mime_for(:csv), do: "text/csv"

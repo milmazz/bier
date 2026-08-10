@@ -101,10 +101,16 @@ defmodule Bier.Mutation do
       if columns == [] do
         respond_empty_update(conn, pref)
       else
-        {set_sql, params} = set_clause(columns, row, relation, pref.missing)
+        {set_sql, body_sql, params} = set_clause(columns, row, relation, pref.missing)
         {where_sql, params} = where_clause(plan.filters, relation, params)
 
-        sql = "UPDATE #{qrel(relation)} SET #{set_sql}#{where_sql} RETURNING *"
+        # `RETURNING` must name the target explicitly: with a FROM item in play a
+        # bare `*` would also project `pgrst_body`'s columns into the CTE the
+        # representation query reads.
+        sql =
+          "UPDATE #{qrel(relation)} SET #{set_sql}#{body_sql}#{where_sql} " <>
+            "RETURNING #{qrel(relation)}.*"
+
         run(conn, write(config, relation, plan, media, pref, :update, 200), sql, params)
       end
     end
@@ -981,26 +987,55 @@ defmodule Bier.Mutation do
     |> Enum.map_join(", ", fn c -> "#{q(c)} = EXCLUDED.#{q(c)}" end)
   end
 
-  # SET col = <typed value> list for UPDATE; single-object body extracted from
-  # one bound jsonb parameter.
+  # The `SET` list and the `FROM` item feeding it, for UPDATE. The payload is
+  # bound as one jsonb parameter and decoded in a FROM subquery — the same
+  # `fromJsonBodyF` source the insert path uses (`QueryBuilder.hs#L152-L153`
+  # threads it into the update exactly as #L123 does into the insert) — so
+  # `SET` only ever copies an already-parsed column out of `pgrst_body`.
+  #
+  # The indirection is load-bearing, not cosmetic. Inlining the value
+  # expression into `SET` puts an IMMUTABLE parse function (a data
+  # representation's `json AS <domain>` cast) on constant arguments once the
+  # bound parameter is substituted, and the planner then FOLDS it — raising the
+  # parse error while planning, before the target rows are known. Reading the
+  # value from a set-returning `jsonb_array_elements` scan blocks that folding
+  # (an SRF is never constant-folded) and leaves the parse where PostgREST puts
+  # it: on the inner side of the join, evaluated only for rows that matched. A
+  # PATCH carrying an unparsable value that matches no row is therefore a 200,
+  # not a 400 (case 1835).
+  #
+  # `LIMIT 1` keeps the cross join single-rowed: PostgREST plans an update from
+  # a single object (`includeLimitOne`).
   defp set_clause(columns, row, relation, missing) do
     payload = Bier.json_library().encode!(row)
 
-    parts =
+    set =
+      Enum.map_join(columns, ", ", fn col -> "#{q(col)} = pgrst_body.#{q(col)}" end)
+
+    body =
       Enum.map_join(columns, ", ", fn col ->
-        "#{q(col)} = #{column_value_expr(col, relation, missing, "($1::text::jsonb)")}"
+        "#{column_value_expr(col, relation, missing, "_e")} AS #{q(col)}"
       end)
 
-    {parts, [payload]}
+    from =
+      " FROM (SELECT #{body} " <>
+        "FROM jsonb_array_elements(jsonb_build_array($1::text::jsonb)) AS _e LIMIT 1) pgrst_body"
+
+    {set, from, [payload]}
   end
 
   # WHERE built from the request's column filters, appended after `params`.
+  #
+  # Every reference is qualified with the target's own name — its implicit SQL
+  # alias — exactly as the read path renders filters (`pgFmtField`). On UPDATE
+  # that is what keeps a filter on a column the payload also writes
+  # (`?id=eq.1` with `{"id": …}`) unambiguous against the `pgrst_body` FROM item.
   defp where_clause([], _relation, params), do: {"", params}
 
   defp where_clause(filters, relation, params) do
     state = %QueryExecutor.State{
       relation: relation,
-      alias_name: nil,
+      alias_name: relation.name,
       params: Enum.reverse(params),
       count: length(params)
     }

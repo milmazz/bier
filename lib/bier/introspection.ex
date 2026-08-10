@@ -808,41 +808,59 @@ defmodule Bier.Introspection do
   # to the base column it projects (via `pg_rewrite`/`pg_depend`), then for every
   # base PK whose columns are all exposed by the view, emit the view's PK as the
   # mapped view column names.
+  #
+  # The mapping is TRANSITIVE, like upstream's recursive `key_dependencies`
+  # query: a view selecting from another view inherits the PK of whatever table
+  # ultimately backs it, however many views deep the chain runs. Only the
+  # OUTERMOST view is restricted to the exposed schemas — the chain may pass
+  # through views the instance does not expose.
   defp infer_view_primary_keys(conn, schemas) do
     sql = """
-    WITH view_cols AS (
+    WITH RECURSIVE view_col_deps AS (
       SELECT DISTINCT
-        sch.nspname  AS view_schema,
-        v.relname    AS view_name,
+        v.oid        AS view_oid,
+        vcol.attname AS view_column,
         src.oid      AS src_oid,
-        scol.attname AS src_column,
-        vcol.attname AS view_column
+        src.relkind  AS src_kind,
+        scol.attname AS src_column
       FROM pg_rewrite r
       JOIN pg_class v ON v.oid = r.ev_class AND v.relkind IN ('v','m')
-      JOIN pg_namespace sch ON sch.oid = v.relnamespace
       JOIN pg_depend d
         ON d.objid = r.oid
        AND d.classid = 'pg_rewrite'::regclass
        AND d.refclassid = 'pg_class'::regclass
        AND d.deptype = 'n'
-      JOIN pg_class src ON src.oid = d.refobjid AND src.relkind IN ('r','p')
+      JOIN pg_class src ON src.oid = d.refobjid AND src.relkind IN ('r','p','v','m')
       JOIN pg_attribute scol
         ON scol.attrelid = src.oid AND scol.attnum = d.refobjsubid AND scol.attnum > 0
       JOIN pg_attribute vcol
         ON vcol.attrelid = v.oid AND vcol.attname = scol.attname AND vcol.attnum > 0
-      WHERE sch.nspname = ANY($1)
+      WHERE src.oid <> v.oid
+    ),
+    base_cols AS (
+      SELECT view_oid, view_column, src_oid AS base_oid, src_column AS base_column
+      FROM view_col_deps
+      WHERE src_kind IN ('r','p')
+      UNION
+      SELECT d.view_oid, d.view_column, b.base_oid, b.base_column
+      FROM view_col_deps d
+      JOIN base_cols b ON b.view_oid = d.src_oid AND b.view_column = d.src_column
+      WHERE d.src_kind IN ('v','m')
     ),
     base_pk AS (
-      SELECT i.indrelid AS src_oid, a.attname AS pk_column, k.ord
+      SELECT i.indrelid AS base_oid, a.attname AS pk_column, k.ord
       FROM pg_index i
       JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
       JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum
       WHERE i.indisprimary
     )
-    SELECT vc.view_schema, vc.view_name, vc.view_column, bp.ord
-    FROM view_cols vc
-    JOIN base_pk bp ON bp.src_oid = vc.src_oid AND bp.pk_column = vc.src_column
-    ORDER BY vc.view_schema, vc.view_name, bp.ord
+    SELECT sch.nspname, v.relname, bc.view_column, bp.ord
+    FROM base_cols bc
+    JOIN pg_class v ON v.oid = bc.view_oid
+    JOIN pg_namespace sch ON sch.oid = v.relnamespace
+    JOIN base_pk bp ON bp.base_oid = bc.base_oid AND bp.pk_column = bc.base_column
+    WHERE sch.nspname = ANY($1)
+    ORDER BY sch.nspname, v.relname, bp.ord
     """
 
     %Postgrex.Result{rows: rows} = Postgrex.query!(conn, sql, [schemas])

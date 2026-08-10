@@ -6,13 +6,23 @@ defmodule Bier.Plugs.Observability do
 
     * **Server-Timing** (`server-timing-enabled`): when enabled, every response
       carries a `Server-Timing` header with the per-phase durations PostgREST
-      reports — `jwt`, `parse`, `plan`, `transaction`, `response` — each as
-      `<name>;dur=<ms>` with at least one decimal. The durations are *measured*:
-      each phase is timed at its real call site via `Bier.ServerTiming.measure/2`
-      and accumulated for the request; a phase that did no work for a given
-      request reports `0.0` (never a fabricated share of the total). `OPTIONS`
-      responses carry only the `jwt`, `parse`, `response` subset (no query plan /
-      DB transaction runs). When disabled the header is omitted entirely.
+      reports — `jwt`, `parse`, `plan`, `transaction`, `response` — joined by
+      `", "` in that fixed order, each rendered `<name>;dur=<ms>` with EXACTLY
+      one fractional digit (`showFFloat (Just 1)`, `Performance.hs`). The
+      durations are *measured*: each phase is timed at its real call site via
+      `Bier.ServerTiming.measure/2` and accumulated for the request; a phase
+      that did no work for a given request reports `0.0` (never a fabricated
+      share of the total). The metric set does not depend on the action —
+      `withTiming` branches only on the config key (`App.hs`), so an `OPTIONS`
+      response reports `plan` and `transaction` too, both `0.0` (it builds no
+      plan and opens no transaction). When disabled the header is omitted
+      entirely.
+
+    * **Server version header**: every response carries
+      `Server: postgrest/<version>`. PostgREST sets it once as a Warp server
+      setting (`setServerName`, `App.hs`), so it is unconditional — no config
+      key gates it and it rides on every response whatever the method, status or
+      content type, error responses included.
 
     * **Trace header passthrough** (`server-trace-header`): when configured with
       a header name (e.g. `X-Request-Id`), the incoming value of that header is
@@ -45,6 +55,9 @@ defmodule Bier.Plugs.Observability do
   alias Bier.Registry
   alias Bier.RequestLog
 
+  # The metric set and its wire order (`Performance.hs` `serverTimingHeader`).
+  @phases [:jwt, :parse, :plan, :transaction, :response]
+
   @impl Plug
   def init(opts), do: opts
 
@@ -70,6 +83,7 @@ defmodule Bier.Plugs.Observability do
 
     conn
     |> echo_trace_header(config)
+    |> register_before_send(&put_server_header/1)
     |> register_before_send(&put_server_timing(&1, config))
     |> register_before_send(&emit_request_stop(&1, name, request_start))
     |> register_before_send(&log_request(&1, config))
@@ -144,35 +158,39 @@ defmodule Bier.Plugs.Observability do
 
   defp echo_trace_header(conn, _config), do: conn
 
+  # ---- Server ---------------------------------------------------------------
+
+  # A server-level setting upstream, not a per-response header: it is written
+  # here from a before_send callback so it also reaches the responses the error
+  # funnel builds (`Bier.Plugs.FallbackController`), which bypass the ordinary
+  # rendering path. The version is the PostgREST release Bier is conformant
+  # with (`Bier.postgrest_version/0`), the same string `info.version` reports.
+  defp put_server_header(conn) do
+    put_resp_header(conn, "server", "postgrest/" <> Bier.postgrest_version())
+  end
+
   # ---- Server-Timing -------------------------------------------------------
 
   defp put_server_timing(conn, %{server_timing_enabled: true} = _config) do
-    value = timing_value(conn.method, Bier.ServerTiming.snapshot())
-    put_resp_header(conn, "server-timing", value)
+    put_resp_header(conn, "server-timing", timing_value(Bier.ServerTiming.snapshot()))
   end
 
   defp put_server_timing(conn, _config), do: conn
 
-  # OPTIONS does no query planning or DB transaction, so it reports only the
-  # jwt/parse/response subset (mirrors PostgREST's ServerTimingSpec); `plan` and
-  # `transaction` are omitted entirely (not rendered as the substring at all).
-  defp timing_value("OPTIONS", phases), do: join(phases, [:jwt, :parse, :response])
-
-  # Every other method reports the full phase set, in PostgREST's fixed order.
-  # Each value is the measured duration of that phase for this request; a phase
-  # that ran no work reports 0.0.
-  defp timing_value(_method, phases),
-    do: join(phases, [:jwt, :parse, :plan, :transaction, :response])
-
-  defp join(phases, names) do
-    Enum.map_join(names, ", ", fn name ->
+  # `serverTimingHeader` joins the five metrics with the two-byte separator
+  # ", " in this fixed order, whatever the action (`Performance.hs`). Each value
+  # is the measured duration of that phase for this request; a phase that ran no
+  # work reports 0.0 — an OPTIONS response builds no plan and opens no
+  # transaction, and still renders both metrics.
+  defp timing_value(phases) do
+    Enum.map_join(@phases, ", ", fn name ->
       "#{name};dur=#{format(Map.get(phases, name, 0.0))}"
     end)
   end
 
-  # Render with at least one decimal digit so it always matches
-  # `dur=[0-9]+\.[0-9]+` (PostgREST emits a fractional millisecond value).
+  # `showFFloat (Just 1)`: exactly one fractional digit, never more
+  # (`Performance.hs`). The value is milliseconds.
   defp format(ms) do
-    :erlang.float_to_binary(ms * 1.0, decimals: 3)
+    :erlang.float_to_binary(ms * 1.0, decimals: 1)
   end
 end
