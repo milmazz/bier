@@ -347,11 +347,12 @@ representations. PostgREST is the ground truth — each case cites the exact
 upstream source line.
 
 759 of the 762 cases are active (the 3 `status_text` cases are `:pending` and
-excluded). The suite was re-synced from v14.12 to v16.0 as a spec-only pass, so
-the target currently sits ahead of the implementation: 100 cases fail, spread
-over all 17 areas. The largest clusters are the v16 behavior changes to
-`jwt-role-claim-key`, `Prefer: timezone`, embed target names and `db-schemas`
-validation, each tracked as a GitHub issue and worked down one area at a time.
+excluded), and **all 759 pass**. The suite was re-synced from v14.12 to v16.0 as
+a spec-only pass, which put the target 100 failures ahead of the
+implementation; those were worked down one area at a time, closing the v16
+behavior changes to `jwt-role-claim-key` (RFC 9535 JSON Path), `Prefer:
+timezone`, embed target names / `url-use-legacy-target-names`, and `db-schemas`
+startup validation.
 The `spec/` tree (behavior models + `COVERAGE.md`) and
 `docs/CONFORMANCE_IMPL.md` document the model and the build. Known feature gaps
 are tracked as GitHub issues (observability/telemetry, admin/health endpoints, …).

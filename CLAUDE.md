@@ -8,7 +8,7 @@ Bier is an alpha Elixir library that serves a RESTful API generated on-the-fly f
 
 The pipeline is real, not stubbed: `Bier.Introspection` queries `pg_catalog`; `Bier.Plugs.ActionController` resolves the target and runs the read/mutation/RPC path; `Bier.QueryParser` (a generated, dependency-free parser) and `Bier.QueryExecutor` build and run one parameterized JSON query; `Bier.Auth` does HS256 JWT verification + role/GUC setup. Development is driven by a frozen conformance suite derived from PostgREST v16.0 (see `docs/CONFORMANCE_IMPL.md` and `spec/`). Known feature gaps (observability/telemetry, admin/health endpoints, asymmetric JWT) are tracked as GitHub issues.
 
-`spec/` was re-synced from v14.12 to v16.0 in one spec-only pass, which moved the target ahead of `lib/`: **the suite is not green** — 100 of the 759 active cases fail, spread over all 17 areas. The largest clusters are tracked as GitHub issues (#93 `jwt-role-claim-key` → RFC 9535 JSON Path, #94 `Prefer: timezone`, #95 embed target names + `url-use-legacy-target-names`, #96 `db-schemas` startup validation). Work the failures down one area at a time with the `bier-conformance` skill.
+`spec/` was re-synced from v14.12 to v16.0 in one spec-only pass, which moved the target ahead of `lib/` by 100 failures; `lib/` has since caught up and **all 17 areas are green** — 759 active cases pass (the 3 `status_text` cases are `:pending`, #42). The v16 behavior changes that drove the gap are closed: #93 (`jwt-role-claim-key` → RFC 9535 JSON Path), #94 (`Prefer: timezone`), #95 (embed target names + `url-use-legacy-target-names`) and #96 (`db-schemas` startup validation). When failures reappear, work them down one area at a time with the `bier-conformance` skill.
 
 ## Toolchain
 
