@@ -880,9 +880,7 @@ defmodule Bier.QueryExecutor do
   def qualified_column_expr(col, path, %State{alias_name: al, relation: rel}) do
     cond do
       computed_field?(rel, col) ->
-        row = quote_ident(al || rel.name)
-        base = "#{quote_ident(rel.schema)}.#{quote_ident(col)}(#{row})"
-        column_expr_base(base, path, rel, col)
+        column_expr_base(computed_field_call(rel, col, al || rel.name), path, rel, col)
 
       al == nil ->
         column_expr(col, path, rel)
@@ -894,6 +892,32 @@ defmodule Bier.QueryExecutor do
 
   defp computed_field?(%Relation{computed_columns: computed}, col), do: col in computed
   defp computed_field?(_rel, _col), do: false
+
+  @doc """
+  Renders the call to computed field `col` over the row identified by `row`.
+
+  Qualified with the schema the **function** lives in, which is not necessarily
+  `rel.schema` — PostgREST only requires the function to be in an exposed schema
+  or on the extra search path, so a computed field may extend a relation in a
+  different schema. Qualifying with the relation's schema instead calls the
+  wrong function, or none (#100).
+
+  This is the single renderer for all three call sites (filter targets here,
+  select list and ORDER BY in `Bier.Embed`) so they cannot drift apart.
+
+  PostgREST renders this *unqualified* — `"alias"."fn"`, resolved by Postgres
+  functional notation (`tbl.f` is `f(tbl)`) plus `search_path` — and once
+  `db_extra_search_path` is actually applied (#105) matching it becomes
+  possible. Deliberately not done: `search_path` is order-dependent, so
+  same-named fields in different schemas would resolve by position and shift
+  with config. That is the context-inference #100 was about, and the explicit
+  form gives identical results. See #106 before changing this.
+  """
+  @spec computed_field_call(Relation.t(), String.t(), String.t()) :: String.t()
+  def computed_field_call(%Relation{} = rel, col, row) do
+    fn_schema = Map.get(rel.computed_column_schemas, col, rel.schema)
+    "#{quote_ident(fn_schema)}.#{quote_ident(col)}(#{quote_ident(row)})"
+  end
 
   @doc """
   The Postgres **base** type of a request field — a column's declared type with
