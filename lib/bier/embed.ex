@@ -240,7 +240,7 @@ defmodule Bier.Embed do
   defp field_expr(%{column: col} = f, relation, al) do
     base =
       if col in relation.computed_columns do
-        "#{QE.quote_ident(relation.schema)}.#{QE.quote_ident(col)}(#{QE.quote_ident(al)})"
+        QE.computed_field_call(relation, col, al)
       else
         QE.column_expr_aliased(col, f.json_path, al, relation)
       end
@@ -683,7 +683,7 @@ defmodule Bier.Embed do
   defp build_order_term(%{column: col} = term, _select, relation, al, state, qe) do
     expr =
       if col in relation.computed_columns do
-        "#{QE.quote_ident(relation.schema)}.#{QE.quote_ident(col)}(#{QE.quote_ident(al)})"
+        QE.computed_field_call(relation, col, al)
       else
         qe.column_expr_aliased(col, term.json_path, al, relation)
       end
@@ -890,7 +890,9 @@ defmodule Bier.Embed do
         cardinality: if(kind == :one, do: "many-to-one", else: "one-to-many"),
         join_cond: :computed,
         via: nil,
-        computed: {source.schema, cr.name},
+        # The function's own schema, not the source relation's — the two need
+        # not agree (#100).
+        computed: {cr.fn_schema, cr.name},
         embed_key: target_name,
         constraint: cr.name,
         hint_names: [cr.name],

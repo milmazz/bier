@@ -71,6 +71,16 @@ defmodule Bier.Introspection do
     """
     @type methods :: [:get | :post | :patch | :delete] | nil
 
+    @typedoc """
+    Maps each computed field name to the schema its *function* lives in.
+
+    That schema is not necessarily the relation's own: PostgREST only requires a
+    computed field's function to sit in an exposed schema or on the extra search
+    path, so `test.foo(other.bar)` is legal. Every call site qualifies the call
+    with this schema rather than `schema` (see #100).
+    """
+    @type computed_schemas :: %{optional(String.t()) => String.t()}
+
     @type t :: %__MODULE__{
             schema: String.t(),
             name: String.t(),
@@ -80,6 +90,7 @@ defmodule Bier.Introspection do
             foreign_keys: [foreign_key()],
             computed_columns: [String.t()],
             computed_column_types: %{optional(String.t()) => String.t()},
+            computed_column_schemas: computed_schemas(),
             computed_relations: [map()],
             comment: String.t() | nil,
             methods: methods()
@@ -93,6 +104,7 @@ defmodule Bier.Introspection do
               foreign_keys: [],
               computed_columns: [],
               computed_column_types: %{},
+              computed_column_schemas: %{},
               computed_relations: [],
               comment: nil,
               methods: nil
@@ -163,6 +175,7 @@ defmodule Bier.Introspection do
       comp_col_defs = Map.get(comp_cols_by_rel, {schema, name}, [])
       comp_cols = Enum.map(comp_col_defs, & &1.name)
       comp_col_types = Map.new(comp_col_defs, &{&1.name, &1.base_type})
+      comp_col_schemas = Map.new(comp_col_defs, &{&1.name, &1.fn_schema})
 
       comp_rels =
         comp_rels_by_rel
@@ -170,6 +183,7 @@ defmodule Bier.Introspection do
         |> Enum.map(fn r ->
           %{
             name: r.name,
+            fn_schema: r.fn_schema,
             ref_schema: r.ref_schema,
             ref_relation: r.ref_relation,
             rows: r.rows
@@ -186,6 +200,7 @@ defmodule Bier.Introspection do
          foreign_keys: fks,
          computed_columns: comp_cols,
          computed_column_types: comp_col_types,
+         computed_column_schemas: comp_col_schemas,
          computed_relations: comp_rels,
          comment: rel_comment
        }}
@@ -887,13 +902,25 @@ defmodule Bier.Introspection do
   #   * returns a scalar (non-set, non-composite) => computed column
   #   * returns SETOF <other relation> => computed relationship (ROWS estimate
   #     decides cardinality: ROWS 1 => many-to-one single object).
+  #
+  # A computed member has TWO schema identities and they need not agree: the
+  # schema the FUNCTION lives in (`pronamespace`) and the schema of the
+  # RELATION it extends (the first argument's `relnamespace`). PostgREST keys
+  # the member by the relation and carries the function's schema separately
+  # (`allComputedRels` selects `rel_table_schema` from the argument type and
+  # the function's own namespace as `relFunction`), because the docs allow the
+  # function to sit anywhere exposed or on the extra search path. Keying by the
+  # function's schema instead would drop the member (no same-named relation in
+  # that schema) or bind it to the wrong relation (#100), so `schema`/`relation`
+  # below describe the argument relation and `fn_schema` the function.
   defp query_computed(conn, schemas) do
     sql =
       @base_types_cte <>
         """
         SELECT
-          pn.nspname    AS schema,
+          arg_n.nspname AS schema,
           arg_rel.relname AS relation,
+          pn.nspname    AS fn_schema,
           p.proname     AS name,
           p.proretset   AS retset,
           ret_n.nspname AS ret_schema,
@@ -927,7 +954,18 @@ defmodule Bier.Introspection do
 
     {cols, rels} =
       Enum.reduce(rows, {[], []}, fn
-        [schema, relation, name, retset, ret_schema, ret_relation, nrows, ret_typtype, ret_base],
+        [
+          schema,
+          relation,
+          fn_schema,
+          name,
+          retset,
+          ret_schema,
+          ret_relation,
+          nrows,
+          ret_typtype,
+          ret_base
+        ],
         {cols, rels} ->
           cond do
             # SETOF composite that maps to a real relation => computed relationship
@@ -937,6 +975,7 @@ defmodule Bier.Introspection do
                  %{
                    schema: schema,
                    relation: relation,
+                   fn_schema: fn_schema,
                    name: name,
                    ref_schema: ret_schema,
                    ref_relation: ret_relation,
@@ -948,7 +987,13 @@ defmodule Bier.Introspection do
             # scalar, non-set => computed column
             not retset and ret_typtype != "c" ->
               {[
-                 %{schema: schema, relation: relation, name: name, base_type: ret_base}
+                 %{
+                   schema: schema,
+                   relation: relation,
+                   fn_schema: fn_schema,
+                   name: name,
+                   base_type: ret_base
+                 }
                  | cols
                ], rels}
 
