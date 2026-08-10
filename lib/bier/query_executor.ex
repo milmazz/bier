@@ -1073,10 +1073,15 @@ defmodule Bier.QueryExecutor do
   defp array_of(type) when is_binary(type), do: type <> "[]"
   defp array_of(_), do: "text[]"
 
-  def column_expr(col, path, relation \\ nil),
+  # `relation` is mandatory on purpose: it is what decides whether a json path
+  # addresses the column directly or through `to_jsonb/1` (PostgREST's
+  # `cfToJson`). A default would let a new call site silently fall back to the
+  # pre-v16 behavior of never converting; omitting it is a compile error
+  # instead. Pass nil explicitly when the relation genuinely is not known.
+  def column_expr(col, path, relation),
     do: column_expr_base(quote_ident(col), path, relation, col)
 
-  def column_expr_aliased(col, path, al, relation \\ nil),
+  def column_expr_aliased(col, path, al, relation),
     do: column_expr_base("#{quote_ident(al)}.#{quote_ident(col)}", path, relation, col)
 
   defp column_expr_base(base_col, [], _relation, _col), do: base_col
