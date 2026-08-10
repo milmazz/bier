@@ -904,6 +904,14 @@ defmodule Bier.QueryExecutor do
 
   This is the single renderer for all three call sites (filter targets here,
   select list and ORDER BY in `Bier.Embed`) so they cannot drift apart.
+
+  PostgREST renders this *unqualified* — `"alias"."fn"`, resolved by Postgres
+  functional notation (`tbl.f` is `f(tbl)`) plus `search_path` — and once
+  `db_extra_search_path` is actually applied (#105) matching it becomes
+  possible. Deliberately not done: `search_path` is order-dependent, so
+  same-named fields in different schemas would resolve by position and shift
+  with config. That is the context-inference #100 was about, and the explicit
+  form gives identical results. See #106 before changing this.
   """
   @spec computed_field_call(Relation.t(), String.t(), String.t()) :: String.t()
   def computed_field_call(%Relation{} = rel, col, row) do
