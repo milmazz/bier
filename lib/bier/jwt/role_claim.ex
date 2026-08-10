@@ -29,12 +29,27 @@ defmodule Bier.JWT.RoleClaim do
     * bracketed filter selectors holding one comparison (`[?(@ == "x")]`, also
       `<`/`<=`/`>`/`>=`/`!=`) or one `search()` test
       (`[?search(@, "^pg_")]`), with the comparables being a literal or a
-      singular query rooted at `@` or `$`.
+      singular query rooted at `@` or `$`;
+    * RFC 9535 whitespace (`S`) wherever the grammar allows it, including
+      before each segment — `$ .a` and `$.a [0]` are legal queries.
 
   Deliberately **not** modelled (they parse upstream but are rejected here, and
-  no PostgREST fixture or documented role-claim value uses them): descendant
-  segments (`..`), wildcards (`*`), array slices, comma-separated multi
-  selectors, and the `&&`/`||`/`!` logical combinators.
+  no PostgREST fixture or documented role-claim value uses them):
+
+  | Construct | Example |
+  |---|---|
+  | descendant segment | `$..role` |
+  | wildcard selector | `$.roles[*]`, `$.*` |
+  | array slice | `$.roles[0:2]` |
+  | multi-selector | `$.roles[0,1]` |
+  | logical combinator | `$.roles[?@ == "a" \\|\\| @ == "b"]`, `&&`, `!` |
+
+  These are rejected with their own message — `unsupported role-claim-key
+  construct (<name>) in (<value>)` — rather than the "failed to parse" message a
+  *malformed* value gets (which conformance case 1711 pins byte for byte). A
+  config PostgREST boots with can still make Bier unbootable (#99), but the
+  operator learns the construct is unimplemented instead of being told their
+  syntax is wrong.
 
   `dump/1` renders the canonical RFC 9535 text the way `aeson-jsonpath`'s
   `dumpQuery` does (bracketed names and string literals in single quotes,
@@ -108,9 +123,24 @@ defmodule Bier.JWT.RoleClaim do
   @index ~r/^-?[0-9]+/
   @number ~r/^-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?/
 
+  # The names the error message uses for the RFC 9535 constructs outside the
+  # supported subset. Reaching one throws, so the parser's `:error` return keeps
+  # meaning "malformed" and only the top level has to tell the two apart.
+  @unsupported %{
+    descendant: "descendant segment",
+    wildcard: "wildcard selector",
+    slice: "array slice",
+    multi: "multi-selector",
+    logical: "logical combinator"
+  }
+
   @doc """
   Parse a `jwt-role-claim-key` JSON Path. Returns `{:ok, path}` or
-  `{:error, message}` with PostgREST's pinned message (case 1711).
+  `{:error, message}`.
+
+  A *malformed* value gets PostgREST's pinned message (case 1711). A value that
+  is well-formed RFC 9535 but uses a construct outside Bier's subset gets a
+  distinct message naming the construct — see the moduledoc and #99.
   """
   @spec parse(String.t()) :: {:ok, path()} | {:error, String.t()}
   def parse("$" <> rest = input) do
@@ -118,23 +148,41 @@ defmodule Bier.JWT.RoleClaim do
       {:ok, path} -> {:ok, path}
       :error -> parse_error(input)
     end
+  catch
+    {:unsupported, construct} -> unsupported_error(input, construct)
   end
 
   def parse(input) when is_binary(input), do: parse_error(input)
 
   defp parse_error(input), do: {:error, "failed to parse role-claim-key value (#{input})"}
 
-  defp segments("", acc), do: {:ok, Enum.reverse(acc)}
+  defp unsupported_error(input, construct) do
+    {:error,
+     "unsupported role-claim-key construct (#{@unsupported[construct]}) in (#{input}): " <>
+       "Bier implements a subset of RFC 9535 JSON Path — see the Bier.JWT.RoleClaim " <>
+       "documentation for the selectors it supports"}
+  end
 
-  defp segments(rest, acc) do
-    case segment(rest) do
-      {:ok, seg, rest} -> segments(rest, [seg | acc])
-      :error -> :error
+  # `segments = *(S segment)`: whitespace may precede every segment, not just
+  # the ones inside a singular query (#102).
+  defp segments(input, acc) do
+    case skip_ws(input) do
+      "" ->
+        {:ok, Enum.reverse(acc)}
+
+      rest ->
+        case segment(rest) do
+          {:ok, seg, rest} -> segments(rest, [seg | acc])
+          :error -> :error
+        end
     end
   end
 
-  # Descendant segments (`..name`) are outside the supported subset.
-  defp segment(".." <> _rest), do: :error
+  # Descendant segments (`..name`, `..*`) and the dotted wildcard (`.*`) are
+  # outside the supported subset. The `..` clause leads so `$..*` is reported as
+  # the descendant it is.
+  defp segment(".." <> _rest), do: throw({:unsupported, :descendant})
+  defp segment(".*" <> _rest), do: throw({:unsupported, :wildcard})
   defp segment("." <> rest), do: dotted_name(rest)
   defp segment("[" <> rest), do: bracketed(rest)
   defp segment(_other), do: :error
@@ -148,22 +196,45 @@ defmodule Bier.JWT.RoleClaim do
 
   defp bracketed(input) do
     with {:ok, selector, rest} <- selector(skip_ws(input)),
-         "]" <> rest <- skip_ws(rest) do
+         "]" <> rest <- comma_check(skip_ws(rest)) do
       {:ok, selector, rest}
     else
       _other -> :error
     end
   end
 
+  # A selector followed by `,` is an RFC 9535 multi-selector (`[0,1]`,
+  # `['a','b']`), not a syntax error.
+  defp comma_check("," <> _rest), do: throw({:unsupported, :multi})
+  defp comma_check(rest), do: rest
+
+  defp selector("*" <> _rest), do: throw({:unsupported, :wildcard})
+
   defp selector("?" <> rest) do
-    with {:ok, expr, rest} <- logical(skip_ws(rest)), do: {:ok, {:filter, expr}, rest}
+    with {:ok, expr, rest} <- logical_expr(skip_ws(rest)), do: {:ok, {:filter, expr}, rest}
   end
 
   defp selector(<<quote_char, _rest::binary>> = input) when quote_char in [?', ?"] do
     with {:ok, name, rest} <- quoted(input), do: {:ok, {:name, :bracket, name}, rest}
   end
 
-  defp selector(input), do: index(input)
+  # The index clause doubles as the slice detector: a `:` in place of, or right
+  # after, the index is `[start:end:step]`, well-formed RFC 9535 that Bier does
+  # not model.
+  defp selector(input) do
+    case index(input) do
+      {:ok, seg, rest} ->
+        {:ok, seg, slice_check(skip_ws(rest))}
+
+      :error ->
+        # `[:2]` / `[::2]` have no index to consume first.
+        _ = slice_check(input)
+        :error
+    end
+  end
+
+  defp slice_check(":" <> _rest), do: throw({:unsupported, :slice})
+  defp slice_check(rest), do: rest
 
   defp index(input) do
     case Regex.run(@index, input) do
@@ -172,10 +243,31 @@ defmodule Bier.JWT.RoleClaim do
     end
   end
 
-  # aeson-jsonpath's pBasicExpr order: parenthesized group, then comparison,
-  # then a bare test expression (here only `search()`).
+  # One expression, then the guard that says a `&&`/`||` follows it: those are
+  # well-formed RFC 9535 that Bier does not model, so they get named rather than
+  # surfacing as a syntax error. Used everywhere a logical expression is read,
+  # so `[?(@ == 1) && (@ == 2)]` and `[?((@ == 1) && (@ == 2))]` both report it.
+  defp logical_expr(input) do
+    case logical(input) do
+      {:ok, _expr, rest} = ok ->
+        _ = combinator_check(skip_ws(rest))
+        ok
+
+      :error ->
+        :error
+    end
+  end
+
+  defp combinator_check("&&" <> _rest), do: throw({:unsupported, :logical})
+  defp combinator_check("||" <> _rest), do: throw({:unsupported, :logical})
+  defp combinator_check(rest), do: rest
+
+  # aeson-jsonpath's pBasicExpr order: negation, parenthesized group, then
+  # comparison, then a bare test expression (here only `search()`).
+  defp logical("!" <> _rest), do: throw({:unsupported, :logical})
+
   defp logical("(" <> rest) do
-    with {:ok, expr, rest} <- logical(skip_ws(rest)),
+    with {:ok, expr, rest} <- logical_expr(skip_ws(rest)),
          ")" <> rest <- skip_ws(rest) do
       {:ok, {:paren, expr}, rest}
     else
