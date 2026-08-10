@@ -63,7 +63,7 @@ defmodule Bier.ConformanceServer do
   # served by the generic `translate/1` clause — no variant_extra_opts/1 needed.
   @variant_case_ids [1139, 1467, 1468, 1469, 1470, 1471, 1472, 1473] ++
                       [1491, 1493, 1498, 1499, 1654, 1677, 1678, 1680, 1682, 1703, 1742] ++
-                      [1758, 1763, 1764] ++
+                      [1495, 1758, 1763, 1764] ++
                       [11800, 11802, 11803, 11804, 11805, 11807, 11818]
 
   def url_for(%Bier.ConformanceCase{id: id}) when id in @variant_case_ids,
@@ -147,6 +147,13 @@ defmodule Bier.ConformanceServer do
   end
 
   defp resolve("asymmetric_jwk_public_key"), do: @asymmetric_jwk_public_key
+
+  # Case 1495 configures the same key as a JWK *Set* (`testCfgAsymJWKSet`
+  # upstream) rather than a bare JWK, exercising the `{"keys": [...]}` wrapper.
+  # Derived from the constant above so there is only one copy of the key.
+  defp resolve("asymmetric_jwks_public_key"),
+    do: ~s({"keys":[) <> @asymmetric_jwk_public_key <> "]}"
+
   defp resolve(value), do: value
 
   @doc """
