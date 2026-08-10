@@ -10,8 +10,8 @@ before writing code. It encodes findings that are expensive to re-derive.
 
 > **Pinned version: v16.0.** `spec/` was re-synced from v14.12 to v16.0 in one
 > spec-only pass (532 → 762 cases, every `source:` re-pinned), which moved the
-> target ahead of `lib/`. The suite is not green: expect failures concentrated in
-> `config`, `auth`, `headers` and `select`, tracked as GitHub issues #93–#96.
+> target ahead of `lib/` by 100 failures. `lib/` has since caught up: the suite
+> is green, all 17 areas at zero, and issues #93–#96 are closed.
 > Re-syncing `spec/` itself is done only via the `bier-spec` / `bier-spec-audit`
 > workflows; implementation work never edits it.
 
