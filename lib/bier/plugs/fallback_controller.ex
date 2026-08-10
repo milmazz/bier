@@ -270,6 +270,36 @@ defmodule Bier.Plugs.FallbackController do
     jwt_error(conn, "PGRST301", "Expected 3 parts in JWT; got #{n}")
   end
 
+  # The three decode-stage failures PostgREST re-labels from jose (Auth/Jwt.hs
+  # `jwtDecodeError`). All are 401 PGRST301 and are told apart by `details`:
+  # `BadCrypto` carries none, `BadAlgorithm`/`KeyError` carry jose's message.
+
+  # jose `BadCrypto`: the compact token could not be parsed at all.
+  def call(conn, {:error, {:jwt, :bad_crypto}}) do
+    jwt_error(conn, "PGRST301", "JWT cryptographic operation failed")
+  end
+
+  # jose `BadAlgorithm`: an unsecured (`alg: none`) token.
+  def call(conn, {:error, {:jwt, {:bad_algorithm, details}}}) do
+    jwt_error(conn, "PGRST301", "Wrong or unsupported encoding algorithm", details)
+  end
+
+  # jose `KeyError`: the token parsed, but no configured key verified it — a
+  # wrong secret, a wrong key type, or an `alg` the key cannot decode.
+  def call(conn, {:error, {:jwt, :jwt_invalid}}) do
+    jwt_error(
+      conn,
+      "PGRST301",
+      "No suitable key or wrong key type",
+      "None of the keys was able to decode the JWT"
+    )
+  end
+
+  # A verified token whose payload is not a JSON object -> 401 PGRST303.
+  def call(conn, {:error, {:jwt, :claims_parse_failed}}) do
+    jwt_error(conn, "PGRST303", "Parsing claims failed")
+  end
+
   # Expired token -> 401 PGRST303.
   def call(conn, {:error, {:jwt, :expired}}) do
     jwt_error(conn, "PGRST303", "JWT expired")
@@ -300,9 +330,10 @@ defmodule Bier.Plugs.FallbackController do
     jwt_error(conn, "PGRST303", "JWT not in audience")
   end
 
-  # Any other JWT failure (bad signature/json/claims/audience) -> 401 PGRST301.
+  # Any JWT failure the clauses above don't name -> 401 PGRST301, PostgREST's
+  # `UnreachableDecodeError` rendering.
   def call(conn, {:error, {:jwt, _reason}}) do
-    jwt_error(conn, "PGRST301", "JWSError JWSInvalidSignature")
+    jwt_error(conn, "PGRST301", "JWT couldn't be decoded")
   end
 
   # A 42501 (or EXECUTE-denied) under the anonymous role surfaces as 401 with
@@ -523,14 +554,16 @@ defmodule Bier.Plugs.FallbackController do
     do: "Only the following schemas are exposed: " <> Enum.join(schemas, ", ")
 
   # PGRST301/PGRST303 carry a `WWW-Authenticate: Bearer error="invalid_token",
-  # error_description="<message>"` header (PostgREST Auth error rendering).
-  defp jwt_error(conn, code, message) do
+  # error_description="<message>"` header (PostgREST Auth error rendering). The
+  # `error_description` is the message alone — `details`, when a decode error
+  # carries one, appears only in the body.
+  defp jwt_error(conn, code, message, details \\ nil) do
     www = ~s(Bearer error="invalid_token", error_description="#{message}")
 
     error(
       conn,
       401,
-      %{code: code, message: message, details: nil, hint: nil},
+      %{code: code, message: message, details: details, hint: nil},
       headers: [{"WWW-Authenticate", www}]
     )
   end
