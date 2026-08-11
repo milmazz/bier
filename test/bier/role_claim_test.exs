@@ -95,20 +95,54 @@ defmodule Bier.RoleClaimTest do
       end
     end
 
-    test "the unmodelled RFC 9535 constructs are hard rejects (see #99)" do
+    test "the unmodelled RFC 9535 constructs are rejected, but as UNSUPPORTED (#99)" do
       # Descendant segments, wildcards, slices, comma multi-selectors and the
       # logical combinators parse upstream but are outside Bier's hand-written
-      # subset, and a rejection aborts startup rather than degrading.
-      for bad <- [
-            ~S|$..role|,
-            ~S|$.roles[*]|,
-            ~S|$.roles[0:2]|,
-            ~S|$.roles[0,1]|,
-            ~S{$.roles[?(@ == "a" || @ == "b")]}
+      # subset, and a rejection aborts startup rather than degrading. They are
+      # well-formed RFC 9535, so the message names the construct instead of
+      # claiming the operator's syntax is wrong — and it must NOT reuse the
+      # malformed wording case 1711 pins.
+      for {bad, construct} <- [
+            {~S|$..role|, "descendant segment"},
+            {~S|$..*|, "descendant segment"},
+            {~S|$.roles[*]|, "wildcard selector"},
+            {~S|$.*|, "wildcard selector"},
+            {~S|$.roles[0:2]|, "array slice"},
+            {~S|$.roles[:2]|, "array slice"},
+            {~S|$.roles[0,1]|, "multi-selector"},
+            {~S{$.roles[?(@ == "a") && (@ == "b")]}, "logical combinator"},
+            {~S{$.roles[?@ == "a" || @ == "b"]}, "logical combinator"},
+            {~S{$.roles[?!(@ == "a")]}, "logical combinator"}
           ] do
-        assert {:error, "failed to parse role-claim-key value (" <> _} = RoleClaim.parse(bad),
-               "expected rejection of #{inspect(bad)}"
+        assert {:error, message} = RoleClaim.parse(bad), "expected rejection of #{inspect(bad)}"
+
+        assert message =~ "unsupported role-claim-key construct (#{construct})",
+               "wrong construct named for #{inspect(bad)}: #{message}"
+
+        assert message =~ bad
+        refute message =~ "failed to parse role-claim-key value"
       end
+    end
+
+    test "a genuinely malformed value keeps case 1711's message verbatim" do
+      assert {:error, "failed to parse role-claim-key value (.role.other)"} =
+               RoleClaim.parse(".role.other")
+    end
+  end
+
+  describe "parse/1 skips RFC 9535 whitespace between segments (#102)" do
+    # `segments = *(S segment)`, so `$ .a` and `$.a [0]` are legal queries that
+    # aeson-jsonpath accepts; only `segments/2` was missing the `S` skip that
+    # `singular_segments/3` already had.
+    test "whitespace before and between segments" do
+      assert {:ok, [{:name, :dot, "a"}]} = RoleClaim.parse(~S|$ .a|)
+      assert {:ok, [{:name, :dot, "a"}, {:index, 0}]} = RoleClaim.parse(~S|$.a [0]|)
+      assert {:ok, [{:name, :dot, "a"}, {:name, :dot, "b"}]} = RoleClaim.parse("$.a\t.b")
+      assert {:ok, [{:name, :dot, "role"}]} = RoleClaim.parse(~S|$.role |)
+    end
+
+    test "whitespace is not a substitute for a segment separator" do
+      assert {:error, _} = RoleClaim.parse(~S|$.a b|)
     end
   end
 
