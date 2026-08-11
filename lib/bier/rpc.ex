@@ -484,6 +484,17 @@ defmodule Bier.Rpc do
       "coalesce(json_agg(ST_AsGeoJSON(t)::json), '[]'))::text FROM (#{inner}) t"
   end
 
+  # CSV over a setof-record result: no exposed relation backs an anonymous
+  # `TABLE(...)`/OUT-params return, so nothing supplies an ordered column list
+  # and `Bier.Render` used to fall back to the sorted keys of a decoded row.
+  # Rendering the rows as ordered `[key, value]` pairs carries the routine's
+  # declared column order (and the exact cell text) out of PostgreSQL instead
+  # (#110) — the same expression the relation reads use.
+  defp result_sql(%{ret_kind: :setof_record}, from, %MediaType{symbol: :csv}) do
+    "SELECT coalesce(json_agg(#{QueryExecutor.csv_row_pairs("t")}), '[]')::text " <>
+      "FROM (SELECT * FROM #{from}) t"
+  end
+
   # Array-of-objects for setof-record / multi-OUT setof. Wrapping the call in a
   # `(SELECT * FROM fn())` subquery keeps `t` a proper composite row even for a
   # single OUT/TABLE column (a bare `FROM fn() t` collapses to the scalar).

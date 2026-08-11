@@ -675,7 +675,29 @@ defmodule Bier.QueryExecutor do
   defp aggregate_body(:json_strip),
     do: "coalesce(json_strip_nulls(json_agg(_postgrest_t._bier_row)), '[]')::text"
 
+  defp aggregate_body(:csv),
+    do: "coalesce(json_agg(#{csv_row_pairs("_postgrest_t._bier_row")}), '[]')::text"
+
   defp aggregate_body(_format), do: "coalesce(json_agg(_postgrest_t._bier_row), '[]')::text"
+
+  @doc false
+  # A row rendered for CSV: the ordered `[key, value]` pairs of its JSON object,
+  # with every value as the text PostgreSQL itself produced.
+  #
+  # CSV cannot rely on JSON object key order once a body has been decoded into
+  # Elixir maps (which are unordered), and re-rendering a decoded number loses
+  # its lexical form — `5.00` becomes `5.0` (#110). `json_each_text` over
+  # `to_json(<row>)` solves both without needing a column list: the pairs come
+  # out in row-type order (`json`, not `jsonb`, preserves it) and `value` is the
+  # exact text. A JSON null value stays SQL NULL here and renders as an empty
+  # cell, unchanged. `Bier.Render` still owns the RFC-4180 quoting — deliberately
+  # not PostgreSQL's `record_out` escaping, which upstream's `asCsvF` inherits
+  # (it backslash-escapes and leaves embedded newlines unquoted).
+  def csv_row_pairs(row) do
+    "(SELECT coalesce(json_agg(json_build_array(_bier_e.key, _bier_e.value) " <>
+      "ORDER BY _bier_e.ord), '[]') " <>
+      "FROM json_each_text(to_json(#{row})) WITH ORDINALITY AS _bier_e(key, value, ord))"
+  end
 
   defp window_count_col(%State{full_count?: true}),
     do: ", count(*) OVER() AS _bier_full_count"
@@ -747,7 +769,7 @@ defmodule Bier.QueryExecutor do
     # geometry column), matching PostgREST instead of emitting a non-Feature.
     {select_list, row_expr} =
       case {cols, state.format} do
-        {[], f} when f in [:json, :json_strip] -> {"1 AS _bier_dummy", "'{}'::json"}
+        {[], f} when f in [:json, :json_strip, :csv] -> {"1 AS _bier_dummy", "'{}'::json"}
         {[], _} -> {"1 AS _bier_dummy", row_json(state.format)}
         _ -> {Embed.render_cols(cols), row_json(state.format)}
       end

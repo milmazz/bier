@@ -184,15 +184,17 @@ defmodule Bier.MediaType do
   The query-executor output format for a negotiated media type: `:geojson`
   for `application/geo+json` (rows aggregated into a FeatureCollection via
   ST_AsGeoJSON), `:json_strip` for any `nulls=stripped` type (the aggregate is
-  wrapped in `json_strip_nulls`, upstream's `addNullsToSnip`), `:json` for
+  wrapped in `json_strip_nulls`, upstream's `addNullsToSnip`), `:csv` for
+  `text/csv` (rows aggregated as ordered `[key, value]` pair lists), `:json` for
   everything else.
 
-  Stripping belongs in SQL rather than in `Bier.Render` because decoding the
-  body into Elixir terms and re-encoding it loses JSON key order and the exact
-  numeric text PostgreSQL emitted (#109).
+  These belong in SQL rather than in `Bier.Render` because decoding the body
+  into Elixir terms and re-encoding it loses JSON key order and the exact
+  numeric text PostgreSQL emitted (#109, #110).
   """
   def executor_format(%__MODULE__{symbol: :geojson}), do: :geojson
   def executor_format(%__MODULE__{params: %{strip: true}}), do: :json_strip
+  def executor_format(%__MODULE__{symbol: :csv}), do: :csv
   def executor_format(_media), do: :json
 
   @doc """
