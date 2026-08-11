@@ -394,19 +394,80 @@ defmodule Bier.Rpc do
       {arg_sql, params} = build_call_args(args)
       from = "#{qfn(fn_def)}(#{arg_sql})"
 
-      sql = result_sql(fn_def, from, media)
+      run_call(conn, pool, fn_def, from, params, media)
+    end
+  end
 
-      case exec(pool, conn, sql, params) do
-        {:ok, %Postgrex.Result{rows: [[body]]}, guc} ->
-          render_result(conn, fn_def, body, media, guc)
+  defp run_call(conn, pool, fn_def, from, params, %MediaType{symbol: :plan} = media) do
+    explain(conn, pool, media, fn ->
+      {:ok, result_sql(fn_def, from, MediaType.for_symbol(:json)), params}
+    end)
+  end
 
-        {:ok, %Postgrex.Result{rows: []}, guc} ->
-          render_result(conn, fn_def, empty_body(fn_def), media, guc)
+  defp run_call(conn, pool, fn_def, from, params, media) do
+    case exec(pool, conn, result_sql(fn_def, from, media), params) do
+      {:ok, %Postgrex.Result{rows: [[body]]}, guc} ->
+        render_result(conn, fn_def, body, media, guc)
 
-        {:error, _} = err ->
-          err
+      {:ok, %Postgrex.Result{rows: []}, guc} ->
+        render_result(conn, fn_def, empty_body(fn_def), media, guc)
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # `application/vnd.pgrst.plan` over a call. Upstream has no RPC-specific plan
+  # code: `mtSnippet` wraps the WHOLE statement — the routine invocation
+  # included — in `explainF`, and it does so for `mainCall` exactly as it does
+  # for `mainRead` (`Query/Statements.hs`), so both call paths funnel through
+  # here. The explained statement is the JSON-bodied one, matching what
+  # `Bier.Plan` already explains for a relation read whatever the plan's `for=`
+  # target says.
+  #
+  # `EXPLAIN` without `ANALYZE` plans but does not execute, so the routine
+  # itself never runs — which is also why this can share the ordinary `exec/4`
+  # transaction (role switch, request GUCs, pre-request hook, cancellation)
+  # without a VOLATILE routine tripping the GET path's read-only transaction.
+  defp explain(conn, pool, media, build) do
+    with {:ok, sql, params} <- Bier.ServerTiming.measure(:plan, build) do
+      case exec(pool, conn, Bier.Plan.explain_sql(media, sql), params) do
+        {:ok, %Postgrex.Result{rows: rows}, _guc} -> Bier.Plan.render(conn, media, rows)
+        {:error, _} = err -> err
       end
     end
+  catch
+    {:bad_request, _} = err -> {:error, err}
+    {:embed_error, _} = err -> {:error, err}
+    {:embed_error_raw, reason} -> {:error, reason}
+  end
+
+  # A plan asks for the shaped read query itself, built but not run.
+  defp run_setof_rel(
+         conn,
+         config,
+         fn_def,
+         ret_rel,
+         args,
+         plan,
+         %MediaType{symbol: :plan} = media,
+         relations
+       ) do
+    pool = Bier.Registry.via(config.name, Postgrex)
+    count_mode = Pagination.call_count_mode(conn)
+    exec_args = Enum.map(args, fn {n, t, _v?, val} -> {n, t, value_for_named(val)} end)
+
+    explain(conn, pool, media, fn ->
+      QueryExecutor.build_function(
+        fn_def,
+        ret_rel,
+        exec_args,
+        plan,
+        relations,
+        :json,
+        count_mode
+      )
+    end)
   end
 
   # The :setof_rel read itself, once media/plan have resolved: the function

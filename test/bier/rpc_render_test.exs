@@ -81,6 +81,14 @@ defmodule Bier.RpcRenderTest do
       """
       CREATE FUNCTION #{@schema}.setof_ints() RETURNS SETOF int
         LANGUAGE sql STABLE AS $fn$ SELECT * FROM (VALUES (1), (2), (3)) v(i) $fn$
+      """,
+      # A SETOF <exposed relation> routine, which takes the read pipeline rather
+      # than the flat-call path — the plan has to cover it too.
+      "CREATE TABLE #{@schema}.readings (id int PRIMARY KEY, label text)",
+      "INSERT INTO #{@schema}.readings VALUES (1, 'first'), (2, 'second')",
+      """
+      CREATE FUNCTION #{@schema}.all_readings() RETURNS SETOF #{@schema}.readings
+        LANGUAGE sql STABLE AS $fn$ SELECT * FROM #{@schema}.readings $fn$
       """
     ]
 
@@ -221,6 +229,65 @@ defmodule Bier.RpcRenderTest do
 
       assert resp.status == 200
       assert resp.body == "5.00"
+    end
+  end
+
+  # `application/vnd.pgrst.plan` was the last media type an RPC never rendered:
+  # `EXPLAIN` only ever ran on the relation path, so a call answered with its
+  # ordinary body under the plan `Content-Type`. Upstream has no RPC-specific
+  # plan code — `mtSnippet` wraps `mainCall`'s snippet in `explainF` exactly as
+  # it wraps `mainRead`'s (`Query/Statements.hs`), so every return kind, the
+  # SETOF-relation one included, is explained.
+  describe "application/vnd.pgrst.plan on a call" do
+    test "a scalar routine is explained, not executed", %{base: base} do
+      resp = get!(base, "/rpc/scalar_text", "application/vnd.pgrst.plan+json")
+
+      assert resp.status == 200
+
+      assert resp.headers["content-type"] ==
+               [~s(application/vnd.pgrst.plan+json; for="application/json"; charset=utf-8)]
+
+      assert [%{"Plan" => %{"Node Type" => _}} | _] = JSON.decode!(resp.body)
+    end
+
+    test "a bare plan Accept defaults to the text format", %{base: base} do
+      resp = get!(base, "/rpc/scalar_text", "application/vnd.pgrst.plan")
+
+      assert resp.status == 200
+
+      assert resp.headers["content-type"] ==
+               [~s(application/vnd.pgrst.plan+text; for="application/json"; charset=utf-8)]
+
+      assert resp.body =~ ~r/\(cost=/
+    end
+
+    test "a composite routine's plan names the function", %{base: base} do
+      resp = get!(base, "/rpc/one_reading", "application/vnd.pgrst.plan")
+
+      assert resp.status == 200
+      assert resp.body =~ "Function Scan on one_reading"
+    end
+
+    test "a SETOF-relation routine is explained through the read pipeline", %{base: base} do
+      resp = get!(base, "/rpc/all_readings", "application/vnd.pgrst.plan")
+
+      assert resp.status == 200
+      assert resp.body =~ ~r/Scan on readings/
+    end
+
+    test "the plan response carries an open Content-Range", %{base: base} do
+      resp = get!(base, "/rpc/scalar_text", "application/vnd.pgrst.plan")
+
+      assert resp.headers["content-range"] == ["*/*"]
+    end
+
+    test "filters on a SETOF-relation routine reach the explained query", %{base: base} do
+      resp = get!(base, "/rpc/all_readings?id=eq.1", "application/vnd.pgrst.plan")
+
+      assert resp.status == 200
+      # An `Index Cond` or a `Filter` depending on what the planner picks; either
+      # way the `id=eq.1` reached the statement that was explained.
+      assert resp.body =~ ~r/(Index Cond|Filter): \(id = 1\)/
     end
   end
 end
