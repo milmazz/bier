@@ -115,14 +115,22 @@ defmodule Bier.Introspection do
   @doc """
   Introspects `schemas` over the given Postgrex connection.
 
+  `extra_search_path` is `db-extra-search-path`. It widens exactly one thing:
+  where a computed field's *function* may live (see `query_computed/3`). Every
+  other query — relations, columns, foreign keys, callable `/rpc/` routines —
+  stays scoped to `schemas`, so an extra-path schema never becomes part of the
+  exposed API surface.
+
   Returns a map keyed by `{schema, relation}`.
   """
-  @spec run(conn :: term(), schemas :: [String.t()]) :: t()
-  def run(conn, schemas) when is_list(schemas) and schemas != [] do
+  @spec run(conn :: term(), schemas :: [String.t()], extra_search_path :: [String.t()]) :: t()
+  def run(conn, schemas, extra_search_path \\ [])
+
+  def run(conn, schemas, extra_search_path) when is_list(schemas) and schemas != [] do
     relations = query_relations(conn, schemas)
     columns = query_columns(conn, schemas)
     foreign_keys = query_foreign_keys(conn, schemas)
-    computed = query_computed(conn, schemas)
+    computed = query_computed(conn, schemas, extra_search_path)
     view_fks = infer_view_foreign_keys(conn, schemas, foreign_keys, relations)
     view_pks = infer_view_primary_keys(conn, schemas)
 
@@ -913,7 +921,19 @@ defmodule Bier.Introspection do
   # function's schema instead would drop the member (no same-named relation in
   # that schema) or bind it to the wrong relation (#100), so `schema`/`relation`
   # below describe the argument relation and `fn_schema` the function.
-  defp query_computed(conn, schemas) do
+  #
+  # The two identities also get two different schema filters (#106). The
+  # argument relation must be exposed (`$1`) — a computed member of a hidden
+  # relation is not addressable. The function only has to be *reachable*
+  # (`$2` = exposed schemas plus `db-extra-search-path`), which is what the docs
+  # mean by "created in the exposed schema or in a schema in the extra search
+  # path"; upstream's `allComputedRels` puts no schema filter on the function at
+  # all and lets `search_path` sort it out. `$2` is ordered exposed-first so
+  # `rank_fn_schemas/2` below can resolve a name defined in two reachable
+  # schemas the way `search_path` order would have.
+  defp query_computed(conn, schemas, extra_search_path) do
+    fn_schemas = Enum.uniq(schemas ++ extra_search_path)
+
     sql =
       @base_types_cte <>
         """
@@ -944,16 +964,18 @@ defmodule Bier.Introspection do
         LEFT JOIN pg_namespace ret_bn ON ret_bn.oid = ret_bpt.typnamespace
         LEFT JOIN pg_class ret_rel ON ret_rel.oid = ret_t.typrelid
         LEFT JOIN pg_namespace ret_n ON ret_n.oid = ret_rel.relnamespace
-        WHERE pn.nspname = ANY($1)
+        WHERE pn.nspname = ANY($2)
           AND p.pronargs = 1
           AND arg_t.typtype = 'c'
           AND arg_n.nspname = ANY($1)
         """
 
-    %Postgrex.Result{rows: rows} = Postgrex.query!(conn, sql, [schemas])
+    %Postgrex.Result{rows: rows} = Postgrex.query!(conn, sql, [schemas, fn_schemas])
 
     {cols, rels} =
-      Enum.reduce(rows, {[], []}, fn
+      rows
+      |> rank_fn_schemas(fn_schemas)
+      |> Enum.reduce({[], []}, fn
         [
           schema,
           relation,
@@ -1003,5 +1025,23 @@ defmodule Bier.Introspection do
       end)
 
     %{columns: cols, relations: rels}
+  end
+
+  # Resolve a computed field name defined for the same relation in more than one
+  # reachable schema. Upstream never has to: it renders the call unqualified and
+  # lets `search_path` order decide. Bier carries the function's schema and
+  # renders it explicitly, so the choice has to be made here — deliberately, and
+  # the same way `search_path` would have: exposed schemas first (in
+  # `db-schemas` order), then `db-extra-search-path` entries in their configured
+  # order. `fn_schemas` is already in exactly that order.
+  #
+  # Rows are `[schema, relation, fn_schema, name | _]`; the winner is the
+  # first survivor per `{arg schema, arg relation, name}`.
+  defp rank_fn_schemas(rows, fn_schemas) do
+    rank = fn_schemas |> Enum.with_index() |> Map.new()
+
+    rows
+    |> Enum.sort_by(fn [_schema, _relation, fn_schema | _] -> Map.get(rank, fn_schema, 0) end)
+    |> Enum.uniq_by(fn [schema, relation, _fn_schema, name | _] -> {schema, relation, name} end)
   end
 end

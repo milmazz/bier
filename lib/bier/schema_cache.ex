@@ -52,10 +52,10 @@ defmodule Bier.SchemaCache do
   the one funnel every load goes through, so boot and reload failures are
   logged exactly once.
   """
-  @spec load!(Bier.name(), term(), [String.t(), ...]) :: t()
-  def load!(name, conn, schemas) do
+  @spec load!(Bier.name(), term(), [String.t(), ...], [String.t()]) :: t()
+  def load!(name, conn, schemas, extra_search_path \\ []) do
     Bier.Telemetry.schema_cache_load(%{instance: name, schemas: schemas}, fn ->
-      cache = introspect(conn, schemas)
+      cache = introspect(conn, schemas, extra_search_path)
       put(name, cache)
       {cache, %{relation_count: map_size(cache.relations)}}
     end)
@@ -70,9 +70,9 @@ defmodule Bier.SchemaCache do
       exit(reason)
   end
 
-  defp introspect(conn, schemas) do
+  defp introspect(conn, schemas, extra_search_path) do
     %__MODULE__{
-      relations: Bier.Introspection.run(conn, schemas),
+      relations: Bier.Introspection.run(conn, schemas, extra_search_path),
       functions: Bier.Introspection.functions(conn, schemas),
       media_handlers: Bier.Introspection.media_handlers(conn, schemas),
       schema_comment: Bier.Introspection.schema_comment(conn, hd(schemas)),
@@ -142,7 +142,7 @@ defmodule Bier.SchemaCache do
         config = Registry.config(name)
         conn = Registry.via(name, Postgrex)
 
-        load!(name, conn, config.db_schemas)
+        load!(name, conn, config.db_schemas, config.db_extra_search_path)
 
         :ok
     end
