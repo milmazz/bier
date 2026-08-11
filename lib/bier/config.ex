@@ -384,6 +384,26 @@ defmodule Bier.Config do
   end
 
   @doc """
+  Render a list of schema names as a `search_path` GUC value: each name quoted
+  as an identifier, comma-separated — PostgREST's `escapeIdentList`
+  (`Query/PreQuery.hs`). `search_path` takes an identifier *list*, so the names
+  cannot be bound individually; the value is pre-quoted here and then bound as
+  a single parameter (or sent as a connection parameter).
+
+  Duplicates are dropped, keeping first position: the request's schema leads and
+  an extra-search-path entry naming the same schema must not shift it. Returns
+  `nil` for an empty list, which callers read as "leave `search_path` alone".
+  """
+  @spec search_path([String.t()]) :: String.t() | nil
+  def search_path([]), do: nil
+
+  def search_path(schemas) when is_list(schemas) do
+    schemas
+    |> Enum.uniq()
+    |> Enum.map_join(", ", &(~s(") <> String.replace(&1, ~s("), ~s("")) <> ~s(")))
+  end
+
+  @doc """
   `admin-server-port` must differ from the main server port. Mirrors PostgREST
   (test_cli.py:test_server_port_and_admin_port_same_value; conformance case
   1717). NimbleOptions validates fields independently, so this cross-field
