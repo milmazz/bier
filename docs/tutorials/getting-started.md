@@ -114,11 +114,16 @@ children = [
 Supervisor.start_link(children, strategy: :one_for_one)
 ```
 
-To try it without writing a project, start it from an `iex` session against
-this repository (`mix deps.get` first if you have not already):
+To try it without writing a project, start an `iex` session against this
+repository (`mix deps.get` first if you have not already) and call
+`Bier.start_link/1` at the prompt:
 
 ```sh
-iex -S mix run -e 'Bier.start_link(
+iex -S mix
+```
+
+```elixir
+Bier.start_link(
   name: Tutorial,
   router: [port: 4040, scheme: :http],
   database: "bier_tutorial",
@@ -126,14 +131,21 @@ iex -S mix run -e 'Bier.start_link(
   password: "mysecretpassword",
   db_schemas: ["api"],
   db_anon_role: "web_anon"
-)'
+)
 ```
 
-Either form prints a Bandit boot line once the schema has been introspected
-and the listener is up — that is your readiness signal:
+> Call it **at the prompt**, not with `iex -S mix run -e '...'`. `Bier` is a
+> supervisor, and `start_link/1` links it to the calling process; the process
+> that evaluates an `-e` expression exits as soon as the expression returns,
+> which shuts the instance down again. The boot line still prints, but nothing
+> is listening. At the prompt the shell process is the parent and stays alive
+> for the whole session.
+
+Either way — child spec or `iex` prompt — Bier prints a Bandit boot line once
+the schema has been introspected and the listener is up:
 
 ```
-Running Tutorial.Router with Bandit 1.12.0 at 0.0.0.0:4040 (http)
+Running Tutorial.Router with Bandit 1.12.4 at 0.0.0.0:4040 (http)
 ```
 
 The rest of this tutorial assumes Bier is reachable at
@@ -181,12 +193,6 @@ curl "http://localhost:4040/beers?select=name,abv&order=abv.desc&limit=3"
 A horizontal filter is `<column>=<operator>.<value>`. `gte` is greater-than-
 or-equal; the full operator table is in the
 [API reference](../guides/api.md#horizontal-filtering).
-
-> `abv` (`numeric(4,2)`) can't be filtered yet — Bier 400s when filtering on
-> (or casting to) a parameterized type like `numeric(p,s)`, a known
-> limitation tracked in
-> [milmazz/bier#71](https://github.com/milmazz/bier/issues/71). This example
-> filters on `ibu` (a plain `int`) instead.
 
 ```bash
 curl "http://localhost:4040/beers?ibu=gte.40&select=name,ibu"

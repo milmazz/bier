@@ -79,12 +79,15 @@ New to Bier? Start with the tutorials, then reach for the reference guides.
 
 - [Getting Started](docs/tutorials/getting-started.md) — create the database, boot Bier, and make your first requests.
 - [Authentication](docs/tutorials/authentication.md) — add roles and JWTs so only members can post.
+- [Realtime](docs/tutorials/realtime.md) — push new rows to the browser with a trigger and the SSE endpoint.
 
 **Reference**
 
-- [API reference](docs/guides/api.md) — reading, filtering, ordering, pagination, embedding, mutations, RPC, and content negotiation.
+- [API reference](docs/guides/api.md) — reading, filtering, ordering, pagination, embedding, mutations, RPC, time zones, and content negotiation.
 - [Configuration](docs/guides/configuration.md) — every option, the `PGRST_*` environment variables, and standalone/Docker/CLI operation.
 - [Observability](docs/guides/observability.md) — telemetry events, Server-Timing, health endpoints, and the error envelope.
+- [Realtime events](docs/guides/realtime_events.md) — the SSE endpoint: channels, auth, delivery semantics, telemetry.
+- [Injection safety](docs/injection_safety.md) — what is bound vs. escaped in the generated SQL, and why.
 
 ## Configuration
 
@@ -105,7 +108,10 @@ defaults are sourced from application env, so you can also set them under
 | `db_max_rows` | `nil` | Cap on rows returned per request. |
 | `db_tx_end` | `:commit` | End each request's transaction with `:commit` or `:rollback`. |
 | `db_pre_request` | `nil` | Function run inside every request transaction before the main query. |
-| `jwt_secret` / `jwt_aud` | `nil` | JWT verification secret and expected audience (HS256). |
+| `jwt_secret` / `jwt_aud` | `nil` | JWT verification secret (an HMAC string, or a JWK/JWK Set for RS/ES/PS/EdDSA) and expected audience. |
+| `jwt_role_claim_key` | `"$.role"` | RFC 9535 JSON Path to the role inside the JWT claims. |
+| `client_error_verbosity` | `"verbose"` | Error envelope shape; `"minimal"` drops `details`/`hint`. |
+| `url_use_legacy_target_names` | `true` | Allow filters/orders to address an aliased embed by its relation name (deprecated, warns). |
 | `server_cors_allowed_origins` | `nil` | Comma-separated CORS allow-list. |
 | `server_timing_enabled` | `false` | Emit a `Server-Timing` header. |
 | `server_trace_header` | `nil` | Request header (e.g. `X-Request-Id`) echoed on the response. |
@@ -417,7 +423,7 @@ runtime module generation, and a parser built with [NimbleParsec][].
 Happy hacking!
 
 [PostgreSQL]: https://www.postgresql.org
-[PostgREST]: https://postgrest.org/en/v14/
+[PostgREST]: https://postgrest.org/en/v16/
 [Bandit]: https://github.com/mtrudel/bandit
 [Plug]: https://hexdocs.pm/plug
 [Plug.Router]: https://hexdocs.pm/plug/Plug.Router.html

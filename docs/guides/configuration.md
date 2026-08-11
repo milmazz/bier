@@ -13,6 +13,7 @@ brewery setup from the tutorials (`db_schemas: ["api"]`,
 `db_anon_role: "web_anon"`).
 
 [NimbleOptions]: https://hexdocs.pm/nimble_options
+[RFC 9535]: https://www.rfc-editor.org/rfc/rfc9535
 
 ## The three configuration surfaces
 
@@ -173,6 +174,40 @@ be set from the standalone binary.
 > `db_schemas` when `jwt_secret` is configured — schemas are not individually
 > opted in or out of auth.
 
+### Request & response semantics
+
+| Option | Type | Default | `PGRST_*` var |
+| --- | --- | --- | --- |
+| `client_error_verbosity` | `"verbose" \| "minimal"` | `"verbose"` | `PGRST_CLIENT_ERROR_VERBOSITY` |
+| `url_use_legacy_target_names` | `boolean` | `true` | `PGRST_URL_USE_LEGACY_TARGET_NAMES` |
+
+Both are **new in PostgREST v16.0**. `client_error_verbosity` selects the
+shape of the error envelope: `verbose` emits `{code, message, details, hint}`
+(all four keys always present), `minimal` emits `{code, message}` only — the
+`details` and `hint` members are *omitted*, not nulled. It applies to every
+error the request pipeline renders, database errors included, and to the 416
+range body the read path builds inline; status, `Content-Type` and
+`Proxy-Status` are unaffected.
+
+`url_use_legacy_target_names` decides how a filter/order/limit prefix
+resolves against an *aliased* embed. Left at `true` (the PostgREST default),
+`select=the_beers:beers(...)&beers.order=…` still resolves and the response
+carries a deprecation `Warning: 299 …` header naming the replacement; set it
+to `false` and the alias becomes the only accepted spelling, with the
+relation name answered by 400 `PGRST108`. See
+[Resource embedding](api.md#resource-embedding).
+
+### Realtime events (SSE)
+
+| Option | Type | Default | `PGRST_*` var |
+| --- | --- | --- | --- |
+| `events_channels` | `[string]` | `[]` | — (Bier-only; PostgREST has no equivalent) |
+| `events_path` | `string` | `"events"` | — (Bier-only) |
+| `events_heartbeat_interval` | `pos_integer` | `15_000` | — (Bier-only) |
+
+The SSE endpoint is off until `events_channels` lists at least one channel.
+See the [Realtime events guide](realtime_events.md).
+
 ### Schema-cache reload options
 
 | Option | Type | Default | `PGRST_*` var |
@@ -189,7 +224,8 @@ See [Schema-cache reload](#schema-cache-reload) below.
 | `jwt_secret` | `string \| nil` | `nil` | `PGRST_JWT_SECRET` |
 | `jwt_aud` | `string \| nil` | `nil` | `PGRST_JWT_AUD` |
 | `jwt_secret_is_base64` | `boolean` | `false` | `PGRST_JWT_SECRET_IS_BASE64` (alias `secret-is-base64` / `PGRST_SECRET_IS_BASE64`) |
-| `jwt_role_claim_key` | `string` | `".role"` | `PGRST_JWT_ROLE_CLAIM_KEY` (alias `role-claim-key` / `PGRST_ROLE_CLAIM_KEY`) |
+| `jwt_role_claim_key` | `string` | `"$.role"` | `PGRST_JWT_ROLE_CLAIM_KEY` (alias `role-claim-key` / `PGRST_ROLE_CLAIM_KEY`) |
+| `jwt_cache_max_entries` | `integer` | `1000` | `PGRST_JWT_CACHE_MAX_ENTRIES` |
 
 Bier verifies both symmetric and asymmetric JWTs through `:jose`
 (`Bier.JWT`): HS256/384/512 (HMAC) as well as RS256/384/512, ES256/384/512,
@@ -199,9 +235,29 @@ asymmetric verification, any other secret an HMAC `oct` key — not by the
 token's own `alg` header, and each key type carries a fixed algorithm
 allowlist. This keeps a public JWK from ever being usable as an HMAC key
 (rejecting alg-confusion attempts) and rejects `alg: none` outright.
-`jwt_role_claim_key` is a JSPath into the decoded claims, e.g. `.role`
-(default) or `."https://example.com/roles"[0]`. See
-[Validators](#validators) for the constraints on all four.
+
+`jwt_role_claim_key` is an [RFC 9535][] JSON Path into the decoded claims,
+e.g. `$.role` (default), `$["https://example.com/roles"][0]`, or
+`$.roles[?search(@, "^app_")]`. **PostgREST v16.0 replaced the v14.12
+leading-dot JSPath DSL with standard JSON Path**, so every expression now
+starts with the root identifier `$` and the old `.role` spelling aborts
+startup. Migrating: prefix with `$`; bracket any member name that is not
+`[A-Za-z0-9_]` (`.roles.write-role` → `$.roles["write-role"]`); and replace
+the DSL's string operators with the RFC's `search()` function
+(`.roles[?(@ ^== "pg_")]` → `$.roles[?search(@, "^pg_")]`). Bier implements
+the subset those values need — root, dotted and bracketed name selectors,
+integer indexes (negative counts from the end), and a single-comparison or
+`search()` filter; descendant segments (`..`), wildcards, slices,
+comma-separated selectors and the `&&`/`||`/`!` combinators are rejected
+(see `Bier.JWT.RoleClaim` and
+[milmazz/bier#99](https://github.com/milmazz/bier/issues/99)).
+
+`jwt_cache_max_entries` caps the per-instance cache of JWT verification
+results; `0` or less disables it. Signature verification and claims decoding
+are cached, while `exp`/`nbf`/`aud` validation still runs on every request,
+so a cached token still expires on time.
+
+See [Validators](#validators) for the constraints on all five.
 
 ### CORS, tracing & logging
 
@@ -211,10 +267,13 @@ allowlist. This keeps a public JWK from ever being usable as an HMAC key
 | `server_timing_enabled` | `boolean` | `false` | `PGRST_SERVER_TIMING_ENABLED` |
 | `server_trace_header` | `string \| nil` | `nil` | `PGRST_SERVER_TRACE_HEADER` |
 | `log_level` | `:crit \| :error \| :warn \| :info \| :debug` | `:error` | `PGRST_LOG_LEVEL` |
+| `log_query` | `boolean` | `false` | `PGRST_LOG_QUERY` |
 
 `server_cors_allowed_origins` is a comma-separated allow-list. See the
 [Observability guide](observability.md) for what `server_timing_enabled` and
-`server_trace_header` actually add to a response.
+`server_trace_header` actually add to a response. `log_query` logs the SQL
+executed for each request, gated by the same `log_level` status filter as the
+access log.
 
 ### OpenAPI
 
@@ -224,10 +283,13 @@ allowlist. This keeps a public JWK from ever being usable as an HMAC key
 | `db_root_spec` | `string \| nil` | `nil` | `PGRST_DB_ROOT_SPEC` (alias `root-spec` / `PGRST_ROOT_SPEC`) |
 | `openapi_server_proxy_uri` | `string \| nil` | `nil` | `PGRST_OPENAPI_SERVER_PROXY_URI` |
 | `openapi_security_active` | `boolean` | `false` | `PGRST_OPENAPI_SECURITY_ACTIVE` |
+| `openapi_version` | `"2.0" \| "3.0"` | `"2.0"` | — (Bier-only) |
 
 `openapi_mode: "disabled"` makes the root endpoint return `404 PGRST126`
 instead of a generated document. `db_root_spec` names a DB function whose
-result replaces the generated document entirely.
+result replaces the generated document entirely. `openapi_version: "3.0"`
+serves an OpenAPI 3.0.3 translation of the same content — a Bier extension,
+since PostgREST has no OpenAPI 3.x emitter (postgrest#932).
 
 ### App settings (custom GUCs)
 
@@ -396,7 +458,8 @@ cross-field/semantic validators before a config is accepted — so `start_link/1
 | `jwt_secret` | A configured secret must be **≥ 32 bytes** (`byte_size/1` — octets, not characters) | `"The JWT secret must be at least 32 characters long."` |
 | `jwt_aud` | Any string is accepted, unless it contains `:`, in which case it must parse as an absolute URI (a scheme is required; a host is not) | `"jwt-aud should be a string or a valid URI"` |
 | `jwt_secret_is_base64` | When `true`, `jwt_secret` must decode as base64 after URL-safe normalization (`-`→`+`, `_`→`/`, `.`→`=`, whitespace stripped) | `"the jwt-secret is not valid base64"` |
-| `jwt_role_claim_key` | Must parse as PostgREST's JSPath grammar (bare/quoted keys, `[n]` indices, a trailing `[?(@ op "text")]` filter) | `"failed to parse role-claim-key value (<input>)"` |
+| `jwt_role_claim_key` | Must parse as an RFC 9535 JSON Path in the supported subset — rooted at `$`, dotted/bracketed name selectors, `[n]` indices, one comparison or `search()` filter. The v14.12 leading-dot spelling (`.role`) no longer parses | `"failed to parse role-claim-key value (<input>)"` |
+| `db_schemas` | New at v16.0: no entry may be `pg_catalog` or `information_schema` | `"db-schemas does not allow schema: '<name>'"` |
 | `server_unix_socket_mode` | The longest leading run of octal digits (Haskell `readOct` semantics — so `"599"` reads as `5`, `"800"` has no octal prefix at all) must fall within `0o600`..`0o777`; checked at boot even with no socket configured | `"...needs to be between 600 and 777"` or `"...not an octal"` |
 | `openapi_server_proxy_uri` | Must be an absolute `http`/`https` URI with a non-empty host | `"Malformed proxy uri, a correct example: https://example.com:8443/basePath"` |
 | `admin_server_port` | When set, must differ from `router[:port]` (`server-port`) | `"admin-server-port cannot be the same as server-port"` |
@@ -405,7 +468,8 @@ cross-field/semantic validators before a config is accepted — so `start_link/1
 Every rule above except `db_channel` mirrors a pinned PostgREST conformance
 case (`jwt-secret` case 1708, `jwt-aud` 1709, `jwt-role-claim-key` 1711,
 `server-unix-socket-mode` 1714/1715, `openapi-server-proxy-uri` 1716,
-`admin-server-port` 1717, base64 secret 1718). `db_channel`'s length/null-byte
+`admin-server-port` 1717, base64 secret 1718, `db-schemas` 1733/1734).
+`db_channel`'s length/null-byte
 rule is Bier-only — PostgREST does not validate this key itself; Bier
 validates it at boot because `Postgrex.Notifications.listen/3` would
 otherwise raise the same violation at connect time, turning a configuration

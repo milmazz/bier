@@ -117,10 +117,11 @@ beers span all 5 styles (`order=` is added for a deterministic group order —
 Postgres's own `GROUP BY` order is otherwise unspecified). `count()` and
 `max()` are aliased (`beer_count`, `max_ibu`) and combined in the same
 `select` alongside the plain `style_id` field driving the `GROUP BY`.
-`avg()`/`sum()` on `beers.abv` work the same way — but casting the result to
-a parameterized type such as `::numeric(4,2)` currently 400s (see the note
-under [Horizontal filtering](#horizontal-filtering)), so the aggregate
-example here sticks to `ibu`, whose plain `int` result needs no cast.
+`avg()`/`sum()` on `beers.abv` work the same way — with the one exception
+that a cast applied to an *aggregate* accepts only an unparameterized type:
+`select=abv.avg()::numeric` and `::text` are fine, while
+`select=abv.avg()::numeric(4,2)` is a 400 `PGRST100` parse error (a plain
+column cast, `select=abv::numeric(4,2)`, has no such restriction).
 
 > **Note:** PostgREST gates aggregate functions behind the `db-aggregates-enabled`
 > config option (default off, 400 `PGRST123` when disabled). Bier does not
@@ -140,15 +141,9 @@ params) are implicitly ANDed together.
 curl "http://localhost:4040/beers?ibu=gte.60"
 ```
 
-> **Known limitation:** filtering on, or casting (`::type(...)`) to, a
-> PostgreSQL type that carries a modifier — `numeric(p,s)`, `varchar(n)`,
-> `char(n)` — currently 400s with `PGRST100`. In the brewery schema this
-> affects `beers.abv` (`numeric(4,2)`) and `breweries.latitude`/`longitude`
-> (`numeric(9,6)`): e.g. `?abv=gte.6` or `?select=abv::numeric(4,2)` both
-> fail. Selecting or ordering by these columns is unaffected — only filters
-> and parameterized casts trigger it. Tracked as
-> [milmazz/bier#71](https://github.com/milmazz/bier/issues/71); the examples
-> below use `ibu`/`style_id` instead.
+Columns of a parameterized type work like any other, both as filter targets
+and as cast targets — `?abv=gte.6` and `?select=abv::numeric(4,2)` are both
+fine.
 
 ### Operators
 
@@ -388,6 +383,26 @@ has no many-to-many relationship, so this pattern is illustrative only.
 ```bash
 curl "http://localhost:4040/beers?select=id,brewery:breweries(name)"
 ```
+
+Once an embed carries an alias, that alias is the name a filter, `order` or
+`limit` should address it by. **New in PostgREST v16.0:** addressing it by the
+*relation* name still works — that is the `url_use_legacy_target_names`
+option, default `true` — but the response now carries a deprecation warning:
+
+```bash
+curl -i "http://localhost:4040/breweries?select=name,the_beers:beers(name)&beers.order=name.asc"
+```
+
+```http
+HTTP/1.1 200 OK
+Warning: 299 Bier<version> "Embedded resource was referenced by relation name even though it has an alias. This is deprecated and will stop working in a future release. Update `beers` to `the_beers` in query string filters, orders or limits."
+```
+
+Using the alias (`the_beers.order=name.asc`) emits no warning. With
+`url_use_legacy_target_names: false`, the relation name is rejected outright —
+400 `PGRST108`, details `"Target names are not allowed in filters if they have
+an alias"` — and the same relation may then be embedded twice (once plain,
+once aliased) with independent filters.
 
 ### `!inner` / `!left`
 
@@ -763,6 +778,48 @@ curl "http://localhost:4040/beers" -H "Accept: text/unknowntype"
 {"code": "PGRST107", "message": "None of these media types are available: text/unknowntype", "details": null, "hint": null}
 ```
 
+Every **non-error** response — reads, writes, RPC and `OPTIONS` alike —
+carries `Vary: Accept, Prefer, Range` (new in PostgREST v16.0), since all
+three request headers can change the representation. Error responses carry no
+`Vary`.
+
+## Time zones (`Prefer: timezone`)
+
+`Prefer: timezone=<tz>` sets the PostgreSQL session time zone used to render
+`timestamptz` values for that one request, and is echoed in
+`Preference-Applied`:
+
+```bash
+curl -i "http://localhost:4040/check_ins?select=id,created_at&limit=1" \
+  -H "Prefer: timezone=America/Los_Angeles"
+```
+
+```http
+HTTP/1.1 200 OK
+Preference-Applied: timezone=America/Los_Angeles
+```
+
+```json
+[{"id": 1, "created_at": "2026-08-10T15:14:24.055175-07:00"}]
+```
+
+Two v16.0 changes to be aware of: the value is now passed straight to
+PostgreSQL, so **numeric UTC offsets are accepted** (`timezone=+05:30`,
+`timezone=-4` — read POSIX-style, so `+05:30` renders as `-05:30`), and an
+**invalid zone is now a hard error** regardless of `handling`: 400 with
+SQLSTATE `22023` (`invalid value for parameter "TimeZone"`), where v14.12
+silently ignored it under `handling=lenient` and raised `PGRST122` under
+`handling=strict`.
+
+```bash
+curl -i "http://localhost:4040/check_ins?select=id,created_at" \
+  -H "Prefer: timezone=Bogus/Zone"
+```
+
+```json
+{"code": "22023", "message": "invalid value for parameter \"TimeZone\": \"Bogus/Zone\"", "details": null, "hint": null}
+```
+
 ## Errors
 
 Every error response is a JSON object with exactly four keys — `code`,
@@ -773,6 +830,19 @@ when there is nothing to report. Every Bier-originated error also carries a
 ```json
 {"code": "PGRST205", "message": "Could not find the table 'api.nonexistent' in the schema cache", "details": null, "hint": null}
 ```
+
+That is the `verbose` envelope, the default. **New in PostgREST v16.0**, the
+`client_error_verbosity` config option can shorten it to `minimal`, in which
+case every error body is just `{code, message}` — `details` and `hint` are
+*omitted*, not nulled:
+
+```json
+{"code": "PGRST205", "message": "Could not find the table 'api.nonexistent' in the schema cache"}
+```
+
+The setting applies to every error the pipeline renders, database errors
+included, and to the 416 range body; it changes only the body, never the
+status, `Content-Type` or `Proxy-Status`.
 
 ### Common codes
 

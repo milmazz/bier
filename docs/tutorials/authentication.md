@@ -52,7 +52,11 @@ Everything in this tutorial assumes Bier is reachable at
 `http://localhost:4040`.
 
 ```sh
-iex -S mix run -e 'Bier.start_link(
+iex -S mix
+```
+
+```elixir
+Bier.start_link(
   name: Tutorial,
   router: [port: 4040, scheme: :http],
   database: "bier_tutorial",
@@ -60,8 +64,12 @@ iex -S mix run -e 'Bier.start_link(
   password: "mysecretpassword",
   db_schemas: ["api"],
   db_anon_role: "web_anon"
-)'
+)
 ```
+
+(As in Getting Started, call `start_link/1` at the `iex` prompt — an
+`iex -S mix run -e '...'` one-liner shuts the instance down again as soon as
+the expression returns.)
 
 Now try to post a check-in with no token:
 
@@ -95,8 +103,11 @@ To accept keys, Bier needs the secret it will verify signatures against. Add
 secret is an ordinary string; the secret must be **at least 32 bytes** — a
 shorter one is rejected at boot.
 
-```sh
-iex -S mix run -e 'Bier.start_link(
+Stop the running session (`Ctrl+C` twice), start a fresh `iex -S mix`, and
+call:
+
+```elixir
+Bier.start_link(
   name: Tutorial,
   router: [port: 4040, scheme: :http],
   database: "bier_tutorial",
@@ -105,7 +116,7 @@ iex -S mix run -e 'Bier.start_link(
   db_schemas: ["api"],
   db_anon_role: "web_anon",
   jwt_secret: "the-tutorial-jwt-secret-change-me-please"
-)'
+)
 ```
 
 Standalone, the same secret comes from an environment variable:
@@ -161,12 +172,15 @@ to `{"role": "brewery_member"}`, and paste the secret into the
 "verify signature" box. Copy the encoded token from the left panel.
 
 > **Where `role` comes from.** Bier reads the role from the `role` claim by
-> default. That path is the `jwt_role_claim_key` option (default `.role`);
+> default. That path is the `jwt_role_claim_key` option (default `$.role`);
 > if your identity provider nests the role elsewhere — say
 > `{"https://example.com/roles": ["brewery_member"]}` — you point Bier at it
-> with `jwt_role_claim_key: ".\"https://example.com/roles\"[0]"`. See the
-> [Configuration guide](../guides/configuration.md) for the full JSPath
-> grammar.
+> with `jwt_role_claim_key: "$[\"https://example.com/roles\"][0]"`. The value
+> is an [RFC 9535](https://www.rfc-editor.org/rfc/rfc9535) JSON Path, so it
+> always starts with the root identifier `$` — PostgREST v16.0 replaced the
+> older leading-dot JSPath DSL (`.role`) with standard JSON Path, and the old
+> spelling is now a startup error. See the
+> [Configuration guide](../guides/configuration.md) for the supported subset.
 >
 > **Expiry.** Real tokens should carry an `exp` (expiration) claim — a Unix
 > timestamp after which Bier rejects the token with `401` (`PGRST303`,
