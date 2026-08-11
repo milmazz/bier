@@ -335,6 +335,18 @@ without a geometry column errors with SQLSTATE `22023`, mirroring PostgREST).
 `search_path` (matching PostgREST) — a PostGIS installed outside the
 search path fails at execution.
 
+### Advertised server version
+
+Every response carries `Server: postgrest/16.0` — the PostgREST release whose
+wire behavior this build reproduces (`Bier.postgrest_version/0`), not Bier's
+own `mix.exs` version. The same string feeds the OpenAPI document's
+`info.version` and its `externalDocs` URL. A client reading `Server:` is asking
+which PostgREST dialect it is talking to, so answering with Bier's version
+would misreport it; the constant moves only when the conformance suite is
+re-synced to a new PostgREST pin. It is not configurable — the header is written
+from a `before_send` callback in `Bier.Plugs.Observability` so it also reaches
+the responses the error funnel builds.
+
 ### The query parser
 
 `Bier.QueryParser` is a **generated**, dependency-free module built from its
