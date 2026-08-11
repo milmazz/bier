@@ -35,7 +35,8 @@ defmodule Bier do
   @type name :: term()
 
   # The PostgREST release this build is wire-conformant with (see
-  # `postgrest_version/0`); `spec/` is pinned to the same release.
+  # `postgrest_version/0`); `spec/` is pinned to the same release. This is the
+  # *dialect* version, not Bier's own — see `version/0`.
   @postgrest_version "16.0"
 
   # The option schema is built at runtime so that DB defaults are sourced from
@@ -56,7 +57,6 @@ defmodule Bier do
         type: :non_empty_keyword_list,
         required: false,
         subsection: "REST endpoint options",
-        # TODO: Change the scheme to HTTPS
         default: [port: 4040, scheme: :http],
         doc: """
         Options needed for the Web endpoint, which under the hood is powered by
@@ -72,9 +72,12 @@ defmodule Bier do
           scheme: [
             type: {:in, [:http, :https]},
             required: true,
-            # TODO: Change this to HTTPS
             default: :http,
-            doc: "Either `:https` or `:http`."
+            doc: """
+            Either `:https` or `:http`. Defaults to `:http`, matching
+            PostgREST, which does not terminate TLS itself either — the
+            expectation is a reverse proxy in front.
+            """
           ]
         ]
       ],
@@ -237,7 +240,7 @@ defmodule Bier do
         default: env(:client_error_verbosity, "verbose"),
         doc: """
         Shape of the client-facing error envelope (PostgREST
-        client-error-verbosity, new in v16.0). `:verbose` emits
+        client-error-verbosity). `:verbose` emits
         `{code, message, details, hint}`; `:minimal` emits `{code, message}`
         only — the `details` and `hint` members are OMITTED, not nulled. It
         applies to every error the request pipeline renders, database errors
@@ -703,17 +706,37 @@ defmodule Bier do
   end
 
   @doc """
+  Bier's own release version, as declared in `mix.exs`.
+
+  This is what Bier answers with when a client asks *which server* it is
+  talking to: the `Server` response header (`bier/<version>`), the OpenAPI
+  document's `info.version`, and the `Warning` header's product token all read
+  it. Falls back to `"0.0.0"` when the `:bier` application is not loaded (an
+  escript, or a bare `Code.require_file/1`).
+
+  For *which PostgREST dialect* a request is speaking, see
+  `postgrest_version/0`.
+  """
+  @spec version() :: String.t()
+  def version do
+    case :application.get_key(:bier, :vsn) do
+      {:ok, vsn} -> List.to_string(vsn)
+      _ -> "0.0.0"
+    end
+  end
+
+  @doc """
   The PostgREST release whose wire behavior this build reproduces.
 
   PostgREST renders its own `prettyVersion` — the first two components of its
-  package version (`Version.hs`) — into three places on the wire: the `Server`
-  response header (`setServerName ("postgrest/" <> prettyVersion)`, `App.hs`),
-  the OpenAPI document's `info.version`, and (through `docsVersion`) the
-  `externalDocs` URL. Bier is a reimplementation, so those bytes must report the
-  PostgREST version it is conformant with rather than Bier's own `mix.exs`
-  version — a client reading `Server:` is asking which PostgREST dialect it is
-  talking to. Bump this constant when the conformance suite is re-synced to a
-  new PostgREST pin (see `docs/CONFORMANCE_IMPL.md`).
+  package version (`Version.hs`) — into the `Server` response header
+  (`setServerName ("postgrest/" <> prettyVersion)`, `App.hs`), the OpenAPI
+  document's `info.version`, and (through `docsVersion`) the `externalDocs`
+  URL. Bier is a reimplementation, not a rebuild of PostgREST, so it answers
+  the first two under its own name (`version/0`) and keeps this constant for
+  the third — the `externalDocs` pointer at the dialect's documentation — and
+  for stating the compatibility baseline in prose. Bump it when the conformance
+  suite is re-synced to a new PostgREST pin (see `docs/CONFORMANCE_IMPL.md`).
   """
   @spec postgrest_version() :: String.t()
   def postgrest_version, do: @postgrest_version

@@ -6,27 +6,52 @@ defmodule Bier.ConformanceTest do
   excluded (see pending_reason): :status_text (req does not expose the HTTP
   reason phrase). CLI cases — including the db-config role-settings ones,
   1724/1725 (#64) — run directly via `Bier.CliCase`.
+
+  A second, narrower exclusion covers **deliberate divergences**: a case whose
+  id is in `@divergences` is tagged :pending with reason :deliberate_divergence.
+  The spec file itself is left untouched — it still records what PostgREST does,
+  which is the point of `spec/` — and the exemption lives here, where the
+  decision not to match it does. Every entry needs operator sign-off and an
+  issue; the list is deliberately hard to grow.
   """
   use Bier.HttpCase, async: true
 
   @moduletag :conformance
 
+  # id => why Bier deliberately does not match this case.
+  @divergences %{
+    1771 =>
+      "Server: bier/<version>, not postgrest/<version> — a Server header names " <>
+        "the software that built the response, and wearing upstream's product " <>
+        "token would misattribute Bier's bugs to PostgREST. The dialect is " <>
+        "advertised through the OpenAPI document's externalDocs instead (#122)."
+  }
+
   for c <- Bier.ConformanceCase.load_all() do
     pending_reason =
-      if Map.has_key?(c.expect, "status_text") do
-        :status_text
+      cond do
+        Map.has_key?(c.expect, "status_text") -> :status_text
+        Map.has_key?(@divergences, c.id) -> :deliberate_divergence
+        true -> nil
       end
 
     @tag area: String.to_atom(c.area)
 
     if pending_reason do
+      message =
+        case pending_reason do
+          :deliberate_divergence ->
+            "conformance case #{c.id} is a deliberate divergence, not a gap: " <>
+              Map.fetch!(@divergences, c.id)
+
+          reason ->
+            "conformance case #{c.id} pending — harness cannot evaluate #{reason} yet"
+        end
+
       @tag :pending
       @tag pending_reason: pending_reason
       test "#{c.id} #{c.feature} (pending: #{pending_reason})" do
-        flunk(
-          "conformance case #{unquote(c.id)} pending — harness cannot evaluate " <>
-            "#{unquote(pending_reason)} yet"
-        )
+        flunk(unquote(message))
       end
     else
       test "#{c.id} #{c.feature}" do

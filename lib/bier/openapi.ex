@@ -37,9 +37,13 @@ defmodule Bier.OpenAPI do
 
     %{
       "swagger" => "2.0",
+      # `info.version` reports the software that generated the document, so it
+      # is Bier's own version (#122) — upstream puts its `prettyVersion` here.
+      # The *dialect* stays advertised through `externalDocs`, which points at
+      # the PostgREST release this build is conformant with.
       "info" =>
         put_optional(
-          %{"title" => title, "version" => Bier.postgrest_version()},
+          %{"title" => title, "version" => Bier.version()},
           "description",
           desc
         ),

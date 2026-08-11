@@ -617,6 +617,7 @@ defmodule Bier.CLI.Config do
   def to_start_opts(resolved) do
     direct =
       [
+        client_error_verbosity: resolved["client-error-verbosity"],
         db_schemas: resolved["db-schemas"],
         db_anon_role: resolved["db-anon-role"],
         db_extra_search_path: resolved["db-extra-search-path"],

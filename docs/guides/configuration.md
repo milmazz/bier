@@ -66,29 +66,57 @@ and the release's `BIER_STANDALONE=1` boot (see
 `Bier.start_link/1` directly never reads `PGRST_*` — that translation layer
 lives entirely in `Bier.CLI.Config`.
 
-`Bier.CLI.Config.load/3` resolves each key from, in order:
+`Bier.CLI.Config` resolves each key from, in order:
 
 1. **flags** — a `%{kebab-key => raw}` override map accepted by the
    `Config.load/3` API itself;
-2. **env** — the key's `PGRST_*` variable (or a deprecated alias's own
+2. **db** — the in-database config source: `pgrst.*` role settings, see
+   [In-database configuration](#in-database-configuration) below;
+3. **env** — the key's `PGRST_*` variable (or a deprecated alias's own
    `PGRST_*` variable);
-3. **file** — the same key (or alias) read from an optional config file;
-4. **default** — the key's built-in default.
-
-> #### The shipped `bier` binary never populates `flags` {: .info}
-> `flags > env > file > default` is the precedence built into
-> `Bier.CLI.Config.load/3`, and `--dump-config`/boot both use it. In
-> practice, though, every call site in `Bier.CLI` and `Bier.Application`
-> passes an **empty** flags map — the escript has no per-key command-line
-> flags today (only `--dump-config`, `-e`/`--example`, `-v`, `-h`, and the
-> positional config-file path). So the effective precedence right now is
-> **env > file > default**; `flags` is there for programmatic callers of
-> `Config.load/3`.
+4. **file** — the same key (or alias) read from an optional config file;
+5. **default** — the key's built-in default.
 
 Each spelling (canonical key, then any deprecated alias) is checked as a
 *complete* source — its own env var, then its own file key — before moving to
 the next spelling. So a canonical file key still beats a deprecated alias's
-env var, matching PostgREST's `optWithAlias` behavior.
+env var, matching PostgREST's `optWithAlias` behavior. The `flags` and `db`
+sources use canonical keys only.
+
+> #### The shipped `bier` binary never populates `flags` {: .info}
+> Every call site in `Bier.CLI` and `Bier.Application` passes an **empty**
+> flags map — the escript has no per-key command-line flags today (only
+> `--dump-config`, `-e`/`--example`, `-v`, `-h`, and the positional
+> config-file path). `flags` is there for programmatic callers of
+> `Config.load/3`; on the shipped binary the top live source is **db**.
+
+### In-database configuration
+
+Settings attached to the connecting role in PostgreSQL are a configuration
+source of their own, and they **outrank both the environment and the config
+file**:
+
+```sql
+ALTER ROLE authenticator SET pgrst.db_max_rows = '1000';
+ALTER ROLE authenticator IN DATABASE brewery_dev SET pgrst.db_schemas = 'api';
+```
+
+This is on by default. `db-config` (`PGRST_DB_CONFIG`, default `true`) is the
+gate: with it `true`, both standalone boot paths — the escript's `run` action
+and the release's `BIER_STANDALONE=1` boot — read the role's `pgrst.*`
+settings before starting the server, and `--dump-config` reads them too, so
+what it prints is what the server would run with. Set it to `false` to ignore
+the database entirely and resolve from flags/env/file/default only.
+
+Cluster-wide (`ALTER ROLE …`) and per-database (`ALTER ROLE … IN DATABASE …`)
+settings are both read, with the per-database value winning. Only keys on
+PostgREST's reloadable whitelist are honored — notably `db-uri` and the
+`server-*` bind settings are **not**, since the server would have to already
+be connected and listening to read them.
+
+The practical consequence: if a `PGRST_*` environment variable seems to have
+no effect, check for an `ALTER ROLE … SET pgrst.*` on the connecting role,
+because that is what is winning.
 
 ## Option reference
 
@@ -135,10 +163,9 @@ backend when the HTTP client disconnects mid-request (`Bier.Cancellation`;
 emits `[:bier, :query, :cancelled]`); set it to `false` to let such queries
 run to completion. `db_pool_max_idletime` maps onto DBConnection's
 `:idle_interval`.
-`nil` is the default for `Bier.start_link/1`/application env (`Bier.schema/0`
-in `lib/bier.ex`), and it defers to the driver default; the standalone/CLI
-surface (`Bier.CLI.Config`) instead defaults this key to `30` when it is not
-overridden (verified via `./bier --dump-config`).
+`nil` is the default for `Bier.start_link/1` and application env, and it
+defers to the driver default; the standalone/CLI surface instead defaults this
+key to `30` when it is not overridden.
 
 ### Schema & relation exposure
 
@@ -164,10 +191,10 @@ PostgREST's `PGRST_DB_TX_END` values `commit`, `commit-allow-override`,
 `-allow-override` variants collapse onto their base mode (`:commit` /
 `:rollback`) since Bier does not yet support the per-request `Prefer`
 override. `db_profile_default`, `db_profile_schemas`, `db_schema_aliases`,
-`db_max_rows_by_schema`, and `db_safe_update_tables` are Bier-internal knobs
-used by the conformance harness (multi-schema profile routing, per-area row
-caps, safe-update emulation) — they have no `PGRST_*` counterpart and cannot
-be set from the standalone binary.
+`db_max_rows_by_schema`, and `db_safe_update_tables` are Bier-only knobs for
+multi-schema profile routing, per-schema row caps, and safe-update emulation —
+they have no `PGRST_*` counterpart and cannot be set from the standalone
+binary.
 
 `db_extra_search_path` is applied in two places. Every pooled connection
 starts with `search_path` set to the configured extras, so schemas listed here
@@ -191,7 +218,7 @@ and view bodies.
 | `client_error_verbosity` | `"verbose" \| "minimal"` | `"verbose"` | `PGRST_CLIENT_ERROR_VERBOSITY` |
 | `url_use_legacy_target_names` | `boolean` | `true` | `PGRST_URL_USE_LEGACY_TARGET_NAMES` |
 
-Both are **new in PostgREST v16.0**. `client_error_verbosity` selects the
+`client_error_verbosity` selects the
 shape of the error envelope: `verbose` emits `{code, message, details, hint}`
 (all four keys always present), `minimal` emits `{code, message}` only — the
 `details` and `hint` members are *omitted*, not nulled. It applies to every
@@ -248,19 +275,14 @@ allowlist. This keeps a public JWK from ever being usable as an HMAC key
 
 `jwt_role_claim_key` is an [RFC 9535][] JSON Path into the decoded claims,
 e.g. `$.role` (default), `$["https://example.com/roles"][0]`, or
-`$.roles[?search(@, "^app_")]`. **PostgREST v16.0 replaced the v14.12
-leading-dot JSPath DSL with standard JSON Path**, so every expression now
-starts with the root identifier `$` and the old `.role` spelling aborts
-startup. Migrating: prefix with `$`; bracket any member name that is not
-`[A-Za-z0-9_]` (`.roles.write-role` → `$.roles["write-role"]`); and replace
-the DSL's string operators with the RFC's `search()` function
-(`.roles[?(@ ^== "pg_")]` → `$.roles[?search(@, "^pg_")]`). Bier implements
-the subset those values need — root, dotted and bracketed name selectors,
-integer indexes (negative counts from the end), and a single-comparison or
-`search()` filter; descendant segments (`..`), wildcards, slices,
-comma-separated selectors and the `&&`/`||`/`!` combinators are rejected
-(see `Bier.JWT.RoleClaim` and
-[milmazz/bier#99](https://github.com/milmazz/bier/issues/99)).
+`$.roles[?search(@, "^app_")]`. Every expression starts with the root
+identifier `$`; anything that does not parse aborts startup.
+
+Bier implements the subset those values need — root, dotted and bracketed name
+selectors, integer indexes (negative ones counting from the end), and a single
+comparison or `search()` filter. Descendant segments (`..`), wildcards,
+slices, comma-separated selectors and the `&&`/`||`/`!` combinators are
+rejected (`Bier.JWT.RoleClaim`).
 
 `jwt_cache_max_entries` caps the per-instance cache of JWT verification
 results; `0` or less disables it. Signature verification and claims decoding
@@ -318,6 +340,36 @@ plain map:
 ```elixir
 config :bier, app_settings: %{"anthem" => "Rocky Top"}
 ```
+
+### Standalone-only keys
+
+Two more `PGRST_*` keys exist on the standalone surface without a
+`Bier.schema/0` option behind them, because they govern how configuration is
+*resolved* rather than how the server behaves:
+
+| Key | Type | Default | `PGRST_*` var |
+| --- | --- | --- | --- |
+| `db-config` | `boolean` | `true` | `PGRST_DB_CONFIG` |
+| `db-pool` | `pos_integer` | `10` | `PGRST_DB_POOL` (feeds `pool_size`) |
+
+`db-config` is the in-database configuration gate — see
+[In-database configuration](#in-database-configuration).
+
+### Accepted but inert
+
+Four PostgREST keys are parsed, type-checked and echoed by `--dump-config`,
+but have **no effect** on the running server, because the behavior behind them
+is not implemented:
+
+* `db-prepared-statements` — Bier always uses prepared statements (Postgrex's
+  default); there is nothing to turn off.
+* `server-reuseport` — Bier does not set `SO_REUSEPORT` on the listener.
+* `admin-server-unix-socket`, `admin-server-unix-socket-mode` — the admin
+  listener is TCP-only (`admin-server-port`).
+
+They are accepted rather than rejected so that a PostgREST config file or
+environment can be pointed at Bier unedited. Any key *not* in this page's
+tables is rejected outright.
 
 ## `PGRST_DB_URI`
 
@@ -453,8 +505,8 @@ app.settings.anthem = "Rocky Top"
 ```
 
 Supported `PGRST_*` keys mirror the [Option reference](#option-reference)
-table above (plus their deprecated aliases); keys Bier does not implement are
-rejected rather than silently accepted or echoed.
+tables above (plus their deprecated aliases and the four
+[accepted-but-inert](#accepted-but-inert) keys); anything else is rejected.
 
 ## Validators
 
@@ -468,17 +520,14 @@ cross-field/semantic validators before a config is accepted — so `start_link/1
 | `jwt_secret` | A configured secret must be **≥ 32 bytes** (`byte_size/1` — octets, not characters) | `"The JWT secret must be at least 32 characters long."` |
 | `jwt_aud` | Any string is accepted, unless it contains `:`, in which case it must parse as an absolute URI (a scheme is required; a host is not) | `"jwt-aud should be a string or a valid URI"` |
 | `jwt_secret_is_base64` | When `true`, `jwt_secret` must decode as base64 after URL-safe normalization (`-`→`+`, `_`→`/`, `.`→`=`, whitespace stripped) | `"the jwt-secret is not valid base64"` |
-| `jwt_role_claim_key` | Must parse as an RFC 9535 JSON Path in the supported subset — rooted at `$`, dotted/bracketed name selectors, `[n]` indices, one comparison or `search()` filter. The v14.12 leading-dot spelling (`.role`) no longer parses | `"failed to parse role-claim-key value (<input>)"` |
-| `db_schemas` | New at v16.0: no entry may be `pg_catalog` or `information_schema` | `"db-schemas does not allow schema: '<name>'"` |
+| `jwt_role_claim_key` | Must parse as an RFC 9535 JSON Path in the supported subset — rooted at `$`, dotted/bracketed name selectors, `[n]` indices, one comparison or `search()` filter | `"failed to parse role-claim-key value (<input>)"` |
+| `db_schemas` | No entry may be `pg_catalog` or `information_schema` | `"db-schemas does not allow schema: '<name>'"` |
 | `server_unix_socket_mode` | The longest leading run of octal digits (Haskell `readOct` semantics — so `"599"` reads as `5`, `"800"` has no octal prefix at all) must fall within `0o600`..`0o777`; checked at boot even with no socket configured | `"...needs to be between 600 and 777"` or `"...not an octal"` |
 | `openapi_server_proxy_uri` | Must be an absolute `http`/`https` URI with a non-empty host | `"Malformed proxy uri, a correct example: https://example.com:8443/basePath"` |
 | `admin_server_port` | When set, must differ from `router[:port]` (`server-port`) | `"admin-server-port cannot be the same as server-port"` |
 | `db_channel` | Non-empty, ≤ 63 bytes (the Postgres identifier limit), no null byte | `"db-channel cannot be empty"` / `"...cannot exceed 63 bytes"` / `"...cannot contain null bytes"` |
 
-Every rule above except `db_channel` mirrors a pinned PostgREST conformance
-case (`jwt-secret` case 1708, `jwt-aud` 1709, `jwt-role-claim-key` 1711,
-`server-unix-socket-mode` 1714/1715, `openapi-server-proxy-uri` 1716,
-`admin-server-port` 1717, base64 secret 1718, `db-schemas` 1733/1734).
+Every rule above except `db_channel` reproduces PostgREST's own validation.
 `db_channel`'s length/null-byte
 rule is Bier-only — PostgREST does not validate this key itself; Bier
 validates it at boot because `Postgrex.Notifications.listen/3` would

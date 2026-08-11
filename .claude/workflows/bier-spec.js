@@ -1,5 +1,5 @@
 /**
- * bier-spec — PostgREST spec-research fan-out (Phase 1 of docs/AGENT_PLAN.md)
+ * bier-spec — PostgREST spec-research fan-out (see docs/workflows/bier-spec.md)
  * ===========================================================================
  *
  * A dynamic workflow that researches PostgREST's public behavior and lays down
@@ -183,9 +183,9 @@ function researchPrompt(area, priorIssues) {
   const { band, bandEnd, overflow, overflowEnd } = idBands(area.key);
   const revising = priorIssues && priorIssues.length;
   return `You are the Spec Researcher for the Bier project, working ONLY on the
-"${area.key}" feature area of PostgREST ${PINNED}. Read docs/AGENT_PLAN.md §5.1
-for the exact deliverable shapes. Work from the repository root (the current
-directory).
+"${area.key}" feature area of PostgREST ${PINNED}. Read docs/workflows/bier-spec.md
+§5 and spec/case.schema.json for the exact deliverable shapes. Work from the
+repository root (the current directory).
 
 AUTHORIZATION: CLAUDE.md declares spec/ frozen — that freeze governs
 conformance-IMPLEMENTATION work. This run is the operator-approved spec
@@ -222,7 +222,7 @@ Ground truth, in priority order:
 Deliverables, under spec/:
   - spec/${area.file}                        the behavior model for this area
   - spec/conformance/cases/NNNN_<slug>.yaml  >=1 black-box case per public feature,
-       in the AGENT_PLAN.md §5.1 case shape (id, feature, request, schema,
+       in the spec/case.schema.json case shape (id, feature, request, schema,
        preconditions, expect{status,headers,body_*}, notes, source)
   - spec/conformance/fixtures/${area.key}.delta.sql  ONLY if your new/changed
        cases need fixture objects that don't exist yet (see FIXTURE RULES)

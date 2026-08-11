@@ -78,5 +78,5 @@ runs — a gap was observed to stall PostgREST's GHC idle GC) and reports
 only the measured phase. Only the measured server ran during a
 stage. Latency cells show median across rounds (min–max). Any non-2xx
 response, dropped iteration, or >5% miss of the shared arrival rate
-aborts the run. Full details:
-`docs/superpowers/specs/2026-07-09-http-benchmark-design.md`.
+aborts the run. The harness itself (`bench/http/run.sh`) is the
+executable specification.

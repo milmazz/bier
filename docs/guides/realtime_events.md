@@ -55,7 +55,12 @@ Emit events from SQL:
 
 ```sql
 NOTIFY orders, '{"id": 42}';
--- or, parameterizable:
+```
+
+`pg_notify` is the parameterizable form, which is what you want when the
+payload is built from a row — inside a trigger function, for instance:
+
+```sql
 SELECT pg_notify('orders', json_build_object('id', new.id)::text);
 ```
 
@@ -80,7 +85,7 @@ A long-lived stream can therefore outlive the JWT that opened it: a token
 that expires five minutes after connecting does not cause the stream to
 close five minutes later. Bounding stream lifetime by `exp` (closing or
 requiring reauthentication when the token expires) is possible future
-hardening, not implemented in v1.
+hardening; it is not currently implemented.
 
 ## Errors
 
@@ -120,8 +125,8 @@ pretend otherwise:
   process mailbox. This is unbounded today and affects only that one
   subscriber — the listener process and every other subscriber are
   unaffected. A mailbox-size guard (dropping or disconnecting a subscriber
-  that falls too far behind) is possible future hardening, not implemented
-  in v1.
+  that falls too far behind) is possible future hardening; it is not
+  currently implemented.
 
 ## Telemetry
 

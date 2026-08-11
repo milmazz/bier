@@ -2,7 +2,7 @@
 # HTTP benchmark: Bier vs PostgREST v14.12, natively on macOS.
 #   bench/http/run.sh           full run (~50-60 min)
 #   bench/http/run.sh --smoke   short windows, 1 round (~pipeline validation)
-# Spec: docs/superpowers/specs/2026-07-09-http-benchmark-design.md
+# Results and methodology: bench/http/REPORT.md
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "$0")" && pwd)"

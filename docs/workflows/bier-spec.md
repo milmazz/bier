@@ -7,17 +7,16 @@
 
 ## 1. What this workflow does
 
-It executes **Phase 1 of `docs/AGENT_PLAN.md`** (the *Spec Researcher*) as a
+It builds (or re-syncs) the whole `spec/` tree — the *spec research* pass — as a
 single background [dynamic workflow](https://code.claude.com/docs/en/workflows):
 it fans out one subagent per PostgREST feature area, has a second wave of agents
 **adversarially cross-check** each other's findings against cited PostgREST
 source, then consolidates and synthesizes the result into a complete `spec/`
 tree. The run returns **one report**; no per-turn transcript.
 
-It is deliberately scoped to research only. It writes **only under `spec/`**
-(the Researcher's writable globs in `AGENT_PLAN.md` §4.2). It does **not** touch
-`lib/`, `test/`, or `mix.exs`. Generating the failing ExUnit suite from `spec/`
-is Phase 2 (the Tester) and is out of scope here.
+It is deliberately scoped to research only. It writes **only under `spec/`**.
+It does **not** touch `lib/`, `test/`, or `mix.exs`. Bringing `lib/` up to the
+resulting cases is the separate `bier-conformance` workflow's job.
 
 ### Why this phase, and why a workflow
 
@@ -41,8 +40,8 @@ is Phase 2 (the Tester) and is out of scope here.
   2. PostgREST Haskell source — `src/**`.
   3. PostgREST docs site — behavior the tests imply but don't state.
 - **Every** spec entry must carry a `source` URL **with a line anchor**.
-  Untraceable claims are dropped and logged as gaps — the Tester refuses
-  untraceable spec entries (`AGENT_PLAN.md` §12).
+  Untraceable claims are dropped and logged as gaps — a case nobody can trace
+  back to upstream is not ground truth.
 
 ## 3. Phases
 
@@ -96,8 +95,7 @@ ground truth for expected bodies is the CONSOLIDATED database as built by
 
 ## 4. Feature-area taxonomy (the research units)
 
-Derived from `AGENT_PLAN.md` §5.1. One agent owns one row and writes that row's
-`spec/<key>.yaml`.
+One agent owns one row and writes that row's `spec/<key>.yaml`.
 
 | #  | key                  | scope (non-exhaustive)                                                                                   |
 |----|----------------------|---------------------------------------------------------------------------------------------------------|
@@ -130,9 +128,10 @@ Restrict a run to a subset of areas with `args.areas` (e.g.
   + `src/**` for that area (via `git clone --depth 1 --branch v16.0` or raw
   `WebFetch` of `raw.githubusercontent.com/PostgREST/postgrest/v16.0/...`).
 - **Writes** (only under `spec/`):
-  - `spec/<key>.yaml` — the area's behavior model (see `AGENT_PLAN.md` §5.1 shapes).
+  - `spec/<key>.yaml` — the area's behavior model.
   - `spec/conformance/cases/NNNN_<slug>.yaml` — ≥1 black-box case per public
-    feature in the area, in the §5.1 case shape (request → expect, with `source`).
+    feature in the area, in the `spec/case.schema.json` shape (request →
+    expect, with `source`).
   - `spec/conformance/fixtures/<key>.delta.sql` — only if new/changed cases need
     fixture objects that don't exist yet (new objects only; folded into the
     primary `fixtures.sql` by phase D).
@@ -187,7 +186,7 @@ spec/
     └── INDEX.md
 ```
 
-## 7. Exit criteria (Phase 1 done — `AGENT_PLAN.md` §5.1)
+## 7. Exit criteria (the spec tree is done)
 
 - `spec/conformance/fixtures.sql` loads cleanly into Postgres 14/15/16.
 - ≥1 conformance case per public feature in PostgREST's docs ToC.

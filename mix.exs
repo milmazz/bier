@@ -1,7 +1,7 @@
 defmodule Bier.MixProject do
   use Mix.Project
 
-  @version "0.1.1-dev"
+  @version "0.1.0"
   @source_url "https://github.com/milmazz/bier"
 
   def project do
@@ -56,9 +56,16 @@ defmodule Bier.MixProject do
       licenses: ["Apache-2.0"],
       links: %{
         "GitHub" => @source_url,
-        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
+        "Documentation" => "https://hexdocs.pm/bier",
+        "Changelog" => "#{@source_url}/blob/v#{@version}/CHANGELOG.md"
       },
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
+      # The published guides and tutorials ship too, so their internal links
+      # resolve and so the tutorials' `brewery.sql` is actually reachable from
+      # a dependency (deps/bier/docs/tutorials/brewery.sql) — without it the
+      # tutorials' very first step only works from a git checkout.
+      # `docs/CONFORMANCE_IMPL.md` and `docs/workflows/` stay out: repo-only.
+      files: ~w(lib docs/guides docs/tutorials docs/injection_safety.md
+           .formatter.exs mix.exs README.md LICENSE CHANGELOG.md CONTRIBUTING.md),
       # `mix bier.fixtures.load` is the dev-only conformance-fixture loader; it
       # requires the excluded spec/ tree and would surface in host apps' `mix help`.
       exclude_patterns: [~r"^lib/mix/"]
@@ -85,20 +92,15 @@ defmodule Bier.MixProject do
         Tutorials: [~r"docs/tutorials/"],
         Reference: [~r"docs/guides/", ~r"docs/injection_safety"]
       ],
-      source_ref: "main",
+      source_ref: "v#{@version}",
       # The README and guides mention these for architecture context, but they
       # are `@moduledoc false`/private internals — don't autolink (and don't warn).
       skip_code_autolink_to: [
         "Bier.Application",
         "Bier.Application.start/2",
         "Bier.schema/0",
-        "Bier.Mutation.preferences/3",
-        "Bier.Plugs.ActionController.read_producers/1",
         "Config.load/3"
       ],
-      # CONTRIBUTING.md points at docs/CONFORMANCE_IMPL.md, a repo-internal
-      # contract deliberately kept out of the published docs.
-      skip_undefined_reference_warnings_on: ["CONTRIBUTING.md"],
       before_closing_head_tag: &before_closing_head_tag/1
     ]
   end

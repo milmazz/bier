@@ -5,10 +5,26 @@
 -- ---------------------------------------------------------------------------
 -- Roles (PostgREST-style): `authenticator` connects and can switch into the
 -- anonymous or member role. Change the password before using anywhere real.
+--
+-- Roles are cluster-global, so they outlive a `dropdb` and re-running this
+-- script would otherwise fail on them. `create role` has no `if not exists`,
+-- hence the guards.
 -- ---------------------------------------------------------------------------
-create role authenticator noinherit login password 'mysecretpassword';
-create role web_anon nologin;
-create role brewery_member nologin;
+do $$ begin
+  create role authenticator noinherit login password 'mysecretpassword';
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create role web_anon nologin;
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create role brewery_member nologin;
+exception when duplicate_object then null;
+end $$;
+
 grant web_anon to authenticator;
 grant brewery_member to authenticator;
 

@@ -10,24 +10,26 @@ related resource, and calling a database function over HTTP.
 ## Prerequisites
 
 * PostgreSQL running and reachable (`createdb`/`psql` on your `PATH`).
-* Elixir `~> 1.18` (this repository is developed against Elixir 1.20 / OTP
-  29 — see `mise.toml` — but any 1.18+ toolchain works for this tutorial).
+* Elixir `~> 1.18` (Bier is developed against Elixir 1.20 / OTP 29, but any
+  1.18+ toolchain works for this tutorial).
 
 ## Create the database
 
 Bier never creates schema — it only introspects and serves whatever is
-already in PostgreSQL. `docs/tutorials/brewery.sql` is a complete,
-runnable script: three roles, an `api` schema with five tables and two
-functions, grants, and seed data.
+already in PostgreSQL. [`brewery.sql`][brewery-sql] is a complete, runnable
+script: three roles, an `api` schema with five tables and two functions,
+grants, and seed data. It ships inside the package, so it is at
+`deps/bier/docs/tutorials/brewery.sql` in a project that depends on Bier, and
+at `docs/tutorials/brewery.sql` in a git checkout.
 
 ```sh
 createdb bier_tutorial
 psql -d bier_tutorial -f docs/tutorials/brewery.sql
 ```
 
-Roles are cluster-global, so if you have run this before and the roles
-already exist, either ignore the "already exists" notice or drop them
-first and re-run:
+The script is safe to re-run: its `create role` statements are guarded, and
+everything else lives in the database you just created. To start completely
+over:
 
 ```sh
 dropdb bier_tutorial
@@ -37,9 +39,10 @@ psql -d postgres -c "drop role if exists authenticator, web_anon, brewery_member
 The script creates three roles, mirroring PostgREST's own convention:
 
 * **`authenticator`** — the only role Bier ever connects to Postgres as.
-  It has `noinherit login`, so it can hold no privileges of its own; it
-  only switches into one of the roles below for the duration of a
-  request.
+  It is granted nothing of its own; it only switches into one of the roles
+  below for the duration of a request. It is declared `noinherit` so that
+  membership in those roles does not silently hand it their privileges
+  outside of an explicit `SET ROLE`.
 * **`web_anon`** — what an unauthenticated request runs as. It can
   `select` from every table in `api` and `execute` both functions, but it
   cannot write.
@@ -145,7 +148,7 @@ Either way — child spec or `iex` prompt — Bier prints a Bandit boot line onc
 the schema has been introspected and the listener is up:
 
 ```
-Running Tutorial.Router with Bandit 1.12.4 at 0.0.0.0:4040 (http)
+Running Tutorial.Router with Bandit 1.x.y at 0.0.0.0:4040 (http)
 ```
 
 The rest of this tutorial assumes Bier is reachable at
@@ -315,3 +318,5 @@ From here:
 * [Authentication](authentication.md) picks up where this tutorial left
   off: minting a JWT for `brewery_member` so a client can post check-ins,
   which `web_anon` cannot do.
+
+[brewery-sql]: https://github.com/milmazz/bier/blob/main/docs/tutorials/brewery.sql

@@ -14,8 +14,10 @@ holds; Bier verifies the signature, reads the `role` claim, and runs that
 request's SQL under `SET LOCAL ROLE <role>`. Authorization is then plain
 PostgreSQL `GRANT`s — the database, not Bier, decides what each role may do.
 
-This tutorial assumes you have already loaded `docs/tutorials/brewery.sql`
+This tutorial assumes you have already loaded [`brewery.sql`][brewery-sql]
 and can run Bier against it, exactly as Getting Started describes.
+
+[brewery-sql]: https://github.com/milmazz/bier/blob/main/docs/tutorials/brewery.sql
 
 ## The role split is already in the schema
 
@@ -130,11 +132,12 @@ PGRST_JWT_SECRET="the-tutorial-jwt-secret-change-me-please" \
 _build/prod/rel/bier/bin/bier start
 ```
 
-With a secret configured, role-switching now applies to every request on the
-`api` schema: a request carrying a valid token runs as the token's `role`
-claim, and a request without one still runs as `db_anon_role` (`web_anon`).
-This is the same uniform model PostgREST uses — authentication is not opted
-in per-table or per-schema; it applies to the whole exposed surface.
+Role-switching was already happening — `db_anon_role` alone was enough to make
+every request run as `web_anon`. What the secret adds is the other half:
+Bier can now *verify* a token and switch into whatever role its `role` claim
+names, while a request without one still runs as `db_anon_role`. This is the
+same uniform model PostgREST uses — authentication is not opted in per-table
+or per-schema; it applies to the whole exposed surface.
 
 ## Mint a token
 
@@ -167,9 +170,9 @@ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYnJld2VyeV9tZW1iZXIifQ.UvAakyOa
 ```
 
 If you would rather not open a shell, [jwt.io](https://jwt.io) can build the
-same token in the browser: choose the **HS256** algorithm, set the payload
-to `{"role": "brewery_member"}`, and paste the secret into the
-"verify signature" box. Copy the encoded token from the left panel.
+same token in the browser: select the **HS256** algorithm, set the payload to
+`{"role": "brewery_member"}`, and supply the secret as the signing key. The
+site hands back the encoded token to copy.
 
 > **Where `role` comes from.** Bier reads the role from the `role` claim by
 > default. That path is the `jwt_role_claim_key` option (default `$.role`);
@@ -177,9 +180,8 @@ to `{"role": "brewery_member"}`, and paste the secret into the
 > `{"https://example.com/roles": ["brewery_member"]}` — you point Bier at it
 > with `jwt_role_claim_key: "$[\"https://example.com/roles\"][0]"`. The value
 > is an [RFC 9535](https://www.rfc-editor.org/rfc/rfc9535) JSON Path, so it
-> always starts with the root identifier `$` — PostgREST v16.0 replaced the
-> older leading-dot JSPath DSL (`.role`) with standard JSON Path, and the old
-> spelling is now a startup error. See the
+> always starts with the root identifier `$`; a value that does not parse
+> aborts startup. See the
 > [Configuration guide](../guides/configuration.md) for the supported subset.
 >
 > **Expiry.** Real tokens should carry an `exp` (expiration) claim — a Unix
