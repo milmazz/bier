@@ -666,6 +666,15 @@ defmodule Bier.QueryExecutor do
       "coalesce(json_agg(_postgrest_t._bier_row), '[]'))::text"
   end
 
+  # `nulls=stripped` wraps the aggregate in `json_strip_nulls`, which is where
+  # PostgREST puts it too (`addNullsToSnip`, `SqlFragment.hs`). Doing it here
+  # rather than in `Bier.Render` keeps the body a single pass-through string, so
+  # JSON key order and the exact numeric text PostgreSQL emitted both survive
+  # (#109). Note it strips recursively, nested objects included — same as
+  # upstream.
+  defp aggregate_body(:json_strip),
+    do: "coalesce(json_strip_nulls(json_agg(_postgrest_t._bier_row)), '[]')::text"
+
   defp aggregate_body(_format), do: "coalesce(json_agg(_postgrest_t._bier_row), '[]')::text"
 
   defp window_count_col(%State{full_count?: true}),
@@ -738,7 +747,7 @@ defmodule Bier.QueryExecutor do
     # geometry column), matching PostgREST instead of emitting a non-Feature.
     {select_list, row_expr} =
       case {cols, state.format} do
-        {[], :json} -> {"1 AS _bier_dummy", "'{}'::json"}
+        {[], f} when f in [:json, :json_strip] -> {"1 AS _bier_dummy", "'{}'::json"}
         {[], _} -> {"1 AS _bier_dummy", row_json(state.format)}
         _ -> {Embed.render_cols(cols), row_json(state.format)}
       end

@@ -4,8 +4,16 @@ defmodule Bier.Render do
   into the negotiated output format: CSV, a singular object, a nulls-stripped
   array/object, or plain JSON.
 
-  Singular and nulls-stripped transforms operate on the decoded rows; CSV needs
-  an explicit ordered column list (it cannot rely on JSON object key order).
+  The bodies themselves are built by PostgreSQL, never re-encoded here: a
+  decode/encode round trip loses JSON object key order (Elixir maps are
+  unordered) and the exact numeric text PostgreSQL emitted (`45.512230` becomes
+  `45.51223`) — issue #109. So null-stripping happens in the aggregate
+  (`Bier.QueryExecutor`'s `json_strip_nulls`, upstream's `addNullsToSnip`), and
+  the singular form is the array's single element sliced out of the text
+  PostgreSQL already produced — byte-identical to upstream's
+  `json_agg(_postgrest_t)->0`. Only CSV, which is a different serialization
+  entirely, decodes; it also needs an explicit ordered column list (it cannot
+  rely on JSON object key order).
   """
 
   alias Bier.MediaType
@@ -26,19 +34,19 @@ defmodule Bier.Render do
     Bier.ServerTiming.measure(:response, fn -> do_render(media, body, opts) end)
   end
 
-  defp do_render(%MediaType{symbol: :singular} = mt, body, _opts) do
-    rows = decode(body)
-
-    case rows do
-      [row] -> {:ok, encode(maybe_strip(row, mt))}
+  # Singular: the plurality check needs the element count, but the body must be
+  # the text PostgreSQL produced, so the decode is used only to count and the
+  # element is sliced out of the original bytes. Any `nulls=stripped` on this
+  # media type was already applied by the aggregate.
+  defp do_render(%MediaType{symbol: :singular}, body, _opts) do
+    case decode(body) do
+      [_row] -> {:ok, single_element(body)}
       other -> {:error, {:not_singular, length(other)}}
     end
   end
 
-  defp do_render(%MediaType{symbol: :array_strip}, body, _opts) do
-    rows = decode(body)
-    {:ok, encode(Enum.map(rows, &strip_nulls/1))}
-  end
+  # `nulls=stripped` array: `json_strip_nulls` already ran in the aggregate.
+  defp do_render(%MediaType{symbol: :array_strip}, body, _opts), do: {:ok, body}
 
   defp do_render(%MediaType{symbol: :csv}, body, opts) do
     rows = decode(body)
@@ -51,16 +59,22 @@ defmodule Bier.Render do
 
   # ---- helpers -------------------------------------------------------------
 
-  defp maybe_strip(row, %MediaType{params: %{strip: true}}), do: strip_nulls(row)
-  defp maybe_strip(row, _mt), do: row
+  # The single element of a one-element JSON array, taken verbatim from the
+  # aggregate's own text. `json_agg` renders a one-row aggregate as `[<elem>]`
+  # with no padding, so dropping the brackets yields exactly what
+  # `json_agg(_postgrest_t)->0` would have. The caller has already established
+  # that the array holds exactly one element; the fallback re-encodes rather
+  # than crashing if the body ever arrives in another shape.
+  defp single_element(<<"[", rest::binary>> = body) when byte_size(rest) > 0 do
+    inner_size = byte_size(rest) - 1
 
-  defp strip_nulls(row) when is_map(row) do
-    row
-    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-    |> Map.new()
+    case rest do
+      <<inner::binary-size(^inner_size), "]">> -> inner
+      _ -> body
+    end
   end
 
-  defp strip_nulls(other), do: other
+  defp single_element(body), do: body
 
   defp decode("[]"), do: []
   defp decode("null"), do: []
