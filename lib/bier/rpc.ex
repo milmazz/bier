@@ -30,6 +30,7 @@ defmodule Bier.Rpc do
   alias Bier.Plugs.Warning
   alias Bier.QueryExecutor
   alias Bier.QueryParser
+  alias Bier.Render
   alias Bier.Response
 
   # Reserved query params that shape the result rather than bind arguments.
@@ -393,19 +394,80 @@ defmodule Bier.Rpc do
       {arg_sql, params} = build_call_args(args)
       from = "#{qfn(fn_def)}(#{arg_sql})"
 
-      sql = result_sql(fn_def, from, media)
+      run_call(conn, pool, fn_def, from, params, media)
+    end
+  end
 
-      case exec(pool, conn, sql, params) do
-        {:ok, %Postgrex.Result{rows: [[body]]}, guc} ->
-          render_result(conn, fn_def, body, media, guc)
+  defp run_call(conn, pool, fn_def, from, params, %MediaType{symbol: :plan} = media) do
+    explain(conn, pool, media, fn ->
+      {:ok, result_sql(fn_def, from, MediaType.for_symbol(:json)), params}
+    end)
+  end
 
-        {:ok, %Postgrex.Result{rows: []}, guc} ->
-          render_result(conn, fn_def, empty_body(fn_def), media, guc)
+  defp run_call(conn, pool, fn_def, from, params, media) do
+    case exec(pool, conn, result_sql(fn_def, from, media), params) do
+      {:ok, %Postgrex.Result{rows: [[body]]}, guc} ->
+        render_result(conn, fn_def, body, media, guc)
 
-        {:error, _} = err ->
-          err
+      {:ok, %Postgrex.Result{rows: []}, guc} ->
+        render_result(conn, fn_def, empty_body(fn_def), media, guc)
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # `application/vnd.pgrst.plan` over a call. Upstream has no RPC-specific plan
+  # code: `mtSnippet` wraps the WHOLE statement — the routine invocation
+  # included — in `explainF`, and it does so for `mainCall` exactly as it does
+  # for `mainRead` (`Query/Statements.hs`), so both call paths funnel through
+  # here. The explained statement is the JSON-bodied one, matching what
+  # `Bier.Plan` already explains for a relation read whatever the plan's `for=`
+  # target says.
+  #
+  # `EXPLAIN` without `ANALYZE` plans but does not execute, so the routine
+  # itself never runs — which is also why this can share the ordinary `exec/4`
+  # transaction (role switch, request GUCs, pre-request hook, cancellation)
+  # without a VOLATILE routine tripping the GET path's read-only transaction.
+  defp explain(conn, pool, media, build) do
+    with {:ok, sql, params} <- Bier.ServerTiming.measure(:plan, build) do
+      case exec(pool, conn, Bier.Plan.explain_sql(media, sql), params) do
+        {:ok, %Postgrex.Result{rows: rows}, _guc} -> Bier.Plan.render(conn, media, rows)
+        {:error, _} = err -> err
       end
     end
+  catch
+    {:bad_request, _} = err -> {:error, err}
+    {:embed_error, _} = err -> {:error, err}
+    {:embed_error_raw, reason} -> {:error, reason}
+  end
+
+  # A plan asks for the shaped read query itself, built but not run.
+  defp run_setof_rel(
+         conn,
+         config,
+         fn_def,
+         ret_rel,
+         args,
+         plan,
+         %MediaType{symbol: :plan} = media,
+         relations
+       ) do
+    pool = Bier.Registry.via(config.name, Postgrex)
+    count_mode = Pagination.call_count_mode(conn)
+    exec_args = Enum.map(args, fn {n, t, _v?, val} -> {n, t, value_for_named(val)} end)
+
+    explain(conn, pool, media, fn ->
+      QueryExecutor.build_function(
+        fn_def,
+        ret_rel,
+        exec_args,
+        plan,
+        relations,
+        :json,
+        count_mode
+      )
+    end)
   end
 
   # The :setof_rel read itself, once media/plan have resolved: the function
@@ -464,6 +526,13 @@ defmodule Bier.Rpc do
   defp return_media_type(_fn_def), do: nil
 
   # ---- result SQL shapes ---------------------------------------------------
+  #
+  # The media-specific shapes come first, then the return-kind ones: upstream
+  # picks the body expression by media type (`handlerF`) and only then lets the
+  # routine's return kind pick the branch inside it (`asJsonF`, `asCsvF` over
+  # whatever `_postgrest_t` the call produced — `Query/Statements.hs` `mainCall`),
+  # so every return kind gets a real CSV rather than a JSON body wearing a CSV
+  # `Content-Type` (#119).
 
   # An octet-stream scalar result returns the raw bytes (cast to bytea), not a
   # JSON encoding (cases 1622/1623).
@@ -484,16 +553,26 @@ defmodule Bier.Rpc do
       "coalesce(json_agg(ST_AsGeoJSON(t)::json), '[]'))::text FROM (#{inner}) t"
   end
 
-  # CSV over a setof-record result: no exposed relation backs an anonymous
-  # `TABLE(...)`/OUT-params return, so nothing supplies an ordered column list
-  # and `Bier.Render` used to fall back to the sorted keys of a decoded row.
-  # Rendering the rows as ordered `[key, value]` pairs carries the routine's
-  # declared column order (and the exact cell text) out of PostgreSQL instead
-  # (#110) — the same expression the relation reads use.
-  defp result_sql(%{ret_kind: :setof_record}, from, %MediaType{symbol: :csv}) do
-    "SELECT coalesce(json_agg(#{QueryExecutor.csv_row_pairs("t")}), '[]')::text " <>
-      "FROM (SELECT * FROM #{from}) t"
-  end
+  # CSV over a row-shaped result — setof-record and single composite alike. No
+  # exposed relation backs an anonymous `TABLE(...)`/OUT-params return, so
+  # nothing supplies an ordered column list and `Bier.Render` used to fall back
+  # to the sorted keys of a decoded row. Rendering the rows as ordered
+  # `[key, value]` pairs carries the routine's declared column order (and the
+  # exact cell text) out of PostgreSQL instead (#110) — the same expression the
+  # relation reads use.
+  defp result_sql(%{ret_kind: kind}, from, %MediaType{symbol: :csv})
+       when kind in [:setof_record, :composite],
+       do: csv_pairs_sql("SELECT * FROM #{from}")
+
+  # CSV over a scalar / set-of-scalar result. The returned value has no column
+  # name of its own, so upstream's CSV header picks up the alias the call query
+  # gave it: `callPlanToQuery` wraps the call as `(SELECT fn(…) pgrst_scalar)
+  # pgrst_call` (`QueryBuilder.hs`), and `asCsvHeaderF` reads the source CTE's
+  # `json_object_keys`. So a scalar comes back as a one-column CSV headed
+  # `pgrst_scalar` — verified by running upstream's own `asCsvF` against
+  # PostgreSQL.
+  defp result_sql(_fn_def, from, %MediaType{symbol: :csv}),
+    do: csv_pairs_sql("SELECT #{from} AS pgrst_scalar")
 
   # Array-of-objects for setof-record / multi-OUT setof. Wrapping the call in a
   # `(SELECT * FROM fn())` subquery keeps `t` a proper composite row even for a
@@ -506,23 +585,45 @@ defmodule Bier.Rpc do
     do: "SELECT #{agg_body("t._v", media)} FROM (SELECT #{from} AS _v) t"
 
   # Single object for a composite / OUT-params single-row return.
-  defp result_sql(%{ret_kind: :composite}, from, _media),
-    do: "SELECT to_jsonb(t)::text FROM (SELECT * FROM #{from}) t"
+  defp result_sql(%{ret_kind: :composite}, from, media),
+    do: "SELECT #{single_body("t", media)} FROM (SELECT * FROM #{from}) t"
 
   # Bare scalar (incl. scalar arrays) -> JSON value of the single returned value.
-  defp result_sql(_fn_def, from, _media),
-    do: "SELECT to_jsonb(_v)::text FROM (SELECT #{from} AS _v) t"
+  defp result_sql(_fn_def, from, media),
+    do: "SELECT #{single_body("_v", media)} FROM (SELECT #{from} AS _v) t"
+
+  defp csv_pairs_sql(source) do
+    "SELECT coalesce(json_agg(#{QueryExecutor.csv_row_pairs("t")}), '[]')::text " <>
+      "FROM (#{source}) t"
+  end
 
   # The array aggregate for the two set-returning shapes, with `nulls=stripped`
   # applied in SQL (`json_strip_nulls`, upstream's `addNullsToSnip`) rather than
   # by re-encoding in `Bier.Render` — a decode/encode round trip loses JSON key
-  # order and the exact numeric text PostgreSQL emitted (#109). Only these two
-  # shapes reach `Bier.Render`; the scalar/composite bodies are sent verbatim
-  # and never carried the strip.
-  defp agg_body(row, %MediaType{params: %{strip: true}}),
-    do: "coalesce(json_strip_nulls(json_agg(#{row})), '[]')::text"
+  # order and the exact numeric text PostgreSQL emitted (#109).
+  defp agg_body(row, media),
+    do: "coalesce(#{strip("json_agg(#{row})", media)}, '[]')::text"
 
-  defp agg_body(row, _media), do: "coalesce(json_agg(#{row}), '[]')::text"
+  # The single-row aggregate, which is upstream's expression rather than a
+  # `to_jsonb`: `asJsonF`/`asJsonSingleF` build the `returnsScalar` and
+  # `returnsSingleComposite` branches as `json_agg(_postgrest_t…)->0`, and
+  # `addNullsToSnip` wraps *those* in `json_strip_nulls` too — so
+  # `nulls=stripped` applies to a scalar/composite return, which it silently did
+  # not before (#119).
+  #
+  # Going through `json` rather than `jsonb` matters for the same reason #109
+  # kept the array bodies out of Elixir: `jsonb` sorts object keys and pads them
+  # with spaces, so a `json`-returning routine came back as `{"a": null, "b": 1}`
+  # where PostgreSQL (and upstream) say `{"b":1,"a":null}`. It also settles the
+  # NULL case — `to_jsonb` is strict, so a routine returning SQL NULL produced a
+  # NULL body, while an aggregate over that row yields the JSON text `null`.
+  defp single_body(row, media),
+    do: "coalesce(#{strip("json_agg(#{row})->0", media)}, 'null')::text"
+
+  defp strip(snippet, %MediaType{params: %{strip: true}}),
+    do: "json_strip_nulls(#{snippet})"
+
+  defp strip(snippet, _media), do: snippet
 
   defp empty_body(%{ret_kind: kind}) when kind in [:setof_record, :setof_scalar], do: "[]"
   defp empty_body(_), do: "null"
@@ -548,7 +649,23 @@ defmodule Bier.Rpc do
     |> send_resp(Bier.Guc.status(guc, 200), octet_body(body))
   end
 
-  defp render_result(conn, _fn_def, body, media, guc) do
+  # CSV: `result_sql/3` built the body as the ordered `[key, value]` pairs of
+  # the result row, so `Bier.Render` writes it exactly as it does for a relation
+  # read. Before #119 this clause did not exist and the JSON body went out under
+  # the CSV `Content-Type`. The row count is fixed at one here, so the body goes
+  # through `Bier.Render` directly rather than through `Bier.Response`, which
+  # would re-derive `Content-Range` from a body that is no longer a row array.
+  defp render_result(conn, _fn_def, body, %MediaType{symbol: :csv} = media, guc) do
+    case Render.render(media, body, columns: []) do
+      {:ok, out} -> send_single(conn, out, media, guc)
+      {:error, _} = err -> err
+    end
+  end
+
+  defp render_result(conn, _fn_def, body, media, guc),
+    do: send_single(conn, body, media, guc)
+
+  defp send_single(conn, body, media, guc) do
     count_mode = Pagination.call_count_mode(conn)
     out = body_for(conn, body)
 
