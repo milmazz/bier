@@ -410,7 +410,8 @@ defmodule Bier.Rpc do
 
   # The :setof_rel read itself, once media/plan have resolved: the function
   # call becomes the FROM source of the shaped read, run under the
-  # client-disconnect watcher like any relation read.
+  # client-disconnect watcher AND the per-request auth context (role switch,
+  # request GUCs, db-pre-request) like any relation read — issue #108.
   defp run_setof_rel(conn, config, fn_def, ret_rel, args, plan, media, relations) do
     pool = Bier.Registry.via(config.name, Postgrex)
     count_mode = Pagination.call_count_mode(conn)
@@ -421,6 +422,7 @@ defmodule Bier.Rpc do
         QueryExecutor.run_function(pool, fn_def, ret_rel, exec_args, plan,
           count_mode: count_mode,
           relations: relations,
+          auth: ActionController.auth_setup(conn, config),
           format: MediaType.executor_format(media)
         )
       end)
