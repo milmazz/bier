@@ -19,10 +19,13 @@ defmodule Bier.Plugs.Observability do
       entirely.
 
     * **Server version header**: every response carries
-      `Server: postgrest/<version>`. PostgREST sets it once as a Warp server
-      setting (`setServerName`, `App.hs`), so it is unconditional — no config
-      key gates it and it rides on every response whatever the method, status or
-      content type, error responses included.
+      `Server: bier/<version>` (`Bier.version/0`). This is a deliberate
+      divergence (#122): upstream sends `Server: postgrest/<version>` (set once
+      as a Warp server setting — `setServerName`, `App.hs`), but a `Server`
+      header names the software that built the response. Like upstream's, the
+      header is unconditional — no config key gates it and it rides on every
+      response whatever the method, status or content type, error responses
+      included.
 
     * **Trace header passthrough** (`server-trace-header`): when configured with
       a header name (e.g. `X-Request-Id`), the incoming value of that header is

@@ -422,7 +422,8 @@ PostgREST's issue tracker. The same reasoning applies to the OpenAPI document's
 speaking — is still advertised, through `externalDocs`, which points at the
 PostgREST release this build reproduces. The exemption is declared in the
 conformance harness rather than by editing the case, so `spec/` keeps recording
-what PostgREST really does. See #122.
+what PostgREST really does. See
+[#122](https://github.com/milmazz/bier/issues/122).
 
 **`Vary: Origin` on CORS responses.** `Bier.Plugs.Cors` echoes the request's
 `Origin` into `Access-Control-Allow-Origin` rather than sending `*`, and a
@@ -436,13 +437,15 @@ funnel so the v16 default is not suppressed. A wildcard
 `Access-Control-Allow-Origin: *` is not an echo and stays bare, and CORS
 **preflight** responses are consciously left alone: upstream answers them in the
 wai-cors middleware, before the funnel that appends `Vary` runs at all, so
-changing them would be inventing behavior rather than correcting it. See #98.
+changing them would be inventing behavior rather than correcting it. See
+[#98](https://github.com/milmazz/bier/issues/98).
 
 **CSV quoting.** Bier's CSV writer is RFC 4180. Upstream builds CSV bodies from
 PostgreSQL's `record_out` text with the parentheses stripped (`asCsvF`), which
 backslash-escapes and leaves embedded newlines unquoted — a value containing
 either yields malformed CSV. Bier renders the *cells* in SQL (so column order
-and numeric text are PostgreSQL's) but keeps its own quoting. See #110.
+and numeric text are PostgreSQL's) but keeps its own quoting. See
+[#110](https://github.com/milmazz/bier/issues/110).
 
 ## Benchmarks
 

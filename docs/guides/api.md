@@ -400,7 +400,7 @@ curl -i "http://localhost:4040/breweries?select=name,the_beers:beers(name)&beers
 
 ```http
 HTTP/1.1 200 OK
-Warning: 299 Bierv0.1.0 "Embedded resource was referenced by relation name even though it has an alias. This is deprecated and will stop working in a future release. Update `beers` to `the_beers` in query string filters, orders or limits."
+Warning: 299 Bierv0.x.y "Embedded resource was referenced by relation name even though it has an alias. This is deprecated and will stop working in a future release. Update `beers` to `the_beers` in query string filters, orders or limits."
 ```
 
 Using the alias (`the_beers.order=name.asc`) emits no warning. With

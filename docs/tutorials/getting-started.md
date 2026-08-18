@@ -27,9 +27,10 @@ createdb bier_tutorial
 psql -d bier_tutorial -f docs/tutorials/brewery.sql
 ```
 
-The script is safe to re-run: its `create role` statements are guarded, and
-everything else lives in the database you just created. To start completely
-over:
+The script is safe to re-run against a freshly created database: its
+`create role` statements are guarded, and everything else lives in the
+database itself, so `dropdb`/`createdb` and loading again runs clean. To start
+completely over, roles included:
 
 ```sh
 dropdb bier_tutorial

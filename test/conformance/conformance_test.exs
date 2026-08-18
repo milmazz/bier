@@ -27,6 +27,33 @@ defmodule Bier.ConformanceTest do
         "advertised through the OpenAPI document's externalDocs instead (#122)."
   }
 
+  # id => {path into the case's expect map, pinned value}. A divergence entry
+  # must keep pointing at a live case that still asserts the upstream behavior
+  # Bier declines to match; a spec re-sync that renumbers or rewrites the case
+  # fails the build here instead of silently keeping (or dangling) the
+  # exemption. Every @divergences entry needs a pin here.
+  @divergence_pins %{1771 => {["headers_match", "Server"], "^postgrest/.+"}}
+
+  cases_by_id = Map.new(Bier.ConformanceCase.load_all(), &{&1.id, &1})
+
+  for id <- Map.keys(@divergences) do
+    {path, pinned} =
+      Map.get(@divergence_pins, id) ||
+        raise "deliberate-divergence entry #{id} has no @divergence_pins entry"
+
+    case Map.fetch(cases_by_id, id) do
+      :error ->
+        raise "deliberate-divergence entry #{id} matches no spec case — " <>
+                "renumbered in a re-sync? Update @divergences/@divergence_pins."
+
+      {:ok, c} ->
+        get_in(c.expect, path) == pinned ||
+          raise "spec case #{id} no longer pins #{inspect(path)} == " <>
+                  "#{inspect(pinned)} — the deliberate-divergence entry is " <>
+                  "stale; re-evaluate it."
+    end
+  end
+
   for c <- Bier.ConformanceCase.load_all() do
     pending_reason =
       cond do
