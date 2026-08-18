@@ -5,23 +5,24 @@ defmodule Bier.Auth do
 
   PostgREST runs every request inside a transaction that first establishes the
   authenticated role and a set of `request.*` settings, then runs the main query.
-  Concretely, before the query it executes (transaction-local):
+  Concretely, before the query it applies (transaction-local, all via
+  `set_config(name, value, true)` — upstream never issues `SET ROLE`):
 
-    * `SET LOCAL ROLE <role>` — the JWT `role` claim, else `db-anon-role`;
-    * `set_config('request.jwt.claims', <claims-json>, true)`;
-    * `set_config('request.method', <method>, true)`;
-    * `set_config('request.path', <path>, true)`;
-    * `set_config('request.headers', <json of lowercased headers>, true)`;
-    * `set_config('request.cookies', <json of cookie pairs>, true)`;
-    * `set_config('search_path', <request schema> : <db-extra-search-path>, true)`
-      — upstream's `searchPathSql` (`Query/PreQuery.hs`), the request's own
-      schema first;
-    * one `set_config('app.settings.<name>', <value>, true)` per configured
-      `app_settings` entry (PostgREST app.settings.*);
-    * the `db-pre-request` proc (if configured), which may itself `SET ROLE` or
-      `RAISE` to abort the request.
+    * `role` — the JWT `role` claim, else `db-anon-role`;
+    * `request.jwt.claims` — the claims JSON;
+    * `request.method` / `request.path`;
+    * `request.headers` — JSON of lowercased headers;
+    * `request.cookies` — JSON of cookie pairs;
+    * `search_path` — `<request schema> : <db-extra-search-path>`, upstream's
+      `searchPathSql` (`Query/PreQuery.hs`), the request's own schema first;
+    * one `app.settings.<name>` per configured `app_settings` entry;
 
-  SQL functions then read these via `current_setting('request.…')`.
+  and then runs the `db-pre-request` proc (if configured), which may itself
+  `SET ROLE` or `RAISE` to abort the request.
+
+  All the `set_config` calls are batched into ONE `SELECT` statement — a single
+  network round trip — mirroring upstream, which pipelines its whole preamble.
+  SQL functions then read the settings via `current_setting('request.…')`.
 
   Bier applies this context whenever auth is configured for the instance
   (`jwt_secret` or `db_anon_role`), for every exposed schema — matching
@@ -164,11 +165,43 @@ defmodule Bier.Auth do
   @spec with_context(term(), t(), Bier.Config.t(), (term() -> any())) ::
           {:ok, any()} | {:error, term()}
   def with_context(tx, context, config, fun) do
-    apply_context(tx, context)
-    apply_search_path(tx, context, config)
-    apply_app_settings(tx, config)
+    apply_preamble(tx, context, config)
     run_pre_request(tx, config)
     fun.(tx)
+  end
+
+  # Apply the role + request GUCs + search_path + app.settings as ONE
+  # `SELECT set_config(...), set_config(...), …` statement — a single round
+  # trip, the way upstream pipelines its preamble. The role switch rides in the
+  # same statement: `set_config('role', <role>, true)` is transaction-local and
+  # is exactly what PostgREST executes (it never issues `SET ROLE`), so bad
+  # roles fail with upstream's error shape. Every name and value is a bind
+  # parameter; nothing is interpolated. A failure rolls the transaction back so
+  # it surfaces as a `{:error, %Postgrex.Error{}}`.
+  defp apply_preamble(tx, context, config) do
+    pairs = guc_pairs(context, config)
+
+    selects =
+      pairs
+      |> Enum.with_index()
+      |> Enum.map_join(", ", fn {_pair, i} ->
+        "set_config($#{2 * i + 1}, $#{2 * i + 2}, true)"
+      end)
+
+    params = Enum.flat_map(pairs, fn {name, value} -> [name, value] end)
+
+    run!(tx, "SELECT " <> selects, params)
+  end
+
+  defp guc_pairs(context, config) do
+    [
+      {"role", context.role},
+      {"request.jwt.claims", context.claims_json},
+      {"request.method", context.method},
+      {"request.path", context.path},
+      {"request.headers", context.headers_json},
+      {"request.cookies", context.cookies_json}
+    ] ++ search_path_pair(context, config) ++ app_settings_pairs(config)
   end
 
   # db-extra-search-path, applied transaction-locally with the *request's*
@@ -180,41 +213,22 @@ defmodule Bier.Auth do
   # names cannot be bound one by one) and then bound as a single parameter.
   # Endpoints with no relation target (SSE events) leave the connection-level
   # default from `Bier.postgrex_opts/1` in place.
-  defp apply_search_path(tx, context, %{db_extra_search_path: extras}) do
+  defp search_path_pair(context, %{db_extra_search_path: extras}) do
     schemas = if context[:schema], do: [context.schema | extras], else: extras
 
     case Bier.Config.search_path(schemas) do
-      nil -> :ok
-      value -> set_guc(tx, "search_path", value)
+      nil -> []
+      value -> [{"search_path", value}]
     end
   end
 
   # Configured app.settings.* values become transaction-local GUCs readable
   # via current_setting('app.settings.<name>'), set in sorted order for
   # determinism.
-  defp apply_app_settings(tx, %{app_settings: settings}) do
+  defp app_settings_pairs(%{app_settings: settings}) do
     settings
     |> Enum.sort()
-    |> Enum.each(fn {name, value} -> set_guc(tx, "app.settings." <> name, value) end)
-  end
-
-  # Apply the role + request GUCs on the transaction connection. SET LOCAL ROLE
-  # uses a validated identifier (the role comes from config or a verified JWT
-  # claim; we still quote it). All GUCs are set via parameterized set_config so
-  # values are never interpolated. A failure rolls the transaction back so it
-  # surfaces as a `{:error, %Postgrex.Error{}}`.
-  defp apply_context(tx, context) do
-    run!(tx, ~s(SET LOCAL ROLE #{quote_ident(context.role)}), [])
-
-    set_guc(tx, "request.jwt.claims", context.claims_json)
-    set_guc(tx, "request.method", context.method)
-    set_guc(tx, "request.path", context.path)
-    set_guc(tx, "request.headers", context.headers_json)
-    set_guc(tx, "request.cookies", context.cookies_json)
-  end
-
-  defp set_guc(tx, name, value) do
-    run!(tx, "SELECT set_config($1, $2, true)", [name, value])
+    |> Enum.map(fn {name, value} -> {"app.settings." <> name, value} end)
   end
 
   # The db-pre-request proc runs after role/GUC setup and before the main query.
