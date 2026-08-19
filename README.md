@@ -458,14 +458,16 @@ filtered 25-row page, insert, and update by primary key.
 
 The published numbers were measured against **PostgREST v16.1** (2026-08),
 with the full per-request auth context (role switch + `request.*` GUCs)
-applied on both sides.
+applied on both sides, and with server-side prepared statements enabled on
+both sides (PostgREST's `db-prepared-statements` default; Bier's statement
+cache).
 
 On our reference machine (Apple M1 Max, PostgreSQL 17), Bier sustains
-**1.9–2.5x PostgREST's max throughput** depending on the scenario, wins
-median latency in three of the four scenarios (and ties the fourth), trades
-p90 (PostgREST is ~1.2–1.35x ahead on three, Bier >2x ahead on the filtered
-page), and holds a much tighter tail: Bier's p99 stayed under 4 ms in every
-round of every scenario, while PostgREST's read-side p99 reached tens of
+**2.7–4.2x PostgREST's max throughput** depending on the scenario, holds
+median latency at parity (within ±7% of PostgREST in every scenario, ahead
+on the reads), wins p90 on the read scenarios (and ties on the writes), and
+holds a much tighter tail: Bier wins p99 in all four scenarios, staying
+under 15 ms in every round, while PostgREST's read-side p99 reached tens of
 milliseconds.
 
 Latency is measured open-loop (k6 `constant-arrival-rate`, immune to
