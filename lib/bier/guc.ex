@@ -23,13 +23,12 @@ defmodule Bier.Guc do
   Returns `{:ok, %{headers: [{name, value}], status: integer | nil}}` or
   `{:error, :bad_response_headers_guc}` / `{:error, :bad_response_status_guc}`.
   """
-  def read(tx) do
+  def read(tx, cache? \\ false) do
+    sql =
+      "SELECT current_setting('response.headers', true), current_setting('response.status', true)"
+
     %Postgrex.Result{rows: [[headers_raw, status_raw]]} =
-      Postgrex.query!(
-        tx,
-        "SELECT current_setting('response.headers', true), current_setting('response.status', true)",
-        []
-      )
+      Postgrex.query!(tx, sql, [], Bier.StatementCache.opts(cache?, sql))
 
     with {:ok, headers} <- parse_headers(headers_raw),
          {:ok, status} <- parse_status(status_raw) do

@@ -298,19 +298,21 @@ defmodule Bier.Mutation do
   # collect the response payload: body/count/meta from the CTE, the PUT/upsert
   # pre-existence flag, and the response GUCs.
   defp execute(tx, %Write{} = write, wrapped, wparams) do
+    cache? = write.config.db_prepared_statements
+
     # pg-safeupdate parity: when this table is configured "safe", an UPDATE
     # or DELETE without a filter must raise 21000.
     maybe_enable_safeupdate(tx, write)
 
     # For PUT, distinguish insert (201) from replace (200) by whether the PK
     # already existed before the upsert.
-    existed = put_existed?(tx, write.relation, write.mutation)
+    existed = put_existed?(tx, write.relation, write.mutation, cache?)
 
     # The request's main statement (log-query); the safeupdate guard and the
     # PUT-existence probe above are internal bookkeeping and stay unlogged.
     Bier.RequestLog.record(wrapped)
 
-    case Postgrex.query(tx, wrapped, wparams) do
+    case Postgrex.query(tx, wrapped, wparams, Bier.StatementCache.opts(cache?, wrapped)) do
       {:ok, %Postgrex.Result{rows: [[body, count, meta]]}} ->
         count = count || 0
 
@@ -319,7 +321,7 @@ defmodule Bier.Mutation do
              # Read any response.headers / response.status GUC an INSTEAD OF
              # trigger set during the write, BEFORE the transaction ends
              # (the GUCs are transaction-local; a rollback would discard them).
-             {:ok, guc} <- Bier.Guc.read(tx) do
+             {:ok, guc} <- Bier.Guc.read(tx, cache?) do
           # The response is fully computed inside the transaction (the CTE's
           # RETURNING is already serialized into `body`). Under db-tx-end
           # :rollback we abort the transaction here, discarding the write but
@@ -378,23 +380,24 @@ defmodule Bier.Mutation do
   defp safe_tables(_config), do: []
 
   # Pre-existence check for PUT: the single-row case of the upsert check.
-  defp put_existed?(tx, relation, {:put, row, pk}), do: all_rows_exist?(tx, relation, pk, [row])
+  defp put_existed?(tx, relation, {:put, row, pk}, cache?),
+    do: all_rows_exist?(tx, relation, pk, [row], cache?)
 
   # Pre-existence check for a POST upsert: true only when EVERY row's conflict
   # key already exists (so nothing is inserted and the status is 200).
-  defp put_existed?(_tx, _relation, {:upsert, [], _rows}), do: false
+  defp put_existed?(_tx, _relation, {:upsert, [], _rows}, _cache?), do: false
 
-  defp put_existed?(tx, relation, {:upsert, conflict_cols, rows}) do
-    all_rows_exist?(tx, relation, conflict_cols, rows)
+  defp put_existed?(tx, relation, {:upsert, conflict_cols, rows}, cache?) do
+    all_rows_exist?(tx, relation, conflict_cols, rows, cache?)
   end
 
-  defp put_existed?(_tx, _relation, _mutation), do: false
+  defp put_existed?(_tx, _relation, _mutation, _cache?), do: false
 
   # One round-trip regardless of payload size: expand the payload rows through
   # the same bound-jsonb + typed-extraction path the INSERT uses (so key values
   # coerce exactly as they will on insert) and AND a correlated EXISTS per row.
   # The table gets an explicit alias so `_p._e` can never resolve to it.
-  defp all_rows_exist?(tx, relation, cols, rows) do
+  defp all_rows_exist?(tx, relation, cols, rows, cache?) do
     predicate =
       Enum.map_join(cols, " AND ", fn col ->
         coltype = column_type(relation, col)
@@ -406,7 +409,12 @@ defmodule Bier.Mutation do
         "SELECT 1 FROM #{qrel(relation)} AS _t WHERE #{predicate}" <>
         ")), false) FROM jsonb_array_elements($1::text::jsonb) AS _p(_e)"
 
-    case Postgrex.query(tx, sql, [Bier.json_library().encode!(rows)]) do
+    case Postgrex.query(
+           tx,
+           sql,
+           [Bier.json_library().encode!(rows)],
+           Bier.StatementCache.opts(cache?, sql)
+         ) do
       {:ok, %Postgrex.Result{rows: [[exists]]}} -> exists
       _ -> false
     end

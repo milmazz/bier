@@ -70,13 +70,14 @@ defmodule Bier.QueryExecutor do
     timezone = Keyword.get(opts, :timezone)
     auth = Keyword.get(opts, :auth)
     format = Keyword.get(opts, :format, :json)
+    cache? = Keyword.get(opts, :statement_cache, false)
 
     with {:ok, sql, params} <-
            Bier.ServerTiming.measure(:plan, fn ->
              build(relation, plan, relations, format, count_mode)
            end) do
       Bier.ServerTiming.measure(:transaction, fn ->
-        case query_read(conn, sql, params, timezone, auth) do
+        case query_read(conn, sql, params, timezone, auth, cache?) do
           {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
             resolve_count(
               conn,
@@ -106,18 +107,18 @@ defmodule Bier.QueryExecutor do
   # the connecting superuser. That is intentional — the auth cases that read GUCs
   # use count=none, and the privilege-gated reads either succeed (granted) or
   # raise here before any count query runs.
-  defp query_read(conn, sql, params, timezone, nil) do
+  defp query_read(conn, sql, params, timezone, nil, cache?) do
     Bier.RequestLog.record(sql)
-    query_with_timezone(conn, sql, params, timezone)
+    query_with_timezone(conn, sql, params, timezone, cache?)
   end
 
-  defp query_read(pool, sql, params, timezone, {context, config}) do
+  defp query_read(pool, sql, params, timezone, {context, config}, cache?) do
     Bier.RequestLog.record(sql)
 
     result =
       Postgrex.transaction(pool, fn tx ->
         Bier.Auth.with_context(tx, context, config, fn tx ->
-          run_with_timezone(tx, sql, params, timezone)
+          run_with_timezone(tx, sql, params, timezone, cache?)
         end)
       end)
 
@@ -128,11 +129,12 @@ defmodule Bier.QueryExecutor do
     end
   end
 
-  defp query_with_timezone(conn, sql, params, nil), do: Postgrex.query(conn, sql, params)
+  defp query_with_timezone(conn, sql, params, nil, cache?),
+    do: Postgrex.query(conn, sql, params, Bier.StatementCache.opts(cache?, sql))
 
-  defp query_with_timezone(conn, sql, params, timezone) do
+  defp query_with_timezone(conn, sql, params, timezone, cache?) do
     Postgrex.transaction(conn, fn tx ->
-      run_with_timezone(tx, sql, params, timezone)
+      run_with_timezone(tx, sql, params, timezone, cache?)
     end)
     |> case do
       {:ok, result} -> {:ok, result}
@@ -143,9 +145,10 @@ defmodule Bier.QueryExecutor do
   # Apply the request's `Prefer: timezone` (if any) and run the read, inside the
   # caller's transaction. Either statement failing rolls the transaction back
   # with the Postgrex error so it reaches the error envelope unchanged.
-  defp run_with_timezone(tx, sql, params, timezone) do
-    with :ok <- set_local_timezone(tx, timezone),
-         {:ok, result} <- Postgrex.query(tx, sql, params) do
+  defp run_with_timezone(tx, sql, params, timezone, cache?) do
+    with :ok <- set_local_timezone(tx, timezone, cache?),
+         {:ok, result} <-
+           Postgrex.query(tx, sql, params, Bier.StatementCache.opts(cache?, sql)) do
       result
     else
       {:error, err} -> Postgrex.rollback(tx, err)
@@ -163,11 +166,15 @@ defmodule Bier.QueryExecutor do
   (`Bier.Rpc`) applies it through the same statement and the same error shape
   rather than duplicating it.
   """
-  @spec set_local_timezone(term(), String.t() | nil) :: :ok | {:error, term()}
-  def set_local_timezone(_tx, nil), do: :ok
+  @spec set_local_timezone(term(), String.t() | nil, boolean()) :: :ok | {:error, term()}
+  def set_local_timezone(tx, timezone, cache? \\ false)
 
-  def set_local_timezone(tx, timezone) do
-    case Postgrex.query(tx, "SELECT set_config('timezone', $1, true)", [timezone]) do
+  def set_local_timezone(_tx, nil, _cache?), do: :ok
+
+  def set_local_timezone(tx, timezone, cache?) do
+    sql = "SELECT set_config('timezone', $1, true)"
+
+    case Postgrex.query(tx, sql, [timezone], Bier.StatementCache.opts(cache?, sql)) do
       {:ok, _result} -> :ok
       {:error, _err} = error -> error
     end
@@ -182,8 +189,8 @@ defmodule Bier.QueryExecutor do
   # it already holds the exact total. When the window is empty (e.g. an offset
   # past the last row), no rows survive to carry the count, so we run a dedicated
   # `count(*)` over the unlimited filtered set to recover the real total.
-  defp resolve_count(conn, relation, plan, relations, :exact, _opts, "[]", _exact) do
-    case exact_count(conn, relation, plan, relations) do
+  defp resolve_count(conn, relation, plan, relations, :exact, opts, "[]", _exact) do
+    case exact_count(conn, relation, plan, relations, Keyword.get(opts, :statement_cache, false)) do
       {:ok, total} -> {:ok, %{body: "[]", count: total}}
       {:error, _} = err -> err
     end
@@ -220,12 +227,12 @@ defmodule Bier.QueryExecutor do
   end
 
   # Exact `count(*)` over the filtered query (no limit/offset/order).
-  defp exact_count(conn, relation, plan, relations) do
+  defp exact_count(conn, relation, plan, relations, cache?) do
     {:ok, inner_sql, params} = build_count_query(relation, plan, relations)
     count_sql = "SELECT count(*) FROM (#{inner_sql}) _bier_count"
     Bier.RequestLog.record(count_sql)
 
-    case Postgrex.query(conn, count_sql, params) do
+    case Postgrex.query(conn, count_sql, params, Bier.StatementCache.opts(cache?, count_sql)) do
       {:ok, %Postgrex.Result{rows: [[n]]}} -> {:ok, n || 0}
       {:error, _} = err -> err
     end
@@ -331,6 +338,7 @@ defmodule Bier.QueryExecutor do
     relations = Keyword.get(opts, :relations, %{})
     format = Keyword.get(opts, :format, :json)
     auth = Keyword.get(opts, :auth)
+    cache? = Keyword.get(opts, :statement_cache, false)
 
     try do
       case Bier.ServerTiming.measure(:plan, fn ->
@@ -340,7 +348,7 @@ defmodule Bier.QueryExecutor do
           Bier.ServerTiming.measure(:transaction, fn ->
             # `Prefer: timezone` is not threaded on this path (the RPC read plan
             # does not carry it today); auth is what `query_read/5` is reused for.
-            case query_read(conn, sql, params, nil, auth) do
+            case query_read(conn, sql, params, nil, auth, cache?) do
               {:ok, %Postgrex.Result{rows: [[body, exact_count]]}} ->
                 # planned/estimated counts are not needed by the RPC pagination
                 # cases; exact reuses the window count, which (with a non-empty
@@ -1179,21 +1187,30 @@ defmodule Bier.QueryExecutor do
 
   # Render a user value for SQL.
   #
-  #   * For text/untyped comparisons we use a real bound parameter (`$n`) so the
-  #     value is never interpolated.
+  #   * For text/untyped comparisons we use a real bound parameter (`$n`).
   #   * When the value must carry a Postgres type (ranges, arrays, numeric/typed
-  #     comparisons, quantifier arrays), we emit a *quoted* SQL literal
-  #     `'<escaped>'::<type>`. Postgres only coerces text into ranges/arrays from
-  #     an *unknown* literal, not from a `text`-typed parameter, so a parameter
-  #     cannot be used here. The literal is single-quote-escaped, so it is still
-  #     injection-safe; only the (validated) column type is templated.
+  #     comparisons, quantifier arrays), we emit `($n::text)::<type>` — the
+  #     inner cast pins the parameter's inferred type to text (a bare
+  #     `$n::<type>` would make PostgreSQL type the parameter itself, and the
+  #     driver would then have to binary-encode the raw string as that type),
+  #     and the outer cast coerces it server-side via PostgreSQL's
+  #     I/O-conversion casts, which accept exactly the same input (and raise
+  #     exactly the same errors) as an unknown `'<v>'::<type>` literal.
+  #     Binding instead of inlining keeps the SQL text identical across
+  #     requests that differ only in filter values, which is what makes the
+  #     `db_prepared_statements` cache (and PostgreSQL's plan cache)
+  #     effective — and it is what PostgREST executes (`"id" = $1`). Only the
+  #     (validated) column type is templated into the SQL.
   def bind(value, type, %State{} = state) when type in [nil, :text] do
     n = state.count + 1
     {"$#{n}", %{state | count: n, params: [to_param(value) | state.params]}}
   end
 
   def bind(value, type, %State{} = state) do
-    {"#{pg_literal(to_param(value))}::#{quote_type(type)}", state}
+    n = state.count + 1
+
+    {"($#{n}::text)::#{quote_type(type)}",
+     %{state | count: n, params: [to_param(value) | state.params]}}
   end
 
   defp to_param(value) when is_binary(value), do: value

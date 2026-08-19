@@ -1,11 +1,11 @@
 # Injection safety
 
 How user-controlled input reaches SQL. Every request produces a single
-parameterized statement, and almost every user value travels as a bound
-parameter — but not all of them *can*. This page consolidates the
-typed-literal binding strategy that is otherwise commented at each site
-(`Bier.QueryExecutor.bind/3`, `Bier.Rpc`'s `call_arg/2`, and the SQL builders
-in `Bier.Mutation`), so security reviewers can audit the model in one place.
+parameterized statement, and every user *value* travels as a bound
+parameter. This page consolidates the binding strategy that is otherwise
+commented at each site (`Bier.QueryExecutor.bind/3`, `Bier.Rpc`'s
+`call_arg/2`, and the SQL builders in `Bier.Mutation`), so security
+reviewers can audit the model in one place.
 
 ## The rule
 
@@ -14,35 +14,41 @@ A user value is rendered in exactly one of two ways:
 | Rendering | When | Where |
 | --- | --- | --- |
 | Bound parameter `$n` | The value's type is unconstrained (`nil`/`:text`): text comparisons, `like`/`ilike`, regex matches, full-text query strings, raw RPC bodies, whole mutation payloads | `QueryExecutor.bind/3` (first clause), `Rpc` variadic/octet args, `Mutation` payload binding |
-| Escaped typed literal `'<escaped>'::<type>` | The value must carry a Postgres type the parameter protocol cannot supply | `QueryExecutor.bind/3` (second clause), `Rpc`'s `call_arg/2` scalar clause |
+| Text-pinned cast parameter `($n::text)::<type>` | The value must coerce to a Postgres type (ranges, arrays, numeric/typed comparisons, quantifier arrays, RPC scalar arguments) | `QueryExecutor.bind/3` (second clause), `Rpc`'s `call_arg/2` scalar clause |
 
-Nothing else of a request's *values* is ever interpolated. `limit`/`offset`
-are integers produced by the query parser; JSON-path array indices are
-interpolated only after matching `^-?\d+$` (`pg_literal_or_index/1`).
+Nothing of a request's *values* is ever interpolated into the SQL text.
+`limit`/`offset` are integers produced by the query parser; JSON-path array
+indices are interpolated only after matching `^-?\d+$`
+(`pg_literal_or_index/1`); the full-text-search language modifier is the one
+small-vocabulary exception, rendered as an escaped `'<lang>'::regconfig`
+literal through `pg_literal/1`.
 
-## Why a literal at all
+## Why the cast is in the SQL text
 
-PostgreSQL coerces text into ranges, arrays, and other structured types only
-from an *unknown*-typed literal. A bound parameter arrives already typed as
-`text`, and `text` does not implicitly convert to `int4range`, `tsrange`,
-typed arrays, and friends — so `col && $1` with a text parameter fails where
-`col && '[1,5)'::int4range` succeeds. The contexts that need this:
+PostgreSQL coerces text into ranges, arrays, and other structured types via
+its I/O-conversion casts, which require an *explicit* cast: `col && $1` with
+a text parameter fails where `col && ($1::text)::int4range` succeeds. The
+inner `::text` pins the parameter's inferred type to `text` (a bare
+`$n::<type>` would make the server type the parameter itself, forcing the
+driver to binary-encode the raw string as that type), and the outer cast
+runs the same input-conversion code — accepting the same values and raising
+the same errors — as an unknown `'<v>'::<type>` literal. The contexts that
+need this:
 
 * **Ranges and arrays** — the structural operators (`cs`, `cd`, `ov`, `sl`,
   `sr`, `nxr`, `nxl`, `adj`) cast the value to the introspected column type.
-* **Typed comparisons** — `eq`/`gt`/… against a non-text column, `isdistinct`,
-  and the `any`/`all` quantifier forms, which build `'{…}'::<coltype>[]`.
+* **Typed comparisons** — `eq`/`gt`/… against a non-text column,
+  `isdistinct`, and the `any`/`all` quantifier forms, which cast to
+  `<coltype>[]`.
 * **RPC arguments** — a function call argument must coerce to the declared
-  argument type; `call_arg/2` inlines `'<escaped>'::<argtype>` for scalars
-  (the full-text-search language modifier gets the same treatment, as
-  `'<escaped>'::regconfig`).
+  argument type.
 
-In each case the *value* is passed through `QueryExecutor.pg_literal/1`, which
-wraps it in single quotes and doubles every embedded `'`. Under
-`standard_conforming_strings` (the server default since PostgreSQL 9.1, never
-disabled by Bier) backslash has no escape meaning inside a `'…'` literal, so
-quote-doubling is a complete escape: no value can terminate the literal.
-Only the cast after it is templated — see below.
+Binding instead of inlining also keeps the SQL text identical across
+requests that differ only in their values, which is what makes
+`db_prepared_statements` (and PostgreSQL's own plan cache) effective, and it
+mirrors what PostgREST executes.
+
+Only the cast after the parameter is templated — see below.
 
 ## What constrains the cast: `quote_type/1`
 
@@ -84,16 +90,17 @@ types come verbatim from `pg_proc` introspection — never from the request.
 ## Site-by-site
 
 **`QueryExecutor.bind/3`** — the single funnel for read-path filter values.
-`nil`/`:text` types bind `$n`; everything else emits the escaped typed
-literal. `bind_filter_value/3` picks the type from the introspected column
-(or the JSON-path arrow: `->>` is `:text`, `->` is `jsonb`), and `in` lists
-bind each element individually. Domain columns with a `text` data
-representation bind `$n` and parse it through the domain's cast function.
+`nil`/`:text` types bind `$n`; everything else binds `($n::text)::<type>`.
+`bind_filter_value/3` picks the type from the introspected column (or the
+JSON-path arrow: `->>` is `:text`, `->` is `jsonb`), and `in` lists bind
+each element individually. Domain columns with a `text` data representation
+bind `$n` and parse it through the domain's cast function.
 
 **`Rpc`, `call_arg/2`** — variadic arguments and raw (octet-stream) bodies
-bind `$n::type`; named scalar arguments inline `'<escaped>'::<argtype>` so
-Postgres coerces from an unknown literal. Argument names are rendered with
-`"name" => …` keyword-call syntax through identifier quoting.
+bind `$n::type` (the driver encodes them as the declared type); named scalar
+arguments bind `($n::text)::<argtype>` so Postgres coerces the raw string
+server-side. Argument names are rendered with `"name" => …` keyword-call
+syntax through identifier quoting.
 
 **`Bier.Mutation`** (`insert_sql`/`upsert_sql`/`set_clause`/`where_clause`) —
 payload *values* never appear in the SQL text at all: the whole JSON body is
@@ -106,13 +113,23 @@ and the cast through `quote_type/1`. `where_clause/3` reuses
 above. The only verbatim interpolation is the column DEFAULT used by
 `missing=default` — taken from `pg_catalog`, not the request.
 
+## Where `pg_literal/1` remains
+
+`QueryExecutor.pg_literal/1` (single quotes, embedded `'` doubled — a
+complete escape under `standard_conforming_strings`, the server default
+since PostgreSQL 9.1 and never disabled by Bier) still renders a handful of
+*structural* strings that are not request values: JSON-path object keys,
+column names inside `jsonb_build_object`, and the full-text-search language
+modifier (`'<lang>'::regconfig`).
+
 ## Identifiers
 
-Every identifier — schema, relation, column, alias, RPC argument name, the
-`SET LOCAL ROLE` role — is rendered through `QueryExecutor.quote_ident/1`
-(`"` doubled, wrapped in `"…"`), including names that were validated against
-the schema cache anyway. Request GUCs (`request.jwt.claims`, headers,
-cookies, …) are set via parameterized `set_config($1, $2, true)` calls.
+Every identifier — schema, relation, column, alias, RPC argument name — is
+rendered through `QueryExecutor.quote_ident/1` (`"` doubled, wrapped in
+`"…"`), including names that were validated against the schema cache anyway.
+The per-request auth preamble (the role switch and the `request.*` GUCs) is
+one parameterized `SELECT set_config($1, $2, true), …` statement — the role
+travels as a bound value, never as SQL text.
 
 ## Future work
 

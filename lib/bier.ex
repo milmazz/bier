@@ -231,6 +231,17 @@ defmodule Bier do
         default: env(:db_plan_enabled, false),
         doc: "Enables the application/vnd.pgrst.plan media type (PostgREST db-plan-enabled)."
       ],
+      db_prepared_statements: [
+        type: :boolean,
+        default: env(:db_prepared_statements, true),
+        doc: """
+        Caches the hot-path statements (the auth preamble, reads, mutations,
+        RPC) as named prepared statements on each pool connection, skipping the
+        parse step on repeats (PostgREST db-prepared-statements). Disable when
+        connecting through a transaction-mode pooler such as PgBouncer, which
+        cannot track session-scoped prepared statements.
+        """
+      ],
       client_error_verbosity: [
         # A STRING enum, like `openapi_mode` below: PostgREST config values
         # arrive as strings from the environment, a config file and the

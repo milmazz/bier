@@ -189,8 +189,9 @@ defmodule Bier.Auth do
       end)
 
     params = Enum.flat_map(pairs, fn {name, value} -> [name, value] end)
+    sql = "SELECT " <> selects
 
-    run!(tx, "SELECT " <> selects, params)
+    run!(tx, sql, params, cache_opts(config, sql))
   end
 
   defp guc_pairs(context, config) do
@@ -236,14 +237,18 @@ defmodule Bier.Auth do
   # back and propagates as a Postgres error (e.g. P0001/400).
   defp run_pre_request(_tx, %{db_pre_request: nil}), do: :ok
 
-  defp run_pre_request(tx, %{db_pre_request: proc}) do
-    run!(tx, "SELECT #{qualify(proc)}()", [])
+  defp run_pre_request(tx, %{db_pre_request: proc} = config) do
+    sql = "SELECT #{qualify(proc)}()"
+    run!(tx, sql, [], cache_opts(config, sql))
   end
+
+  defp cache_opts(config, sql),
+    do: Bier.StatementCache.opts(config.db_prepared_statements, sql)
 
   # Run a setup statement, rolling the transaction back (so the outer
   # transaction returns `{:error, …}`) on failure instead of raising.
-  defp run!(tx, sql, params) do
-    case Postgrex.query(tx, sql, params) do
+  defp run!(tx, sql, params, opts) do
+    case Postgrex.query(tx, sql, params, opts) do
       {:ok, _result} -> :ok
       {:error, reason} -> Postgrex.rollback(tx, reason)
     end

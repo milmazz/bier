@@ -506,7 +506,8 @@ defmodule Bier.Plugs.ActionController do
                max_rows: config.db_max_rows,
                timezone: prefs.timezone,
                auth: auth_setup(conn, config),
-               format: MediaType.executor_format(media)
+               format: MediaType.executor_format(media),
+               statement_cache: config.db_prepared_statements
              )
            end) do
       conn

@@ -154,6 +154,7 @@ differ from `router[:port]` (see [Validators](#validators)).
 | `ssl` | `boolean` | `false` | via `PGRST_DB_URI` (`sslmode=require\|verify-ca\|verify-full` → `true`) |
 | `pool_size` | `pos_integer` | `10` | `PGRST_DB_POOL` |
 | `db_pool_max_idletime` | `pos_integer \| nil` | `nil` (defaults to `30` on the standalone binary) | `PGRST_DB_POOL_MAX_IDLETIME` (alias `db-pool-timeout` / `PGRST_DB_POOL_TIMEOUT`) |
+| `db_prepared_statements` | `boolean` | `true` | `PGRST_DB_PREPARED_STATEMENTS` |
 | `cancel_on_disconnect` | `boolean` | `true` | — (Bier-only; PostgREST cannot do this — postgrest#699) |
 
 There is no `PGRST_DB_HOST`-style variable — the whole connection is set from
@@ -166,6 +167,13 @@ run to completion. `db_pool_max_idletime` maps onto DBConnection's
 `nil` is the default for `Bier.start_link/1` and application env, and it
 defers to the driver default; the standalone/CLI surface instead defaults this
 key to `30` when it is not overridden.
+
+`db_prepared_statements` caches the hot-path statements (the auth preamble,
+reads, mutations, RPC) as named prepared statements on each pool connection,
+skipping the parse step when a query shape repeats — the same behavior (and
+default) as PostgREST's `db-prepared-statements`. Set it to `false` when
+connecting through a transaction-mode pooler such as PgBouncer, which cannot
+track session-scoped prepared statements.
 
 ### Schema & relation exposure
 

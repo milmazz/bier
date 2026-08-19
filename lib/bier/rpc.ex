@@ -485,7 +485,8 @@ defmodule Bier.Rpc do
           count_mode: count_mode,
           relations: relations,
           auth: ActionController.auth_setup(conn, config),
-          format: MediaType.executor_format(media)
+          format: MediaType.executor_format(media),
+          statement_cache: config.db_prepared_statements
         )
       end)
 
@@ -715,11 +716,16 @@ defmodule Bier.Rpc do
     {keyword_call(name, "$#{idx}::#{type}"), {[raw | params], idx + 1}}
   end
 
-  # Inline a single-quote-escaped literal cast to the arg type (Postgres
-  # coerces from an *unknown* literal, which a typed param cannot supply).
-  # The literal is escaped, so it is injection-safe.
-  defp call_arg({name, type, _variadic?, value}, acc) do
-    {keyword_call(name, "#{pg_literal(scalar_value(value))}::#{type}"), acc}
+  # Bind the scalar value as a text parameter and cast it to the arg type
+  # server-side: `($n::text)::<type>` pins the parameter itself to text (so the
+  # raw string encodes as-is) and the outer cast is PostgreSQL's I/O-conversion
+  # cast — the same coercion, and the same errors, as an unknown
+  # `'<escaped>'::<type>` literal. Binding keeps the SQL text identical across
+  # calls that differ only in argument values, so the `db_prepared_statements`
+  # cache is effective (mirrors `QueryExecutor.bind/3`).
+  defp call_arg({name, type, _variadic?, value}, {params, idx}) do
+    {keyword_call(name, "($#{idx}::text)::#{type}"),
+     {[to_string(scalar_value(value)) | params], idx + 1}}
   end
 
   # An unnamed parameter (single-unnamed json/jsonb body) binds positionally;
@@ -739,10 +745,6 @@ defmodule Bier.Rpc do
   defp value_for_named({:raw, v}), do: v
   defp value_for_named({:list, list}), do: list
 
-  defp pg_literal(value) do
-    "'" <> String.replace(to_string(value), "'", "''") <> "'"
-  end
-
   # ---- helpers -------------------------------------------------------------
 
   # Run the call inside a transaction and read the PostgREST response GUCs
@@ -758,7 +760,15 @@ defmodule Bier.Rpc do
     timezone = conn.assigns[:bier_timezone]
 
     Bier.Cancellation.run(conn, config, fn ->
-      exec_transaction(pool, read_only?, auth, sql, params, timezone)
+      exec_transaction(
+        pool,
+        read_only?,
+        auth,
+        sql,
+        params,
+        timezone,
+        config.db_prepared_statements
+      )
     end)
     |> case do
       {:ok, {result, guc}} -> {:ok, result, guc}
@@ -767,25 +777,25 @@ defmodule Bier.Rpc do
     end
   end
 
-  defp exec_transaction(pool, read_only?, auth, sql, params, timezone) do
+  defp exec_transaction(pool, read_only?, auth, sql, params, timezone, cache?) do
     Bier.ServerTiming.measure(:transaction, fn ->
       Postgrex.transaction(pool, fn tx ->
         if read_only?, do: Postgrex.query!(tx, "SET TRANSACTION READ ONLY", [])
         apply_auth(tx, auth)
 
-        case Bier.QueryExecutor.set_local_timezone(tx, timezone) do
-          :ok -> query_then_read_gucs(tx, sql, params)
+        case Bier.QueryExecutor.set_local_timezone(tx, timezone, cache?) do
+          :ok -> query_then_read_gucs(tx, sql, params, cache?)
           {:error, err} -> Postgrex.rollback(tx, err)
         end
       end)
     end)
   end
 
-  defp query_then_read_gucs(tx, sql, params) do
+  defp query_then_read_gucs(tx, sql, params, cache?) do
     Bier.RequestLog.record(sql)
 
-    with {:ok, result} <- Postgrex.query(tx, sql, params),
-         {:ok, guc} <- Bier.Guc.read(tx) do
+    with {:ok, result} <- Postgrex.query(tx, sql, params, Bier.StatementCache.opts(cache?, sql)),
+         {:ok, guc} <- Bier.Guc.read(tx, cache?) do
       {result, guc}
     else
       {:error, reason} -> Postgrex.rollback(tx, reason)
