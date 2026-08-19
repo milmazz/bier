@@ -8,6 +8,12 @@ and this project adheres to
 
 ## Unreleased
 
+- The per-request auth preamble (role switch, `request.*` GUCs, `search_path`,
+  `app.settings.*`) is now applied as a single batched `SELECT set_config(…)`
+  statement instead of one statement per setting, cutting ~10 database round
+  trips per authenticated request to 4 and roughly halving p50 latency under
+  load. The role is set via `set_config('role', …, true)` — exactly what
+  PostgREST executes — so role-switch error shapes now match upstream too.
 - **Conformance target moved from PostgREST v14.12 to v16.0.** The frozen
   suite was re-synced area by area and all 759 active cases pass again. The
   behavior changes that came with it are the four entries below.
