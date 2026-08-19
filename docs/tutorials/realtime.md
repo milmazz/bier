@@ -1,24 +1,31 @@
 # Realtime: a live check-ins board
 
-This chapter continues the brewery from [Getting started](getting-started.md)
+This chapter continues the brewery from [Getting Started](getting-started.md)
 and builds on the `brewery_member` setup from
-[Authentication](authentication.md) (schema in `docs/tutorials/brewery.sql`).
+[Authentication](authentication.md) (schema in [`brewery.sql`][brewery-sql]).
 Regulars already post check-ins as `brewery_member`; now we'll push each new
 one to a browser the moment it lands — a live check-ins board — using
 nothing but a trigger and Bier's SSE endpoint.
 
+[brewery-sql]: https://github.com/milmazz/bier/blob/main/docs/tutorials/brewery.sql
+
 ## 1. Expose a channel
 
 Add `events_channels` to the options you already booted Bier with in
-[Getting started](getting-started.md) (or
+[Getting Started](getting-started.md) (or
 [Authentication](authentication.md), if you've since added `jwt_secret`) —
-every other option stays as it was:
+keep every other option exactly as it was:
 
 ```elixir
 {Bier,
  name: Tutorial,
  router: [port: 4040, scheme: :http],
+ database: "bier_tutorial",
+ username: "authenticator",
+ password: "mysecretpassword",
  db_schemas: ["api"],
+ db_anon_role: "web_anon",
+ jwt_secret: "the-tutorial-jwt-secret-change-me-please",
  events_channels: ["new_check_ins"]}
 ```
 

@@ -50,15 +50,27 @@ The `::type` suffix is not user text either. `QueryExecutor.quote_type/1`
 validates every cast against a conservative charset:
 
 ```elixir
-~r/^[A-Za-z0-9_ \[\]\".]+$/
+~r/^(?:[A-Za-z0-9_ \[\]\".]|\(\d+(?:,\d+)*\))+$/
 ```
 
 anything else throws `{:bad_request, :bad_cast}` (HTTP 400). The charset
 admits schema-qualified, quoted, spaced, and array type names
-(`"my schema".mytype[]`, `timestamp with time zone`) but excludes `'`, `(`,
-`)`, `;`, `,` and `-` — a cast can neither re-open a string, call a function,
-terminate the statement, nor start a comment. It guards both trusted and
-untrusted type sources:
+(`"my schema".mytype[]`, `timestamp with time zone`) but excludes `'`, `;`
+and `-` — a cast can neither re-open a string, terminate the statement, nor
+start a comment.
+
+Parentheses are admitted in exactly one shape: a **fully-formed digit list**,
+`\(\d+(?:,\d+)*\)`. That is PostgreSQL's own type-modifier syntax, and it is
+what lets a parameterized type through — `numeric(4,2)`,
+`character varying(255)`, `timestamp(3) without time zone` — both from
+introspection and from an explicit `select=abv::numeric(4,2)` cast (see the
+[API reference](guides/api.md#horizontal-filtering)). Because the group's
+contents are constrained to digits and commas, it cannot smuggle a function
+call: `int4(version())` and `int4(1);drop` both fail the match, since the
+former's group holds non-digits and the latter has trailing text outside any
+group. A comma is reachable only *inside* such a group, never at top level.
+
+It guards both trusted and untrusted type sources:
 
 * the explicit `select=col::cast` from the query string (untrusted);
 * introspected column types reaching `bind/3` and `Mutation`'s `type_cast/1`

@@ -4,8 +4,10 @@ Bier generates a REST API on the fly from PostgreSQL introspection, following
 PostgREST's request grammar. This reference documents that grammar — the
 `select`/filter/order/pagination query parameters, resource embedding,
 mutations, RPC, content negotiation, and error responses — using the brewery
-example schema (`docs/tutorials/brewery.sql`, exposed under `db_schemas:
+example schema ([`brewery.sql`][brewery-sql], exposed under `db_schemas:
 ["api"]`) for every example.
+
+[brewery-sql]: https://github.com/milmazz/bier/blob/main/docs/tutorials/brewery.sql
 
 All curl examples assume Bier is running at `http://localhost:4040` with the
 `api` schema exposed (see [Getting Started](../tutorials/getting-started.md)).
@@ -315,7 +317,10 @@ curl -i "http://localhost:4040/beers" -H "Range-Unit: items" -H "Range: 0-2"
 
 `Prefer: count=<mode>` controls whether a total row count is computed:
 
-* `none` (default) — no count; `Content-Range` total is `*`, status is always 200.
+* omitted (the default) — no count; `Content-Range` total is `*`, status is
+  always 200. There is no `count=none` token: sending it literally is an
+  unrecognized preference, ignored by default and rejected with 400
+  `PGRST122` under `Prefer: handling=strict`.
 * `exact` — an exact `COUNT`, reported in `Content-Range`.
 * `planned` — the query planner's row estimate (cheap, may be inaccurate).
 * `estimated` — the planner estimate when it exceeds `max-rows`, otherwise the exact count.
@@ -385,9 +390,9 @@ curl "http://localhost:4040/beers?select=id,brewery:breweries(name)"
 ```
 
 Once an embed carries an alias, that alias is the name a filter, `order` or
-`limit` should address it by. **New in PostgREST v16.0:** addressing it by the
-*relation* name still works — that is the `url_use_legacy_target_names`
-option, default `true` — but the response now carries a deprecation warning:
+`limit` should address it by. Addressing it by the *relation* name also works —
+that is the `url_use_legacy_target_names` option, default `true` — but it is
+deprecated, and the response says so:
 
 ```bash
 curl -i "http://localhost:4040/breweries?select=name,the_beers:beers(name)&beers.order=name.asc"
@@ -395,7 +400,7 @@ curl -i "http://localhost:4040/breweries?select=name,the_beers:beers(name)&beers
 
 ```http
 HTTP/1.1 200 OK
-Warning: 299 Bier<version> "Embedded resource was referenced by relation name even though it has an alias. This is deprecated and will stop working in a future release. Update `beers` to `the_beers` in query string filters, orders or limits."
+Warning: 299 Bierv0.x.y "Embedded resource was referenced by relation name even though it has an alias. This is deprecated and will stop working in a future release. Update `beers` to `the_beers` in query string filters, orders or limits."
 ```
 
 Using the alias (`the_beers.order=name.asc`) emits no warning. With
@@ -559,11 +564,9 @@ curl -X POST "http://localhost:4040/styles?on_conflict=name" \
 HTTP/1.1 200 OK
 ```
 
-A table with no primary key silently ignores the `resolution` preference
-when no conflict target is available — unless the request also supplies
-`?on_conflict=<cols>` naming a `UNIQUE` constraint to upsert on instead
-(`Bier.Mutation.preferences/3` honors `resolution` whenever
-`relation.primary_key != []` or an explicit `on_conflict` is given).
+A table with no primary key silently ignores the `resolution` preference,
+because there is no conflict target to upsert on — unless the request also
+supplies `?on_conflict=<cols>` naming a `UNIQUE` constraint to use instead.
 
 ### PATCH (update)
 
@@ -755,7 +758,7 @@ own preference). No acceptable type is a 406 with code `PGRST107`.
 |---|---|
 | `application/json` (default) | A JSON array of row objects (or a bare value for scalars). |
 | `text/csv` | A header row plus data rows, `Content-Type: text/csv; charset=utf-8`. |
-| `application/geo+json` | Rows aggregated into a GeoJSON `FeatureCollection`. Offered as a producer only when the `postgis` extension is installed database-wide (`Bier.SchemaCache.postgis?/1`, checked in `Bier.Plugs.ActionController.read_producers/1`) — `brewery.sql` never runs `CREATE EXTENSION postgis;`, so against the tutorial database as shipped, `Accept: application/geo+json` on any relation (including `breweries`) fails 406 with code `PGRST107` (no acceptable media type), the same as any other unsupported `Accept`. If `postgis` *is* installed, the producer becomes available for every relation, but rendering still needs an actual `geometry`/`geography` column — `breweries`' plain `numeric` `latitude`/`longitude` columns don't qualify, so requesting it there would then fail 400 with SQLSTATE `22023` ("geometry column is missing"). |
+| `application/geo+json` | Rows aggregated into a GeoJSON `FeatureCollection`. Offered only when the `postgis` extension is installed database-wide — `brewery.sql` never runs `CREATE EXTENSION postgis;`, so against the tutorial database as shipped, `Accept: application/geo+json` on any relation (including `breweries`) fails 406 with code `PGRST107` (no acceptable media type), the same as any other unsupported `Accept`. If `postgis` *is* installed, the type becomes available for every relation, but rendering still needs an actual `geometry`/`geography` column — `breweries`' plain `numeric` `latitude`/`longitude` columns don't qualify, so requesting it there would then fail 400 with SQLSTATE `22023` ("geometry column is missing"). |
 | `application/vnd.pgrst.object+json` | Coerces the result to a single JSON object instead of a one-element array. Fails 406 `PGRST116` ("Cannot coerce the result to a single JSON object") when the result is not exactly one row. The `+json` suffix is optional. |
 | `application/vnd.pgrst.object+json;nulls=stripped` | As above, with every null-valued key omitted from the object. |
 | `application/vnd.pgrst.array+json;nulls=stripped` | A JSON array with null-valued keys omitted from each row. Stripping is PostgreSQL's `json_strip_nulls`, so it reaches nested objects (embedded resources included), not just the top-level keys. |
@@ -779,9 +782,10 @@ curl "http://localhost:4040/beers" -H "Accept: text/unknowntype"
 ```
 
 Every **non-error** response — reads, writes, RPC and `OPTIONS` alike —
-carries `Vary: Accept, Prefer, Range` (new in PostgREST v16.0), since all
-three request headers can change the representation. Error responses carry no
-`Vary`.
+carries `Vary: Accept, Prefer, Range`, since all three request headers can
+change the representation. When the response also echoes the request's
+`Origin` back in `Access-Control-Allow-Origin`, `Origin` is appended:
+`Vary: Accept, Prefer, Range, Origin`. Error responses carry no `Vary`.
 
 ## Time zones (`Prefer: timezone`)
 
@@ -803,13 +807,11 @@ Preference-Applied: timezone=America/Los_Angeles
 [{"id": 1, "created_at": "2026-08-10T15:14:24.055175-07:00"}]
 ```
 
-Two v16.0 changes to be aware of: the value is now passed straight to
-PostgreSQL, so **numeric UTC offsets are accepted** (`timezone=+05:30`,
-`timezone=-4` — read POSIX-style, so `+05:30` renders as `-05:30`), and an
-**invalid zone is now a hard error** regardless of `handling`: 400 with
-SQLSTATE `22023` (`invalid value for parameter "TimeZone"`), where v14.12
-silently ignored it under `handling=lenient` and raised `PGRST122` under
-`handling=strict`.
+The value is passed straight to PostgreSQL, which has two consequences worth
+knowing. **Numeric UTC offsets are accepted** (`timezone=+05:30`,
+`timezone=-4`) — and read POSIX-style, so `+05:30` renders as `-05:30`. And an
+**invalid zone is a hard error** regardless of `handling`: 400 with SQLSTATE
+`22023` (`invalid value for parameter "TimeZone"`), never silently ignored.
 
 ```bash
 curl -i "http://localhost:4040/check_ins?select=id,created_at" \
@@ -831,10 +833,9 @@ when there is nothing to report. Every Bier-originated error also carries a
 {"code": "PGRST205", "message": "Could not find the table 'api.nonexistent' in the schema cache", "details": null, "hint": null}
 ```
 
-That is the `verbose` envelope, the default. **New in PostgREST v16.0**, the
-`client_error_verbosity` config option can shorten it to `minimal`, in which
-case every error body is just `{code, message}` — `details` and `hint` are
-*omitted*, not nulled:
+That is the `verbose` envelope, the default. The `client_error_verbosity`
+config option can shorten it to `minimal`, in which case every error body is
+just `{code, message}` — `details` and `hint` are *omitted*, not nulled:
 
 ```json
 {"code": "PGRST205", "message": "Could not find the table 'api.nonexistent' in the schema cache"}

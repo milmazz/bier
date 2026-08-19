@@ -2,13 +2,20 @@
 
 Thanks for your interest in Bier! This guide collects the project-specific
 rules that are easy to trip over; the [README](README.md) covers the
-architecture and the [docs/CONFORMANCE_IMPL.md](docs/CONFORMANCE_IMPL.md)
-document covers the conformance build in depth.
+architecture and [`docs/CONFORMANCE_IMPL.md`][conformance-impl] covers the
+conformance build in depth.
+
+Everything below assumes a git checkout — several files it refers to
+(`mise.toml`, `spec/`, `docs/CONFORMANCE_IMPL.md`) are repository-only and are
+not part of the published package or documentation.
+
+[conformance-impl]: https://github.com/milmazz/bier/blob/main/docs/CONFORMANCE_IMPL.md
 
 ## Toolchain
 
-Elixir/OTP versions are pinned in [`mise.toml`](mise.toml) (Elixir 1.19.5 /
-OTP 28). With [mise](https://mise.jdx.dev) installed:
+Elixir/OTP versions are pinned in `mise.toml` (Elixir 1.20 / OTP 29), matching
+CI. `mix.exs` declares the lower bound at `~> 1.18`. With
+[mise](https://mise.jdx.dev) installed:
 
 ```sh
 mise install
@@ -73,12 +80,8 @@ mix test
 ```
 
 CI runs the same steps individually (not the alias) so each gate reports its
-result separately.
-
-CI tolerates a documented baseline of known environment/harness test failures
-(see `.github/workflows/elixir.yml`); it fails only when the failure count
-*increases*. If your change fixes some of those failures, lower the baseline
-in the workflow to lock in the gain.
+result separately. The test step is a plain `mix test` with no tolerated
+baseline: the suite passes today, and any failure fails the job.
 
 ## Style
 

@@ -19,10 +19,13 @@ defmodule Bier.Plugs.Observability do
       entirely.
 
     * **Server version header**: every response carries
-      `Server: postgrest/<version>`. PostgREST sets it once as a Warp server
-      setting (`setServerName`, `App.hs`), so it is unconditional — no config
-      key gates it and it rides on every response whatever the method, status or
-      content type, error responses included.
+      `Server: bier/<version>` (`Bier.version/0`). This is a deliberate
+      divergence (#122): upstream sends `Server: postgrest/<version>` (set once
+      as a Warp server setting — `setServerName`, `App.hs`), but a `Server`
+      header names the software that built the response. Like upstream's, the
+      header is unconditional — no config key gates it and it rides on every
+      response whatever the method, status or content type, error responses
+      included.
 
     * **Trace header passthrough** (`server-trace-header`): when configured with
       a header name (e.g. `X-Request-Id`), the incoming value of that header is
@@ -163,10 +166,17 @@ defmodule Bier.Plugs.Observability do
   # A server-level setting upstream, not a per-response header: it is written
   # here from a before_send callback so it also reaches the responses the error
   # funnel builds (`Bier.Plugs.FallbackController`), which bypass the ordinary
-  # rendering path. The version is the PostgREST release Bier is conformant
-  # with (`Bier.postgrest_version/0`), the same string `info.version` reports.
+  # rendering path.
+  #
+  # DELIBERATE DIVERGENCE (#122): upstream sends `postgrest/<prettyVersion>`,
+  # and conformance case 1771 pins that prefix. Bier answers under its own
+  # name instead — a `Server:` header identifies the software that built the
+  # response, and reporting another project's product token would misattribute
+  # Bier's bugs to PostgREST. The dialect a client is speaking is stated in the
+  # OpenAPI document's description and `externalDocs` instead, which is where a
+  # client can actually act on it. Case 1771 is exempted in the harness.
   defp put_server_header(conn) do
-    put_resp_header(conn, "server", "postgrest/" <> Bier.postgrest_version())
+    put_resp_header(conn, "server", "bier/" <> Bier.version())
   end
 
   # ---- Server-Timing -------------------------------------------------------

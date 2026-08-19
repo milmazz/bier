@@ -1,5 +1,10 @@
 # Bier
 
+[![CI](https://github.com/milmazz/bier/actions/workflows/elixir.yml/badge.svg)](https://github.com/milmazz/bier/actions/workflows/elixir.yml)
+[![Hex.pm](https://img.shields.io/hexpm/v/bier.svg)](https://hex.pm/packages/bier)
+[![Documentation](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/bier)
+[![License](https://img.shields.io/hexpm/l/bier.svg)](https://github.com/milmazz/bier/blob/main/LICENSE)
+
 > **Alpha.** Bier is in its first stage. Expect bugs and possibly security
 > flaws — it is **not** ready for production use.
 
@@ -21,7 +26,17 @@ JSON, which is then rendered in the negotiated media type.
 
 ## Installation
 
-Not yet published to Hex. Add it as a git dependency:
+Add `bier` to your dependencies:
+
+```elixir
+def deps do
+  [
+    {:bier, "~> 0.1"}
+  ]
+end
+```
+
+To track unreleased work on `main`, use a git dependency instead:
 
 ```elixir
 def deps do
@@ -33,7 +48,8 @@ end
 
 Requires Elixir `~> 1.18` (developed against Elixir 1.20 / OTP 29) and a
 reachable PostgreSQL instance. Bier pulls in [Bandit][], [Plug][], [Postgrex][],
-and [NimbleOptions][] as runtime dependencies.
+[DBConnection][], [NimbleOptions][], [JOSE][] (JWT verification), and
+[telemetry][] as runtime dependencies.
 
 ## Usage
 
@@ -91,10 +107,10 @@ New to Bier? Start with the tutorials, then reach for the reference guides.
 
 ## Configuration
 
-Options are validated by a [NimbleOptions][] schema (`Bier.schema/0`). Their
-defaults are sourced from application env, so you can also set them under
-`config :bier, …` instead of passing them to `start_link/1`. The main keys
-(named after their PostgREST equivalents):
+Options are validated by a [NimbleOptions][] schema. Their defaults are sourced
+from application env, so you can also set them under `config :bier, …` instead
+of passing them to `start_link/1`. The main keys (named after their PostgREST
+equivalents):
 
 | Key | Default | Purpose |
 |-----|---------|---------|
@@ -120,7 +136,9 @@ defaults are sourced from application env, so you can also set them under
 | `openapi_version` | `"2.0"` | OpenAPI document version; `"3.0"` emits OpenAPI 3.0.3 (a Bier extension; PostgREST/postgrest#932). |
 | `openapi_security_active` | `false` | Advertise JWT security definitions in the OpenAPI document. |
 
-See `Bier.schema/0` for the complete, documented list.
+The [configuration guide](docs/guides/configuration.md) documents every option
+— type, default, `PGRST_*` variable, and the validators that can reject a
+configuration at boot.
 
 ### Pluggable JSON
 
@@ -220,16 +238,24 @@ PGRST_DB_SCHEMAS=api ./bier --dump-config
 
 Supported `PGRST_*` keys mirror the [Configuration](#configuration) table
 (`PGRST_DB_URI`, `PGRST_DB_SCHEMAS`, `PGRST_SERVER_PORT`, `PGRST_JWT_SECRET`,
-`PGRST_LOG_LEVEL`, …) plus their deprecated PostgREST aliases. Keys Bier does not
-implement are intentionally not accepted rather than silently echoed.
+`PGRST_LOG_LEVEL`, …) plus their deprecated PostgREST aliases. A handful of
+PostgREST keys are accepted and echoed without having an effect, so an existing
+PostgREST config can be pointed at Bier unedited; anything outside that set is
+rejected. The [configuration guide](docs/guides/configuration.md) has the full
+list, along with the in-database (`ALTER ROLE … SET pgrst.*`) configuration
+source, which outranks both the environment and the config file.
 
 ## Architecture
 
-There are two supervisors with different jobs. `Bier.Application` (the OTP `mod:`)
-starts only `Bier.Registry`, a process registry shared by every Bier instance in
-the node — it does **not** start a web server. `Bier` itself is the per-instance
-`Supervisor` the host application starts; each instance owns its config, its
-Postgrex pool, a `DynamicSupervisor`, and a dynamically generated router module.
+There are two supervisors with different jobs. `Bier.Application` (the OTP
+`mod:`) starts only node-wide infrastructure: `Bier.Registry`, the process
+registry every Bier instance registers through, and `Bier.Events.Registry`, the
+pub/sub registry behind the SSE endpoint. It does **not** start a web server —
+except under `BIER_STANDALONE=1`, where it additionally boots one instance from
+the environment (see [Running standalone](#running-standalone)). `Bier` itself
+is the per-instance `Supervisor` the host application starts; each instance
+owns its config, its Postgrex pool, a `DynamicSupervisor`, and a dynamically
+generated router module.
 
 ### Boot flow
 
@@ -263,7 +289,8 @@ sequenceDiagram
 `Bier.RouterBuilder.build/2` creates the router with `Module.create/3` at runtime,
 named `<name>.Router`. It is a thin **catch-all**: every request flows through a
 fixed plug pipeline (`:match` → `assign_instance` → `Bier.Plugs.Cors` →
-`Bier.Plugs.Observability` → `Bier.Plugs.ReadBody` → `:dispatch`) and is then
+`Bier.Plugs.Vary` → `Bier.Plugs.Warning` → `Bier.Plugs.Observability` →
+`Bier.Plugs.ReadBody` → `:dispatch`) and is then
 forwarded to `Bier.Plugs.ActionController`. Because the router is regenerated on
 every boot it is not checked in, and grepping for routes will not find them — edit
 the quoted block in `RouterBuilder` instead.
@@ -287,7 +314,7 @@ sequenceDiagram
     participant FC as Bier.Plugs.FallbackController
     C->>+G: HTTP request
     G->>+R: catch-all match
-    R->>R: :match → assign_instance → Cors → Observability → ReadBody → :dispatch
+    R->>R: :match → assign_instance → Cors → Vary → Warning → Observability → ReadBody → :dispatch
     R->>+AC: call/2
     AC->>AC: resolve {schema, relation} from path + Accept/Content-Profile
     opt schema requires auth
@@ -337,15 +364,16 @@ search path fails at execution.
 
 ### Advertised server version
 
-Every response carries `Server: postgrest/16.0` — the PostgREST release whose
-wire behavior this build reproduces (`Bier.postgrest_version/0`), not Bier's
-own `mix.exs` version. The same string feeds the OpenAPI document's
-`info.version` and its `externalDocs` URL. A client reading `Server:` is asking
-which PostgREST dialect it is talking to, so answering with Bier's version
-would misreport it; the constant moves only when the conformance suite is
-re-synced to a new PostgREST pin. It is not configurable — the header is written
-from a `before_send` callback in `Bier.Plugs.Observability` so it also reaches
-the responses the error funnel builds.
+Every response carries `Server: bier/<version>` — Bier's own `mix.exs` version
+(`Bier.version/0`), which is also what the OpenAPI document reports as
+`info.version`. It is not configurable: the header is written from a
+`before_send` callback in `Bier.Plugs.Observability`, so it also reaches the
+responses the error funnel builds.
+
+The **dialect** — which PostgREST release this build is wire-conformant with —
+is a separate question, answered by the OpenAPI document's `externalDocs` URL
+(`https://postgrest.org/en/v16/…`) and by `Bier.postgrest_version/0`. That
+split is deliberate; see the divergence note below.
 
 ### The query parser
 
@@ -357,30 +385,45 @@ and regenerate; never edit the generated `.ex` directly.
 
 ## Conformance
 
-Bier is developed against a frozen conformance suite derived from PostgREST
-**v16.0**: 762 cases across 17 areas — URL grammar, operators, select/embedding,
-filters, ordering, pagination, representations, mutations, RPC, auth, errors,
-headers, content negotiation, OpenAPI, config, observability, and domain
-representations. PostgREST is the ground truth — each case cites the exact
-upstream source line.
+Bier reproduces the request/response behavior of **PostgREST v16.0**, and is
+developed against a frozen conformance suite derived from it: 762 cases across
+17 areas — URL grammar, operators, select/embedding, filters, ordering,
+pagination, representations, mutations, RPC, auth, errors, headers, content
+negotiation, OpenAPI, config, observability, and domain representations.
+PostgREST is the ground truth — each case cites the exact upstream source line,
+and a difference from upstream is treated as a Bier bug.
 
-759 of the 762 cases are active (the 3 `status_text` cases are `:pending` and
-excluded), and **all 759 pass**. The suite was re-synced from v14.12 to v16.0 as
-a spec-only pass, which put the target 100 failures ahead of the
-implementation; those were worked down one area at a time, closing the v16
-behavior changes to `jwt-role-claim-key` (RFC 9535 JSON Path), `Prefer:
-timezone`, embed target names / `url-use-legacy-target-names`, and `db-schemas`
-startup validation.
-The `spec/` tree (behavior models + `COVERAGE.md`) and
-`docs/CONFORMANCE_IMPL.md` document the model and the build. Known feature gaps
-are tracked as GitHub issues (observability/telemetry, admin/health endpoints, …).
+**All 758 active cases pass.** Four are excluded: three assert the HTTP reason
+phrase, which the test client cannot read ([#42][]), and one pins the `Server`
+header's product token, which Bier deliberately answers differently (see
+below).
+
+The suite and the behavior models it is built from live under [`spec/`][spec]
+in the repository, and [`docs/CONFORMANCE_IMPL.md`][conformance-impl] documents
+how it is wired. Neither ships in the package.
+
+[#42]: https://github.com/milmazz/bier/issues/42
+[spec]: https://github.com/milmazz/bier/tree/main/spec
+[conformance-impl]: https://github.com/milmazz/bier/blob/main/docs/CONFORMANCE_IMPL.md
 
 ### Deliberate divergences from PostgREST
 
 PostgREST is the ground truth, and every divergence from it is a bug — with the
-short list of exceptions below, where matching upstream would mean reproducing a
-defect. Each is unconstrained by the frozen suite (no case pins the behavior
-either way) and each is recorded here so it is not mistaken for drift.
+short list of exceptions below, where matching upstream would mean reproducing
+a defect or misrepresenting what this server is. Each is recorded here so it is
+not mistaken for drift.
+
+**`Server: bier/<version>`.** Upstream sets `Server: postgrest/<version>`, and
+conformance case 1771 pins that prefix — the one case Bier is knowingly
+exempted from. A `Server` header names the software that built the response,
+and wearing another project's product token would route Bier's bugs to
+PostgREST's issue tracker. The same reasoning applies to the OpenAPI document's
+`info.version`. What a client can actually act on — which dialect it is
+speaking — is still advertised, through `externalDocs`, which points at the
+PostgREST release this build reproduces. The exemption is declared in the
+conformance harness rather than by editing the case, so `spec/` keeps recording
+what PostgREST really does. See
+[#122](https://github.com/milmazz/bier/issues/122).
 
 **`Vary: Origin` on CORS responses.** `Bier.Plugs.Cors` echoes the request's
 `Origin` into `Access-Control-Allow-Origin` rather than sending `*`, and a
@@ -393,23 +436,29 @@ request from `https://b.example`. Bier emits the union —
 funnel so the v16 default is not suppressed. A wildcard
 `Access-Control-Allow-Origin: *` is not an echo and stays bare, and CORS
 **preflight** responses are consciously left alone: upstream answers them in the
-wai-cors middleware, before the funnel that appends `Vary` runs at all
-(`spec/COVERAGE.md` records that leg as uncovered by any case), so changing them
-would be inventing behavior rather than correcting it. See #98.
+wai-cors middleware, before the funnel that appends `Vary` runs at all, so
+changing them would be inventing behavior rather than correcting it. See
+[#98](https://github.com/milmazz/bier/issues/98).
 
 **CSV quoting.** Bier's CSV writer is RFC 4180. Upstream builds CSV bodies from
 PostgreSQL's `record_out` text with the parentheses stripped (`asCsvF`), which
 backslash-escapes and leaves embedded newlines unquoted — a value containing
 either yields malformed CSV. Bier renders the *cells* in SQL (so column order
-and numeric text are PostgreSQL's) but keeps its own quoting. See #110.
+and numeric text are PostgreSQL's) but keeps its own quoting. See
+[#110](https://github.com/milmazz/bier/issues/110).
 
 ## Benchmarks
 
 `bench/http/` contains a k6 harness that benchmarks Bier against PostgREST
-v14.12 head-to-head: both servers run natively against the same local
-PostgreSQL under matched configuration (pool size, schema, anon role, no JWT,
-no compression, HTTP/1.1 keep-alive) across four scenarios — single-row read
-by primary key, filtered 25-row page, insert, and update by primary key.
+head-to-head: both servers run natively against the same local PostgreSQL under
+matched configuration (pool size, schema, anon role, no JWT, no compression,
+HTTP/1.1 keep-alive) across four scenarios — single-row read by primary key,
+filtered 25-row page, insert, and update by primary key.
+
+The published numbers were measured against **PostgREST v14.12**, before the
+conformance target moved to v16.0; they have not been re-measured since. Treat
+them as indicative of the shape of the difference rather than a current
+head-to-head.
 
 On our reference machine (Apple M1 Max, PostgreSQL 17), Bier sustains
 **2.3–4.1x PostgREST's max throughput** depending on the scenario, with
@@ -426,6 +475,9 @@ for the full tables and environment, and `bench/http/run.sh` to reproduce
 them.
 
 ## Development
+
+Development happens in a git checkout — the conformance suite and its fixtures
+are not part of the published package.
 
 ```sh
 mix deps.get
@@ -448,8 +500,8 @@ which chains, in order: `mix deps.unlock --check-unused`,
 individually so each gate reports separately.)
 
 The test suite loads `spec/conformance/fixtures.sql` into a local `bier_test`
-database; see `docs/CONFORMANCE_IMPL.md` for the database wiring, and
-[CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
+database; [`docs/CONFORMANCE_IMPL.md`][conformance-impl] covers the database
+wiring, and [CONTRIBUTING.md](CONTRIBUTING.md) is the full contributor guide.
 
 ## Why "Bier"?
 
@@ -468,5 +520,8 @@ Happy hacking!
 [Plug]: https://hexdocs.pm/plug
 [Plug.Router]: https://hexdocs.pm/plug/Plug.Router.html
 [Postgrex]: https://hexdocs.pm/postgrex/readme.html
+[DBConnection]: https://hexdocs.pm/db_connection
+[JOSE]: https://hexdocs.pm/jose
+[telemetry]: https://hexdocs.pm/telemetry
 [NimbleOptions]: https://hexdocs.pm/nimble_options
 [NimbleParsec]: https://hexdocs.pm/nimble_parsec/NimbleParsec.html

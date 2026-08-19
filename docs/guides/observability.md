@@ -1,7 +1,7 @@
 # Observability
 
 How to watch a running `Bier` instance: the `:telemetry` events it emits, the
-`Server-Timing` header it can add to every response, the admin
+`Server-Timing` header it can add to every response, the access log, the admin
 liveness/readiness endpoints, connection-pool sampling, request-trace header
 passthrough, and the structured diagnostics it logs for database failures.
 None of this changes request handling — it is read-only instrumentation
@@ -109,25 +109,60 @@ the per-phase durations PostgREST reports: `jwt`, `parse`, `plan`,
 
 Each phase is *measured* at its real call site (`Bier.ServerTiming.measure/2`)
 and accumulated per request — a phase that did no work for a given request
-reports `0.000`, never a fabricated share of the total. The header format is
-`<name>;dur=<milliseconds>` (three decimal places), phases comma-separated in
-that fixed order:
+reports `0.0`, never a fabricated share of the total. The header format is
+`<name>;dur=<milliseconds>` with exactly **one** fractional digit, phases
+comma-separated in that fixed order:
 
 ```http
-server-timing: jwt;dur=0.512, parse;dur=0.037, plan;dur=1.204, transaction;dur=3.881, response;dur=0.096
+server-timing: jwt;dur=0.5, parse;dur=0.0, plan;dur=1.2, transaction;dur=3.9, response;dur=0.1
 ```
 
-`OPTIONS` responses run no query planning or database transaction, so they
-report only the `jwt`, `parse`, `response` subset — `plan` and `transaction`
-are omitted from the header entirely, not rendered as zero:
+All five metrics render on every response, whatever the request did. An
+`OPTIONS` response builds no query plan and opens no database transaction, so
+`plan` and `transaction` are still present and read `0.0` — the header's shape
+never varies:
 
 ```http
-server-timing: jwt;dur=0.000, parse;dur=0.012, response;dur=0.004
+server-timing: jwt;dur=0.0, parse;dur=0.0, plan;dur=0.0, transaction;dur=0.0, response;dur=0.0
 ```
 
 Timing is collected per request in process-scoped state
 (`Bier.ServerTiming`), reset at the top of the pipeline so a connection
 reused across keep-alive requests never carries a previous request's phases.
+
+## Access log (`log_level`, `log_query`)
+
+Every response whose status passes the `log_level` filter emits one
+Apache-combined access line through Elixir's `Logger`. `log_level` (env
+`PGRST_LOG_LEVEL`) is a *status* filter, not a `Logger` level:
+
+| `log_level` | Logs responses with status |
+| --- | --- |
+| `:crit` | nothing |
+| `:error` (default) | `>= 500` |
+| `:warn` | `>= 400` |
+| `:info`, `:debug` | everything |
+
+The line itself is logged at the `Logger` level the status warrants —
+`:error` for 5xx, `:warning` for 4xx, `:info` otherwise — so a host
+application's own `Logger` configuration still has the final say on what
+reaches a backend:
+
+```text
+- - web_anon [10/Aug/2026:15:14:24 +0000] "GET /beers?select=name HTTP/1.1" 200 132 "" "curl/8.7.1"
+```
+
+The fields are the Apache combined format: remote host and identd (always
+`- -`, since Bier sits behind whatever terminated the connection), the
+**resolved database role** for the request as the user field (`-` when the
+request failed before role resolution, or auth is not configured), the
+timestamp in UTC, the request line, status, response body length, `Referer`,
+and `User-Agent`.
+
+Set `log_query: true` (env `PGRST_LOG_QUERY`) to additionally log the SQL each
+request executed, one statement per line, under the same status filter and at
+the same level as its access line. `log_level` never changes the response
+itself — it only decides what is written.
 
 ## Health and readiness (admin server)
 

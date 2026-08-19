@@ -89,9 +89,6 @@ defmodule Bier.Plugs.Warning do
   # it stays a single RFC 7234 `warn-agent` token whatever the version string
   # looks like. Bier emits the same shape under its own name.
   defp product_token do
-    case :application.get_key(:bier, :vsn) do
-      {:ok, vsn} -> "Bierv" <> String.replace(List.to_string(vsn), " ", "")
-      _ -> "Bier"
-    end
+    "Bierv" <> String.replace(Bier.version(), " ", "")
   end
 end
