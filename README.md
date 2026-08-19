@@ -455,16 +455,17 @@ matched configuration (pool size, schema, anon role, no JWT, no compression,
 HTTP/1.1 keep-alive) across four scenarios — single-row read by primary key,
 filtered 25-row page, insert, and update by primary key.
 
-The published numbers were measured against **PostgREST v14.12**, before the
-conformance target moved to v16.0; they have not been re-measured since. Treat
-them as indicative of the shape of the difference rather than a current
-head-to-head.
+The published numbers were measured against **PostgREST v16.1** (2026-08),
+with the full per-request auth context (role switch + `request.*` GUCs)
+applied on both sides.
 
 On our reference machine (Apple M1 Max, PostgreSQL 17), Bier sustains
-**2.3–4.1x PostgREST's max throughput** depending on the scenario, with
-comparable median latency (p50/p90 within ~25% of each other both ways) and a
-tighter tail: across the whole run Bier's worst per-round p99 was ~13 ms,
-while PostgREST shows occasional multi-hundred-millisecond rounds.
+**1.9–2.5x PostgREST's max throughput** depending on the scenario, wins
+median latency in three of the four scenarios (and ties the fourth), trades
+p90 (PostgREST is ~1.2–1.35x ahead on three, Bier >2x ahead on the filtered
+page), and holds a much tighter tail: Bier's p99 stayed under 4 ms in every
+round of every scenario, while PostgREST's read-side p99 reached tens of
+milliseconds.
 
 Latency is measured open-loop (k6 `constant-arrival-rate`, immune to
 coordinated omission) at a shared arrival rate both servers sustain with zero

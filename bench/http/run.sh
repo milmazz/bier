@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# HTTP benchmark: Bier vs PostgREST v14.12, natively on macOS.
+# HTTP benchmark: Bier vs PostgREST (PG_VERSION_PIN below), natively on macOS.
 #   bench/http/run.sh           full run (~50-60 min)
 #   bench/http/run.sh --smoke   short windows, 1 round (~pipeline validation)
 # Results and methodology: bench/http/REPORT.md
@@ -9,7 +9,7 @@ BENCH_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$BENCH_DIR/../.." && pwd)"
 RESULTS="$BENCH_DIR/results"
 BIN="$BENCH_DIR/bin"
-PG_VERSION_PIN="v14.12"
+PG_VERSION_PIN="v16.1"
 
 BIER_PORT="${BIER_PORT:-3001}"
 POSTGREST_PORT="${POSTGREST_PORT:-3002}"
@@ -93,7 +93,8 @@ if [ ! -x "$BIN/postgrest" ]; then
     | tar -xJ -C "$BIN" || die "postgrest download failed — check asset names on the ${PG_VERSION_PIN} release page"
   chmod +x "$BIN/postgrest"
 fi
-"$BIN/postgrest" --version | grep -q "14.12" || die "wrong postgrest version in $BIN"
+"$BIN/postgrest" --version | grep -qF "${PG_VERSION_PIN#v}" \
+  || die "wrong postgrest version in $BIN — rm -f $BIN/postgrest to re-download $PG_VERSION_PIN"
 
 # ---------- database ------------------------------------------------------
 log "loading bier_bench fixtures"
