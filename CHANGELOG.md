@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- Added `db_prepared_statements` (PostgREST `db-prepared-statements`,
+  `PGRST_DB_PREPARED_STATEMENTS`, default `true`): the hot-path statements —
+  the auth preamble, reads, mutations, and RPC — are cached as named prepared
+  statements on each pool connection, skipping the parse step when a query
+  shape repeats. Set it to `false` behind a transaction-mode pooler such as
+  PgBouncer (#127).
+- Typed filter values and RPC scalar arguments are now bound as parameters
+  (`($n::text)::<type>`) instead of being inlined as escaped literals
+  (`'<v>'::<type>`). The server-side coercion — and every error it can
+  raise — is identical (PostgreSQL I/O-conversion casts), the conformance
+  suite is byte-for-byte unchanged, and it matches the SQL PostgREST
+  executes (`"id" = $1`). This is what makes the statement cache effective:
+  requests differing only in their values now share one SQL text (#127).
+
 ## v0.1.0 — 2026-08-18
 
 First release. Bier serves a RESTful API generated at boot from PostgreSQL

@@ -118,6 +118,7 @@ equivalents):
 | `router` | `[port: 4040, scheme: :http]` | Bandit web-endpoint options. |
 | `hostname` / `port` / `database` / `username` / `password` | `localhost` / `5432` / `bier` / — / — | Postgres connection. |
 | `pool_size` | `10` | Per-instance Postgrex pool size. |
+| `db_prepared_statements` | `true` | Cache hot-path statements as prepared statements per connection; disable behind transaction-mode poolers. |
 | `db_schemas` | `["public"]` | Ordered list of exposed schemas; the first is the default. |
 | `db_anon_role` | `nil` | Role assumed for unauthenticated requests. |
 | `db_extra_search_path` | `["public"]` | Extra schemas appended to the search path. |

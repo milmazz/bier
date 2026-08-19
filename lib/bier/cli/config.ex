@@ -624,6 +624,7 @@ defmodule Bier.CLI.Config do
         db_max_rows: resolved["db-max-rows"],
         pool_size: resolved["db-pool"],
         db_pool_max_idletime: resolved["db-pool-max-idletime"],
+        db_prepared_statements: resolved["db-prepared-statements"],
         server_host: resolved["server-host"],
         server_unix_socket: resolved["server-unix-socket"],
         server_unix_socket_mode: resolved["server-unix-socket-mode"],
