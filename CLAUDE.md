@@ -18,6 +18,7 @@ Elixir/OTP versions are pinned in `mise.toml` (Elixir 1.20 / OTP 29) and matched
 
 ```sh
 mix deps.get          # fetch dependencies
+git submodule update --init   # fetch the spec/ conformance submodule
 mix compile
 mix test              # loads the fixture DB, then runs the full suite
 mix test test/path/to/file_test.exs:LINE   # single test by file:line

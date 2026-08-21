@@ -20,14 +20,14 @@ CI. `mix.exs` declares the lower bound at `~> 1.18`. With
 ```sh
 mise install
 mix deps.get
+git submodule update --init   # fetch the spec/ conformance submodule
 ```
 
 A local PostgreSQL (15+) reachable at `localhost:5432` is required for the
-test suite, with the PostGIS extension available (`mix bier.fixtures.load`
-runs `CREATE EXTENSION IF NOT EXISTS postgis` for the geo+json conformance
-cases; CI uses the `postgis/postgis` images). Connection parameters come from
-the standard `PG*` environment variables (`PGHOST`, `PGPORT`, `PGUSER`,
-`PGPASSWORD`).
+test suite, with the PostGIS extension available: the fixture chain's
+`spec/fixtures/04_postgis.sql` requires it (CI uses the `postgis/postgis`
+images). Connection parameters come from the standard `PG*` environment
+variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`).
 
 ## Running the suite
 

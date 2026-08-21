@@ -403,7 +403,7 @@ in the repository, and [`docs/CONFORMANCE_IMPL.md`][conformance-impl] documents
 how it is wired. Neither ships in the package.
 
 [#42]: https://github.com/milmazz/bier/issues/42
-[spec]: https://github.com/milmazz/bier/tree/main/spec
+[spec]: https://github.com/milmazz/postgrest-conformance
 [conformance-impl]: https://github.com/milmazz/bier/blob/main/docs/CONFORMANCE_IMPL.md
 
 ### Deliberate divergences from PostgREST

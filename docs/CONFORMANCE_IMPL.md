@@ -72,8 +72,9 @@ before writing code. It encodes findings that are expensive to re-derive.
   So a case with `schema: operators` is sent with header
   `Accept-Profile: operators` (unless it already set one). `schema: test`/nil
   sends **no** profile header. See §2 for what this demands of the DB. This is
-  bier's implementation of `spec/HARNESS.md` §3.4 — that document is the
-  authority on the rule itself; this is only proof bier's harness follows it.
+  bier's implementation of `spec/HARNESS.md` §3 (step 4) — that document is
+  the authority on the rule itself; this is only proof bier's harness follows
+  it.
 - `Bier.ConformanceAssertions` implements the assertion semantics
   `spec/HARNESS.md` §4 specifies (`status`, `headers`, `headers_present`,
   `headers_absent`, `headers_match`, `headers_no_blank`,
@@ -165,15 +166,16 @@ headers, config, domain_representations`. (`headers`/`config` also need the
 v1/v2/private/special schemas, already built by the consolidated load.)
 
 **Function-heavy areas** (`rpc`, `openapi`, parts of `auth`/`config`) expose
-**functions**, which views don't cover. Options for the owning agent, in order of
-preference:
-1. Mirror `test`'s functions into the area schema with thin SQL wrappers
-   generated from `pg_proc` (handle overloads/variadics/OUT params), **or**
-2. Re-load that one fragment into the area schema by remapping its
-   `test`→`<area>` schema references at load time (those fragments are
-   `test.`-qualified, so a scoped rewrite of `\btest\b` in DDL contexts works;
-   verify nothing in string literals breaks).
-   Keep this confined to the area's own loader step.
+**functions**, which plain views don't cover. `06_area_schemas.sql` carries
+those too: alongside the view mirrors it has full `CREATE FUNCTION`/`CREATE
+TABLE` statements for each area's function-backed objects (e.g.
+`rpc.add_them`, `rpc.getallprojects`, `config.get_lines`), produced by the
+same upstream `tools/regen_area_schemas.exs` pass (§2.2 above) and checked
+into the submodule alongside the view mirrors. Bier's loader does not choose
+a mirroring strategy or generate any of this DDL — it only executes the
+file as one more `spec/fixtures/0N_*.sql` chain step (§2.3). A function-heavy
+area that needs a new or changed object gets that change **upstream**, in
+`postgrest-conformance`, like any other fixture edit.
 
 ### 2.3 How the loader runs
 - A `Mix.Task` (`lib/mix/tasks/bier.fixtures.load.ex`, namespaced
@@ -321,8 +323,9 @@ Accept-Profile, then builds **one SQL statement** returning JSON. Mirror that:
 ## 5. Suggested build order (dependencies)
 
 1. **Foundation** (must come first; everything depends on it): deps
-   (`postgrex`), config plumbing (§2.4), fixture loader + mirror (§2.2–2.3),
-   Postgrex pool, introspection, catch-all routing, read pipeline
+   (`postgrex`), config plumbing (§2.4), fixture chain loader (§2.3, which
+   pulls in the pre-generated area-schema mirror from §2.2), Postgrex pool,
+   introspection, catch-all routing, read pipeline
    (select/filters/order/limit/offset → SQL → JSON), Content-Type, basic
    Content-Range, error envelope skeleton. **Target green:** `operators` (87),
    `ordering` (33), and the `test`-schema read parts of `select`/`filters`.
@@ -332,9 +335,10 @@ Accept-Profile, then builds **one SQL statement** returning JSON. Mirror that:
    (CSV/GeoJSON/singular/nulls).
 3. **Write slices**: `mutations`, `representations` (Prefer return=, upsert,
    columns, safe-update).
-4. **Function/meta slices**: `rpc` (function mirroring §2.2), `openapi`,
-   `errors`, `headers`, `observability`, `domain_representations`, `config`
-   (non-CLI subset), `url_grammar` profile/406 edge cases.
+4. **Function/meta slices**: `rpc` (its area-schema functions ship pre-built
+   in `06_area_schemas.sql`, §2.2), `openapi`, `errors`, `headers`,
+   `observability`, `domain_representations`, `config` (non-CLI subset),
+   `url_grammar` profile/406 edge cases.
 5. **auth**: only the small non-`:pending` subset is reachable now.
 
 Each slice: read its cases, run `mix test --only area:<area>`, implement to
