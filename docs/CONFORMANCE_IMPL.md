@@ -19,7 +19,7 @@ before writing code. It encodes findings that are expensive to re-derive.
 > against PostgREST v16.0 must pass against Bier, against the same Postgres
 > fixture DB. PostgREST is the ground truth; cases cite the exact source line.
 
-> **Pinned version: v16.0** (submodule tag `v16.0.0-suite.1`). `spec/` was
+> **Pinned version: v16.0** (submodule tag `v16.0.0-suite.2`). `spec/` was
 > re-synced from v14.12 to v16.0 in one spec-only pass (532 → 762 cases, every
 > `source:` re-pinned), which moved the target ahead of `lib/` by 100
 > failures. `lib/` has since caught up: the suite is green, all 17 areas at

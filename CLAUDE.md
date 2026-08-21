@@ -105,7 +105,7 @@ The suite is driven by the **conformance cases** in `test/conformance/conformanc
 
 `spec/` is a **git submodule** pinned to a tag of
 [`github.com/milmazz/postgrest-conformance`](https://github.com/milmazz/postgrest-conformance)
-(currently `v16.0.0-suite.1`) — the freeze above is absolute: it is never
+(currently `v16.0.0-suite.2`) — the freeze above is absolute: it is never
 edited inside bier, not even for a typo. The two exceptions the freeze used
 to carve out for in-repo `spec/` edits are gone now that `spec/` moved out:
 case/behavior changes and fixture edits both happen **upstream**, through
