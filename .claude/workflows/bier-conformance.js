@@ -43,7 +43,7 @@
 export const meta = {
   name: 'bier-conformance',
   description: 'Bring Bier lib/ to green against the PostgREST conformance suite: baseline the failures, repair the foundation only if the suite cannot run, then one sequential agent per failing area, then full CI gates',
-  whenToUse: 'After the spec/ tree changed (bier-spec / bier-spec-audit re-sync + human harness gate) or whenever conformance failures need working down. Green areas are skipped.',
+  whenToUse: 'After the spec/ submodule pin was bumped (a re-sync upstream in postgrest-conformance + human harness gate) or whenever conformance failures need working down. Green areas are skipped.',
   phases: [
     { title: 'Baseline', detail: 'fixture load + full mix test; per-area failure counts from real output' },
     { title: 'Foundation repair', detail: 'only if the suite cannot run: fix infra/pipeline per docs/CONFORMANCE_IMPL.md' },
@@ -57,10 +57,10 @@ const DOC = 'docs/CONFORMANCE_IMPL.md'
 const RULES = `
 HARD RULES (read ${DOC} in full first — it encodes the architecture and the keystone DB trick; CLAUDE.md summarizes the current pipeline):
 - Bier is ALREADY IMPLEMENTED and has passed this suite before. You are repairing/extending, not scaffolding: never re-create deps, config files, or modules that exist — read the current code and modify it. Do NOT rewrite working code from scratch.
-- Write ONLY under lib/, mix.exs, config/. NEVER edit test/** or spec/** (frozen ground truth; spec/conformance/fixtures_local.sql is human-owned). If a test looks wrong, re-read its cited source: URL — do not change the test.
+- Write ONLY under lib/, mix.exs, config/. NEVER edit test/** or spec/** (frozen ground truth; spec/ is a git submodule of postgrest-conformance, never edited in this repo even for a typo). If a test looks wrong, re-read its cited source: URL — do not change the test.
 - HARNESS GAPS are not yours to solve: if a failure is caused by the frozen harness rather than lib/ — an "unknown key" raise from conformance_assertions, a case needing a JWT sign_with key the harness doesn't define, PGRST106 because a case uses a schema label the fixture loader never builds, or undefined_table because the fixture DB lacks a relation the case references — record it as a blocker prefixed "harness_gap:" with the case ids and STOP working on those cases. Do not contort lib/ (or smuggle DDL into the fixture loader) to paper over them.
 - Serialize JSON via Bier.json_library(). Keep mix format clean and compile warning-free.
-- 'mix test' is aliased to run 'mix bier.fixtures.load' first (drops+recreates the local bier_test DB, loads spec/conformance/fixtures.sql + fixtures_local.sql, mirrors area schemas). Both are idempotent; a reachable local Postgres is required.
+- 'mix test' is aliased to run 'mix bier.fixtures.load' first (drops+recreates the local bier_test DB, then runs the spec/ submodule's numbered fixture chain spec/fixtures/01...07 via psql — the area-schema mirror is a pre-generated file in that chain now, not built at load time). Idempotent; a reachable local Postgres is required.
 - Report HONEST numbers copied from actual command output, and paste the final test-summary line (e.g. "532 tests, 3 failures, 57 excluded") verbatim into the "evidence" field. Do not claim green without running the command.
 `
 
@@ -135,7 +135,7 @@ TASK — establish the real current state; change NOTHING under lib/ (this pass 
 3. Derive per-area failure counts: every conformance test is tagged with its area
    (test/conformance/conformance_test.exs generates one test per spec/ case, each
    @tag area: :<area>). Map each failing test back to its area from the failure
-   output / the case files under spec/conformance/cases — do NOT re-run the suite
+   output / the case files under spec/cases — do NOT re-run the suite
    once per area (each 'mix test' invocation reloads the fixture DB; it's slow).
 4. Classify obviously harness-shaped failures ("unknown key" assertion raises,
    missing sign_with JWT keys, PGRST106 on a schema label the loader doesn't
@@ -178,9 +178,9 @@ The baseline run found ${failures} failing test(s) in this area. Baseline eviden
 ${baselineEvidence}
 
 Read ${DOC} (esp. the row for "${area}" in §3 and the relevant parts of §4) and
-this slice's cases: the spec/conformance/cases/*.yaml whose feature: starts with
-"${area}" (grep -rl 'feature: ${area}' spec/conformance/cases/).
-Focus areas: ${SLICE_FOCUS[area] || 'see the failing cases under spec/conformance/cases'}.
+this slice's cases: the spec/cases/*.yaml whose feature: starts with
+"${area}" (grep -rl 'feature: ${area}' spec/cases/).
+Focus areas: ${SLICE_FOCUS[area] || 'see the failing cases under spec/cases'}.
 
 Build on the existing foundation + earlier slices already in lib/. Extend the
 parser/executor/controller/renderer/introspection as needed; add to working
@@ -234,9 +234,12 @@ if (!base || !base.fixtures_load_ok || !base.suite_runs) {
 Baseline findings: ${JSON.stringify(base)}
 
 TASK: repair whatever prevents 'mix bier.fixtures.load' and 'mix test' from
-executing to completion — compile errors, fixture-loader failures against the
-current spec/conformance/fixtures.sql (e.g. new schemas/roles the mirror logic
-must cover), boot/introspection crashes. Consult ${DOC} for the architecture.
+executing to completion — compile errors, boot/introspection crashes, or the
+loader task itself (lib/mix/tasks/bier.fixtures.load.ex, e.g. env/psql
+wiring). If the failure instead traces to the spec/ submodule's own fixture
+chain content (spec/fixtures/*.sql), that's upstream, not yours to fix here —
+record it as a "harness_gap:" blocker with the pinned submodule commit and
+stop. Consult ${DOC} for the architecture.
 Fix lib//mix.exs/config/ only. Test FAILURES are fine at this stage — the later
 slice agents work those down; your job ends when the full suite runs to
 completion. If what blocks the run is harness-shaped (frozen test/** or spec/**

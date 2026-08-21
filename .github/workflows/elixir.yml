@@ -42,8 +42,9 @@ jobs:
 
     env:
       # config/test.exs reads these; the `mix test` alias runs
-      # `mix bier.fixtures.load`, which connects to localhost:5432 and loads
-      # spec/conformance/fixtures.sql into a fresh `bier_test`.
+      # `mix bier.fixtures.load`, which connects to localhost:5432 and runs the
+      # spec/ submodule's numbered fixture chain (spec/fixtures/01…07) into a
+      # fresh `bier_test`.
       PGHOST: localhost
       PGPORT: '5432'
       PGUSER: postgres
@@ -51,6 +52,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: true
     - name: Set up Elixir
       uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
       with:
@@ -75,9 +78,10 @@ jobs:
     - name: Build docs (warnings as errors)
       run: mix docs --warnings-as-errors
     - name: Run tests
-      # The `test` alias loads spec/conformance/fixtures.sql into `bier_test`
-      # (via psql, preinstalled on the runner) before running ExUnit. The full
-      # suite passes; any failure fails the job.
+      # The `test` alias runs the spec/ submodule's fixture chain
+      # (spec/fixtures/01…07, via psql, preinstalled on the runner) into
+      # `bier_test` before running ExUnit. The full suite passes; any failure
+      # fails the job.
       run: mix test
     # Last so that newly published advisories against locked deps (which need
     # a `mix deps.update` to clear) still fail the job without also hiding
