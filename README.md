@@ -500,9 +500,11 @@ which chains, in order: `mix deps.unlock --check-unused`,
 `mix docs --warnings-as-errors`, and `mix test`. (CI runs the same steps
 individually so each gate reports separately.)
 
-The test suite loads `spec/conformance/fixtures.sql` into a local `bier_test`
-database; [`docs/CONFORMANCE_IMPL.md`][conformance-impl] covers the database
-wiring, and [CONTRIBUTING.md](CONTRIBUTING.md) is the full contributor guide.
+The test suite runs the `spec/` submodule's numbered fixture chain
+(`spec/fixtures/01_roles.sql` through `07_analyze.sql`) into a local
+`bier_test` database; [`docs/CONFORMANCE_IMPL.md`][conformance-impl] covers
+the database wiring, and [CONTRIBUTING.md](CONTRIBUTING.md) is the full
+contributor guide.
 
 ## Why "Bier"?
 

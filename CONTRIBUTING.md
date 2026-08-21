@@ -38,8 +38,9 @@ mix test --only area:operators            # one conformance area
 ```
 
 `mix test` is aliased to `["bier.fixtures.load", "test"]`: it drops and
-recreates a local `bier_test` database and loads
-`spec/conformance/fixtures.sql` before running, so it is always safe to re-run.
+recreates a local `bier_test` database and runs the `spec/` submodule's
+numbered fixture chain (`spec/fixtures/01_roles.sql` through
+`07_analyze.sql`) before running, so it is always safe to re-run.
 
 ## The golden rule: `test/**` and `spec/**` are frozen
 
@@ -50,6 +51,12 @@ behavior, with each case citing its upstream source. It is **ground truth**:
 * Fix `lib/` to match the cases — never edit `test/**` or `spec/**`.
 * If a case looks wrong, re-check the cited PostgREST source before assuming
   the test is at fault.
+
+`spec/` is a git submodule of
+[`milmazz/postgrest-conformance`](https://github.com/milmazz/postgrest-conformance),
+so the freeze above is absolute here: there is no in-repo escape hatch for it
+at all. Case/behavior changes and fixture edits happen **upstream**, in that
+repo, through its own reviewed process — never as part of a bier PR.
 
 ## Generated code
 

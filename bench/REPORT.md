@@ -26,7 +26,7 @@ conformance suite and benchmarked function-by-function.
 `bench/corpus.exs` builds inputs from two sources:
 
 1. **Conformance-derived** - every `request.path` query string in
-   `spec/conformance/cases/*.yaml` (240 unique query strings), URL-decoded and
+   `spec/cases/*.yaml` (240 unique query strings), URL-decoded and
    split into the relevant fragments per leaf grammar (filter values, json-path
    columns, order terms, select fields).
 2. **Hand-picked edge cases** - json paths (`data->foo->>bar`, `data->>-3`,
