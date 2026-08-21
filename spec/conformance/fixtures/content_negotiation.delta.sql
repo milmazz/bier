@@ -1,1 +1,0 @@
--- Folded into ../fixtures.sql on 2026-08-09 (public."application/octet-stream" domain in section 3c; test.unnamed_bytea_param(bytea) REPLACED IN PLACE at section 6 to return that domain instead of plain bytea — the delta's DROP FUNCTION guard was unnecessary and dropped, cases 1622/1623/1624); empty until the next delta.

@@ -17,7 +17,6 @@ defmodule Bier.HttpCaseTest do
         "headers" => %{"Accept" => "application/json"}
       },
       schema: "test",
-      preconditions: [],
       expect: %{},
       source: nil
     }
@@ -40,7 +39,6 @@ defmodule Bier.HttpCaseTest do
       kind: :http,
       request: %{"method" => "GET", "path" => "/__unknown__"},
       schema: "test",
-      preconditions: [],
       expect: %{},
       source: nil
     }

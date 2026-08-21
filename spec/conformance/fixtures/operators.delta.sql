@@ -1,1 +1,0 @@
--- Folded into ../fixtures.sql on 2026-08-09 (test.tsvector_not_null/tsvector_not_empty domains in new section 3d, test.items_with_different_col_types + test.tsearch_to_tsvector tables and their upstream seeds, test.text_search_vector(test.tsearch_to_tsvector) computed field; cases 10200-10205 and 10220-10230); empty until the next delta.

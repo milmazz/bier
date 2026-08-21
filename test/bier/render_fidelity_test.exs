@@ -18,7 +18,7 @@ defmodule Bier.RenderFidelityTest do
   `addNullsToSnip`) — and therefore preserves both.
 
   No frozen case pins either property for these media types (the singular cases
-  select a single column, and `spec/content_negotiation.yaml` models plurality,
+  select a single column, and `spec/spec/content_negotiation.yaml` models plurality,
   `Content-Type` and the `nulls=stripped` semantics but says nothing about key
   order or numeric text), so this is the Bier-side regression test. The schema
   is created and dropped by the test — `spec/**` is untouched.
