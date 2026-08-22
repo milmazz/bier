@@ -18,6 +18,18 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
     end
 
     [roles | rest] = files
+
+    # The first chain file runs against the maintenance DB, before the target
+    # database exists — guard the positional assumption so an upstream rename
+    # fails loudly at the pin bump instead of running roles SQL against the
+    # wrong database.
+    if Path.basename(roles) != "01_roles.sql" do
+      Mix.raise(
+        "unexpected first chain file #{Path.basename(roles)} (expected 01_roles.sql) — " <>
+          "the spec/ submodule's fixture chain layout changed; update this task to match"
+      )
+    end
+
     Mix.shell().info("Loading conformance chain into #{cfg[:database]}")
     run_psql!(psql, cfg, "postgres", ["-f", roles])
     run_psql!(psql, cfg, "postgres", ["-c", ~s(DROP DATABASE IF EXISTS "#{cfg[:database]}";)])
