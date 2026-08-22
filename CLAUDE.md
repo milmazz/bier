@@ -18,6 +18,7 @@ Elixir/OTP versions are pinned in `mise.toml` (Elixir 1.20 / OTP 29) and matched
 
 ```sh
 mix deps.get          # fetch dependencies
+git submodule update --init   # fetch the spec/ conformance submodule
 mix compile
 mix test              # loads the fixture DB, then runs the full suite
 mix test test/path/to/file_test.exs:LINE   # single test by file:line
@@ -28,9 +29,10 @@ mix precommit         # run every CI gate (format/audit/compile/credo/docs/test)
 ```
 
 `mix test` is aliased to `["bier.fixtures.load", "test"]` (`mix.exs`), so it
-drops+recreates a local `bier_test` PostgreSQL database and loads
-`spec/conformance/fixtures.sql` before running. A reachable local Postgres is
-required; see `docs/CONFORMANCE_IMPL.md` for the wiring.
+drops+recreates a local `bier_test` PostgreSQL database and runs the `spec/`
+submodule's numbered fixture chain (`spec/fixtures/01_roles.sql` through
+`07_analyze.sql`) before running. A reachable local Postgres is required; see
+`docs/CONFORMANCE_IMPL.md` and `spec/HARNESS.md` for the wiring.
 
 Run every CI gate locally before pushing with one command:
 
@@ -99,6 +101,17 @@ Any non-`Plug.Conn` return value falls through to `Bier.Plugs.FallbackController
 
 `test/support/` is added to `elixirc_paths` only in `:test` (see `mix.exs`). Put shared fixtures/helpers there.
 
-The suite is driven by the **conformance cases** in `test/conformance/conformance_test.exs`, which generates one ExUnit test per case in `spec/` (762 cases across 17 areas; 4 are excluded — the 3 `:pending` `status_text` cases, #42, and case 1771 via the `@divergences` map, #122). `@divergences` in that file is the only mechanism for a **deliberate divergence**: the case's id maps to the reasoning, the test is tagged `:pending` and flunks with that reasoning, and the spec YAML stays untouched (it keeps recording what PostgREST really does — `spec/case.schema.json` has no pending key by design). Every entry needs explicit operator sign-off plus a tracking issue, and a compile-time guard fails the build if an entry's case disappears or stops pinning the upstream behavior it diverges from. Each case is tagged `@tag area: :<area>`. The harness under `test/support/` — `Bier.ConformanceServer` (boots one shared instance), `Bier.HttpCase.perform/1` (issues the request via `Req`), and `Bier.ConformanceAssertions` — plus everything under `spec/` is **frozen ground truth**: it encodes real PostgREST v16.0 behavior. Fix `lib/` to match the cases, never edit `test/**` or `spec/**`. See `docs/CONFORMANCE_IMPL.md` for the full contract.
+The suite is driven by the **conformance cases** in `test/conformance/conformance_test.exs`, which generates one ExUnit test per case in `spec/cases/` (762 cases across 17 areas; 4 are excluded — the 3 `:pending` `status_text` cases, #42, and case 1771 via the `@divergences` map, #122). `@divergences` in that file is the only mechanism for a **deliberate divergence**: the case's id maps to the reasoning, the test is tagged `:pending` and flunks with that reasoning, and the spec YAML stays untouched (it keeps recording what PostgREST really does — `spec/case.schema.json` has no pending key by design). Every entry needs explicit operator sign-off plus a tracking issue, and a compile-time guard fails the build if an entry's case disappears or stops pinning the upstream behavior it diverges from. Each case is tagged `@tag area: :<area>`. The harness under `test/support/` — `Bier.ConformanceServer` (boots one shared instance), `Bier.HttpCase.perform/1` (issues the request via `Req`), and `Bier.ConformanceAssertions` — plus everything under `spec/` is **frozen ground truth**: it encodes real PostgREST v16.0 behavior. Fix `lib/` to match the cases, never edit `test/**` or `spec/**`. See `docs/CONFORMANCE_IMPL.md` for bier's own harness wiring and `spec/HARNESS.md` for the implementer-agnostic format/assertion contract those cases are checked against.
 
-Two scoped exceptions to the freeze, both requiring explicit operator approval: (1) re-syncing `spec/` to a new PostgREST pin is done only via the `bier-spec`/`bier-spec-audit` workflows (`.claude/workflows/`), whose prompts carry that authorization; (2) `spec/conformance/fixtures_local.sql` is a human-owned supplement edited only in reviewed commits (see `spec/conformance/fixtures/README.md` for the fixture layering). Implementation/conformance work never touches either.
+`spec/` is a **git submodule** pinned to a tag of
+[`github.com/milmazz/postgrest-conformance`](https://github.com/milmazz/postgrest-conformance)
+(currently `v16.0.0-suite.2`) — the freeze above is absolute: it is never
+edited inside bier, not even for a typo. The two exceptions the freeze used
+to carve out for in-repo `spec/` edits are gone now that `spec/` moved out:
+case/behavior changes and fixture edits both happen **upstream**, through
+that repo's own reviewed workflows (see its `CONTRIBUTING.md`); the old
+human-owned `fixtures_local.sql` supplement is now
+`spec/fixtures/03_supplement.sql`, upstream-owned the same way. The only
+`spec/`-touching action left in bier is bumping the pin — an explicit,
+reviewed commit (`cd spec && git checkout <tag> && cd .. && git add spec`),
+never a behavior change smuggled in alongside it.

@@ -404,7 +404,7 @@ in the repository, and [`docs/CONFORMANCE_IMPL.md`][conformance-impl] documents
 how it is wired. Neither ships in the package.
 
 [#42]: https://github.com/milmazz/bier/issues/42
-[spec]: https://github.com/milmazz/bier/tree/main/spec
+[spec]: https://github.com/milmazz/postgrest-conformance
 [conformance-impl]: https://github.com/milmazz/bier/blob/main/docs/CONFORMANCE_IMPL.md
 
 ### Deliberate divergences from PostgREST
@@ -503,9 +503,11 @@ which chains, in order: `mix deps.unlock --check-unused`,
 `mix docs --warnings-as-errors`, and `mix test`. (CI runs the same steps
 individually so each gate reports separately.)
 
-The test suite loads `spec/conformance/fixtures.sql` into a local `bier_test`
-database; [`docs/CONFORMANCE_IMPL.md`][conformance-impl] covers the database
-wiring, and [CONTRIBUTING.md](CONTRIBUTING.md) is the full contributor guide.
+The test suite runs the `spec/` submodule's numbered fixture chain
+(`spec/fixtures/01_roles.sql` through `07_analyze.sql`) into a local
+`bier_test` database; [`docs/CONFORMANCE_IMPL.md`][conformance-impl] covers
+the database wiring, and [CONTRIBUTING.md](CONTRIBUTING.md) is the full
+contributor guide.
 
 ## Why "Bier"?
 

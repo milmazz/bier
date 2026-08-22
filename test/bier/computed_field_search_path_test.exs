@@ -13,7 +13,7 @@ defmodule Bier.ComputedFieldSearchPathTest do
   # carrying `fn_schema` separately), this drops it by never selecting the row.
   #
   # Not reachable from `spec/`: every computed field in
-  # `spec/conformance/fixtures.sql` is same-schema and the fixture set has no
+  # `spec/fixtures/02_base.sql` is same-schema and the fixture set has no
   # extra-search-path schema. These schemas are created and dropped by the test
   # itself — `spec/**` is untouched.
   #

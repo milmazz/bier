@@ -1,1 +1,0 @@
--- Folded into ../fixtures.sql on 2026-08-09 (test.evil_friends_with_column_default in section 4, right after its sibling test.evil_friends; no seeds, no GRANT; case 1822 flipped to passing with zero regressions); empty until the next delta.

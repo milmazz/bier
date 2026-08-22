@@ -29,7 +29,7 @@ defmodule Bier.RpcRenderTest do
       `null`, which is what upstream sends.
 
   The frozen suite does not model any of this: no case pairs a scalar/composite
-  RPC with `text/csv`, and `spec/content_negotiation.yaml` does not model the
+  RPC with `text/csv`, and `spec/spec/content_negotiation.yaml` does not model the
   RPC return-kind split. The schema here is created and dropped by the test —
   `spec/**` is untouched.
   """

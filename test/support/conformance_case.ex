@@ -1,6 +1,6 @@
 defmodule Bier.ConformanceCase do
   @moduledoc """
-  A parsed `spec/conformance/cases/*.yaml` record. `load_all/0` reads every case
+  A parsed `spec/cases/*.yaml` record. `load_all/0` reads every case
   file into a struct; the conformance generator enumerates these.
   """
 
@@ -12,7 +12,6 @@ defmodule Bier.ConformanceCase do
     :kind,
     :request,
     :schema,
-    :preconditions,
     :expect,
     :source,
     config: %{}
@@ -25,7 +24,6 @@ defmodule Bier.ConformanceCase do
           kind: :http | :cli,
           request: map(),
           schema: String.t() | nil,
-          preconditions: list(),
           expect: map(),
           source: String.t() | nil,
           # PostgREST per-case config overrides (e.g. `openapi-mode: disabled`).
@@ -34,8 +32,8 @@ defmodule Bier.ConformanceCase do
           config: map()
         }
 
-  # test/support -> project root -> spec/conformance/cases
-  @cases_dir Path.expand("../../spec/conformance/cases", __DIR__)
+  # test/support -> project root -> spec/cases
+  @cases_dir Path.expand("../../spec/cases", __DIR__)
 
   @spec load_all() :: [t()]
   def load_all do
@@ -58,7 +56,6 @@ defmodule Bier.ConformanceCase do
       kind: if(Map.get(request, "kind") == "cli", do: :cli, else: :http),
       request: request,
       schema: Map.get(data, "schema"),
-      preconditions: Map.get(data, "preconditions", []),
       expect: Map.get(data, "expect", %{}),
       source: Map.get(data, "source"),
       config: Map.get(data, "config") || %{}

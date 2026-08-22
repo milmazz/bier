@@ -12,7 +12,7 @@ defmodule Bier.ComputedFieldSchemaTest do
   # schema A and its relation in schema B the field was either silently dropped
   # (no `A.X`) or attached to the wrong relation (a different `A.X` exists).
   #
-  # Every computed field in `spec/conformance/fixtures.sql` is same-schema, so
+  # Every computed field in `spec/fixtures/02_base.sql` is same-schema, so
   # the frozen conformance suite cannot see this. These schemas are created and
   # dropped by the test itself — `spec/**` is untouched.
   use ExUnit.Case, async: false

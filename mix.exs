@@ -63,7 +63,7 @@ defmodule Bier.MixProject do
       # resolve and so the tutorials' `brewery.sql` is actually reachable from
       # a dependency (deps/bier/docs/tutorials/brewery.sql) — without it the
       # tutorials' very first step only works from a git checkout.
-      # `docs/CONFORMANCE_IMPL.md` and `docs/workflows/` stay out: repo-only.
+      # `docs/CONFORMANCE_IMPL.md` and the `spec/` submodule stay out: repo-only.
       files: ~w(lib docs/guides docs/tutorials docs/injection_safety.md
            .formatter.exs mix.exs README.md LICENSE CHANGELOG.md CONTRIBUTING.md),
       # `mix bier.fixtures.load` is the dev-only conformance-fixture loader; it

@@ -3,7 +3,7 @@ defmodule Bier.OpenAPI do
   Builds the Swagger 2.0 (OpenAPI 2.0) root document from an introspection
   snapshot. Wire-format match to PostgREST `Bier.postgrest_version/0` is the
   contract; see
-  spec/openapi.yaml and spec/conformance/cases/16*.yaml. An opt-in
+  spec/spec/openapi.yaml and spec/cases/16*.yaml. An opt-in
   OpenAPI 3.0.3 translation of this document is available via the
   `openapi_version: "3.0"` config option (`Bier.OpenAPI.V3`).
   """

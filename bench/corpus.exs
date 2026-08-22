@@ -2,12 +2,12 @@
 #
 # Loaded via `Code.require_file("corpus.exs", __DIR__)` from the bench scripts.
 # Builds per-function input lists from BOTH the conformance cases
-# (`spec/conformance/cases/*.yaml`, the `request.path` query parts) and a set of
+# (`spec/cases/*.yaml`, the `request.path` query parts) and a set of
 # hand-picked edge cases (json paths, quantifiers, quoted values, related order,
 # deep json path, long select lists, balanced-nesting comma splits).
 
 defmodule Bench.Corpus do
-  @cases_dir Path.expand("../spec/conformance/cases", __DIR__)
+  @cases_dir Path.expand("../spec/cases", __DIR__)
 
   @doc "Raw query strings (everything after `?`) extracted from conformance cases."
   def query_strings do

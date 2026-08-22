@@ -22,7 +22,7 @@ defmodule Bier.CsvFidelityTest do
   quote embedded newlines).
 
   No frozen case exercises CSV for a relation-less RPC, and none puts a
-  `numeric` column in a CSV body; `spec/content_negotiation.yaml` models the
+  `numeric` column in a CSV body; `spec/spec/content_negotiation.yaml` models the
   header row, the absent trailing newline and the `Content-Type` only. The
   schema here is created and dropped by the test — `spec/**` is untouched.
   """
