@@ -24,10 +24,10 @@ git submodule update --init   # fetch the spec/ conformance submodule
 ```
 
 A local PostgreSQL (15+) reachable at `localhost:5432` is required for the
-test suite, with the PostGIS extension available: the fixture chain's
-`spec/fixtures/04_postgis.sql` requires it (CI uses the `postgis/postgis`
-images). Connection parameters come from the standard `PG*` environment
-variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`).
+test suite. The PostGIS extension must be installed as well — the fixture
+chain's `spec/fixtures/04_postgis.sql` depends on it (CI uses the
+`postgis/postgis` images). Connection parameters come from the standard `PG*`
+environment variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`).
 
 ## Running the suite
 
