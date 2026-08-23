@@ -616,12 +616,11 @@ defmodule Bier.Plugs.ActionController do
   defp exposed_profiles(%{db_profile_schemas: schemas}) when is_list(schemas), do: schemas
   defp exposed_profiles(_config), do: nil
 
-  # Area-mirror schemas are auto-updatable views over the base `test` schema
-  # (see docs/CONFORMANCE_IMPL.md §2.2). PostgREST's own cases were authored
-  # against the base `test` schema, so a not-found error must report `test.<rel>`
-  # even though the request resolved through the mirror label.
-  @mirror_schemas ~w(operators ordering pagination representations mutations config domain_representations)
-
+  # PGRST205 qualifies the missing table with the request's active schema
+  # (`Error.hs#L255` builds `qi <> "." <> relName` from the resolved profile),
+  # even when that schema is an area mirror over `test` — upstream's specs show
+  # `test.` only because their sole exposed schema is named `test`. Cases
+  # 1360/1368/1373 pin this (spec >= v16.0.0-suite.3).
   defp resolve_relation(conn, schema, relations) do
     case conn.path_info do
       [segment] ->
@@ -633,8 +632,7 @@ defmodule Bier.Plugs.ActionController do
 
           :error ->
             {:error,
-             {:unknown_relation, reported_schema(schema), relation,
-              table_hint(schema, relation, relations)}}
+             {:unknown_relation, schema, relation, table_hint(schema, relation, relations)}}
         end
 
       _ ->
@@ -654,12 +652,9 @@ defmodule Bier.Plugs.ActionController do
 
     case Bier.Fuzzy.best_match(relation, candidates, @table_hint_min_score) do
       nil -> nil
-      match -> "Perhaps you meant the table '#{reported_schema(schema)}.#{match}'"
+      match -> "Perhaps you meant the table '#{schema}.#{match}'"
     end
   end
-
-  defp reported_schema(schema) when schema in @mirror_schemas, do: "test"
-  defp reported_schema(schema), do: schema
 
   # ---- query plan ----------------------------------------------------------
 
