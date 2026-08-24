@@ -75,9 +75,10 @@ defmodule Bier.Events do
     with {:ok, conn} <- ActionController.maybe_auth(bearer_fallback(conn), config),
          {:ok, channels, tables} <- parse_subscriptions(conn, config),
          :ok <- authorize(channels, config),
-         {:ok, columns} <- authorize_tables(conn, tables, config),
+         role = resolve_role(conn),
+         {:ok, columns} <- authorize_tables(conn, tables, config, role),
          :ok <- negotiate(conn) do
-      stream(conn, config, channels, tables, columns)
+      stream(conn, config, channels, tables, columns, role)
     end
   end
 
@@ -126,7 +127,14 @@ defmodule Bier.Events do
     end
   end
 
-  defp authorize_tables(_conn, [], _config), do: {:ok, %{}}
+  defp resolve_role(conn) do
+    case conn.assigns[:bier_auth] do
+      %{role: role} -> role
+      nil -> nil
+    end
+  end
+
+  defp authorize_tables(_conn, [], _config, _role), do: {:ok, %{}}
 
   # WAL table subscriptions require `events_publication`. `tables` is
   # guaranteed non-empty here (the `[]` clause above precedes this one), so
@@ -136,16 +144,10 @@ defmodule Bier.Events do
   # sees its own table name echoed back, the same way it would if the
   # publication were configured, so this still can't be used to learn
   # whether table subscriptions are enabled at all.
-  defp authorize_tables(_conn, [{schema, table} | _], %{events_publication: nil}),
+  defp authorize_tables(_conn, [{schema, table} | _], %{events_publication: nil}, _role),
     do: {:error, {:events_unknown_table, schema <> "." <> table}}
 
-  defp authorize_tables(conn, tables, config) do
-    role =
-      case conn.assigns[:bier_auth] do
-        %{role: role} -> role
-        nil -> nil
-      end
-
+  defp authorize_tables(_conn, tables, config, role) do
     pool = Bier.Registry.via(config.name, Postgrex)
     Authorize.check(pool, role, config.events_publication, tables)
   rescue
@@ -198,7 +200,7 @@ defmodule Bier.Events do
     |> Enum.any?(&(&1 in ["*/*", "text/*", "text/event-stream", ""]))
   end
 
-  defp stream(conn, config, channels, tables, columns) do
+  defp stream(conn, config, channels, tables, columns, role) do
     metadata = %{instance: config.name, channels: channels, tables: tables}
     start = Bier.Telemetry.events_subscribe_start(metadata)
 
@@ -208,13 +210,28 @@ defmodule Bier.Events do
       |> put_resp_header("cache-control", "no-store")
       # Stops buffering reverse proxies (nginx et al.) from absorbing frames.
       |> put_resp_header("x-accel-buffering", "no")
+      # Headers are flushed right here (send_chunked/2), before `loop/6`
+      # learns why the stream eventually ends — so this can't be decided at
+      # `finish/4` time. Declaring the connection non-keepalive up front
+      # means every termination path (write failure, overloaded, and now a
+      # `{:bier_wal_recheck}` revocation) actually closes the TCP
+      # connection once the chunked body ends, instead of Bandit parking it
+      # for reuse: a client polling the raw socket sees a real `:closed`,
+      # not an indefinitely idle keep-alive connection.
+      |> put_resp_header("connection", "close")
       |> send_chunked(200)
 
     case chunk(conn, SSE.preamble()) do
       {:ok, conn} ->
         Enum.each(channels, &Bier.Events.Registry.register(config.name, &1))
         Enum.each(tables, &Bier.Events.Registry.register_table(config.name, &1))
-        sub = %{columns: columns, tables: tables, names: table_names(tables, config)}
+
+        sub = %{
+          columns: columns,
+          tables: tables,
+          names: table_names(tables, config),
+          role: role
+        }
 
         # Registration happens BEFORE replay, so an event landing while
         # history is being replayed is already queued in this process's
@@ -269,7 +286,7 @@ defmodule Bier.Events do
   # entirely rather than calling `Buffer.generation/1`, which would crash
   # (no Buffer process exists) on an instance with WAL disabled entirely
   # (`events_publication: nil`) — the only shape a table-less `sub` can have,
-  # since `authorize_tables/3` already refuses table subscriptions there.
+  # since `authorize_tables/4` already refuses table subscriptions there.
   defp replay(conn, _config, %{tables: []}, _cursor), do: {:live, conn, 0}
 
   defp replay(conn, config, sub, cursor) do
@@ -330,9 +347,11 @@ defmodule Bier.Events do
   # Runs in the Bandit connection process. Registry entries die with it, so
   # there is no explicit unsubscribe. A failed write (client gone) ends the
   # loop; detection of a silent disconnect is bounded by the heartbeat.
-  # `sub` (`%{columns, tables, names}`) is the per-subscriber WAL state: the
-  # column allowlist per table, the subscribed table keys, and their
-  # rendered `event:` names.
+  # `sub` (`%{columns, tables, names, role}`) is the per-subscriber WAL
+  # state: the column allowlist per table, the subscribed table keys, their
+  # rendered `event:` names, and the role authorization was last checked
+  # against (remembered so a later `{:bier_wal_recheck}` can re-run the
+  # exact same check).
   defp loop(conn, config, sub, delivered, start, metadata) do
     receive do
       {:bier_event, channel, payload} ->
@@ -361,6 +380,9 @@ defmodule Bier.Events do
           {:error, reason} ->
             finish(conn, delivered, start, Map.put(metadata, :reason, reason))
         end
+
+      {:bier_wal_recheck} ->
+        recheck(conn, config, sub, delivered, start, metadata)
     after
       config.events_heartbeat_interval ->
         case chunk(conn, SSE.heartbeat()) do
@@ -399,6 +421,35 @@ defmodule Bier.Events do
           finish(conn, delivered, start, Map.put(metadata, :reason, reason))
       end
     end
+  end
+
+  # A schema reload is the signal that privileges may have changed under a
+  # live subscriber (`Bier.SchemaCache.load!/3` calls `Bier.Wal.notify_
+  # recheck/1` right after its snapshot swap). A pure NOTIFY connection
+  # (`sub.tables == []`) has nothing WAL-authorized to re-check, so it just
+  # keeps looping. Otherwise re-run the exact subscribe-time check with the
+  # remembered role: `{:ok, columns}` continues with the FRESH column map
+  # (grants may have narrowed, e.g. a partial-grant role losing its last
+  # visible column), `{:error, _}` — including a rescued Postgrex/
+  # DBConnection error, same rescue shape as `authorize_tables/4` — closes
+  # the stream rather than keep leaking rows the role can no longer see.
+  defp recheck(conn, config, %{tables: []} = sub, delivered, start, metadata) do
+    loop(conn, config, sub, delivered, start, metadata)
+  end
+
+  defp recheck(conn, config, sub, delivered, start, metadata) do
+    pool = Bier.Registry.via(config.name, Postgrex)
+
+    case Authorize.check(pool, sub.role, config.events_publication, sub.tables) do
+      {:ok, columns} ->
+        loop(conn, config, %{sub | columns: columns}, delivered, start, metadata)
+
+      {:error, _reason} ->
+        finish(conn, delivered, start, Map.put(metadata, :reason, :revoked))
+    end
+  rescue
+    _error in [Postgrex.Error, DBConnection.ConnectionError] ->
+      finish(conn, delivered, start, Map.put(metadata, :reason, :revoked))
   end
 
   defp finish(conn, delivered, start, metadata) do

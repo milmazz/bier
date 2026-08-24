@@ -191,6 +191,26 @@ defmodule Bier.Wal.EventsHttpTest do
     end)
   end
 
+  # A revoked/closed stream still writes the chunked terminator
+  # ("0\r\n\r\n") — and possibly an interleaving keepalive comment — before
+  # Bandit closes the TCP connection, so a single `:gen_tcp.recv/3` can
+  # observe that trailing data instead of the close. Drain until the peer
+  # actually closes (or flunk on an unexpected data frame, which would mean
+  # the stream kept delivering instead of ending).
+  defp assert_socket_closes(sock, deadline \\ 5_000) do
+    case :gen_tcp.recv(sock, 0, deadline) do
+      {:error, :closed} ->
+        :ok
+
+      {:ok, data} ->
+        refute data =~ "data: {", "stream kept delivering: #{inspect(data)}"
+        assert_socket_closes(sock, deadline)
+
+      {:error, reason} ->
+        flunk("expected the socket to close, got #{inspect(reason)}")
+    end
+  end
+
   test "insert arrives as a typed frame with an id", %{db: db, port: port} do
     sock = SSETestClient.connect_sse(port, "/events?table=orders")
     SSETestClient.recv_until(sock, ": connected")
@@ -402,6 +422,72 @@ defmodule Bier.Wal.EventsHttpTest do
 
     data = replay |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
     assert data["row"] == %{"id" => 102}
+  end
+
+  test "revoking SELECT closes the stream on the next schema reload", %{db: db} do
+    %{port: port, name: auth_name} = start_auth_instance!()
+    wait_wal_streaming(db, auth_name)
+    token = SSETestClient.sign_hs256(%{"role" => "postgrest_test_anonymous"}, @jwt_secret)
+
+    sock = SSETestClient.connect_sse(port, "/events?table=orders&access_token=#{token}")
+    SSETestClient.recv_until(sock, ": connected")
+
+    # The fixture role is shared with other tests (e.g. the partial-grant
+    # tests above), so the revoke must be undone even if an assertion below
+    # fails — a fresh connection, since `db` is only guaranteed alive for
+    # the duration of this test process (same convention as setup/0's own
+    # on_exit).
+    on_exit(fn ->
+      {:ok, cleanup} =
+        Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
+
+      Postgrex.query!(
+        cleanup,
+        "GRANT SELECT (id) ON #{@schema}.orders TO postgrest_test_anonymous",
+        []
+      )
+    end)
+
+    # Only column `id` was ever granted (see setup/0); revoking it leaves the
+    # role with zero SELECT-able columns on `orders`, so the next reload's
+    # recheck must find `Authorize.check/4` failing and close the stream.
+    Postgrex.query!(
+      db,
+      "REVOKE SELECT (id) ON #{@schema}.orders FROM postgrest_test_anonymous",
+      []
+    )
+
+    :ok = Bier.reload_schema_cache(auth_name)
+
+    # The stream must end rather than keep leaking rows to a subscriber
+    # whose privileges were just revoked. Bandit still writes the chunked
+    # terminator ("0\r\n\r\n") before closing the TCP connection, so drain
+    # that (and any interleaving keepalive) before asserting the eventual
+    # `:closed` — a single recv can otherwise observe the terminator instead
+    # of the close.
+    assert_socket_closes(sock)
+  end
+
+  test "a schema reload with unchanged grants leaves the stream open and delivering", %{db: db} do
+    %{port: port, name: auth_name} = start_auth_instance!()
+    wait_wal_streaming(db, auth_name)
+    token = SSETestClient.sign_hs256(%{"role" => "postgrest_test_anonymous"}, @jwt_secret)
+
+    sock = SSETestClient.connect_sse(port, "/events?table=orders&access_token=#{token}")
+    SSETestClient.recv_until(sock, ": connected")
+
+    :ok = Bier.reload_schema_cache(auth_name)
+
+    Postgrex.query!(
+      db,
+      "INSERT INTO #{@schema}.orders (id, note) VALUES (301, 'still-open')",
+      []
+    )
+
+    # "data: {" — same keepalive ambiguity as the other WAL-streaming tests.
+    frame = SSETestClient.recv_until(sock, "data: {")
+    data = frame |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["row"] == %{"id" => 301}
   end
 
   test "a transaction beyond events_max_tx_events resets the live stream and any earlier cursor",
