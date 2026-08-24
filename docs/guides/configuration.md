@@ -114,6 +114,10 @@ PostgREST's reloadable whitelist are honored — notably `db-uri` and the
 `server-*` bind settings are **not**, since the server would have to already
 be connected and listening to read them.
 
+`db_aggregates_enabled` is deliberately absent from that whitelist, matching
+upstream's `dbSettingsNames`: it is settable from the environment, the config
+file and the CLI flag only, so a role cannot turn aggregates on for itself.
+
 The practical consequence: if a `PGRST_*` environment variable seems to have
 no effect, check for an `ALTER ROLE … SET pgrst.*` on the connecting role,
 because that is what is winning.
@@ -225,6 +229,7 @@ and view bodies.
 | --- | --- | --- | --- |
 | `client_error_verbosity` | `"verbose" \| "minimal"` | `"verbose"` | `PGRST_CLIENT_ERROR_VERBOSITY` |
 | `url_use_legacy_target_names` | `boolean` | `true` | `PGRST_URL_USE_LEGACY_TARGET_NAMES` |
+| `db_aggregates_enabled` | `boolean` | `false` | `PGRST_DB_AGGREGATES_ENABLED` |
 
 `client_error_verbosity` selects the
 shape of the error envelope: `verbose` emits `{code, message, details, hint}`
@@ -241,6 +246,15 @@ carries a deprecation `Warning: 299 …` header naming the replacement; set it
 to `false` and the alias becomes the only accepted spelling, with the
 relation name answered by 400 `PGRST108`. See
 [Resource embedding](api.md#resource-embedding).
+
+`db_aggregates_enabled` gates the aggregate functions (`count`, `sum`, `avg`,
+`min`, `max`) in a request's `select`. It is **off by default**, as upstream
+has it: with it off, any aggregate — including one nested in an embed or a
+spread — is answered 400 `PGRST123`, because an unprivileged caller can
+otherwise turn one request into an arbitrarily expensive scan. Turn it on to
+serve them. It is the one implemented key that is *not* settable from the
+in-database config source (see below). See
+[Aggregates](api.md#aggregates).
 
 ### Realtime events (SSE)
 

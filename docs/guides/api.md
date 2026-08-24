@@ -125,9 +125,13 @@ that a cast applied to an *aggregate* accepts only an unparameterized type:
 `select=abv.avg()::numeric(4,2)` is a 400 `PGRST100` parse error (a plain
 column cast, `select=abv::numeric(4,2)`, has no such restriction).
 
-> **Note:** PostgREST gates aggregate functions behind the `db-aggregates-enabled`
-> config option (default off, 400 `PGRST123` when disabled). Bier does not
-> implement that toggle — aggregate functions in `select` are always available.
+> **Note:** Aggregate functions are gated behind `db_aggregates_enabled`
+> (PostgREST `db-aggregates-enabled`, `PGRST_DB_AGGREGATES_ENABLED`), which
+> defaults to **off**, as upstream does. With it off every aggregate in a
+> `select` — including one inside a spread embed — is rejected with
+> 400 `PGRST123`, so the examples above need `db_aggregates_enabled: true`.
+> Aggregates on a one-to-many or many-to-many **spread** are rejected with
+> 400 `PGRST127` even when the option is on, matching upstream.
 
 Aggregates also apply inside an embedded resource, e.g.
 `breweries?select=name,beers(abv.avg())` returns each brewery's average beer

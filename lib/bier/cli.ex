@@ -3,11 +3,13 @@ defmodule Bier.CLI do
   Command-line interface for running Bier as a standalone, drop-in
   PostgREST-compatible service.
 
-  `run/2` is the pure core: it takes argv plus an explicit environment and
-  returns `%{stdout, stderr, exit}` for terminal commands, or `{:boot,
-  resolved}` for the default run-the-server action. It performs no IO and never
-  halts — the conformance suite drives it directly. `main/1` (added separately)
-  is the escript wrapper that supplies real IO and `System.halt/1`.
+  `run/2` is the core: it takes argv plus an explicit environment and returns
+  `%{stdout, stderr, exit}` for terminal commands, or `{:boot, resolved}` for
+  the default run-the-server action. It never writes to stdio and never halts —
+  the conformance suite drives it directly. (`--ready` is the one command that
+  performs IO of its own: it is a health-check *client*, so the outbound probe
+  is part of the command, not of the wrapper.) `main/1` is the escript wrapper
+  that supplies real stdio and `System.halt/1`.
   """
 
   alias Bier.CLI.Config
@@ -21,12 +23,11 @@ defmodule Bier.CLI do
 
   @doc ~S"""
   Run the CLI core. `opts[:env]` is a `%{"PGRST_*" => string}` map (defaults to
-  an empty map). Returns a `%{stdout, stderr, exit}` map for terminal commands,
-  `{:boot, resolved}` for the default run-the-server action, or `{:ready, url}`
-  when `--ready` resolved to a URL to probe (`main/1` performs the request via
-  `Bier.CLI.Ready.check/1`).
+  an empty map). Returns a `%{stdout, stderr, exit}` map for terminal commands
+  (`--ready` included — its probe runs here, via `Bier.CLI.Ready.check/1`), or
+  `{:boot, resolved}` for the default run-the-server action.
   """
-  @spec run([String.t()], keyword()) :: result() | {:boot, map()} | {:ready, String.t()}
+  @spec run([String.t()], keyword()) :: result() | {:boot, map()}
   def run(argv, opts \\ []) do
     env = Keyword.get(opts, :env, %{})
 
@@ -91,7 +92,20 @@ defmodule Bier.CLI do
         )
 
       true ->
-        {:ready, "http://#{wrap_ipv6(host)}:#{resolved["admin-server-port"]}/ready"}
+        ready_url(host, resolved["admin-server-port"])
+    end
+  end
+
+  # http-client rejects an unparseable URL (a negative admin-server-port, say)
+  # with InvalidUrlException *before* opening a socket, so the failure is
+  # decided here rather than in the probe — a distinct error flavor from the
+  # connection-refused message every transport failure collapses into.
+  defp ready_url(host, port) do
+    url = "http://#{wrap_ipv6(host)}:#{port}/ready"
+
+    case Ready.validate_url(url) do
+      :ok -> Ready.check(url)
+      {:error, message} -> error(message)
     end
   end
 
@@ -173,10 +187,6 @@ defmodule Bier.CLI do
     case run(argv, env: System.get_env()) do
       {:boot, resolved} ->
         boot(resolved)
-
-      {:ready, url} ->
-        %{stdout: out, stderr: err, exit: code} = Ready.check(url)
-        emit(out, err, code)
 
       %{stdout: out, stderr: err, exit: code} ->
         emit(out, err, code)

@@ -86,10 +86,16 @@ defmodule Bier.ConformanceServer do
   # server-cors-allowed-origins where the shared instances populate it), so
   # without a variant they assert against the wrong configuration. Both are
   # served by the generic `translate/1` clause — no variant_extra_opts/1 needed.
+  # The aggregate cases declare `db-aggregates-enabled: true`; PostgREST v16
+  # defaults it to false, so once bier honors the gate they must each run on an
+  # instance that turns it back on (upstream's `harnessVariantIDs`, HARNESS.md
+  # §2.3). Served by the generic `translate/1` clause too.
   @variant_case_ids [1139, 1467, 1468, 1469, 1470, 1471, 1472, 1473] ++
                       [1491, 1493, 1498, 1499, 1654, 1677, 1678, 1680, 1682, 1703, 1742] ++
                       [1495, 1517, 1518, 1522, 1758, 1763, 1764] ++
-                      [11800, 11802, 11803, 11804, 11805, 11807, 11818]
+                      [11800, 11802, 11803, 11804, 11805, 11807, 11818] ++
+                      [1129, 1130, 1131, 1132, 1133, 1147, 1148, 1149] ++
+                      [11115, 11116, 11117, 11118, 11119]
 
   def url_for(%Bier.ConformanceCase{id: id}) when id in @variant_case_ids,
     do: :persistent_term.get({__MODULE__, :variant, id})
@@ -103,32 +109,47 @@ defmodule Bier.ConformanceServer do
   defp auth_case?(%Bier.ConformanceCase{schema: schema, request: request}),
     do: schema in ["auth", "openapi"] or Map.get(request, "path") == "/"
 
-  # One Bier instance per variant case. The set is tiny, so they are started
-  # eagerly here rather than lazily (which would race under `async: true`). Each
-  # variant rebases onto the auth or bulk opts via the same predicate.
+  # One Bier instance per distinct variant CONFIGURATION, not per variant case:
+  # every case whose options come out identical shares an instance (the seven
+  # `jwt-aud` cases, the thirteen `db-aggregates-enabled` ones). Instances are
+  # what a variant needs to be isolated by, and each one costs two Postgres
+  # connections — its pool plus the schema-cache listener's LISTEN connection —
+  # so one-per-case put the suite over `max_connections` (100 by default,
+  # including in CI) once the aggregate cases joined. Grouping by the fully
+  # resolved opts keeps the isolation identical while collapsing the duplicates.
+  #
+  # They are started eagerly here rather than lazily, which would race under
+  # `async: true`. Each variant rebases onto the auth or bulk opts via the same
+  # predicate.
   defp start_variants do
     Bier.ConformanceCase.load_all()
     |> Enum.filter(&(&1.id in @variant_case_ids))
-    |> Enum.each(fn %Bier.ConformanceCase{id: id, config: config} = case_data ->
-      name = Module.concat(__MODULE__, "Variant#{id}")
-
-      variant_base = if auth_case?(case_data), do: auth_opts(), else: base_opts()
-
-      opts =
-        variant_base
-        # Each variant serves a single low-traffic case, so a small pool keeps
-        # the combined connection count of all instances under Postgres'
-        # max_connections (100 by default, including in CI). One connection is
-        # enough for a single request, and at 29 variants a pool of 2 exceeded
-        # the ceiling once the bulk and auth instances (10 each) and the unit
-        # tests' own async instances are counted.
-        |> Keyword.merge(pool_size: 1)
-        |> Keyword.merge(translate(config))
-        |> Keyword.merge(variant_extra_opts(id))
-
+    |> Enum.group_by(&variant_opts/1, & &1.id)
+    |> Enum.each(fn {opts, ids} ->
+      # Named after the lowest id in the group so the instance is traceable
+      # back to a case in the boot log.
+      name = Module.concat(__MODULE__, "Variant#{Enum.min(ids)}")
       base = start_instance(name, opts)
-      :persistent_term.put({__MODULE__, :variant, id}, base)
+      Enum.each(ids, &:persistent_term.put({__MODULE__, :variant, &1}, base))
     end)
+  end
+
+  # The fully resolved `Bier.start_link/1` options a variant case needs. Two
+  # cases that produce the same list share one instance, so this doubles as the
+  # grouping key above — `variant_extra_opts/1` is folded in rather than applied
+  # afterwards, which keeps a per-id override from silently leaking onto the
+  # other cases in its group.
+  defp variant_opts(%Bier.ConformanceCase{id: id, config: config} = case_data) do
+    variant_base = if auth_case?(case_data), do: auth_opts(), else: base_opts()
+
+    variant_base
+    # Each variant serves a handful of low-traffic cases, so a small pool keeps
+    # the combined connection count of all instances under Postgres'
+    # max_connections. One connection is enough for a single request.
+    |> Keyword.merge(pool_size: 1)
+    |> Keyword.merge(translate(config))
+    |> Keyword.merge(variant_extra_opts(id))
+    |> Enum.sort()
   end
 
   # Case 1654 asserts the default title/description when the exposed schema has

@@ -733,7 +733,7 @@ defmodule Bier.QueryExecutor do
     column_filters =
       Embed.rewrite_null_embed_filters(plan.filters, plan.select, plan.embed_filters || %{})
 
-    {cols, laterals, state} =
+    {cols, laterals, meta, state} =
       Embed.build_row_select(
         plan.select,
         relation,
@@ -757,10 +757,18 @@ defmodule Bier.QueryExecutor do
 
     where_sql = combine_where(where_sql, inner_where)
 
-    {group_sql, having} = Embed.group_by(plan.select, al, relation)
+    {group_sql, having} = Embed.group_by(plan.select, al, relation, meta)
 
     {order_sql, state} =
-      Embed.build_order_advanced(plan.order, plan.select, relation, al, state, __MODULE__)
+      Embed.build_order_advanced(
+        plan.order,
+        plan.select,
+        relation,
+        al,
+        state,
+        __MODULE__,
+        meta.spread_aliases
+      )
 
     {limit_sql, state} = build_limit(plan, state)
 

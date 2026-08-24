@@ -100,14 +100,25 @@ defmodule Bier.CLITest do
              }
     end
 
-    test "a resolvable host yields the ready-check directive with the /ready URL" do
+    test "a resolvable host is probed at the /ready URL" do
       env = %{"PGRST_ADMIN_SERVER_PORT" => "3001", "PGRST_SERVER_HOST" => "localhost"}
-      assert CLI.run(["--ready"], env: env) == {:ready, "http://localhost:3001/ready"}
+      result = CLI.run(["--ready"], env: env)
+
+      # Nothing listens on 3001 here, so the probe reports the URL it built.
+      assert result.exit == 1
+
+      assert IO.iodata_to_binary(result.stderr) ==
+               "ERROR: connection refused to http://localhost:3001/ready\n"
     end
 
     test "an IPv6 host is bracket-wrapped in the URL" do
       env = %{"PGRST_ADMIN_SERVER_PORT" => "3001", "PGRST_SERVER_HOST" => "::1"}
-      assert CLI.run(["--ready"], env: env) == {:ready, "http://[::1]:3001/ready"}
+      result = CLI.run(["--ready"], env: env)
+
+      assert result.exit == 1
+
+      assert IO.iodata_to_binary(result.stderr) ==
+               "ERROR: connection refused to http://[::1]:3001/ready\n"
     end
 
     test "config fatals still win over the ready check" do
