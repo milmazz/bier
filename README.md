@@ -31,7 +31,7 @@ Add `bier` to your dependencies:
 ```elixir
 def deps do
   [
-    {:bier, "~> 0.1"}
+    {:bier, "~> 0.2"}
   ]
 end
 ```
