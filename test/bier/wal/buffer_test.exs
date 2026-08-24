@@ -57,12 +57,22 @@ defmodule Bier.Wal.BufferTest do
     assert {:ok, []} = Buffer.replay_after(name, [@orders], cursor(0), new_gen)
   end
 
-  test "drop clears only the given tables" do
+  test "drop marks a table as having lost history until a new entry re-anchors it" do
     {name, gen} = start!(10)
     :ok = Buffer.append(name, [{cursor(1), @orders, event(1)}, {cursor(1, 1), @items, event(2)}])
     :ok = Buffer.drop(name, [@orders])
 
-    assert {:ok, replayed} = Buffer.replay_after(name, [@orders, @items], cursor(0), gen)
-    assert Enum.map(replayed, fn {_c, t, _e} -> t end) == [@items]
+    # The undropped table is unaffected by the drop.
+    assert {:ok, [{cursor(1, 1), @items, event(2)}]} ==
+             Buffer.replay_after(name, [@items], cursor(0), gen)
+
+    # A dropped table with no entries yet resets for every cursor.
+    assert Buffer.replay_after(name, [@orders], cursor(0), gen) == :reset
+
+    # Once a new entry lands, it becomes the new floor: a cursor at-or-past
+    # it is fine, but any cursor from before the drop still resets.
+    :ok = Buffer.append(name, [{cursor(9), @orders, event(9)}])
+    assert {:ok, []} = Buffer.replay_after(name, [@orders], cursor(9), gen)
+    assert Buffer.replay_after(name, [@orders], cursor(0), gen) == :reset
   end
 end
