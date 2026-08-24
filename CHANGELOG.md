@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `db_aggregates_enabled` (PostgREST `db-aggregates-enabled`,
+  `PGRST_DB_AGGREGATES_ENABLED`, default `false`): gates aggregate functions in
+  a request's `select`. When off, any aggregate — including one inside a spread
+  embed — is rejected with 400 `PGRST123`, matching PostgREST v16. Aggregates on
+  a one-to-many or many-to-many spread are rejected with 400 `PGRST127`
+  regardless of the setting.
+- Aggregates inside spread embeds now hoist the enclosing `GROUP BY`, so
+  `select=total:amount.sum(),...category(owner)` groups by the spread's columns
+  instead of erroring or returning ungrouped rows.
+
+### Changed
+
+- **Breaking:** aggregate functions in `select` are now **disabled by default**.
+  They were previously always available; PostgREST v16 defaults
+  `db-aggregates-enabled` to off and answers 400 `PGRST123`, and Bier now
+  matches. Set `db_aggregates_enabled: true` (or
+  `PGRST_DB_AGGREGATES_ENABLED=true`) to restore the old behavior.
+
+### Fixed
+
+- A spread embed whose columns fed an aggregate leaked a raw PostgreSQL
+  `42803` (`must appear in the GROUP BY clause`) to the client.
+
+Conformance `spec/` bumped to `7a29dff` (three commits past
+`v16.0.0-suite.3`), which adds the 39 spread/aggregate cases 11100–11138 and
+takes the tree to 801 cases. Case 11125 is recorded as a deliberate divergence
+(#138): it pins upstream's tolerance of an unbalanced trailing `)` in `select`,
+which Bier rejects with 400 `PGRST100`.
+
 ## v0.2.0 — 2026-08-23
 
 ### Added
