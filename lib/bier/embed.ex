@@ -583,9 +583,9 @@ defmodule Bier.Embed do
         # legal SQL that is no longer an aggregate query, so the LATERAL
         # returns one row per child and MULTIPLIES the parent rows instead of
         # contributing nothing (case 11138 pins one row per parent for the
-        # `...rel()` spelling). Pre-existing; the fix is probably to treat a
-        # spread with no projected columns exactly like `empty: true`, but the
-        # `!inner` interaction via `inner_join_where/6` needs checking first.
+        # `...rel()` spelling). Pre-existing, tracked as #154 — what upstream
+        # returns for this shape is not pinned by any case yet, so that is the
+        # first thing the fix needs.
         :many ->
           aggs =
             Enum.map_join(child_cols, ", ", fn {_expr, name} ->
