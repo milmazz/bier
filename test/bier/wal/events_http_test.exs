@@ -254,6 +254,21 @@ defmodule Bier.Wal.EventsHttpTest do
     assert wal =~ "event: orders\n" and wal =~ ~s("note":"mux")
   end
 
+  test "connection: close is scoped to WAL table subscriptions, not pure NOTIFY", %{port: port} do
+    # Only a table subscriber can ever be sent `{:bier_wal_recheck}` (see
+    # `Bier.Wal.notify_recheck/1` — it targets `table_subscribers/1`
+    # specifically), so only a table response needs the connection declared
+    # non-keepalive up front. A channel-only response on this same
+    # WAL-enabled instance must NOT pay that cost on every reconnect.
+    channel_sock = SSETestClient.connect_sse(port, "/events?channel=chat")
+    channel_frame = SSETestClient.recv_until(channel_sock, ": connected")
+    refute channel_frame =~ ~r/connection:\s*close/i
+
+    table_sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    table_frame = SSETestClient.recv_until(table_sock, ": connected")
+    assert table_frame =~ ~r/connection:\s*close/i
+  end
+
   test "unknown / unpublished / RLS / publication-disabled tables get the uniform 404 payload",
        %{port: port} do
     bodies =

@@ -210,15 +210,7 @@ defmodule Bier.Events do
       |> put_resp_header("cache-control", "no-store")
       # Stops buffering reverse proxies (nginx et al.) from absorbing frames.
       |> put_resp_header("x-accel-buffering", "no")
-      # Headers are flushed right here (send_chunked/2), before `loop/6`
-      # learns why the stream eventually ends — so this can't be decided at
-      # `finish/4` time. Declaring the connection non-keepalive up front
-      # means every termination path (write failure, overloaded, and now a
-      # `{:bier_wal_recheck}` revocation) actually closes the TCP
-      # connection once the chunked body ends, instead of Bandit parking it
-      # for reuse: a client polling the raw socket sees a real `:closed`,
-      # not an indefinitely idle keep-alive connection.
-      |> put_resp_header("connection", "close")
+      |> put_recheckable_close_header(tables)
       |> send_chunked(200)
 
     case chunk(conn, SSE.preamble()) do
@@ -250,6 +242,20 @@ defmodule Bier.Events do
         finish(conn, 0, start, Map.put(metadata, :reason, reason))
     end
   end
+
+  # Headers are flushed right here (send_chunked/2 below), before `loop/6`
+  # learns why the stream eventually ends — so keepalive can't be decided
+  # at `finish/4` time; it has to be declared once, up front. But only WAL
+  # table subscribers can ever receive `{:bier_wal_recheck}` (pure NOTIFY
+  # connections aren't registered in `table_subscribers/1` — see
+  # `Bier.Wal.notify_recheck/1`), so a channel-only subscription has
+  # nothing to gain from declaring the connection non-keepalive: it forces
+  # a fresh TCP/TLS handshake on every reconnect of the already-shipped
+  # NOTIFY endpoint for no benefit. Scope the header to `tables != []`.
+  defp put_recheckable_close_header(conn, []), do: conn
+
+  defp put_recheckable_close_header(conn, _tables),
+    do: put_resp_header(conn, "connection", "close")
 
   # The `event:` field for each subscribed table: the name as subscribed
   # (qualified iff the client qualified it, or the schema is not the
@@ -430,9 +436,23 @@ defmodule Bier.Events do
   # keeps looping. Otherwise re-run the exact subscribe-time check with the
   # remembered role: `{:ok, columns}` continues with the FRESH column map
   # (grants may have narrowed, e.g. a partial-grant role losing its last
-  # visible column), `{:error, _}` — including a rescued Postgrex/
-  # DBConnection error, same rescue shape as `authorize_tables/4` — closes
-  # the stream rather than keep leaking rows the role can no longer see.
+  # visible column); a real `{:error, _}` from `Authorize.check/4` (the
+  # table stopped being published, RLS got enabled, or the role's last
+  # visible column was revoked) closes the stream rather than keep leaking
+  # rows the role can no longer see.
+  #
+  # The two rescued exception classes are NOT equivalent, and deliberately
+  # get different outcomes (controller ruling, Task 10 review): a
+  # `Postgrex.Error` (e.g. the role itself was dropped — `has_column_
+  # privilege` raises `undefined_object`) is genuine evidence the
+  # subscription is no longer valid, so it also finishes as `:revoked`. A
+  # `DBConnection.ConnectionError` is pool contention or an infrastructure
+  # hiccup — exactly what a reload "thundering herd" of simultaneous
+  # rechecks can produce against a finite pool — and is NOT evidence of
+  # lost SELECT: a checkout timeout says nothing about the role's
+  # privileges, so the stream stays open on the sub's PREVIOUS columns and
+  # keeps looping; the next reload's recheck (or the connection recovering
+  # on its own) gets another chance to actually verify.
   defp recheck(conn, config, %{tables: []} = sub, delivered, start, metadata) do
     loop(conn, config, sub, delivered, start, metadata)
   end
@@ -448,8 +468,11 @@ defmodule Bier.Events do
         finish(conn, delivered, start, Map.put(metadata, :reason, :revoked))
     end
   rescue
-    _error in [Postgrex.Error, DBConnection.ConnectionError] ->
+    _error in Postgrex.Error ->
       finish(conn, delivered, start, Map.put(metadata, :reason, :revoked))
+
+    _error in DBConnection.ConnectionError ->
+      loop(conn, config, sub, delivered, start, metadata)
   end
 
   defp finish(conn, delivered, start, metadata) do
