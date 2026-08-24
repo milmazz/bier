@@ -46,6 +46,31 @@ defmodule Bier.ConformanceServer do
   @doc "Base URL of the no-auth (bulk) shared instance."
   def base_url, do: :persistent_term.get(@bulk_key)
 
+  @doc """
+  Re-arm the serial sequence behind `representations.auto_incrementing_pk` so
+  the next `nextval()` yields 2, matching case 1305's pinned
+  `Location: /auto_incrementing_pk?id=eq.2`.
+
+  Sequences are the one piece of database state `db_tx_end: :rollback` cannot
+  restore — `nextval` is non-transactional — so the fixture chain's load-time
+  `setval` holds only until the first consumption (issue #120). Run from
+  `Bier.HttpCase`'s setup before each representations-area case, translating
+  the frozen case's never-executed "Assumes: ALTER SEQUENCE … RESTART WITH 2"
+  note the same way upstream's suite calls its reset_sequence RPC before the
+  test. Uses the bulk instance's own pool: no extra connection against the
+  max_connections budget, and the conformance cases all live in one ExUnit
+  module (serial), so no representations request is in flight when it runs.
+  """
+  def reset_auto_pk_sequence! do
+    Postgrex.query!(
+      Bier.Registry.via(@bulk_instance, Postgrex),
+      "SELECT setval('representations.auto_incrementing_pk_id_seq', 2, false)",
+      []
+    )
+
+    :ok
+  end
+
   @doc "Base URL of the auth-configured shared instance."
   def auth_url, do: :persistent_term.get(@auth_key)
 
