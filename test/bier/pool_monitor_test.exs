@@ -74,10 +74,11 @@ defmodule Bier.PoolMonitorTest do
     :exit, _ -> :ok
   end
 
-  defp free_port do
-    {:ok, sock} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}])
-    {:ok, port} = :inet.port(sock)
-    :gen_tcp.close(sock)
-    port
-  end
+  # Delegates to the shared helper rather than re-probing an ephemeral
+  # port: those come from the same range the suite's own outgoing
+  # connections use, so one could be taken between the probe closing and
+  # this instance binding it — an :eaddrinuse that surfaces as an
+  # unrelated test failure. `Bier.TestPorts` also reserves what it hands
+  # out, so two callers cannot receive the same port.
+  defp free_port, do: Bier.TestPorts.free_port()
 end
