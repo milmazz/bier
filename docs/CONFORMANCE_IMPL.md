@@ -144,8 +144,12 @@ each area schema as auto-updatable views**:
 
 ```sql
 CREATE SCHEMA operators;
--- for every relation r in schema test:
+-- for every table r in schema test:
 CREATE VIEW operators.<r> AS SELECT * FROM test.<r>;
+-- for every view v in schema test: the mirror inlines v's own
+-- definition (its base tables/functions) instead of selecting from
+-- test.<v>, so writes through the mirror resolve PKs/Location the
+-- same way the original view does (suite.3, case 1824)
 ```
 
 That file is **pre-generated and checked into the submodule**, not built at
