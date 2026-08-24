@@ -234,6 +234,7 @@ defmodule Bier.Events do
 
     case chunk(conn, SSE.preamble()) do
       {:ok, conn} ->
+        schedule_token_expiry(conn)
         Enum.each(channels, &Bier.Events.Registry.register(config.name, &1))
         Enum.each(tables, &Bier.Events.Registry.register_table(config.name, &1))
 
@@ -273,8 +274,19 @@ defmodule Bier.Events do
   # NOTIFY endpoint for no benefit. Scope the header to `tables != []`.
   defp put_recheckable_close_header(conn, []), do: conn
 
-  defp put_recheckable_close_header(conn, _tables),
-    do: put_resp_header(conn, "connection", "close")
+  defp put_recheckable_close_header(conn, _tables) do
+    # `connection` is a hop-by-hop header: RFC 9113 §8.2.2 makes any HTTP/2
+    # message carrying one malformed, and Bandit passes plug response
+    # headers through verbatim on h2 (only cookies are special-cased). A
+    # browser `EventSource` against an instance on `scheme: :https` — where
+    # Bandit advertises h2 via ALPN — would therefore reset the stream with
+    # ERR_HTTP2_PROTOCOL_ERROR every time. Scope it to HTTP/1.1, the only
+    # protocol where it is both legal and load-bearing.
+    case get_http_protocol(conn) do
+      :"HTTP/1.1" -> put_resp_header(conn, "connection", "close")
+      _other -> conn
+    end
+  end
 
   # The `event:` field for each subscribed table: derived from the
   # RESOLVED schema, not from how the client spelled it — qualified iff
@@ -370,6 +382,40 @@ defmodule Bier.Events do
     end
   end
 
+  # A subscription is one request that can outlive its own credential by
+  # days: the JWT is verified at connect and never looked at again, so a
+  # token that expired — or a user who was deprovisioned — would keep
+  # receiving row images for as long as the socket stayed open. Every other
+  # endpoint re-validates `exp` on every request; this is that check's
+  # equivalent for a long-lived stream. The client reconnects (EventSource
+  # does so on its own) and either presents a fresh token or gets the 401 it
+  # has been owed.
+  #
+  # `@token_skew_seconds` mirrors `Bier.JWT`'s own allowance, so the stream
+  # closes at exactly the moment a fresh request with the same token would
+  # start being refused. A subscription with no token, or a token with no
+  # `exp`, has no deadline — the same semantics the request path gives them.
+  @token_skew_seconds 30
+
+  defp schedule_token_expiry(conn) do
+    with %{claims_json: claims_json} <- conn.assigns[:bier_auth],
+         {:ok, %{"exp" => exp}} when is_number(exp) <- decode_claims(claims_json) do
+      deadline = trunc((exp + @token_skew_seconds) * 1000) - System.system_time(:millisecond)
+      Process.send_after(self(), :bier_token_expired, max(deadline, 0))
+    end
+
+    :ok
+  end
+
+  defp decode_claims(claims_json) do
+    case Bier.json_library().decode(claims_json) do
+      {:ok, claims} when is_map(claims) -> {:ok, claims}
+      _other -> :error
+    end
+  rescue
+    _error -> :error
+  end
+
   # Runs in the Bandit connection process. Registry entries die with it, so
   # there is no explicit unsubscribe. A failed write (client gone) ends the
   # loop; detection of a silent disconnect is bounded by the heartbeat.
@@ -407,8 +453,20 @@ defmodule Bier.Events do
             finish(conn, delivered, start, Map.put(metadata, :reason, reason))
         end
 
-      {:bier_wal_recheck} ->
+      {:bier_wal_recheck, window} ->
+        # Don't re-authorize inline: a reload wakes EVERY table subscriber at
+        # once and each one runs its own `Authorize.check/4` against a pool
+        # of `pool_size` (default 10) connections, so a few hundred
+        # subscribers starve the request path. Spread the checks across a
+        # window sized by `Bier.Wal.notify_recheck/1` instead.
+        Process.send_after(self(), :bier_wal_recheck_now, :rand.uniform(window))
+        loop(conn, config, sub, delivered, start, metadata)
+
+      :bier_wal_recheck_now ->
         recheck(conn, config, sub, delivered, start, metadata)
+
+      :bier_token_expired ->
+        finish(conn, delivered, start, Map.put(metadata, :reason, :token_expired))
     after
       config.events_heartbeat_interval ->
         case chunk(conn, SSE.heartbeat()) do

@@ -107,7 +107,7 @@ subscriptions follow the same "auth before existence" ordering:
 | 401 | `PGRST3xx` | JWT missing/invalid, same as the rest of the API. Checked first. |
 | 400 | `BIER002` | Neither a `channel` nor a `table` query parameter was supplied. |
 | 404 | `BIER001` | A requested channel is not in `events_channels`. |
-| 404 | `BIER003` | A requested table doesn't exist, isn't in the configured publication, has RLS enabled, or leaves the role no `SELECT`-able column — one indistinguishable shape for all four (see [Change feed (WAL)](#change-feed-wal)); also returned for any `table=` request when `events_publication` isn't configured at all. |
+| 404 | `BIER003` | A requested table doesn't exist, isn't an ordinary table (a view, foreign table, or partitioned parent), isn't in the configured publication, has RLS enabled, is in a schema outside `db_schemas`, leaves the role no `SELECT`-able column, or names a role the authenticator may not assume — one indistinguishable shape for every one of them (see [Change feed (WAL)](#change-feed-wal)); also returned for any `table=` request when `events_publication` isn't configured at all. |
 | 400 | `42704` (raw `SQLSTATE`) | The JWT's role does not exist in `pg_roles` — surfaced like any other Postgres error (see the [API reference](api.md#errors)), never a 500 or a hang. |
 | 406 | `PGRST107` | `Accept` excludes `text/event-stream`. |
 | 405 | `PGRST117` | Any method other than `GET` or `OPTIONS`. |
@@ -133,17 +133,22 @@ pretend otherwise:
 * **Slow clients buffer in their own mailbox.** Delivery to each subscriber
   is a plain Erlang message send; if a client reads slower than events
   arrive, the backlog piles up in that subscriber's Bandit connection
-  process mailbox. This is unbounded today and affects only that one
-  subscriber — the listener process and every other subscriber are
-  unaffected. A mailbox-size guard (dropping or disconnecting a subscriber
-  that falls too far behind) is possible future hardening; it is not
-  currently implemented.
+  process mailbox, affecting only that one subscriber — the listener
+  process and every other subscriber are unaffected. For `channel=`
+  (NOTIFY) delivery this backlog is unbounded; a mailbox-size guard is
+  possible future hardening and is not currently implemented. `table=`
+  (WAL) delivery *is* guarded: a subscriber past ~1,000 queued frames is
+  disconnected and resumes by cursor — see [Limits](#limits).
 
 ## Telemetry
 
 * `[:bier, :events, :subscribe, :start | :stop]` — one span per SSE
-  connection (`:stop` carries `:duration`, `:delivered`, and `:reason` — the
-  chunk-write error that ended the stream, e.g. a client disconnect).
+  connection. `:stop` carries `:duration`, `:delivered`, and `:reason`:
+  either a chunk-write error (a client disconnect, typically) or one of
+  three deliberate terminations — `:overloaded` (the slow-subscriber guard
+  below), `:revoked` (re-authorization failed after a schema reload), and
+  `:token_expired` (the subscription outlived its JWT's `exp`). The last
+  two are the ones worth alerting on.
 * `[:bier, :events, :notification]` — per NOTIFY, with the `:subscribers`
   count reached.
 * `[:bier, :events, :listener]` — `:status` of `:connected` /
@@ -198,8 +203,10 @@ curl -N "http://localhost:4040/events?channel=chat&table=orders,order_items"
 An unqualified name (`orders`) resolves against the instance's default
 schema (the first of `db_schemas`); a table in any other exposed schema
 must be written qualified (`billing.orders`). The qualifier is split off at
-the *first* dot only, so a table whose own name contains a literal `.`
-cannot be addressed via `table=` in v1.
+the *first* dot only, so a table whose own name contains a literal `.` must
+always be written qualified (`billing.odd.name` resolves to schema
+`billing`, table `odd.name`); the bare form is not addressable, because the
+first dot would be read as the schema separator.
 
 A table is subscribable only when it is in the publication, in an exposed
 schema, has no RLS enabled, and the connecting role has `SELECT` on at
@@ -272,6 +279,16 @@ ALTER TABLE orders REPLICA IDENTITY FULL;    -- old carries every column ("full"
 ALTER TABLE orders REPLICA IDENTITY DEFAULT; -- old carries only the primary key ("key")
 ALTER TABLE orders REPLICA IDENTITY NOTHING; -- see below: mutations stop working instead
 ```
+
+Under `DEFAULT` (and `USING INDEX`), `old` carries the identity columns and
+*only* those: PostgreSQL nulls every other attribute before writing the old
+tuple, so reporting them would be indistinguishable from columns that
+genuinely held `NULL`. Note also that `DEFAULT` logs an old tuple **only
+when the identity columns themselves changed** — an ordinary `UPDATE` that
+leaves the primary key alone carries no `old` and no `old_kind` at all
+(the keys are absent, not null). A `DELETE` always carries one. Under
+`FULL` every column is logged, `old_kind` is `"full"`, and both
+`UPDATE` and `DELETE` always carry a complete pre-image.
 
 `NOTHING` is not a quieter version of `DEFAULT` — for a table in a
 publication that publishes `UPDATE`/`DELETE` (the default), PostgreSQL
@@ -353,14 +370,34 @@ privilege is still gone, gets the ordinary `BIER003` refusal (see
 * **Partitioned tables cannot be subscribed** — refused the same way a
   nonexistent table is (see
   [Subscribing to tables](#subscribing-to-tables) above).
-* **Table names containing a literal `.` are unaddressable** via `table=` —
-  the qualifier is split off at the first dot only.
+* **Table names containing a literal `.` must be written schema-qualified**
+  — the qualifier is split off at the first dot only, so the bare form is
+  unaddressable.
 * **A multi-table subscription resets as a whole** when any one of its
   tables loses history (see [Resume and reset](#resume-and-reset) above).
 * **Connections that stop reading are disconnected** once ~1,000 frames
   back up in their mailbox — bounded memory by construction; reconnecting
   with the cursor resumes from the ring buffer.
 * **`REPLICA IDENTITY` governs `old`** — see above.
+* **The ring buffer retains history for every published table**, subscribed
+  or not, so its footprint is `published tables × events_buffer_size`
+  entries — not `events_buffer_size` overall. Each entry also carries a copy
+  of its relation's column metadata, which for a wide table can outweigh the
+  row payload several times over. Scope the publication to the tables that
+  are actually subscribable rather than reaching for `FOR ALL TABLES`.
+* **A privilege change reaches live subscribers within a short window**, not
+  instantly: a schema reload scatters subscribers' re-authorization across a
+  window that scales with subscriber count (milliseconds for a handful,
+  capped at 10s) so a reload cannot stampede the connection pool. A
+  subscriber can therefore still receive a just-revoked column for up to
+  that window.
+* **A subscription ends when its JWT expires.** The token is verified at
+  connect like any request; the stream is then bounded by that token's
+  `exp` (plus the same 30s skew allowance the request path uses) rather
+  than living on indefinitely. `EventSource` reconnects on its own, so a
+  client that refreshes its token resumes by cursor.
+* **`Connection: close` is only sent over HTTP/1.1.** The header is
+  malformed in HTTP/2, so on an h2 connection it is omitted.
 * A bier restart always starts a fresh replication slot at the current LSN;
   there is no cross-restart resume in v1 (a possible future addition), only
   the in-process ring buffer described above.

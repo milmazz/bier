@@ -8,6 +8,8 @@ and this project adheres to
 
 ## Unreleased
 
+### Added
+
 - WAL change feed on the events endpoint: with `events_publication` naming an
   operator-created publication, `GET /events?table=<name>` streams typed
   INSERT/UPDATE/DELETE/TRUNCATE events with row images over SSE — no NOTIFY
@@ -15,14 +17,26 @@ and this project adheres to
   resume via `Last-Event-ID` within a bounded in-memory window; anything the
   server can no longer replay is announced with an explicit `bier:reset`
   frame, never silently skipped. Subscriptions require SELECT on the table
-  (column images are filtered per role); tables with RLS refuse subscription
-  in this release. Boot fails fast (with remediation hints) unless
-  `wal_level=logical`, the publication exists, and the role has REPLICATION.
-  A response carrying a table subscription also sends `Connection: close`
-  (the WAL stream can end at any time, unlike a NOTIFY-only response); an
-  unknown, unpublished, RLS-enabled, or unprivileged table all refuse with
+  (column images are filtered per role) and a role the authenticator may
+  actually assume; tables with RLS refuse subscription in this release. Boot
+  fails fast (with remediation hints) unless `wal_level=logical`, the
+  publication exists, and the role has REPLICATION. A response carrying a
+  table subscription also sends `Connection: close` over HTTP/1.1 (the WAL
+  stream can end at any time, unlike a NOTIFY-only response; the header is
+  malformed in HTTP/2 and is omitted there). An unknown, non-ordinary,
+  unpublished, RLS-enabled, unexposed, or unprivileged table all refuse with
   the same 404 (`BIER003`), so the endpoint cannot be used as an existence
   or privilege oracle.
+- `events_publication` is validated at boot: it must be a non-empty
+  identifier of at most 63 bytes with no quotes, backslashes, or null bytes.
+
+### Changed
+
+- SSE subscriptions are now bounded by their JWT's `exp` (with the same 30s
+  skew allowance the request path uses) instead of living on indefinitely
+  after the token that authorized them expired. The `[:bier, :events,
+  :subscribe, :stop]` span reports this as `:reason` `:token_expired`.
+- `BIER002`'s message and hint now mention `table=` alongside `channel=`.
 
 ## v0.2.0 — 2026-08-23
 

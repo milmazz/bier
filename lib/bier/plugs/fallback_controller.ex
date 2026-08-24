@@ -534,9 +534,11 @@ defmodule Bier.Plugs.FallbackController do
   def call(conn, {:error, :events_missing_channel}) do
     error(conn, 400, %{
       code: "BIER002",
-      message: "Missing channel query parameter",
+      message: "Missing channel or table query parameter",
       details: nil,
-      hint: "Subscribe with ?channel=<name> (comma-separate or repeat for several)"
+      hint:
+        "Subscribe with ?channel=<name> or ?table=<name> " <>
+          "(comma-separate or repeat for several)"
     })
   end
 

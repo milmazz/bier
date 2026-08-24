@@ -624,11 +624,12 @@ defmodule Bier do
           # `start_child` call races the DynamicSupervisor's own startup and crashes
           # (the supervisor then restarts HttpServerStarter, rebuilding the router).
           {DynamicSupervisor,
-           strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
-          {Bier.HttpServerStarter, conf}
+           strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)}
         ] ++
+        wal_buffer_children(conf) ++
+        [{Bier.HttpServerStarter, conf}] ++
         listener_children(conf) ++
-        events_children(conf) ++ wal_children(conf) ++ admin_children(conf)
+        events_children(conf) ++ wal_consumer_children(conf) ++ admin_children(conf)
 
     Supervisor.init(children, strategy: :one_for_one)
   end
@@ -660,8 +661,19 @@ defmodule Bier do
   # The WAL change feed runs only when an operator publication is configured:
   # the Buffer must precede the Consumer (the consumer's connect callback
   # bumps the Buffer generation).
-  defp wal_children(%Bier.Config{events_publication: nil}), do: []
-  defp wal_children(conf), do: [{Bier.Wal.Buffer, conf}, {Bier.Wal.Consumer, conf}]
+  # The Buffer starts BEFORE HttpServerStarter: `HttpServerStarter`'s
+  # `handle_continue` starts Bandit, which can accept a `GET /events?table=…`
+  # carrying `Last-Event-ID` immediately — and that path calls
+  # `Bier.Wal.Buffer.generation/1`, which would exit `:noproc` on a
+  # not-yet-registered via-tuple and surface as a raw 500.
+  defp wal_buffer_children(%Bier.Config{events_publication: nil}), do: []
+  defp wal_buffer_children(conf), do: [{Bier.Wal.Buffer, conf}]
+
+  # The Consumer stays AFTER HttpServerStarter, whose `init/1` runs
+  # `Bier.Wal.validate!/2`: a misconfigured instance fails boot there rather
+  # than letting the consumer flap against a database that cannot stream.
+  defp wal_consumer_children(%Bier.Config{events_publication: nil}), do: []
+  defp wal_consumer_children(conf), do: [{Bier.Wal.Consumer, conf}]
 
   # The JWT verification cache only runs when it can do work: a secret is
   # configured and jwt-cache-max-entries is positive (PostgREST's JwtNoCache

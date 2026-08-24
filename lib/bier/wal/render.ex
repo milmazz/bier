@@ -77,7 +77,19 @@ defmodule Bier.Wal.Render do
   defp convert(nil, _oid), do: nil
   defp convert("t", @bool_oid), do: true
   defp convert("f", @bool_oid), do: false
-  defp convert(text, oid) when oid in @int_oids, do: String.to_integer(text)
+
+  defp convert(text, oid) when oid in @int_oids do
+    case Integer.parse(text) do
+      {int, ""} -> int
+      # Mirrors the float clause: a value that does not parse as the type
+      # the cached Relation claims (a stale registry across an
+      # `ALTER COLUMN ... TYPE`, say) passes through as text. `String.
+      # to_integer/1` would raise instead, and this runs inside the Bandit
+      # connection process — on the replay path that would kill the
+      # reconnect too.
+      _ -> text
+    end
+  end
 
   defp convert(text, oid) when oid in @float_oids do
     case Float.parse(text) do

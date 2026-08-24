@@ -13,11 +13,23 @@ defmodule Bier.EventsQueueOverloadedTest do
   """
   use ExUnit.Case, async: true
 
-  test "queue_overloaded? trips past the high-water mark" do
+  # Pinned at the boundary rather than at a comfortable 1_100: flooding well
+  # past the mark and asserting the guard trips would hold on ANY threshold
+  # at or below the flood size, so it could not tell `>` from `>=` and would
+  # survive the mark being moved. `@max_queue` is 1_000, so 1_000 queued
+  # messages must NOT trip it and 1_001 must.
+  @max_queue 1_000
+
+  test "queue_overloaded? is false at the high-water mark and true one past it" do
     refute Bier.Events.queue_overloaded?()
-    for n <- 1..1_100, do: send(self(), {:flood, n})
+
+    for n <- 1..@max_queue, do: send(self(), {:flood, n})
+    refute Bier.Events.queue_overloaded?()
+
+    send(self(), {:flood, @max_queue + 1})
     assert Bier.Events.queue_overloaded?()
-    for _ <- 1..1_100, do: receive(do: ({:flood, _} -> :ok))
+
+    for _ <- 1..(@max_queue + 1), do: receive(do: ({:flood, _} -> :ok))
     refute Bier.Events.queue_overloaded?()
   end
 end

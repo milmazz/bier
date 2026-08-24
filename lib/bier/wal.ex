@@ -44,10 +44,37 @@ defmodule Bier.Wal do
     :ok
   end
 
+  # Each subscriber's re-authorization is one round trip on the instance's
+  # shared Postgrex pool (`pool_size`, default 10). Waking every subscriber
+  # at once would queue hundreds of checkouts in front of ordinary API
+  # requests, so subscribers are told how wide a window to scatter
+  # themselves across: ~20ms per subscriber, so the rate stays near
+  # 50 checks/second whatever the subscriber count.
+  #
+  # The window scales from (effectively) zero: a handful of subscribers
+  # re-check within milliseconds, which matters because the window is also
+  # how long a just-revoked column can still reach a live subscriber. The
+  # 10s ceiling bounds that lag at scale.
+  @recheck_window_per_subscriber 20
+  @min_recheck_window 1
+  @max_recheck_window 10_000
+
   @doc "Ask every table subscriber to re-run its authorization (Task 10)."
   @spec notify_recheck(term()) :: :ok
   def notify_recheck(name) do
-    for pid <- Bier.Events.Registry.table_subscribers(name), do: send(pid, {:bier_wal_recheck})
+    subscribers = Bier.Events.Registry.table_subscribers(name)
+    window = recheck_window(length(subscribers))
+
+    for pid <- subscribers, do: send(pid, {:bier_wal_recheck, window})
     :ok
+  end
+
+  @doc false
+  @spec recheck_window(non_neg_integer()) :: pos_integer()
+  def recheck_window(subscriber_count) do
+    subscriber_count
+    |> Kernel.*(@recheck_window_per_subscriber)
+    |> max(@min_recheck_window)
+    |> min(@max_recheck_window)
   end
 end

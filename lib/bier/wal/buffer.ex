@@ -40,13 +40,52 @@ defmodule Bier.Wal.Buffer do
 
   def drop(name, tables), do: GenServer.call(Registry.via(name, __MODULE__), {:drop, tables})
 
-  def replay_after(name, tables, cursor, generation),
-    do:
-      GenServer.call(Registry.via(name, __MODULE__), {:replay_after, tables, cursor, generation})
+  @doc """
+  History strictly after `cursor` for `tables`, or `:reset` when it cannot
+  be served in full.
+
+  The ETS table is `:protected`, so the traversal deliberately runs in the
+  CALLING process rather than inside the server. Replay is the one
+  unbounded piece of work here — up to `tables × events_buffer_size`
+  entries collected, sorted and copied — and the consumer's `append/2` is a
+  `GenServer.call` from inside the `Postgrex.ReplicationConnection`
+  process. Serving replays from the server would put those appends behind
+  them: a reconnect burst (a proxy blip, say) could exceed the call's 5s
+  timeout, which raises inside the replication process, kills the consumer,
+  and turns a transient reconnect into a global `stream_restarted` reset
+  for every subscriber. The server keeps only the O(tables) reset decision.
+  """
+  def replay_after(name, tables, cursor, generation) do
+    server = Registry.via(name, __MODULE__)
+    plan = {:replay_plan, tables, cursor, generation}
+
+    with {:ok, tid} <- GenServer.call(server, plan) do
+      replayed =
+        tables
+        |> Enum.flat_map(&collect_after(tid, &1, cursor))
+        |> Enum.sort_by(fn {c, _t, _e} -> c end)
+
+      # Re-run the decision after the traversal. Because it ran outside the
+      # server, a concurrent generation bump or ring eviction could have
+      # removed entries this reader had not reached yet — a silent gap,
+      # which is the one outcome the feed promises never to produce. Any
+      # eviction that took an entry we owed the caller necessarily raises
+      # that table's `oldest` above `cursor`, so re-checking catches it and
+      # degrades to the same announced reset as every other lost-history
+      # path.
+      case GenServer.call(server, plan) do
+        {:ok, _tid} -> {:ok, replayed}
+        :reset -> :reset
+      end
+    end
+  end
 
   @impl true
   def init(conf) do
-    tid = :ets.new(__MODULE__, [:ordered_set, :private])
+    # `:protected` (not `:private`): only this process ever writes, but
+    # `replay_after/4` reads from the subscriber's own process — see its
+    # docstring for why that traversal must not run in here.
+    tid = :ets.new(__MODULE__, [:ordered_set, :protected, read_concurrency: true])
 
     {:ok,
      %{
@@ -101,17 +140,12 @@ defmodule Bier.Wal.Buffer do
     {:reply, :ok, state}
   end
 
-  def handle_call({:replay_after, tables, cursor, generation}, _from, state) do
+  def handle_call({:replay_plan, tables, cursor, generation}, _from, state) do
     if generation != state.generation or before_floor?(state, cursor) or
          Enum.any?(tables, &stale?(state, &1, cursor)) do
       {:reply, :reset, state}
     else
-      replayed =
-        tables
-        |> Enum.flat_map(&collect_after(state.tid, &1, cursor))
-        |> Enum.sort_by(fn {c, _t, _e} -> c end)
-
-      {:reply, {:ok, replayed}, state}
+      {:reply, {:ok, state.tid}, state}
     end
   end
 

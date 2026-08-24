@@ -14,6 +14,16 @@ defmodule Bier.Wal.Authorize do
   tables and — deliberately, in v1 — partitioned parents all fail the same
   way, since WAL routes changes per child partition, so subscribing to the
   parent would silently deliver nothing.
+
+  The role must also be one the authenticator may actually assume. Every
+  other endpoint gets that check from Postgres for free, because
+  `Bier.Auth` applies the role with `set_config('role', …)` and a
+  non-member fails `42501 permission denied to set role`. Nothing here ever
+  switches role — the check is a catalog lookup — so `pg_has_role(…,
+  'MEMBER')` has to reproduce it explicitly. Without it a JWT naming a role
+  the authenticator cannot assume (a role claim sourced from a
+  user-editable field, say) would be refused by `GET /orders` and accepted
+  by `GET /events?table=orders`, which is the wrong way round.
   """
 
   @type table_key :: {String.t(), String.t()}
@@ -23,7 +33,7 @@ defmodule Bier.Wal.Authorize do
          (pt.pubname IS NOT NULL) AS published,
          COALESCE(c.relrowsecurity, false) AS rls,
          COALESCE(cols.names, '{}') AS selectable
-  FROM unnest($2::text[], $3::text[]) AS t("schema", "table")
+  FROM unnest($2::text[], $3::text[]) WITH ORDINALITY AS t("schema", "table", ord)
   LEFT JOIN pg_class c
          ON c.relname = t."table"
         AND c.relnamespace = to_regnamespace(quote_ident(t."schema"))
@@ -36,6 +46,8 @@ defmodule Bier.Wal.Authorize do
     WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
       AND has_column_privilege(COALESCE($4, current_user), c.oid, a.attname, 'SELECT')
   ) cols ON c.oid IS NOT NULL
+        AND ($4 IS NULL OR pg_has_role(current_user, $4::name, 'MEMBER'))
+  ORDER BY t.ord
   """
 
   @doc """

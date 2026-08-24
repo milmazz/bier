@@ -55,8 +55,21 @@ defmodule Bier.Wal.PgoutputTest do
     msg = <<?U, 42::32, ?K, old::binary, ?N, new::binary>>
     {event, _} = Pgoutput.decode(msg, reg(42))
     assert event.kind == :update and event.old_kind == :key
-    assert event.old == %{"id" => "3", "name" => nil}
+    # A 'K' tuple is ExtractReplicaIdentity's output: every attribute outside
+    # the replica identity is NULLed and lands on the wire as 'n'. Reporting
+    # `"name" => nil` would be indistinguishable from a column that really
+    # held NULL, so a client diffing old against row would read an unlogged
+    # column as having changed FROM null. Only the key columns were logged,
+    # so only the key columns are reported.
+    assert event.old == %{"id" => "3"}
     assert event.row == %{"id" => "3", "name" => :unchanged_toast}
+  end
+
+  test "Delete with a key old-tuple ('K') reports only the identity columns" do
+    old = <<2::16, ?t, 1::32, "3", ?n>>
+    {event, _} = Pgoutput.decode(<<?D, 42::32, ?K, old::binary>>, reg(42))
+    assert event.kind == :delete and event.old_kind == :key
+    assert event.old == %{"id" => "3"}
   end
 
   test "Update without old tuple has old: nil" do
@@ -70,6 +83,11 @@ defmodule Bier.Wal.PgoutputTest do
     old = <<2::16, ?t, 1::32, "3", ?n>>
     {event, _} = Pgoutput.decode(<<?D, 42::32, ?O, old::binary>>, reg(42))
     assert event.kind == :delete and event.old_kind == :full
+    # An 'O' tuple is the whole row, so nothing is filtered out — `name` is
+    # reported as a genuine NULL even though this relation flags only `id`
+    # as a key column. (Postgres only sends 'O' under REPLICA IDENTITY FULL,
+    # where it flags every column, but pinning the tag rather than the flags
+    # is what keeps the 'K' filtering above from over-reaching.)
     assert event.old == %{"id" => "3", "name" => nil}
   end
 

@@ -65,6 +65,16 @@ defmodule Bier.Wal.EventsHttpTest do
       []
     )
 
+    # Two granted columns (unlike `orders` above): revoking ONE of them
+    # leaves the role still authorized, which is the only way to exercise
+    # `recheck/6`'s narrowing branch — `orders` can only ever go from one
+    # column to zero, i.e. straight to the revoked branch.
+    Postgrex.query!(
+      db,
+      "GRANT SELECT (id, sku) ON #{@schema}.items TO postgrest_test_anonymous",
+      []
+    )
+
     on_exit(fn ->
       {:ok, cleanup} =
         Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
@@ -709,5 +719,148 @@ defmodule Bier.Wal.EventsHttpTest do
       reset |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
 
     assert reset_data["reason"] == "history_evicted"
+  end
+
+  test "old under the DEFAULT replica identity carries the key columns only", %{
+    db: db,
+    port: port
+  } do
+    # `items` is left at the DEFAULT replica identity (unlike `tracked`
+    # above, which is FULL), so Postgres logs only the primary key in the
+    # old tuple and NULLs every other attribute. Those NULLed attributes
+    # arrive on the wire as 'n' — indistinguishable from a real NULL once
+    # decoded positionally, which is why `old` must report the identity
+    # columns and nothing else. A client diffing `old` against `row` would
+    # otherwise read `sku` as having changed from NULL.
+    sock = SSETestClient.connect_sse(port, "/events?table=items")
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.items (id, sku) VALUES (1, 'before')", [])
+    assert decode_frame(SSETestClient.recv_until(sock, "data: {"))["type"] == "INSERT"
+
+    # Under DEFAULT identity Postgres logs an old tuple only when the
+    # identity columns themselves changed, so an ordinary column update
+    # carries NO pre-image at all — absent, not null, and not an empty map.
+    Postgrex.query!(db, "UPDATE #{@schema}.items SET sku = 'after' WHERE id = 1", [])
+    updated = decode_frame(SSETestClient.recv_until(sock, "data: {"))
+    assert updated["type"] == "UPDATE"
+    assert updated["row"] == %{"id" => 1, "sku" => "after"}
+    refute Map.has_key?(updated, "old")
+    refute Map.has_key?(updated, "old_kind")
+
+    # Changing the key DOES log one — and it is the case that would expose
+    # the bug: `sku` is NULLed by ExtractReplicaIdentity and hits the wire
+    # as 'n', so a positional zip would report `"sku" => nil` and a client
+    # would read it as "sku changed from null".
+    Postgrex.query!(db, "UPDATE #{@schema}.items SET id = 2 WHERE id = 1", [])
+    rekeyed = decode_frame(SSETestClient.recv_until(sock, "data: {"))
+    assert rekeyed["type"] == "UPDATE"
+    assert rekeyed["row"] == %{"id" => 2, "sku" => "after"}
+    assert rekeyed["old_kind"] == "key"
+    assert rekeyed["old"] == %{"id" => 1}
+
+    # A DELETE always logs the identity, so it is the everyday path where
+    # `old` is key-only.
+    Postgrex.query!(db, "DELETE FROM #{@schema}.items WHERE id = 2", [])
+    deleted = decode_frame(SSETestClient.recv_until(sock, "data: {"))
+    assert deleted["type"] == "DELETE"
+    assert deleted["old_kind"] == "key"
+    assert deleted["old"] == %{"id" => 2}
+  end
+
+  test "TRUNCATE fans out one frame per named relation", %{db: db, port: port} do
+    # Subscribes to both tables and truncates both in ONE statement, which
+    # is a single wire message naming two relations: it exercises
+    # `Consumer.expand/2`'s fan-out (each relation needs its own table key,
+    # cursor and commit_at, or delivery raises in the connection process),
+    # and `items` is deliberately never written to on this connection first,
+    # so it also covers a truncate reaching a relation the decoder's
+    # registry has not seen through an INSERT/UPDATE/DELETE.
+    sock = SSETestClient.connect_sse(port, "/events?table=orders,items")
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "TRUNCATE #{@schema}.orders, #{@schema}.items", [])
+
+    # Both frames are written back-to-back and routinely land in a single
+    # `:gen_tcp.recv/3`, so they must be parsed out of one accumulated
+    # buffer rather than read one recv at a time. Chaining `recv_until/3`'s
+    # accumulator waits for whichever name has not arrived yet and is
+    # order-independent.
+    raw = SSETestClient.recv_until(sock, "event: orders\n")
+    raw = SSETestClient.recv_until(sock, "event: items\n", raw)
+
+    frames =
+      for [_, event, payload] <-
+            Regex.scan(~r/event: ([^\n]+)\nid: [^\n]+\ndata: (\{[^\n]*\})/, raw),
+          do: {event, JSON.decode!(payload)}
+
+    assert [{"items", items}, {"orders", orders}] = Enum.sort_by(frames, &elem(&1, 0))
+
+    for data <- [items, orders] do
+      assert data["type"] == "TRUNCATE"
+      assert data["schema"] == @schema
+      # A TRUNCATE names no row at all: neither a post-image nor a
+      # pre-image, and no `unchanged` list either.
+      refute Map.has_key?(data, "row")
+      refute Map.has_key?(data, "old")
+      refute Map.has_key?(data, "unchanged")
+    end
+
+    assert items["table"] == "items" and orders["table"] == "orders"
+  end
+
+  test "a narrowed grant drops the revoked column without closing the stream", %{db: db} do
+    %{port: port, name: auth_name} = start_auth_instance!()
+    wait_wal_streaming(db, auth_name)
+    token = SSETestClient.sign_hs256(%{"role" => "postgrest_test_anonymous"}, @jwt_secret)
+
+    sock = SSETestClient.connect_sse(port, "/events?table=items&access_token=#{token}")
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.items (id, sku) VALUES (401, 'visible')", [])
+
+    assert decode_frame(SSETestClient.recv_until(sock, "data: {"))["row"] == %{
+             "id" => 401,
+             "sku" => "visible"
+           }
+
+    on_exit(fn ->
+      {:ok, cleanup} =
+        Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
+
+      Postgrex.query!(
+        cleanup,
+        "GRANT SELECT (id, sku) ON #{@schema}.items TO postgrest_test_anonymous",
+        []
+      )
+    end)
+
+    # Narrowing, not revoking: the role keeps `id`, so the subscription
+    # stays valid and `recheck/6` must adopt the FRESH column map rather
+    # than keep streaming the column it just lost. Reusing the subscriber's
+    # remembered `columns` here would leak `sku` for the life of the
+    # connection — precisely what the recheck exists to prevent — and the
+    # revoke-to-zero test cannot catch it, because zero columns errors out
+    # long before the map is reused.
+    Postgrex.query!(
+      db,
+      "REVOKE SELECT (sku) ON #{@schema}.items FROM postgrest_test_anonymous",
+      []
+    )
+
+    :ok = Bier.reload_schema_cache(auth_name)
+
+    # `Bier.Wal.notify_recheck/1` scatters subscribers' re-authorization
+    # across a window rather than stampeding the pool, so the recheck is
+    # scheduled, not immediate. Wait out this instance's own bound (one
+    # subscriber => a couple of milliseconds) plus slack, asking the
+    # implementation for the number rather than hardcoding one.
+    Process.sleep(Bier.Wal.recheck_window(1) + 200)
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.items (id, sku) VALUES (402, 'now-hidden')", [])
+
+    raw = SSETestClient.recv_until(sock, "data: {")
+    refute raw =~ "now-hidden"
+    assert decode_frame(raw)["row"] == %{"id" => 402}
   end
 end

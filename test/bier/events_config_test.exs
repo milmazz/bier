@@ -78,6 +78,26 @@ defmodule Bier.EventsConfigTest do
       assert conf.events_max_tx_events == 100
     end
 
+    test "reject a publication name that cannot be safely interpolated" do
+      # START_REPLICATION takes no bind parameters, so the name is
+      # interpolated into a single-quoted literal; a quote or backslash in
+      # it would break out of that literal rather than produce a clear
+      # error.
+      for bad <- [~s(with'quote), ~s(with"quote), "back\\slash", <<?a, 0, ?b>>] do
+        assert_raise ArgumentError,
+                     ~r/events-publication cannot contain quotes, backslashes, or null bytes/,
+                     fn -> new!(events_publication: bad) end
+      end
+
+      assert_raise ArgumentError, ~r/events-publication cannot be empty/, fn ->
+        new!(events_publication: "")
+      end
+
+      assert_raise ArgumentError, ~r/events-publication cannot exceed 63 bytes/, fn ->
+        new!(events_publication: String.duplicate("p", 64))
+      end
+    end
+
     test "reject a non-positive buffer size" do
       assert_raise ArgumentError, ~r/events_buffer_size option: expected positive integer/, fn ->
         new!(events_buffer_size: 0)

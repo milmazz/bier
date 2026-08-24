@@ -61,12 +61,13 @@ defmodule Bier.Wal.Pgoutput do
   def decode(<<?U, oid::32, tag, rest::binary>>, reg) when tag in [?K, ?O] do
     {old, <<?N, rest::binary>>} = tuple_data(rest)
     {row, ""} = tuple_data(rest)
+    old_kind = if(tag == ?K, do: :key, else: :full)
 
     {%{
        kind: :update,
        relation: rel!(reg, oid),
-       old: named(reg, oid, old),
-       old_kind: if(tag == ?K, do: :key, else: :full),
+       old: old_named(reg, oid, old, old_kind),
+       old_kind: old_kind,
        row: named(reg, oid, row)
      }, reg}
   end
@@ -85,12 +86,13 @@ defmodule Bier.Wal.Pgoutput do
 
   def decode(<<?D, oid::32, tag, rest::binary>>, reg) when tag in [?K, ?O] do
     {old, ""} = tuple_data(rest)
+    old_kind = if(tag == ?K, do: :key, else: :full)
 
     {%{
        kind: :delete,
        relation: rel!(reg, oid),
-       old: named(reg, oid, old),
-       old_kind: if(tag == ?K, do: :key, else: :full)
+       old: old_named(reg, oid, old, old_kind),
+       old_kind: old_kind
      }, reg}
   end
 
@@ -117,6 +119,15 @@ defmodule Bier.Wal.Pgoutput do
        content: content
      }, reg}
   end
+
+  # Anything else: a protocol addition, or a message kind that cannot reach
+  # proto_version 1 today (the streaming and two-phase families). Return an
+  # inert event rather than raising — this runs inside `handle_data/2`, so a
+  # FunctionClauseError here kills the replication process, and the restart
+  # resets every subscriber. `Bier.Wal.Consumer.handle_event/2` already has
+  # a catch-all that ignores kinds it does not know; this makes the decoder
+  # match the tolerance the frame layer above it already has.
+  def decode(<<tag, _rest::binary>>, reg), do: {%{kind: :unknown, tag: tag}, reg}
 
   # TupleData: n columns, each 'n' (null) | 'u' (unchanged TOAST) |
   # 't' len+text | 'b' len+binary (only when the binary option is requested).
@@ -151,6 +162,30 @@ defmodule Bier.Wal.Pgoutput do
   defp named(reg, oid, values) do
     %{columns: cols} = rel!(reg, oid)
     cols |> Enum.map(& &1.name) |> Enum.zip(values) |> Map.new()
+  end
+
+  # Old images need one extra step that new images don't. A `K` tuple is
+  # built by Postgres' ExtractReplicaIdentity, which NULLs every attribute
+  # outside the replica identity and then writes them on the wire as `n`
+  # (null) — indistinguishable, once decoded, from a column that genuinely
+  # held NULL. Zipping positionally would therefore report
+  # `old: %{"id" => 1, "note" => nil}` for a table at the DEFAULT replica
+  # identity, and a client diffing `old` against `row` would conclude
+  # `note` changed from NULL when in fact it was simply never logged.
+  #
+  # Keep only the columns Postgres actually logged: the Relation message
+  # flags exactly those with LOGICALREP_IS_REPLICA_IDENTITY (`key?`). Under
+  # REPLICA IDENTITY FULL every column carries the flag and the tuple
+  # arrives as `O`, so `:full` images are passed through untouched.
+  defp old_named(reg, oid, values, :full), do: named(reg, oid, values)
+
+  defp old_named(reg, oid, values, :key) do
+    %{columns: cols} = rel!(reg, oid)
+
+    cols
+    |> Enum.zip(values)
+    |> Enum.filter(fn {col, _value} -> col.key? end)
+    |> Map.new(fn {col, value} -> {col.name, value} end)
   end
 
   defp cstring(bin) do

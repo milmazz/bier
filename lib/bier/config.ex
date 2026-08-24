@@ -170,6 +170,7 @@ defmodule Bier.Config do
          :ok <- validate_proxy_uri(conf[:openapi_server_proxy_uri]),
          :ok <- validate_events_channels(Keyword.get(conf, :events_channels, [])),
          :ok <- validate_events_path(Keyword.get(conf, :events_path, "events")),
+         :ok <- validate_events_publication(conf[:events_publication]),
          {:ok, conf} <- decode_jwt_secret(conf),
          {:ok, conf} <- parse_jwt_role_claim_key(conf) do
       {:ok, struct!(__MODULE__, conf)}
@@ -458,6 +459,34 @@ defmodule Bier.Config do
 
       String.contains?(channel, "\"") ->
         {:error, "events-channels entries cannot contain double quotes"}
+
+      true ->
+        :ok
+    end
+  end
+
+  @doc """
+  `events-publication` names an operator-created `PUBLICATION`. Replication
+  commands take no bind parameters, so `Bier.Wal.Consumer` has to interpolate
+  the name into `START_REPLICATION ... (publication_names '<name>')` — a name
+  carrying a single quote would break out of that literal. Operator config
+  rather than user input, so this is a guard against a typo becoming a
+  confusing replication error, not a defence against an attacker; it holds
+  the name to the same identifier shape `events-channels` uses.
+  """
+  @spec validate_events_publication(String.t() | nil) :: :ok | {:error, String.t()}
+  def validate_events_publication(nil), do: :ok
+
+  def validate_events_publication(publication) when is_binary(publication) do
+    cond do
+      publication == "" ->
+        {:error, "events-publication cannot be empty"}
+
+      byte_size(publication) > 63 ->
+        {:error, "events-publication cannot exceed 63 bytes"}
+
+      String.contains?(publication, [<<0>>, "\"", "'", "\\"]) ->
+        {:error, "events-publication cannot contain quotes, backslashes, or null bytes"}
 
       true ->
         :ok

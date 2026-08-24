@@ -59,13 +59,32 @@ defmodule Bier.Wal.ConsumerTest do
       )
 
     start_supervised!({Bier, opts})
-    SSETestClient.wait_until(fn -> wal_streaming?(db) end)
+    SSETestClient.wait_until(fn -> wal_streaming?(db, name) end)
     %{db: db, name: name}
   end
 
-  defp wal_streaming?(db) do
+  # Scoped to THIS instance's own slot, not "some connection is streaming".
+  # Each test here boots a fresh instance; when test N is torn down and test
+  # N+1's setup runs milliseconds later, test N's replication backend can
+  # still be listed in `pg_stat_replication` with state = 'streaming'. An
+  # unscoped check returns true immediately, the test fires its INSERT
+  # before the NEW consumer's temporary slot exists — and a temporary slot
+  # starts at the current LSN, so that event is gone for good and the test
+  # fails 5s later on a `assert_receive` that can never match. The consumer
+  # mints its slot name from `phash2(instance_name)`, so the prefix
+  # disambiguates. (Same reasoning, same shape as
+  # `Bier.Wal.EventsHttpTest.streaming_slots/2`.)
+  defp wal_streaming?(db, name) do
     %{rows: rows} =
-      Postgrex.query!(db, "SELECT 1 FROM pg_stat_replication WHERE state = 'streaming'", [])
+      Postgrex.query!(
+        db,
+        """
+        SELECT 1 FROM pg_stat_replication sr
+        JOIN pg_replication_slots rs ON rs.active_pid = sr.pid
+        WHERE rs.slot_name LIKE $1 AND sr.state = 'streaming'
+        """,
+        ["bier_#{:erlang.phash2(name)}_%"]
+      )
 
     rows != []
   end
