@@ -234,16 +234,31 @@ defmodule Bier.Mutation do
   # with no `request.*` GUCs and no privilege check, a security gap (#73).
   defp run(conn, %Write{} = write, sql, params) do
     conn = Warning.record(conn, write.plan)
-    pool = Bier.Registry.via(write.config.name, Postgrex)
     relations = Bier.SchemaCache.relations(write.config.name)
-    context = conn.assigns[:bier_auth]
 
-    {:ok, wrapped, wparams} =
+    representation =
       Bier.ServerTiming.measure(:plan, fn ->
         QueryExecutor.build_representation(write.relation, write.plan, relations, {sql, params},
           format: MediaType.executor_format(write.media)
         )
       end)
+
+    # A select/embed shape the representation cannot render comes back as
+    # `{:error, reason}`: PGRST127 for an aggregate inside a to-many spread,
+    # PGRST108 for a filter on an unselected embed, PGRST118 for a related order
+    # on a to-many. Thread it out to `FallbackController` so a mutation answers
+    # with the same 400 the read path gives; matching on `{:ok, …}` raised a
+    # MatchError and turned each of those into a 500.
+    case representation do
+      {:ok, wrapped, wparams} -> transact(conn, write, wrapped, wparams)
+      {:error, _reason} = err -> err
+    end
+  end
+
+  # The write itself, once the representation query is known to be renderable.
+  defp transact(conn, %Write{} = write, wrapped, wparams) do
+    pool = Bier.Registry.via(write.config.name, Postgrex)
+    context = conn.assigns[:bier_auth]
 
     result =
       Bier.Cancellation.run(conn, write.config, fn ->

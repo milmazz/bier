@@ -33,6 +33,13 @@ defmodule Bier.CLI.Config do
       aliases: ["db-schema"]
     },
     %{
+      key: "db-aggregates-enabled",
+      env: "PGRST_DB_AGGREGATES_ENABLED",
+      kind: :bool,
+      default: false,
+      aliases: []
+    },
+    %{
       key: "db-anon-role",
       env: "PGRST_DB_ANON_ROLE",
       kind: :opt_string,
@@ -294,9 +301,11 @@ defmodule Bier.CLI.Config do
 
   # Keys settable from the in-database config source (`ALTER ROLE ... SET
   # pgrst.*`): upstream's dbSettingsNames whitelist (Config/Database.hs,
-  # v16.0) intersected with the keys Bier implements. Upstream-only names not
-  # mirrored here: db_aggregates_enabled, db_pre_config, db_hoisted_tx_settings,
-  # jwt_cache_max_lifetime (Bier's jwt-cache-max-entries is a different knob).
+  # v16.0) intersected with the keys Bier implements. Names not mirrored here:
+  # db_pre_config, db_hoisted_tx_settings, jwt_cache_max_lifetime (Bier's
+  # jwt-cache-max-entries is a different knob) — upstream-only. And
+  # db_aggregates_enabled, which Bier does implement but upstream's
+  # dbSettingsNames omits, so it stays settable by env/file/flag only.
   # Everything else — notably server-* bind settings and db-uri — is
   # non-reloadable and ignored when set via the database (case 1725).
   @db_settable_keys ~w(
@@ -619,6 +628,7 @@ defmodule Bier.CLI.Config do
       [
         client_error_verbosity: resolved["client-error-verbosity"],
         db_schemas: resolved["db-schemas"],
+        db_aggregates_enabled: resolved["db-aggregates-enabled"],
         db_anon_role: resolved["db-anon-role"],
         db_extra_search_path: resolved["db-extra-search-path"],
         db_max_rows: resolved["db-max-rows"],

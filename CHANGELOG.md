@@ -10,6 +10,16 @@ and this project adheres to
 
 ### Added
 
+- `db_aggregates_enabled` (PostgREST `db-aggregates-enabled`,
+  `PGRST_DB_AGGREGATES_ENABLED`, default `false`): gates aggregate functions in
+  a request's `select`. When off, any aggregate — including one inside a spread
+  embed — is rejected with 400 `PGRST123`, matching PostgREST v16. When on,
+  aggregates on a one-to-many or many-to-many spread are rejected with 400
+  `PGRST127`. It is settable from the environment, the config file and the CLI
+  flag, but — like upstream — not from the in-database config source.
+- Aggregates inside spread embeds now hoist the enclosing `GROUP BY`, so
+  `select=total:amount.sum(),...category(owner)` groups by the spread's columns
+  instead of erroring or returning ungrouped rows.
 - WAL change feed on the events endpoint: with `events_publication` naming an
   operator-created publication, `GET /events?table=<name>` streams typed
   INSERT/UPDATE/DELETE/TRUNCATE events with row images over SSE — no NOTIFY
@@ -36,6 +46,17 @@ and this project adheres to
 
 ### Changed
 
+- **Breaking:** aggregate functions in `select` are now **disabled by default**.
+  They were previously always available; PostgREST v16 defaults
+  `db-aggregates-enabled` to off and answers 400 `PGRST123`, and Bier now
+  matches. Set `db_aggregates_enabled: true` (or
+  `PGRST_DB_AGGREGATES_ENABLED=true`) to restore the old behavior.
+- **Breaking (API):** `Bier.CLI.run/2` performs the `--ready` health check
+  itself and returns a result map like every other command, instead of handing
+  the caller a `{:ready, url}` directive to probe. In `Bier.Embed`, `group_by`
+  takes a fourth argument and `build_row_select` returns a 4-tuple carrying the
+  aggregate metadata.
+
 - SSE subscriptions are now bounded by their JWT's `exp` (with the same 30s
   skew allowance the request path uses) instead of living on indefinitely
   after the token that authorized them expired. The `[:bier, :events,
@@ -53,6 +74,32 @@ and this project adheres to
 - `Last-Event-ID` is validated more strictly: LSN halves must fit in 32
   bits, signs are rejected, and oversized input is refused before parsing.
   An unparseable cursor still just starts the stream at the live head.
+
+### Fixed
+
+- A spread embed whose columns fed an aggregate leaked a raw PostgreSQL
+  `42803` (`must appear in the GROUP BY clause`) to the client.
+- A `select` shape a mutation could not render — an aggregate inside a to-many
+  spread (`PGRST127`), a filter on an unselected embed (`PGRST108`), a related
+  order on a to-many (`PGRST118`) — raised a `MatchError` and answered 500. The
+  mutation paths now return the same 400 the read path does.
+- Only PostgREST's five aggregate functions (`avg`, `count`, `max`, `min`,
+  `sum`) are accepted in `select`. Any other name parsed as an aggregate and
+  reached SQL as a function call, so `?select=id.pg_sleep()` invoked it once per
+  row; it is now a 400 `PGRST100` select parse error, as upstream gives.
+- `--ready` distinguishes an unparseable admin-server URL (`invalid url`) from a
+  refused connection, instead of collapsing every transport failure into
+  `connection refused`.
+- `--dump-config` no longer comes back empty when the database is momentarily
+  out of connection slots: the in-database config read retries a checkout the
+  pool dropped as backpressure, up to the acquisition deadline. An endpoint
+  nothing is listening on still fails immediately, now naming the host and port.
+
+Conformance `spec/` bumped to `v16.0.0-suite.4`, which adds the 39
+spread/aggregate cases 11100–11138 and the four `--ready` health-check cases
+1745–1748, taking the tree to 805 cases. Case 11125 is recorded as a deliberate
+divergence (#138): it pins upstream's tolerance of an unbalanced trailing `)` in
+`select`, which Bier rejects with 400 `PGRST100`.
 
 ## v0.2.0 — 2026-08-23
 

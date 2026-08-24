@@ -414,6 +414,28 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
+  # ---- aggregates used while db-aggregates-enabled is off (400 PGRST123) ---
+  def call(conn, {:error, :aggregates_not_allowed}) do
+    error(conn, 400, %{
+      code: "PGRST123",
+      message: "Use of aggregate functions is not allowed",
+      details: nil,
+      hint: nil
+    })
+  end
+
+  # ---- aggregate inside a to-many spread embed (400 PGRST127) -------------
+  # `addToManyOrderSelects` rejects the combination outright rather than
+  # aggregating in a context where the result would be meaningless.
+  def call(conn, {:error, :agg_in_to_many_spread}) do
+    error(conn, 400, %{
+      code: "PGRST127",
+      message: "Feature not implemented",
+      details: "Aggregates are not implemented for one-to-many or many-to-many spreads.",
+      hint: nil
+    })
+  end
+
   # ---- related order on a non-to-one relationship (PGRST118) --------------
   def call(conn, {:error, {:related_order_not_to_one, source, target}}) do
     error(conn, 400, %{

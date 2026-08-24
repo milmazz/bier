@@ -24,20 +24,45 @@ defmodule Bier.ConformanceTest do
       "Server: bier/<version>, not postgrest/<version> — a Server header names " <>
         "the software that built the response, and wearing upstream's product " <>
         "token would misattribute Bier's bugs to PostgREST. The dialect is " <>
-        "advertised through the OpenAPI document's externalDocs instead (#122)."
+        "advertised through the OpenAPI document's externalDocs instead (#122).",
+    11125 =>
+      "the select carries an unbalanced trailing `)`, transcribed verbatim from " <>
+        "SpreadQueriesSpec.hs:390. Upstream runs `pFieldForest` with no `eof` " <>
+        "terminator (QueryParams.hs:219,318), so Parsec keeps the longest valid " <>
+        "prefix and silently discards the unread tail — the stray token is not " <>
+        "handled, it is never looked at. Bier answers 400 PGRST100 instead. " <>
+        "Matching it would mean accepting arbitrary trailing garbage after a " <>
+        "well-formed tree, so a select truncated by a stray token would come " <>
+        "back silently short with a 200. The same select minus the `)` already " <>
+        "returns this case's exact body, so the m2m nested-spread behavior the " <>
+        "case is about is conformant; only the parse of malformed input " <>
+        "differs (#138)."
   }
 
-  # id => {path into the case's expect map, pinned value}. A divergence entry
-  # must keep pointing at a live case that still asserts the upstream behavior
-  # Bier declines to match; a spec re-sync that renumbers or rewrites the case
-  # fails the build here instead of silently keeping (or dangling) the
-  # exemption. Every @divergences entry needs a pin here.
-  @divergence_pins %{1771 => {["headers_match", "Server"], "^postgrest/.+"}}
+  # id => pins that must all still hold, each `{:expect | :request, path,
+  # value}`. A divergence entry must keep pointing at a live case that still
+  # asserts the upstream behavior Bier declines to match; a spec re-sync that
+  # renumbers or rewrites the case fails the build here instead of silently
+  # keeping (or dangling) the exemption. Every @divergences entry needs a pin
+  # here. Pin whichever side carries the behavior: 1771 declines a response
+  # header, so it pins `expect`; 11125 declines how a *request* is parsed, so it
+  # pins the malformed path too — an upstream typo-fix there ends the divergence
+  # and has to fail the build rather than leave the exemption standing.
+  @divergence_pins %{
+    1771 => [{:expect, ["headers_match", "Server"], "^postgrest/.+"}],
+    11125 => [
+      {:request, ["path"],
+       "/operators?select=name,...processes(process:name,...process_costs(cost)))" <>
+         "&id=eq.5&processes.id=eq.7"},
+      {:expect, ["body_exact"],
+       [%{"name" => "Alfred", "process" => ["Process XX"], "cost" => [nil]}]}
+    ]
+  }
 
   cases_by_id = Map.new(Bier.ConformanceCase.load_all(), &{&1.id, &1})
 
   for id <- Map.keys(@divergences) do
-    {path, pinned} =
+    pins =
       Map.get(@divergence_pins, id) ||
         raise "deliberate-divergence entry #{id} has no @divergence_pins entry"
 
@@ -47,10 +72,14 @@ defmodule Bier.ConformanceTest do
                 "renumbered in a re-sync? Update @divergences/@divergence_pins."
 
       {:ok, c} ->
-        get_in(c.expect, path) == pinned ||
-          raise "spec case #{id} no longer pins #{inspect(path)} == " <>
-                  "#{inspect(pinned)} — the deliberate-divergence entry is " <>
-                  "stale; re-evaluate it."
+        for {source, path, pinned} <- pins do
+          actual = get_in(Map.fetch!(c, source), path)
+
+          actual == pinned ||
+            raise "spec case #{id} no longer pins #{source} #{inspect(path)} == " <>
+                    "#{inspect(pinned)} — the deliberate-divergence entry is " <>
+                    "stale; re-evaluate it."
+        end
     end
   end
 
