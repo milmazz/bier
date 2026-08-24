@@ -137,6 +137,17 @@ defmodule Bier.Events do
 
   defp authorize_tables(_conn, [], _config, _role), do: {:ok, %{}}
 
+  # The refusals below are byte-identical, but they are not all equally
+  # EXPENSIVE: the exposure/reserved-name gate and the `events_publication:
+  # nil` gate answer with no database round trip, while the
+  # publication/RLS/privilege gate costs one. A determined observer can time
+  # the difference and learn which gate fired — that leaks configuration
+  # (whether a schema is exposed, whether the feature is on), never data or
+  # the existence of a table. Equalising it would mean issuing a pointless
+  # query on the cheap paths; the trade is deliberate and recorded here so
+  # the "one indistinguishable shape" claim is not read as stronger than it
+  # is.
+  #
   # `table=` may only reference schemas this instance actually exposes
   # (`db_schemas`) — a request naming an unexposed schema is refused before
   # anything else (no DB round trip, no publication check), through the
@@ -144,11 +155,20 @@ defmodule Bier.Events do
   # table in request order, so a qualified name still can't be used to
   # probe which schemas are configured.
   defp authorize_tables(conn, tables, config, role) do
-    case Enum.find(tables, fn {schema, _table} -> schema not in config.db_schemas end) do
+    case Enum.find(tables, &refused_outright?(&1, config)) do
       {schema, table} -> {:error, {:events_unknown_table, schema <> "." <> table}}
       nil -> authorize_published_tables(conn, tables, config, role)
     end
   end
+
+  # Refused before any database work, through the same uniform shape as
+  # every other refusal: a schema this instance does not expose, or a table
+  # whose name would claim the `bier:` prefix the stream reserves for its own
+  # control frames (`event: bier:reset`). `events_channels` is held to the
+  # same reservation in `Bier.Config`; this is the half of it that cannot be
+  # checked at boot, because the name comes from the database.
+  defp refused_outright?({schema, table}, config),
+    do: schema not in config.db_schemas or String.starts_with?(table, "bier:")
 
   # WAL table subscriptions require `events_publication`. `tables` is
   # guaranteed non-empty here (the `[]` clause on `authorize_tables/4`
@@ -236,13 +256,12 @@ defmodule Bier.Events do
       {:ok, conn} ->
         schedule_token_expiry(conn)
         Enum.each(channels, &Bier.Events.Registry.register(config.name, &1))
-        Enum.each(tables, &Bier.Events.Registry.register_table(config.name, &1))
+        Enum.each(tables, &Bier.Events.Registry.register_table(config.name, &1, role))
 
         sub = %{
           columns: columns,
           tables: tables,
-          names: table_names(tables, config),
-          role: role
+          names: table_names(tables, config)
         }
 
         # Registration happens BEFORE replay, so an event landing while
@@ -453,17 +472,8 @@ defmodule Bier.Events do
             finish(conn, delivered, start, Map.put(metadata, :reason, reason))
         end
 
-      {:bier_wal_recheck, window} ->
-        # Don't re-authorize inline: a reload wakes EVERY table subscriber at
-        # once and each one runs its own `Authorize.check/4` against a pool
-        # of `pool_size` (default 10) connections, so a few hundred
-        # subscribers starve the request path. Spread the checks across a
-        # window sized by `Bier.Wal.notify_recheck/1` instead.
-        Process.send_after(self(), :bier_wal_recheck_now, :rand.uniform(window))
-        loop(conn, config, sub, delivered, start, metadata)
-
-      :bier_wal_recheck_now ->
-        recheck(conn, config, sub, delivered, start, metadata)
+      {:bier_wal_recheck, verdict} ->
+        recheck(conn, config, sub, delivered, start, metadata, verdict)
 
       :bier_token_expired ->
         finish(conn, delivered, start, Map.put(metadata, :reason, :token_expired))
@@ -508,49 +518,34 @@ defmodule Bier.Events do
   end
 
   # A schema reload is the signal that privileges may have changed under a
-  # live subscriber (`Bier.SchemaCache.load!/3` calls `Bier.Wal.notify_
-  # recheck/1` right after its snapshot swap). A pure NOTIFY connection
-  # (`sub.tables == []`) has nothing WAL-authorized to re-check, so it just
-  # keeps looping. Otherwise re-run the exact subscribe-time check with the
-  # remembered role: `{:ok, columns}` continues with the FRESH column map
-  # (grants may have narrowed, e.g. a partial-grant role losing its last
-  # visible column); a real `{:error, _}` from `Authorize.check/4` (the
-  # table stopped being published, RLS got enabled, or the role's last
-  # visible column was revoked) closes the stream rather than keep leaking
-  # rows the role can no longer see.
+  # live subscriber. `Bier.Wal.notify_recheck/1` re-runs the subscribe-time
+  # check centrally — once per distinct role, against the union of that
+  # role's tables — and pushes each subscriber the verdict, so this clause
+  # only applies it. Doing the query here instead would mean one checkout
+  # per subscriber against a pool of `pool_size` (default 10) every time
+  # anything reloaded the schema cache.
   #
-  # The two rescued exception classes are NOT equivalent, and deliberately
-  # get different outcomes (controller ruling, Task 10 review): a
-  # `Postgrex.Error` (e.g. the role itself was dropped — `has_column_
-  # privilege` raises `undefined_object`) is genuine evidence the
-  # subscription is no longer valid, so it also finishes as `:revoked`. A
-  # `DBConnection.ConnectionError` is pool contention or an infrastructure
-  # hiccup — exactly what a reload "thundering herd" of simultaneous
-  # rechecks can produce against a finite pool — and is NOT evidence of
-  # lost SELECT: a checkout timeout says nothing about the role's
-  # privileges, so the stream stays open on the sub's PREVIOUS columns and
-  # keeps looping; the next reload's recheck (or the connection recovering
-  # on its own) gets another chance to actually verify.
-  defp recheck(conn, config, %{tables: []} = sub, delivered, start, metadata) do
-    loop(conn, config, sub, delivered, start, metadata)
-  end
-
-  defp recheck(conn, config, sub, delivered, start, metadata) do
-    pool = Bier.Registry.via(config.name, Postgrex)
-
-    case Authorize.check(pool, sub.role, config.events_publication, sub.tables) do
+  # `{:ok, columns}` continues with the FRESH map: grants may merely have
+  # narrowed (a partial-grant role losing one of several visible columns),
+  # and reusing the remembered map would keep streaming a column the role
+  # can no longer see. `:revoked` closes the stream rather than keep leaking
+  # rows. `:keep` means the check could not be completed (pool contention,
+  # not evidence of lost privilege), so the subscription stands and the next
+  # reload gets another chance.
+  #
+  # A pure NOTIFY connection (`sub.tables == []`) is never registered as a
+  # table subscriber, so it cannot receive any of these.
+  defp recheck(conn, config, sub, delivered, start, metadata, verdict) do
+    case verdict do
       {:ok, columns} ->
         loop(conn, config, %{sub | columns: columns}, delivered, start, metadata)
 
-      {:error, _reason} ->
+      :keep ->
+        loop(conn, config, sub, delivered, start, metadata)
+
+      :revoked ->
         finish(conn, delivered, start, Map.put(metadata, :reason, :revoked))
     end
-  rescue
-    _error in Postgrex.Error ->
-      finish(conn, delivered, start, Map.put(metadata, :reason, :revoked))
-
-    _error in DBConnection.ConnectionError ->
-      loop(conn, config, sub, delivered, start, metadata)
   end
 
   defp finish(conn, delivered, start, metadata) do

@@ -102,4 +102,78 @@ defmodule Bier.Wal.PgoutputTest do
       Pgoutput.decode(<<?I, 7::32, ?N, 0::16>>, %{})
     end
   end
+
+  test "Origin, Type and Message decode without disturbing the registry" do
+    # These arrive interleaved with data messages — Type in particular is
+    # emitted ahead of Relation for user-defined types, so a table with an
+    # enum column hits it on the very first event. A mistake here raises
+    # inside handle_data/2 and kills the consumer.
+    reg = reg(42)
+
+    {origin, ^reg} = Pgoutput.decode(<<?O, 7::32, 99::32, "pg_1", 0>>, reg)
+    assert origin.kind == :origin and origin.lsn == {7, 99} and origin.name == "pg_1"
+
+    {type, ^reg} = Pgoutput.decode(<<?Y, 16_385::32, "public", 0, "mood", 0>>, reg)
+    assert type.kind == :type and type.oid == 16_385
+    assert type.schema == "public" and type.name == "mood"
+
+    content = "hello"
+    msg = <<?M, 1::8, 7::32, 100::32, "bier", 0, byte_size(content)::32, content::binary>>
+    {message, ^reg} = Pgoutput.decode(msg, reg)
+    assert message.kind == :message and message.transactional
+    assert message.prefix == "bier" and message.content == content
+
+    # Bit 0 is the transactional flag; higher bits are reserved, so a future
+    # flag set alongside it must not read as non-transactional.
+    {both, ^reg} =
+      Pgoutput.decode(
+        <<?M, 3::8, 7::32, 100::32, "bier", 0, byte_size(content)::32, content::binary>>,
+        reg
+      )
+
+    assert both.transactional
+    {none, ^reg} = Pgoutput.decode(<<?M, 2::8, 7::32, 100::32, "bier", 0, 0::32>>, reg)
+    refute none.transactional
+  end
+
+  test "binary tuple values are tagged rather than mistaken for text" do
+    # Only reachable when the binary option is negotiated, which bier does
+    # not do — but a value silently read as text would be corrupt data, so
+    # the kind is preserved rather than guessed at.
+    tuple = <<2::16, ?t, 1::32, "3", ?b, 2::32, 0xFF, 0x00>>
+    {event, _} = Pgoutput.decode(<<?I, 42::32, ?N, tuple::binary>>, reg(42))
+    assert event.row == %{"id" => "3", "name" => {:binary, <<0xFF, 0x00>>}}
+  end
+
+  test "every replica identity setting decodes" do
+    for {byte, expected} <- [{?d, :default}, {?n, :nothing}, {?f, :full}, {?i, :index}] do
+      msg = <<?R, 7::32, "public", 0, "t", 0, byte, 1::16, 1::8, "id", 0, 23::32, -1::signed-32>>
+      {event, _} = Pgoutput.decode(msg, %{})
+      assert event.relation.replica_identity == expected
+    end
+  end
+
+  test "an unrecognised message kind is inert rather than fatal" do
+    # Protocol additions (the streaming and two-phase families, none of them
+    # reachable at proto_version 1) must not raise: this runs inside the
+    # replication process, where a FunctionClauseError kills the consumer and
+    # resets every subscriber.
+    {event, reg} = Pgoutput.decode(<<?Z, 1, 2, 3>>, %{})
+    assert event == %{kind: :unknown, tag: ?Z}
+    assert reg == %{}
+  end
+
+  test "a tuple whose arity disagrees with the cached relation raises" do
+    # Enum.zip/2 truncates to the shorter side, so without an explicit check
+    # this would silently DROP a column instead of failing — the one outcome
+    # the feed must not have. Raising restarts the consumer, which re-reads
+    # the relation and announces the gap as a reset.
+    assert_raise RuntimeError, ~r/columns but the tuple carried/, fn ->
+      Pgoutput.decode(<<?I, 42::32, ?N, 1::16, ?t, 1::32, "3">>, reg(42))
+    end
+
+    assert_raise RuntimeError, ~r/columns but the old tuple carried/, fn ->
+      Pgoutput.decode(<<?D, 42::32, ?K, 1::16, ?t, 1::32, "3">>, reg(42))
+    end
+  end
 end

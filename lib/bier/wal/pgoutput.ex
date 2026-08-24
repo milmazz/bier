@@ -113,7 +113,7 @@ defmodule Bier.Wal.Pgoutput do
 
     {%{
        kind: :message,
-       transactional: flags == 1,
+       transactional: (flags &&& 1) == 1,
        lsn: lsn(message_lsn),
        prefix: prefix,
        content: content
@@ -159,8 +159,20 @@ defmodule Bier.Wal.Pgoutput do
     do: Map.get(reg, oid) || raise("pgoutput: data message for unknown relation oid #{oid}")
 
   # Zip a tuple's positional values with the relation's column names.
+  #
+  # The arity check is not ceremony: `Enum.zip/2` truncates to the shorter
+  # side, so a tuple that disagreed with the cached relation (a Relation
+  # message we somehow missed after a DDL) would silently DROP columns
+  # rather than fail. Losing a column quietly is the one outcome this feed
+  # must not have; raising restarts the consumer, which re-reads the
+  # relation and announces the gap as a reset.
   defp named(reg, oid, values) do
     %{columns: cols} = rel!(reg, oid)
+
+    length(cols) == length(values) ||
+      raise "pgoutput: relation #{oid} has #{length(cols)} columns but the tuple " <>
+              "carried #{length(values)} values"
+
     cols |> Enum.map(& &1.name) |> Enum.zip(values) |> Map.new()
   end
 
@@ -181,6 +193,10 @@ defmodule Bier.Wal.Pgoutput do
 
   defp old_named(reg, oid, values, :key) do
     %{columns: cols} = rel!(reg, oid)
+
+    length(cols) == length(values) ||
+      raise "pgoutput: relation #{oid} has #{length(cols)} columns but the old tuple " <>
+              "carried #{length(values)} values"
 
     cols
     |> Enum.zip(values)

@@ -33,7 +33,7 @@ defmodule Bier.Wal.Authorize do
          (pt.pubname IS NOT NULL) AS published,
          COALESCE(c.relrowsecurity, false) AS rls,
          COALESCE(cols.names, '{}') AS selectable
-  FROM unnest($2::text[], $3::text[]) WITH ORDINALITY AS t("schema", "table", ord)
+  FROM unnest($2::text[], $3::text[]) AS t("schema", "table")
   LEFT JOIN pg_class c
          ON c.relname = t."table"
         AND c.relnamespace = to_regnamespace(quote_ident(t."schema"))
@@ -47,7 +47,6 @@ defmodule Bier.Wal.Authorize do
       AND has_column_privilege(COALESCE($4, current_user), c.oid, a.attname, 'SELECT')
   ) cols ON c.oid IS NOT NULL
         AND ($4 IS NULL OR pg_has_role(current_user, $4::name, 'MEMBER'))
-  ORDER BY t.ord
   """
 
   @doc """
@@ -65,16 +64,36 @@ defmodule Bier.Wal.Authorize do
           {:ok, %{table_key() => MapSet.t(String.t())}}
           | {:error, {:events_unknown_table, String.t()}}
   def check(pool, role, publication, tables) do
+    authorized = columns(pool, role, publication, tables)
+
+    # Scanned in REQUEST order, not result order: the response names the
+    # first table the client asked for that failed, and the query carries no
+    # ORDER BY (the planner may return the unnest join however it likes).
+    case Enum.find(tables, &(not is_map_key(authorized, &1))) do
+      nil -> {:ok, authorized}
+      {schema, table} -> {:error, {:events_unknown_table, schema <> "." <> table}}
+    end
+  end
+
+  @doc """
+  The SELECT-able columns per table, for the tables that pass every gate —
+  a table that fails any of them is simply absent from the map.
+
+  This is `check/4` without the all-or-nothing verdict, so one query can
+  answer for the union of several subscribers' tables and each subscriber's
+  own verdict be derived from the result. `check/4` is written in terms of
+  it.
+  """
+  @spec columns(term(), String.t() | nil, String.t(), [table_key()]) ::
+          %{table_key() => MapSet.t(String.t())}
+  def columns(pool, role, publication, tables) do
     {schemas, names} = Enum.unzip(tables)
 
     %{rows: rows} = Postgrex.query!(pool, @sql, [publication, schemas, names, role])
 
-    Enum.reduce_while(rows, {:ok, %{}}, fn
-      [schema, table, true, false, selectable], {:ok, acc} when selectable != [] ->
-        {:cont, {:ok, Map.put(acc, {schema, table}, MapSet.new(selectable))}}
-
-      [schema, table, _published, _rls, _selectable], _acc ->
-        {:halt, {:error, {:events_unknown_table, schema <> "." <> table}}}
-    end)
+    for [schema, table, true, false, selectable] <- rows,
+        selectable != [],
+        into: %{},
+        do: {{schema, table}, MapSet.new(selectable)}
   end
 end

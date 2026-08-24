@@ -29,6 +29,10 @@ and this project adheres to
   or privilege oracle.
 - `events_publication` is validated at boot: it must be a non-empty
   identifier of at most 63 bytes with no quotes, backslashes, or null bytes.
+- `bier:` is a reserved `event:` prefix: `events_channels` entries claiming
+  it are refused at boot, and a `table=` subscription naming such a table is
+  refused like any other unavailable table. Without the reservation a
+  channel or table could emit a frame a client reads as a control message.
 
 ### Changed
 
@@ -37,6 +41,18 @@ and this project adheres to
   after the token that authorized them expired. The `[:bier, :events,
   :subscribe, :stop]` span reports this as `:reason` `:token_expired`.
 - `BIER002`'s message and hint now mention `table=` alongside `channel=`.
+- Subscriptions are re-authorized centrally after a schema reload — one
+  query per distinct role over the union of that role's subscribed tables,
+  rather than one per subscriber — so a reload applies immediately without
+  queueing a checkout per subscriber against the connection pool.
+- The WAL ring buffer stores each table's column metadata once instead of on
+  every buffered entry. A DDL that changes a table's columns now invalidates
+  that table's buffered history, so a client resuming across the change gets
+  an announced `bier:reset` rather than rows labelled with the wrong
+  columns.
+- `Last-Event-ID` is validated more strictly: LSN halves must fit in 32
+  bits, signs are rejected, and oversized input is refused before parsing.
+  An unparseable cursor still just starts the stream at the live head.
 
 ## v0.2.0 — 2026-08-23
 

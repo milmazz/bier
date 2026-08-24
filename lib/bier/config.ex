@@ -460,6 +460,13 @@ defmodule Bier.Config do
       String.contains?(channel, "\"") ->
         {:error, "events-channels entries cannot contain double quotes"}
 
+      String.starts_with?(channel, "bier:") ->
+        # The `bier:` prefix is how the SSE stream spells its own control
+        # frames (`event: bier:reset`). A channel allowed to claim it could
+        # emit a frame a client would read as a control message, with an
+        # app-controlled `data:` payload behind it.
+        {:error, "events-channels entries cannot start with the reserved \"bier:\" prefix"}
+
       true ->
         :ok
     end

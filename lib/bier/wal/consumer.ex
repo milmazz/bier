@@ -195,15 +195,24 @@ defmodule Bier.Wal.Consumer do
   end
 
   # Any other frame (future protocol additions, or a bug upstream) — log and
-  # keep the connection alive rather than crashing the process.
+  # keep the connection alive rather than crashing the process. Only the
+  # frame's tag and size are logged, never its bytes: an unrecognised frame
+  # can still carry row data, and this is the one place that would put it in
+  # an operator's log file.
   def handle_data(other, state) do
     Logger.warning(
       "Bier WAL consumer for #{inspect(state.conf.name)} received an unexpected " <>
-        "replication frame: #{inspect(other)}"
+        "replication frame: #{describe_frame(other)}"
     )
 
     {:noreply, state}
   end
+
+  defp describe_frame(<<tag, rest::binary>>),
+    do: "tag #{inspect(<<tag>>)}, #{byte_size(rest) + 1} bytes"
+
+  defp describe_frame(other) when is_binary(other), do: "empty frame"
+  defp describe_frame(other), do: inspect(other)
 
   defp handle_event(%{kind: :begin}, state),
     do: %{state | tx: %{events: [], count: 0, bytes: 0, overflow: false, tables: MapSet.new()}}
@@ -281,7 +290,7 @@ defmodule Bier.Wal.Consumer do
       |> Enum.with_index()
       |> Enum.map(fn {{table_key, event}, seq} -> {{lsn, seq}, table_key, event} end)
 
-    Buffer.append(state.conf.name, entries)
+    retain(state, entries)
 
     for {cursor, table_key, event} <- entries,
         do:
@@ -292,6 +301,34 @@ defmodule Bier.Wal.Consumer do
           )
 
     :ok
+  end
+
+  # Buffering is best-effort; LIVE delivery is not. If the Buffer is
+  # momentarily gone (its own supervisor restarting it), letting the
+  # `GenServer.call` exit propagate would kill this process too — and a
+  # consumer restart costs the whole instance's shared restart budget and
+  # resets every subscriber. Announce the lost history for the affected
+  # tables instead and keep streaming: resume degrades to a reset, which is
+  # the contract, rather than a silent gap or an outage.
+  defp retain(state, entries) do
+    Buffer.append(state.conf.name, entries)
+  catch
+    :exit, _reason ->
+      Logger.warning(
+        "Bier WAL consumer for #{inspect(state.conf.name)} could not buffer a " <>
+          "transaction (buffer unavailable); resume history for the affected " <>
+          "tables is announced as lost"
+      )
+
+      for table_key <- entries |> Enum.map(&elem(&1, 1)) |> Enum.uniq() do
+        Events.broadcast_table(
+          state.conf.name,
+          table_key,
+          {:bier_wal_reset, "history_evicted"}
+        )
+      end
+
+      :ok
   end
 
   # Truncate touches several relations at once; fan a copy out per table so

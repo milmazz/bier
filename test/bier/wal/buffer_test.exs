@@ -15,12 +15,34 @@ defmodule Bier.Wal.BufferTest do
   end
 
   defp cursor(lo, seq \\ 0), do: {{0, lo}, seq}
-  defp event(n), do: %{kind: :insert, n: n}
+
+  # Real events always carry their relation; the Buffer interns it (one copy
+  # per table rather than one per entry) and re-attaches it on replay, so the
+  # fixtures have to carry one for the round trip to be exercised at all.
+  defp relation(table_key, columns \\ ["id"])
+
+  defp relation({schema, table}, columns) do
+    %{
+      oid: :erlang.phash2({schema, table}),
+      schema: schema,
+      table: table,
+      replica_identity: :default,
+      columns: Enum.map(columns, &%{name: &1, type_oid: 23, type_mod: -1, key?: &1 == "id"})
+    }
+  end
+
+  defp event(n, table_key \\ @orders, columns \\ ["id"]),
+    do: %{kind: :insert, n: n, relation: relation(table_key, columns)}
 
   test "replays events strictly after the cursor, across tables, in order" do
     {name, gen} = start!(10)
 
-    :ok = Buffer.append(name, [{cursor(1), @orders, event(1)}, {cursor(1, 1), @items, event(2)}])
+    :ok =
+      Buffer.append(name, [
+        {cursor(1), @orders, event(1)},
+        {cursor(1, 1), @items, event(2, @items)}
+      ])
+
     :ok = Buffer.append(name, [{cursor(2), @orders, event(3)}])
 
     assert {:ok, replayed} = Buffer.replay_after(name, [@orders, @items], cursor(1), gen)
@@ -98,14 +120,20 @@ defmodule Bier.Wal.BufferTest do
 
   test "drop marks a table as having lost history until a new entry re-anchors it" do
     {name, gen} = start!(10)
-    :ok = Buffer.append(name, [{cursor(1), @orders, event(1)}, {cursor(1, 1), @items, event(2)}])
+
+    :ok =
+      Buffer.append(name, [
+        {cursor(1), @orders, event(1)},
+        {cursor(1, 1), @items, event(2, @items)}
+      ])
+
     :ok = Buffer.drop(name, [@orders])
 
     # The undropped table is unaffected by the drop. cursor(1) — the epoch
     # floor here, this generation's first appended cursor — rather than
     # cursor(0): anything below the floor resets on its own, which would
     # mask the per-table behavior under test.
-    assert {:ok, [{cursor(1, 1), @items, event(2)}]} ==
+    assert {:ok, [{cursor(1, 1), @items, event(2, @items)}]} ==
              Buffer.replay_after(name, [@items], cursor(1), gen)
 
     # A dropped table with no entries yet resets for every cursor.
@@ -116,5 +144,66 @@ defmodule Bier.Wal.BufferTest do
     :ok = Buffer.append(name, [{cursor(9), @orders, event(9)}])
     assert {:ok, []} = Buffer.replay_after(name, [@orders], cursor(9), gen)
     assert Buffer.replay_after(name, [@orders], cursor(0), gen) == :reset
+  end
+
+  test "replay re-attaches each table's interned relation" do
+    {name, gen} = start!(10)
+
+    # An anchoring append first: the epoch floor is this generation's FIRST
+    # cursor, and anything below it resets by design, so the cursor a client
+    # can legitimately resume from has to be at-or-after it.
+    :ok = Buffer.append(name, [{cursor(1), @orders, event(0, @orders, ["id", "note"])}])
+
+    :ok =
+      Buffer.append(name, [
+        {cursor(2), @orders, event(1, @orders, ["id", "note"])},
+        {cursor(2, 1), @items, event(2, @items, ["id", "sku"])}
+      ])
+
+    assert {:ok, replayed} = Buffer.replay_after(name, [@orders, @items], cursor(1), gen)
+
+    # The relation is stripped before storage (one copy per table, not one
+    # per entry) and put back on the way out, so a replayed event must be
+    # indistinguishable from the live one Render sees — including the right
+    # relation for the right table.
+    assert [{_, @orders, orders_event}, {_, @items, items_event}] = replayed
+    assert orders_event.relation.table == "orders"
+    assert Enum.map(orders_event.relation.columns, & &1.name) == ["id", "note"]
+    assert items_event.relation.table == "items"
+    assert Enum.map(items_event.relation.columns, & &1.name) == ["id", "sku"]
+  end
+
+  test "a changed relation invalidates that table's history, not its neighbours" do
+    {name, gen} = start!(10)
+
+    :ok =
+      Buffer.append(name, [
+        {cursor(1), @orders, event(1, @orders, ["id", "note"])},
+        {cursor(1, 1), @items, event(2, @items, ["id", "sku"])}
+      ])
+
+    # A DDL changed `orders`: the entry retained above was decoded against
+    # the old column list, so replaying it with the new relation would name
+    # its values wrongly. Resuming across the change must reset rather than
+    # hand back mislabeled rows.
+    :ok = Buffer.append(name, [{cursor(2), @orders, event(3, @orders, ["id", "note", "extra"])}])
+    :ok = Buffer.append(name, [{cursor(3), @orders, event(4, @orders, ["id", "note", "extra"])}])
+
+    assert Buffer.replay_after(name, [@orders], cursor(1), gen) == :reset
+
+    # `items` never changed, so its history survives — the invalidation is
+    # per table, not a wholesale generation bump.
+    assert {:ok, [{_, @items, items_event}]} =
+             Buffer.replay_after(name, [@items], cursor(1), gen)
+
+    assert items_event.n == 2
+
+    # And `orders` resumes normally from its re-anchored history onward,
+    # now carrying the NEW column list.
+    assert {:ok, [{_, @orders, orders_event}]} =
+             Buffer.replay_after(name, [@orders], cursor(2), gen)
+
+    assert orders_event.n == 4
+    assert Enum.map(orders_event.relation.columns, & &1.name) == ["id", "note", "extra"]
   end
 end

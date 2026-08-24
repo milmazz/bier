@@ -369,7 +369,14 @@ privilege is still gone, gets the ordinary `BIER003` refusal (see
   evaluation is future work.
 * **Partitioned tables cannot be subscribed** — refused the same way a
   nonexistent table is (see
-  [Subscribing to tables](#subscribing-to-tables) above).
+  [Subscribing to tables](#subscribing-to-tables) above). A publication
+  created `WITH (publish_via_partition_root = true)` is therefore unusable
+  for its partitioned tables: only the parent appears in
+  `pg_publication_tables`, and the parent is exactly what v1 refuses.
+* **A table whose name begins with `bier:` cannot be subscribed** — that
+  prefix is reserved for the stream's own control frames (`event:
+  bier:reset`), and `events_channels` is held to the same reservation at
+  boot.
 * **Table names containing a literal `.` must be written schema-qualified**
   — the qualifier is split off at the first dot only, so the bare form is
   unaddressable.
@@ -381,16 +388,22 @@ privilege is still gone, gets the ordinary `BIER003` refusal (see
 * **`REPLICA IDENTITY` governs `old`** — see above.
 * **The ring buffer retains history for every published table**, subscribed
   or not, so its footprint is `published tables × events_buffer_size`
-  entries — not `events_buffer_size` overall. Each entry also carries a copy
-  of its relation's column metadata, which for a wide table can outweigh the
-  row payload several times over. Scope the publication to the tables that
-  are actually subscribable rather than reaching for `FOR ALL TABLES`.
-* **A privilege change reaches live subscribers within a short window**, not
-  instantly: a schema reload scatters subscribers' re-authorization across a
-  window that scales with subscriber count (milliseconds for a handful,
-  capped at 10s) so a reload cannot stampede the connection pool. A
-  subscriber can therefore still receive a just-revoked column for up to
-  that window.
+  entries — not `events_buffer_size` overall. (Column metadata is stored
+  once per table rather than per entry, so an entry costs about its row
+  payload.) Scope the publication to the tables that are actually
+  subscribable rather than reaching for `FOR ALL TABLES`.
+* **A DDL that changes a table's columns invalidates that table's buffered
+  history**, because entries retained from before the change were decoded
+  against the old column list. A client resuming across such a change gets
+  the ordinary `bier:reset` rather than mislabeled rows; live delivery is
+  unaffected.
+* **A privilege change reaches live subscribers on the next schema reload**,
+  and does so immediately: the re-authorization runs centrally, one query
+  per distinct role over the union of that role's subscribed tables, so it
+  costs a handful of round trips however many subscribers there are. A
+  subscription whose grants merely narrowed keeps streaming with the
+  reduced column set; one that lost its last visible column, its
+  publication membership, or its table is closed.
 * **A subscription ends when its JWT expires.** The token is verified at
   connect like any request; the stream is then bounded by that token's
   `exp` (plus the same 30s skew allowance the request path uses) rather

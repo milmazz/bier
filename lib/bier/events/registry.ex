@@ -38,10 +38,17 @@ defmodule Bier.Events.Registry do
     length(Registry.lookup(__MODULE__, {instance, channel}))
   end
 
-  @doc "Subscribe the calling process to a table's WAL change feed."
-  @spec register_table(term(), {String.t(), String.t()}) :: :ok
-  def register_table(instance, table_key) do
-    {:ok, _owner} = Registry.register(__MODULE__, {instance, {:table, table_key}}, nil)
+  @doc """
+  Subscribe the calling process to a table's WAL change feed.
+
+  The entry's value is the role the subscription was authorized against, so
+  `Bier.Wal.notify_recheck/1` can re-authorize every live subscriber from
+  ONE place — grouping by role and asking the database once per role —
+  instead of waking each subscriber to run its own query.
+  """
+  @spec register_table(term(), {String.t(), String.t()}, String.t() | nil) :: :ok
+  def register_table(instance, table_key, role) do
+    {:ok, _owner} = Registry.register(__MODULE__, {instance, {:table, table_key}}, role)
     :ok
   end
 
@@ -66,5 +73,20 @@ defmodule Bier.Events.Registry do
       {{{instance, {:table, :_}}, :"$1", :_}, [], [:"$1"]}
     ])
     |> Enum.uniq()
+  end
+
+  @doc """
+  Every live WAL table subscription on `instance` as `{pid, table_key,
+  role}` — one entry per subscribed table, so a process watching three
+  tables appears three times (unlike `table_subscribers/1`, which
+  deduplicates).
+
+  This is the input `Bier.Wal.notify_recheck/1` groups by role.
+  """
+  @spec table_subscriptions(term()) :: [{pid(), {String.t(), String.t()}, String.t() | nil}]
+  def table_subscriptions(instance) do
+    Registry.select(__MODULE__, [
+      {{{instance, {:table, :"$1"}}, :"$2", :"$3"}, [], [{{:"$2", :"$1", :"$3"}}]}
+    ])
   end
 end

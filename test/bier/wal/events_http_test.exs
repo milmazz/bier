@@ -43,6 +43,23 @@ defmodule Bier.Wal.EventsHttpTest do
     Postgrex.query!(db, "CREATE TABLE #{@schema}.hidden (id int)", [])
     Postgrex.query!(db, "CREATE TABLE #{@schema}.locked (id int)", [])
     Postgrex.query!(db, "ALTER TABLE #{@schema}.locked ENABLE ROW LEVEL SECURITY", [])
+    # A PUBLISHED partitioned parent: it passes every gate except
+    # `relkind = 'r'`, so it is the case that proves that filter end to end.
+    # Subscribing to it would otherwise succeed and then deliver nothing,
+    # since WAL routes changes through the child partitions.
+    Postgrex.query!(
+      db,
+      "CREATE TABLE #{@schema}.parted (id int, at date) PARTITION BY RANGE (at)",
+      []
+    )
+
+    Postgrex.query!(
+      db,
+      "CREATE TABLE #{@schema}.parted_2026 PARTITION OF #{@schema}.parted " <>
+        "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
+      []
+    )
+
     Postgrex.query!(db, "DROP SCHEMA IF EXISTS #{@other_schema} CASCADE", [])
     Postgrex.query!(db, "CREATE SCHEMA #{@other_schema}", [])
     Postgrex.query!(db, "CREATE TABLE #{@other_schema}.orders (id serial PRIMARY KEY)", [])
@@ -51,7 +68,7 @@ defmodule Bier.Wal.EventsHttpTest do
     Postgrex.query!(
       db,
       "CREATE PUBLICATION #{@pub} FOR TABLE #{@schema}.orders, #{@schema}.items, " <>
-        "#{@schema}.tracked, #{@schema}.locked, #{@other_schema}.orders",
+        "#{@schema}.tracked, #{@schema}.locked, #{@schema}.parted, #{@other_schema}.orders",
       []
     )
 
@@ -191,6 +208,31 @@ defmodule Bier.Wal.EventsHttpTest do
     port
   end
 
+  # An instance exposing BOTH scratch schemas, so a table outside the
+  # default schema is reachable — the only way to exercise the qualified
+  # `event: schema.table` branch of `table_names/2`.
+  defp start_two_schema_instance! do
+    port = TestPorts.free_port()
+    name = :"wal_http_two_#{System.unique_integer([:positive])}"
+
+    opts =
+      Bier.ConformanceServer.base_opts()
+      |> Keyword.merge(
+        name: name,
+        pool_size: 2,
+        db_schemas: [@schema, @other_schema],
+        db_channel_enabled: false,
+        events_publication: @pub,
+        events_heartbeat_interval: 50,
+        events_max_tx_events: 10_000,
+        router: [port: port, scheme: :http]
+      )
+
+    start_supervised!({Bier, opts})
+    TestPorts.wait_until_listening(port)
+    %{port: port, name: name}
+  end
+
   # Waits for THIS instance's own replication slot specifically (not just
   # "some" consumer streaming): a test may run a second Bier instance
   # concurrently (see `start_auth_instance!/0`), and `Bier.Wal.Consumer`
@@ -200,7 +242,14 @@ defmodule Bier.Wal.EventsHttpTest do
   # drop the event (fire-and-forget by design) and hang the test on
   # heartbeats until ExUnit's timeout.
   defp wait_wal_streaming(db, name) do
-    SSETestClient.wait_until(fn -> not Enum.empty?(streaming_slots(db, name)) end)
+    # 500 retries (~5s), not `wait_until/1`'s ~1s default: creating a LOGICAL
+    # slot has to reach a consistent decoding point, which waits for every
+    # in-flight transaction to finish. On a loaded CI runner — this suite
+    # boots an instance per test — that regularly exceeds a second, and the
+    # failure would be a bare "condition never became true" rather than
+    # anything pointing at slot creation. Same budget `wait_wal_restarted/3`
+    # already uses.
+    SSETestClient.wait_until(fn -> not Enum.empty?(streaming_slots(db, name)) end, 500)
   end
 
   # The slot names THIS instance currently has streaming.
@@ -363,35 +412,40 @@ defmodule Bier.Wal.EventsHttpTest do
       {"missing", "#{@schema}.missing"},
       {"hidden", "#{@schema}.hidden"},
       {"locked", "#{@schema}.locked"},
+      {"parted", "#{@schema}.parted"},
       {"#{@other_schema}.orders", "#{@other_schema}.orders"}
     ]
 
     bodies =
-      for {query, identifier} <- cases do
-        resp = Req.get!("http://127.0.0.1:#{port}/events?table=#{query}", retry: false)
-        assert resp.status == 404
-        # Normalize the "schema.table" identifier out so the envelopes must
-        # otherwise be equal (String.replace/3 replaces every occurrence by
-        # default).
-        resp.body |> Bier.json_library().encode!() |> String.replace(identifier, "T")
-      end
+      for {query, identifier} <- cases, do: refusal_body(port, query, identifier)
 
     disabled_port = start_publication_disabled_instance!()
+    disabled_body = refusal_body(disabled_port, "orders", "#{@schema}.orders")
 
-    disabled_resp =
-      Req.get!("http://127.0.0.1:#{disabled_port}/events?table=orders", retry: false)
-
-    assert disabled_resp.status == 404
-
-    disabled_body =
-      disabled_resp.body
-      |> Bier.json_library().encode!()
-      |> String.replace("#{@schema}.orders", "T")
-
-    assert [b, b, b, b] = bodies, "the four refusals must be indistinguishable"
+    assert [b, b, b, b, b] = bodies, "the five refusals must be indistinguishable"
 
     assert disabled_body == b,
            "a disabled-publication refusal must be indistinguishable from the others too"
+  end
+
+  # The RAW response body with only the echoed identifier normalized out.
+  # `decode_body: false` matters: letting Req decode to a map and
+  # re-encoding would normalize on-the-wire key ORDER away, so the test
+  # would no longer prove the byte-equality it claims. Headers are compared
+  # too — a refusal that differed only in `proxy-status` would still be an
+  # oracle.
+  defp refusal_body(port, query, identifier) do
+    resp =
+      Req.get!("http://127.0.0.1:#{port}/events?table=#{query}",
+        retry: false,
+        decode_body: false
+      )
+
+    assert resp.status == 404
+    assert resp.headers["proxy-status"] == ["Bier; error=BIER003"]
+    assert resp.headers["content-type"] == ["application/json; charset=utf-8"]
+
+    String.replace(resp.body, identifier, "T")
   end
 
   test "a role with partial column grants sees only its columns", %{db: db} do
@@ -848,19 +902,129 @@ defmodule Bier.Wal.EventsHttpTest do
       []
     )
 
+    # `Bier.reload_schema_cache/1` runs the re-authorization synchronously
+    # (centrally, one query per distinct role), so by the time it returns
+    # every subscriber has already been sent its new column map. No settle
+    # window to wait out, and no window during which a revoked column can
+    # still be delivered.
     :ok = Bier.reload_schema_cache(auth_name)
-
-    # `Bier.Wal.notify_recheck/1` scatters subscribers' re-authorization
-    # across a window rather than stampeding the pool, so the recheck is
-    # scheduled, not immediate. Wait out this instance's own bound (one
-    # subscriber => a couple of milliseconds) plus slack, asking the
-    # implementation for the number rather than hardcoding one.
-    Process.sleep(Bier.Wal.recheck_window(1) + 200)
 
     Postgrex.query!(db, "INSERT INTO #{@schema}.items (id, sku) VALUES (402, 'now-hidden')", [])
 
     raw = SSETestClient.recv_until(sock, "data: {")
     refute raw =~ "now-hidden"
     assert decode_frame(raw)["row"] == %{"id" => 402}
+  end
+
+  test "a table outside the default schema renders a qualified event name", %{db: db} do
+    %{port: port, name: name} = start_two_schema_instance!()
+    wait_wal_streaming(db, name)
+
+    # `@schema` is the default (first of db_schemas), so its tables render
+    # unqualified; `@other_schema` is exposed but not default, so its tables
+    # must render qualified. Both spellings on ONE connection, so the test
+    # pins the distinction rather than either branch alone.
+    sock =
+      SSETestClient.connect_sse(port, "/events?table=orders,#{@other_schema}.orders")
+
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('default-schema')", [])
+    assert SSETestClient.recv_until(sock, "data: {") =~ "event: orders\n"
+
+    Postgrex.query!(db, "INSERT INTO #{@other_schema}.orders DEFAULT VALUES", [])
+    qualified = SSETestClient.recv_until(sock, "data: {")
+    assert qualified =~ "event: #{@other_schema}.orders\n"
+    assert decode_frame(qualified)["schema"] == @other_schema
+  end
+
+  test "a subscriber whose mailbox backs up is disconnected, not buffered forever", %{
+    db: db,
+    port: port,
+    name: name
+  } do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(sock, ": connected")
+
+    key = {name, {:table, {@schema, "orders"}}}
+    SSETestClient.wait_until(fn -> Registry.lookup(Bier.Events.Registry, key) != [] end)
+    [{subscriber, _value}] = Registry.lookup(Bier.Events.Registry, key)
+
+    # Suspending the connection process is what makes this deterministic:
+    # otherwise it drains each frame to a loopback socket faster than any
+    # producer can outpace it, and the high-water mark is never reached. The
+    # events are well-formed and deliverable, so a BROKEN guard writes all
+    # 1,100 of them and the stream stays open — which is what
+    # `assert_socket_closes/2` fails on.
+    :erlang.suspend_process(subscriber)
+
+    for n <- 1..1_100 do
+      Bier.Events.Registry.broadcast_table(
+        name,
+        {@schema, "orders"},
+        {:bier_wal_event, {@schema, "orders"}, {{0, n}, 0}, backed_up_event()}
+      )
+    end
+
+    :erlang.resume_process(subscriber)
+
+    assert_socket_closes(sock)
+  end
+
+  defp backed_up_event do
+    %{
+      kind: :insert,
+      commit_at: ~U[2026-08-24 00:00:00Z],
+      relation: %{
+        oid: 1,
+        schema: @schema,
+        table: "orders",
+        replica_identity: :default,
+        columns: [%{name: "id", type_oid: 23, type_mod: -1, key?: true}]
+      },
+      row: %{"id" => "1"}
+    }
+  end
+
+  test "one reload re-authorizes every subscriber, each against its own tables", %{db: db} do
+    %{port: port, name: auth_name} = start_auth_instance!()
+    wait_wal_streaming(db, auth_name)
+    token = SSETestClient.sign_hs256(%{"role" => "postgrest_test_anonymous"}, @jwt_secret)
+
+    # Two subscribers on the same instance and the same role but DIFFERENT
+    # tables. `Bier.Wal.notify_recheck/1` asks the database once per role,
+    # over the union of both, and derives each subscriber's verdict from
+    # that one answer — so this pins that the union does not leak across
+    # subscribers: revoking on `items` must not disturb the `orders` one.
+    orders_sock = SSETestClient.connect_sse(port, "/events?table=orders&access_token=#{token}")
+    SSETestClient.recv_until(orders_sock, ": connected")
+    items_sock = SSETestClient.connect_sse(port, "/events?table=items&access_token=#{token}")
+    SSETestClient.recv_until(items_sock, ": connected")
+
+    on_exit(fn ->
+      {:ok, cleanup} =
+        Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
+
+      Postgrex.query!(
+        cleanup,
+        "GRANT SELECT (id, sku) ON #{@schema}.items TO postgrest_test_anonymous",
+        []
+      )
+    end)
+
+    Postgrex.query!(
+      db,
+      "REVOKE SELECT (id, sku) ON #{@schema}.items FROM postgrest_test_anonymous",
+      []
+    )
+
+    :ok = Bier.reload_schema_cache(auth_name)
+
+    # The items subscriber lost its last visible column: revoked.
+    assert_socket_closes(items_sock)
+
+    # The orders subscriber is untouched and still delivering.
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (id, note) VALUES (501, 'fine')", [])
+    assert decode_frame(SSETestClient.recv_until(orders_sock, "data: {"))["row"] == %{"id" => 501}
   end
 end

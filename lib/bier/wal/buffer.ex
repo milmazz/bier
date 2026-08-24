@@ -9,6 +9,17 @@ defmodule Bier.Wal.Buffer do
   which is what turns a bier restart into an explicit `bier:reset` instead
   of a silent gap.
 
+  Relations are **interned**, not stored per entry. A decoded event carries
+  its whole relation (name, and one map per column), which for a wide table
+  outweighs the row itself several times over — and ETS copies every term it
+  stores, so keeping it on each entry would multiply that by
+  `events_buffer_size` for every published table. One copy per table is kept
+  instead and re-attached on replay. When a table's relation CHANGES (a DDL
+  that adds, drops, or retypes a column), the entries retained for it were
+  decoded against the old column list, so re-attaching the new one would
+  mislabel their values: that table's history is invalidated instead, which
+  surfaces to a resuming client as the ordinary announced reset.
+
   Each generation also carries an **epoch floor**: the very first cursor
   appended since the bump, `:unanchored` until then. It is the floor that
   actually catches a client resuming across a restart — the endpoint reads
@@ -59,10 +70,10 @@ defmodule Bier.Wal.Buffer do
     server = Registry.via(name, __MODULE__)
     plan = {:replay_plan, tables, cursor, generation}
 
-    with {:ok, tid} <- GenServer.call(server, plan) do
+    with {:ok, tid, rel_tid} <- GenServer.call(server, plan) do
       replayed =
         tables
-        |> Enum.flat_map(&collect_after(tid, &1, cursor))
+        |> Enum.flat_map(&collect_after(tid, rel_tid, &1, cursor))
         |> Enum.sort_by(fn {c, _t, _e} -> c end)
 
       # Re-run the decision after the traversal. Because it ran outside the
@@ -74,7 +85,7 @@ defmodule Bier.Wal.Buffer do
       # degrades to the same announced reset as every other lost-history
       # path.
       case GenServer.call(server, plan) do
-        {:ok, _tid} -> {:ok, replayed}
+        {:ok, _tid, _rel_tid} -> {:ok, replayed}
         :reset -> :reset
       end
     end
@@ -86,10 +97,12 @@ defmodule Bier.Wal.Buffer do
     # `replay_after/4` reads from the subscriber's own process — see its
     # docstring for why that traversal must not run in here.
     tid = :ets.new(__MODULE__, [:ordered_set, :protected, read_concurrency: true])
+    rel_tid = :ets.new(:"#{__MODULE__}.Relations", [:set, :protected, read_concurrency: true])
 
     {:ok,
      %{
        tid: tid,
+       rel_tid: rel_tid,
        limit: conf.events_buffer_size,
        generation: 0,
        floor: :unanchored,
@@ -101,6 +114,7 @@ defmodule Bier.Wal.Buffer do
   @impl true
   def handle_call(:new_generation, _from, state) do
     :ets.delete_all_objects(state.tid)
+    :ets.delete_all_objects(state.rel_tid)
     generation = state.generation + 1
 
     {:reply, generation,
@@ -112,6 +126,7 @@ defmodule Bier.Wal.Buffer do
   def handle_call({:append, entries}, _from, state) do
     state =
       Enum.reduce(entries, state, fn {cursor, table_key, event}, acc ->
+        {acc, event} = intern_relation(acc, table_key, event)
         :ets.insert(acc.tid, {{table_key, cursor}, event})
         counts = Map.update(acc.counts, table_key, 1, &(&1 + 1))
         oldest = restore_oldest(acc.oldest, table_key, cursor)
@@ -126,18 +141,7 @@ defmodule Bier.Wal.Buffer do
   end
 
   def handle_call({:drop, tables}, _from, state) do
-    state =
-      Enum.reduce(tables, state, fn table_key, acc ->
-        :ets.match_delete(acc.tid, {{table_key, :_}, :_})
-
-        %{
-          acc
-          | counts: Map.delete(acc.counts, table_key),
-            oldest: Map.put(acc.oldest, table_key, :wrapped)
-        }
-      end)
-
-    {:reply, :ok, state}
+    {:reply, :ok, Enum.reduce(tables, state, &forget_table(&2, &1))}
   end
 
   def handle_call({:replay_plan, tables, cursor, generation}, _from, state) do
@@ -145,8 +149,48 @@ defmodule Bier.Wal.Buffer do
          Enum.any?(tables, &stale?(state, &1, cursor)) do
       {:reply, :reset, state}
     else
-      {:reply, {:ok, state.tid}, state}
+      {:reply, {:ok, state.tid, state.rel_tid}, state}
     end
+  end
+
+  # Strip the relation off the stored entry, keeping one copy per table.
+  #
+  # A CHANGED relation invalidates that table's retained history: those
+  # entries' positional values were named against the old column list, so
+  # re-attaching the new one on replay would silently mislabel them (or drop
+  # a column that no longer exists). Dropping is the same lost-history state
+  # `drop/2` records, so a resuming client gets the ordinary announced reset
+  # rather than wrong data. Live delivery is unaffected — it never goes
+  # through here.
+  defp intern_relation(state, table_key, %{relation: relation} = event) do
+    state =
+      case :ets.lookup(state.rel_tid, table_key) do
+        [{^table_key, ^relation}] ->
+          state
+
+        [] ->
+          :ets.insert(state.rel_tid, {table_key, relation})
+          state
+
+        [_changed] ->
+          state = forget_table(state, table_key)
+          :ets.insert(state.rel_tid, {table_key, relation})
+          state
+      end
+
+    {state, Map.delete(event, :relation)}
+  end
+
+  # Discard everything retained for one table and record that its history is
+  # gone (`:wrapped`), so any cursor into it resets until new entries land.
+  defp forget_table(state, table_key) do
+    :ets.match_delete(state.tid, {{table_key, :_}, :_})
+
+    %{
+      state
+      | counts: Map.delete(state.counts, table_key),
+        oldest: Map.put(state.oldest, table_key, :wrapped)
+    }
   end
 
   # The epoch floor, checked before any per-table history: the earliest
@@ -194,12 +238,21 @@ defmodule Bier.Wal.Buffer do
     end
   end
 
-  # Walk the ordered_set from just past {table_key, cursor}.
-  defp collect_after(tid, table_key, cursor) do
-    tid
-    |> stream_from(:ets.next(tid, {table_key, cursor}))
-    |> Enum.take_while(fn {{t, _c}, _e} -> t == table_key end)
-    |> Enum.map(fn {{t, c}, e} -> {c, t, e} end)
+  # Walk the ordered_set from just past {table_key, cursor}, re-attaching the
+  # table's interned relation. A table with retained entries always has one
+  # (they are interned on the same append that stores them), so the `[]`
+  # clause is unreachable in practice and yields nothing rather than raising.
+  defp collect_after(tid, rel_tid, table_key, cursor) do
+    case :ets.lookup(rel_tid, table_key) do
+      [{^table_key, relation}] ->
+        tid
+        |> stream_from(:ets.next(tid, {table_key, cursor}))
+        |> Enum.take_while(fn {{t, _c}, _e} -> t == table_key end)
+        |> Enum.map(fn {{t, c}, e} -> {c, t, Map.put(e, :relation, relation)} end)
+
+      [] ->
+        []
+    end
   end
 
   defp stream_from(tid, start_key) do

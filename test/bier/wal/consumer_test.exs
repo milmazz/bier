@@ -59,7 +59,9 @@ defmodule Bier.Wal.ConsumerTest do
       )
 
     start_supervised!({Bier, opts})
-    SSETestClient.wait_until(fn -> wal_streaming?(db, name) end)
+    # ~5s, not the ~1s default: creating a LOGICAL slot waits for in-flight
+    # transactions to finish, which on a loaded CI runner overruns a second.
+    SSETestClient.wait_until(fn -> wal_streaming?(db, name) end, 500)
     %{db: db, name: name}
   end
 
@@ -97,7 +99,7 @@ defmodule Bier.Wal.ConsumerTest do
     # below starts from. "Everything in the buffer" cannot be spelled
     # `{{0, 0}, 0}` any more: a cursor older than this generation's first
     # appended id names pre-restart history and resets by design.
-    :ok = Bier.Events.Registry.register_table(name, table)
+    :ok = Bier.Events.Registry.register_table(name, table, nil)
     Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('anchor')", [])
     assert_receive {:bier_wal_event, ^table, anchor, %{kind: :insert}}, 5_000
 
@@ -117,7 +119,7 @@ defmodule Bier.Wal.ConsumerTest do
   end
 
   test "subscribed processes receive per-event broadcasts", %{db: db, name: name} do
-    :ok = Bier.Events.Registry.register_table(name, {@schema, "orders"})
+    :ok = Bier.Events.Registry.register_table(name, {@schema, "orders"}, nil)
     Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('live')", [])
 
     assert_receive {:bier_wal_event, {@schema, "orders"}, _cursor, %{kind: :insert} = event},
@@ -127,7 +129,7 @@ defmodule Bier.Wal.ConsumerTest do
   end
 
   test "consumer restart bumps the generation and broadcasts reset", %{name: name} do
-    :ok = Bier.Events.Registry.register_table(name, {@schema, "orders"})
+    :ok = Bier.Events.Registry.register_table(name, {@schema, "orders"}, nil)
     gen = Buffer.generation(name)
 
     [{pid, _}] = Registry.lookup(Bier.Registry, {name, Bier.Wal.Consumer})
@@ -143,7 +145,7 @@ defmodule Bier.Wal.ConsumerTest do
     name: name
   } do
     table = {@schema, "orders"}
-    :ok = Bier.Events.Registry.register_table(name, table)
+    :ok = Bier.Events.Registry.register_table(name, table, nil)
     gen = Buffer.generation(name)
 
     # A one-row transaction fits under the cap of 1: it anchors the Buffer's
