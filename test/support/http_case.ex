@@ -11,6 +11,14 @@ defmodule Bier.HttpCase do
     quote do
       import Bier.HttpCase
       import Bier.ConformanceAssertions
+
+      # Sequence values survive db_tx_end: :rollback (nextval is
+      # non-transactional), so re-arm the auto-pk sequence case 1305 asserts
+      # through before every representations-area case — see issue #120.
+      setup tags do
+        if tags[:area] == :representations, do: Bier.ConformanceServer.reset_auto_pk_sequence!()
+        :ok
+      end
     end
   end
 
