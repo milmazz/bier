@@ -19,9 +19,9 @@ before writing code. It encodes findings that are expensive to re-derive.
 > against PostgREST v16.0 must pass against Bier, against the same Postgres
 > fixture DB. PostgREST is the ground truth; cases cite the exact source line.
 
-> **Pinned version: v16.0** (submodule commit `7a29dff`, three commits past
-> tag `v16.0.0-suite.3`, which added the spread/aggregate cases 11100–11138;
-> re-pin to a tag once upstream cuts one). `spec/` was re-synced from v14.12 to
+> **Pinned version: v16.0** (submodule tag `v16.0.0-suite.4`, which folded in
+> the spread/aggregate cases 11100–11138 and added the `--ready` CLI cases
+> 1745–1748). `spec/` was re-synced from v14.12 to
 > v16.0 in one spec-only pass (532 → 762 cases, every `source:` re-pinned),
 > which moved the target ahead of `lib/` by 100 failures. `lib/` has since
 > caught up: the suite is green, all 17 areas at zero, and issues #93–#96 are
@@ -234,7 +234,7 @@ from PostgREST" carries the rationale. `:jwt`, `:jsonpath` and `:cli` are no
 longer pending: JWT and JSONPath cases run in the normal suite and CLI cases run
 directly via `Bier.CliCase`.
 
-Counts and bands below are the **801**-case v16.0 tree, derived from disk;
+Counts and bands below are the **805**-case v16.0 tree, derived from disk;
 `spec/INDEX.md` is the authoritative cross-reference (`spec/HARNESS.md` §7
 carries the same table, implementer-agnostic) and a case's `feature:` prefix
 — not its id neighbourhood — decides its area. The table below adds one
@@ -263,7 +263,7 @@ the id bands/counts themselves if the two ever drift after a pin bump.
 | headers | 1550–1584 | 35 | `headers` (+v1/v2/private/special) | Prefer (incl. v16 `timezone`, #94), Accept/Content-Profile, Location, Content-Location, `Vary`, GUC response headers |
 | content_negotiation | 1600–1649, 12400–12401 | 52 | `test` | JSON/CSV/GeoJSON/octet-stream/text, `Accept` negotiation & precedence, singular, nulls-stripped, custom media handlers, errors |
 | openapi | 1650–1688 | 39 | `openapi` (functions) + `openapi_no_comment` | root spec, defaults, comments, table/types/rpc/security, modes |
-| config | 1700–1744 | 45 | `config` | sources/aliases/validation/coercion/precedence, `db-max-rows`, `db-tx-end`, app-settings, CORS, `--dump-config` (via `Bier.CliCase`) |
+| config | 1700–1748 | 49 | `config` | sources/aliases/validation/coercion/precedence, `db-max-rows`, `db-tx-end`, app-settings, CORS, `--dump-config` and `--ready` (via `Bier.CliCase`) |
 | observability | 1750–1771 | 22 | `observability` | `Server-Timing`, trace header passthrough, log level, `Server:` header |
 | domain_representations | 1800–1836 | 37 | `domain_representations` (+`test` for 1822) | domain cast read/write/filter/default representations, `?columns=` on views |
 
