@@ -94,6 +94,13 @@ and this project adheres to
   out of connection slots: the in-database config read retries a checkout the
   pool dropped as backpressure, up to the acquisition deadline. An endpoint
   nothing is listening on still fails immediately, now naming the host and port.
+- A query parameter whose percent-escape decodes to invalid UTF-8 (e.g.
+  `?channel=%e2%28%a1`) no longer crashes the error response it triggers: the
+  stdlib `JSON` encoder rejects non-UTF-8 binaries outright, and an unknown
+  channel/table/relation echoes the client's own (invalid) input back in
+  `details`. `Bier.ErrorPayload` — the single choke point every error body
+  serializes through — now scrubs invalid byte sequences before encoding
+  instead of letting the request answer a raw 500 (#142).
 
 Conformance `spec/` bumped to `v16.0.0-suite.4`, which adds the 39
 spread/aggregate cases 11100–11138 and the four `--ready` health-check cases

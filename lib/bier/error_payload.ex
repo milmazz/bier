@@ -78,9 +78,35 @@ defmodule Bier.ErrorPayload do
 
     members =
       Enum.map_intersperse(pairs, ",", fn {key, value} ->
-        [json.encode_to_iodata!(key), ?:, json.encode_to_iodata!(value)]
+        [json.encode_to_iodata!(key), ?:, json.encode_to_iodata!(sanitize(value))]
       end)
 
     IO.iodata_to_binary([?{, members, ?}])
+  end
+
+  # `details`/`message`/`hint` routinely echo attacker-controlled text (an
+  # unknown channel/table/column name, a malformed relation) straight from the
+  # request. `URI.decode_www_form/1` never validates UTF-8 — an invalid
+  # percent-escape (e.g. `%e2%28%a1`) decodes to a binary that survives every
+  # step up to here, where the stdlib `JSON` encoder rejects it outright
+  # (`{:invalid_byte, _}`), turning the response meant to report the original
+  # error into an unhandled 500. Scrub rather than trust it.
+  defp sanitize(value) when is_binary(value) do
+    if String.valid?(value), do: value, else: scrub_utf8(value, [])
+  end
+
+  defp sanitize(value), do: value
+
+  defp scrub_utf8(binary, acc) do
+    case :unicode.characters_to_binary(binary) do
+      valid when is_binary(valid) ->
+        IO.iodata_to_binary(Enum.reverse([valid | acc]))
+
+      {tag, good, <<_bad, rest::binary>>} when tag in [:error, :incomplete] ->
+        scrub_utf8(rest, ["�", good | acc])
+
+      {tag, good, <<>>} when tag in [:error, :incomplete] ->
+        IO.iodata_to_binary(Enum.reverse([good | acc]))
+    end
   end
 end

@@ -41,6 +41,27 @@ defmodule Bier.EventsHttpTest do
     assert resp.headers["proxy-status"] == ["Bier; error=BIER002"]
   end
 
+  # `%e2%28%a1` percent-decodes to a byte sequence that is not valid UTF-8
+  # (`URI.decode_www_form/1` never validates it). A raw socket is required:
+  # an HTTP client (Req/Mint) refuses to even send a request target with a
+  # malformed percent-escape, so the only way to put invalid bytes on the
+  # wire is to write the request line ourselves (see #142).
+  defp raw_get(port, target) do
+    {:ok, sock} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false], 1_000)
+    :ok = :gen_tcp.send(sock, "GET #{target} HTTP/1.1\r\nhost: 127.0.0.1\r\n\r\n")
+    data = recv_until(sock, "\r\n\r\n")
+    [status_line | _] = String.split(data, "\r\n")
+    status_line
+  end
+
+  test "a channel with an invalid-UTF-8 percent-escape is 404, not a raw 500", %{port: port} do
+    assert raw_get(port, "/events?channel=%e2%28%a1") == "HTTP/1.1 404 Not Found"
+  end
+
+  test "a table with an invalid-UTF-8 percent-escape is 404, not a raw 500", %{port: port} do
+    assert raw_get(port, "/events?table=%e2%28%a1") == "HTTP/1.1 404 Not Found"
+  end
+
   test "GET /events with a channel outside the allowlist is 404 BIER001", %{port: port} do
     resp = Req.get!("http://127.0.0.1:#{port}/events?channel=nope", retry: false)
     assert resp.status == 404
