@@ -74,7 +74,10 @@ defmodule Bier.Config do
           admin_server_port: pos_integer() | nil,
           events_channels: [String.t()],
           events_path: String.t(),
-          events_heartbeat_interval: pos_integer()
+          events_heartbeat_interval: pos_integer(),
+          events_publication: String.t() | nil,
+          events_buffer_size: pos_integer(),
+          events_max_tx_events: pos_integer()
         }
 
   defstruct [
@@ -98,6 +101,7 @@ defmodule Bier.Config do
     :server_unix_socket,
     :openapi_server_proxy_uri,
     :db_pool_max_idletime,
+    :events_publication,
     name: Bier,
     server_host: "!4",
     server_unix_socket_mode: "660",
@@ -128,7 +132,9 @@ defmodule Bier.Config do
     jwt_cache_max_entries: 1000,
     events_channels: [],
     events_path: "events",
-    events_heartbeat_interval: 15_000
+    events_heartbeat_interval: 15_000,
+    events_buffer_size: 1024,
+    events_max_tx_events: 10_000
   ]
 
   @doc """

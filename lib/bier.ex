@@ -518,6 +518,29 @@ defmodule Bier do
         comment frame is written. Keeps idle proxies from dropping the
         stream and bounds dead-client detection.
         """
+      ],
+      events_publication: [
+        type: {:or, [:string, nil]},
+        default: env(:events_publication, nil),
+        doc: """
+        Name of an operator-created `PUBLICATION` to stream as a WAL change feed
+        on the events endpoint. `nil` (the default) disables the feature; when
+        set, boot validates `wal_level=logical`, the publication's existence,
+        and the connection role's `REPLICATION` attribute.
+        """
+      ],
+      events_buffer_size: [
+        type: :pos_integer,
+        default: env(:events_buffer_size, 1024),
+        doc: "Ring-buffer entries retained per table for `Last-Event-ID` resume."
+      ],
+      events_max_tx_events: [
+        type: :pos_integer,
+        default: env(:events_max_tx_events, 10_000),
+        doc: """
+        Per-transaction event cap: larger transactions are dropped from the feed
+        and affected tables receive a `bier:reset` frame.
+        """
       ]
     ]
   end
