@@ -106,6 +106,30 @@ defmodule Bier.Wal.EventsHttpTest do
     %{port: port, name: name}
   end
 
+  # Boots a third instance with `events_publication` unset entirely (nil) —
+  # `events_channels` stays non-empty so `/events` is still routed at all —
+  # to prove the "table subscriptions disabled" refusal renders exactly like
+  # every other table refusal (Important finding #1).
+  defp start_publication_disabled_instance! do
+    port = TestPorts.free_port()
+    name = :"wal_http_nopub_#{System.unique_integer([:positive])}"
+
+    opts =
+      Bier.ConformanceServer.base_opts()
+      |> Keyword.merge(
+        name: name,
+        pool_size: 1,
+        db_schemas: [@schema],
+        db_channel_enabled: false,
+        events_channels: ["chat"],
+        router: [port: port, scheme: :http]
+      )
+
+    start_supervised!({Bier, opts})
+    TestPorts.wait_until_listening(port)
+    port
+  end
+
   # Waits for THIS instance's own replication slot specifically (not just
   # "some" consumer streaming): a test may run a second Bier instance
   # concurrently (see `start_auth_instance!/0`), and `Bier.Wal.Consumer`
@@ -139,7 +163,10 @@ defmodule Bier.Wal.EventsHttpTest do
 
     Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('hello')", [])
 
-    frame = SSETestClient.recv_until(sock, "\n\n")
+    # "data: {" (not "\n\n") — a `: keepalive\n\n` heartbeat frame satisfies
+    # "\n\n" too, so on a slow WAL round trip that ambiguous pattern can
+    # return a keepalive instead of the event this test is waiting for.
+    frame = SSETestClient.recv_until(sock, "data: {")
     assert frame =~ "event: orders\n"
     assert frame =~ ~r/id: [0-9A-F]+\/[0-9A-F]+\.0\n/
     data = frame |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
@@ -160,7 +187,9 @@ defmodule Bier.Wal.EventsHttpTest do
     SSETestClient.wait_until(fn -> Bier.Events.Registry.subscriber_count(name, "chat") == 1 end)
     SSETestClient.wait_until_listener_connected(name)
     SSETestClient.notify(name, "chat", ~s({"msg":"hi"}))
-    chat = SSETestClient.recv_until(sock, "\n\n")
+    # "data: {" — same ambiguity as above; the chat payload is also a JSON
+    # object, so this discriminates from a keepalive just as well.
+    chat = SSETestClient.recv_until(sock, "data: {")
     assert chat =~ "event: chat\n"
 
     Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('mux')", [])
@@ -171,7 +200,8 @@ defmodule Bier.Wal.EventsHttpTest do
     assert wal =~ "event: orders\n" and wal =~ ~s("note":"mux")
   end
 
-  test "unknown / unpublished / RLS tables get the uniform 404 payload", %{port: port} do
+  test "unknown / unpublished / RLS / publication-disabled tables get the uniform 404 payload",
+       %{port: port} do
     bodies =
       for table <- ["missing", "hidden", "locked"] do
         resp = Req.get!("http://127.0.0.1:#{port}/events?table=#{table}", retry: false)
@@ -181,7 +211,20 @@ defmodule Bier.Wal.EventsHttpTest do
         resp.body |> Bier.json_library().encode!() |> String.replace(table, "T")
       end
 
+    disabled_port = start_publication_disabled_instance!()
+
+    disabled_resp =
+      Req.get!("http://127.0.0.1:#{disabled_port}/events?table=orders", retry: false)
+
+    assert disabled_resp.status == 404
+
+    disabled_body =
+      disabled_resp.body |> Bier.json_library().encode!() |> String.replace("orders", "T")
+
     assert [b, b, b] = bodies, "the three refusals must be indistinguishable"
+
+    assert disabled_body == b,
+           "a disabled-publication refusal must be indistinguishable from the others too"
   end
 
   test "a role with partial column grants sees only its columns", %{db: db} do
@@ -194,7 +237,8 @@ defmodule Bier.Wal.EventsHttpTest do
     SSETestClient.recv_until(sock, ": connected")
     Postgrex.query!(db, "INSERT INTO #{@schema}.orders (id, note) VALUES (7, 'secret')", [])
 
-    frame = SSETestClient.recv_until(sock, "\n\n")
+    # "data: {" — same keepalive ambiguity as the other WAL-streaming tests.
+    frame = SSETestClient.recv_until(sock, "data: {")
     data = frame |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
     assert data["row"] == %{"id" => 7}
     refute frame =~ "secret"

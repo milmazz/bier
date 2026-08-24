@@ -106,12 +106,16 @@ defmodule Bier.Events do
 
   defp authorize_tables(_conn, [], _config), do: {:ok, %{}}
 
-  # WAL table subscriptions require `events_publication`; a `table=` request
-  # against an instance with no publication configured shares the same
-  # uniform refusal as an unpublished/unauthorized table (no oracle either
-  # way — a client cannot tell "not enabled" from "not visible to you").
-  defp authorize_tables(_conn, _tables, %{events_publication: nil}),
-    do: {:error, {:events_unknown_table, "table subscriptions are not enabled"}}
+  # WAL table subscriptions require `events_publication`. `tables` is
+  # guaranteed non-empty here (the `[]` clause above precedes this one), so
+  # naming the first REQUESTED table renders through the exact same
+  # `{:events_unknown_table, "schema.table"}` shape and BIER003 envelope as
+  # an unpublished/RLS-enabled/unprivileged table — the client only ever
+  # sees its own table name echoed back, the same way it would if the
+  # publication were configured, so this still can't be used to learn
+  # whether table subscriptions are enabled at all.
+  defp authorize_tables(_conn, [{schema, table} | _], %{events_publication: nil}),
+    do: {:error, {:events_unknown_table, schema <> "." <> table}}
 
   defp authorize_tables(conn, tables, config) do
     role =
@@ -124,9 +128,11 @@ defmodule Bier.Events do
     Authorize.check(pool, role, config.events_publication, tables)
   rescue
     # A verified JWT can carry a role absent from pg_roles (`has_column_
-    # privilege` then raises `undefined_object`); surface it through the
-    # ordinary Postgrex-error path instead of a raw 500.
-    error in Postgrex.Error -> {:error, error}
+    # privilege` then raises `undefined_object`); a checked-out connection
+    # can also be lost/time out mid-check. Surface both through the ordinary
+    # Postgrex/DBConnection error paths (FallbackController already maps
+    # both) instead of crashing to a raw 500.
+    error in [Postgrex.Error, DBConnection.ConnectionError] -> {:error, error}
   end
 
   # The browser EventSource API cannot set request headers, so this endpoint
