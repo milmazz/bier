@@ -408,6 +408,25 @@ defmodule Bier.CLI.ConfigTest do
       assert resolved["db-max-rows"] == :unset
     end
 
+    test "in-db source: db-aggregates-enabled resolves from the database" do
+      # The behavior the whitelist entry buys: a role setting actually reaches
+      # the resolved config and the start opts, like every other db-settable
+      # bool (#146 item 4).
+      {:ok, resolved} = Config.load(%{}, nil, %{}, %{"db-aggregates-enabled" => "true"})
+      assert resolved["db-aggregates-enabled"] == true
+      assert Config.to_start_opts(resolved)[:db_aggregates_enabled] == true
+    end
+
+    test "in-db source: a malformed db-aggregates-enabled falls back, never to true" do
+      # The surface a role setting opens up: a junk value must not coerce to a
+      # truthy config that turns aggregates on for an unprivileged caller.
+      # `coerce(:bool, _)` reads it as Nothing and `resolve/5` lands on the
+      # key's default, which is off.
+      {:ok, resolved} = Config.load(%{}, nil, %{}, %{"db-aggregates-enabled" => "banana"})
+      assert resolved["db-aggregates-enabled"] == false
+      assert Config.to_start_opts(resolved)[:db_aggregates_enabled] == false
+    end
+
     test "db_settings_names/0 is upstream's whitelist ∩ implemented keys" do
       names = Config.db_settings_names()
 
@@ -422,12 +441,21 @@ defmodule Bier.CLI.ConfigTest do
       assert "pgrst.url_use_legacy_target_names" in names
       assert "pgrst.server_timing_enabled" in names
 
+      # db_aggregates_enabled is the FIRST entry of upstream's dbSettingsNames
+      # (Config/Database.hs#L47), so a role can turn aggregates on for itself.
+      # This assertion previously read the other way round, on a claim nothing
+      # checked (#146 item 4).
+      assert "pgrst.db_aggregates_enabled" in names
+
       # Non-reloadable / unimplemented keys stay out.
       refute "pgrst.server_port" in names
       refute "pgrst.db_config" in names
       refute "pgrst.log_level" in names
 
-      assert length(names) == 21
+      # Upstream lists 25 names; the three Bier does not implement
+      # (db_pre_config, db_hoisted_tx_settings, jwt_cache_max_lifetime) are the
+      # only ones missing here.
+      assert length(names) == 22
     end
 
     test "dump output is reparse-stable (case 1726)" do

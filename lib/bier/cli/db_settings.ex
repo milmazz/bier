@@ -86,8 +86,11 @@ defmodule Bier.CLI.DbSettings do
   end
 
   # Is anything listening on the resolved endpoint? `Config.connection_opts/2`
-  # always resolves a hostname and port (defaulting to localhost:5432), so this
-  # is a well-defined TCP check.
+  # always resolves a hostname and port (defaulting to localhost:5432) and
+  # never emits Postgrex's `:socket`/`:socket_dir`, so this is a well-defined
+  # TCP check. That coupling is why unix-socket support would have to teach
+  # this probe about `{:local, path}` (or skip it) rather than let it reject a
+  # good socket configuration before Postgrex sees it — see #146.
   defp probe(opts) do
     host = to_charlist(opts[:hostname])
 

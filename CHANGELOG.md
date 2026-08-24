@@ -15,8 +15,8 @@ and this project adheres to
   a request's `select`. When off, any aggregate — including one inside a spread
   embed — is rejected with 400 `PGRST123`, matching PostgREST v16. When on,
   aggregates on a one-to-many or many-to-many spread are rejected with 400
-  `PGRST127`. It is settable from the environment, the config file and the CLI
-  flag, but — like upstream — not from the in-database config source.
+  `PGRST127`. Settable from the environment, the config file, the CLI flag and
+  — as upstream's `dbSettingsNames` allows — the in-database config source.
 - Aggregates inside spread embeds now hoist the enclosing `GROUP BY`, so
   `select=total:amount.sum(),...category(owner)` groups by the spread's columns
   instead of erroring or returning ungrouped rows.

@@ -96,18 +96,12 @@ defmodule Bier.CLI do
     end
   end
 
-  # http-client rejects an unparseable URL (a negative admin-server-port, say)
-  # with InvalidUrlException *before* opening a socket, so the failure is
-  # decided here rather than in the probe — a distinct error flavor from the
-  # connection-refused message every transport failure collapses into.
-  defp ready_url(host, port) do
-    url = "http://#{wrap_ipv6(host)}:#{port}/ready"
-
-    case Ready.validate_url(url) do
-      :ok -> Ready.check(url)
-      {:error, message} -> error(message)
-    end
-  end
+  # `check/1` owns the whole probe, an unparseable URL included: http-client
+  # rejects one (a negative admin-server-port, say) with InvalidUrlException
+  # before opening a socket, and `check/1` answers that with the same result
+  # shape this would. Validating here as well would put one rule in two places.
+  defp ready_url(host, port),
+    do: Ready.check("http://#{wrap_ipv6(host)}:#{port}/ready")
 
   # IPv6 literals need brackets in a URL (":" is the port separator).
   defp wrap_ipv6(host) do
