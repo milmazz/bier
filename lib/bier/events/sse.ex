@@ -25,12 +25,18 @@ defmodule Bier.Events.SSE do
 
   @doc "One event frame: `event:` = channel, `data:` = payload verbatim."
   @spec frame(String.t(), String.t()) :: iodata()
-  def frame(channel, payload) do
+  def frame(channel, payload), do: frame_iodata(channel, payload, [])
+
+  @doc "Event frame carrying an `id:` field (the WAL change feed's cursor)."
+  @spec frame(String.t(), String.t(), String.t()) :: iodata()
+  def frame(channel, payload, id), do: frame_iodata(channel, payload, ["id: ", id, "\n"])
+
+  defp frame_iodata(channel, payload, id_line) do
     data =
       payload
       |> String.split(@line_break)
       |> Enum.map(&["data: ", &1, "\n"])
 
-    ["event: ", channel, "\n", data, "\n"]
+    ["event: ", channel, "\n", id_line, data, "\n"]
   end
 end
