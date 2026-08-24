@@ -43,18 +43,57 @@ defmodule Bier.Wal.BufferTest do
 
   test "an empty table never forces a reset" do
     {name, gen} = start!(2)
+
+    # Anchor the epoch on a DIFFERENT table first: a generation that has
+    # issued no ids at all resets every cursor (see the epoch-floor test
+    # below), so what this test is about — a table with no history of its
+    # own contributing no reset — is only observable once some id exists.
+    :ok = Buffer.append(name, [{cursor(1), @orders, event(1)}])
+
     assert {:ok, []} = Buffer.replay_after(name, [@items], cursor(1), gen)
   end
 
   test "generation mismatch resets and new_generation clears history" do
     {name, gen} = start!(10)
-    :ok = Buffer.append(name, [{cursor(1), @orders, event(1)}])
+    :ok = Buffer.append(name, [{cursor(5), @orders, event(5)}])
 
-    assert Buffer.replay_after(name, [@orders], cursor(0), gen - 1) == :reset
+    assert Buffer.replay_after(name, [@orders], cursor(5), gen - 1) == :reset
 
     new_gen = Buffer.new_generation(name)
     assert new_gen == gen + 1
-    assert {:ok, []} = Buffer.replay_after(name, [@orders], cursor(0), new_gen)
+
+    # Anchor the new epoch BELOW the cleared entry's cursor: replaying from
+    # that anchor comes back empty, which it could only do if the bump
+    # really did drop cursor(5)'s entry — it sorts after the anchor.
+    :ok = Buffer.append(name, [{cursor(1), @orders, event(1)}])
+    assert {:ok, []} = Buffer.replay_after(name, [@orders], cursor(1), new_gen)
+  end
+
+  test "a cursor minted before the current epoch resets, even at the current generation" do
+    {name, _gen} = start!(10)
+
+    :ok = Buffer.append(name, [{cursor(5), @orders, event(5)}])
+    old = cursor(5)
+
+    # The generation the endpoint hands back is the one it just READ from
+    # this Buffer, so the generation guard can never fire for a real client
+    # (`Bier.Events.replay/4`); the epoch floor is what has to catch a
+    # cursor minted before the last (re)start. Nothing has been appended
+    # since the bump, so no id this Buffer could honor exists at all.
+    new_gen = Buffer.new_generation(name)
+    assert Buffer.replay_after(name, [@orders], old, new_gen) == :reset
+
+    # The first append after the bump anchors the epoch floor: a cursor
+    # older than it belongs to the previous epoch and still resets, while
+    # replay from the floor itself works normally.
+    :ok =
+      Buffer.append(name, [{cursor(9), @orders, event(9)}, {cursor(9, 1), @orders, event(10)}])
+
+    assert Buffer.replay_after(name, [@orders], old, new_gen) == :reset
+    assert Buffer.replay_after(name, [@orders], cursor(8), new_gen) == :reset
+
+    assert {:ok, [{cursor(9, 1), @orders, event(10)}]} ==
+             Buffer.replay_after(name, [@orders], cursor(9), new_gen)
   end
 
   test "drop marks a table as having lost history until a new entry re-anchors it" do
@@ -62,12 +101,15 @@ defmodule Bier.Wal.BufferTest do
     :ok = Buffer.append(name, [{cursor(1), @orders, event(1)}, {cursor(1, 1), @items, event(2)}])
     :ok = Buffer.drop(name, [@orders])
 
-    # The undropped table is unaffected by the drop.
+    # The undropped table is unaffected by the drop. cursor(1) — the epoch
+    # floor here, this generation's first appended cursor — rather than
+    # cursor(0): anything below the floor resets on its own, which would
+    # mask the per-table behavior under test.
     assert {:ok, [{cursor(1, 1), @items, event(2)}]} ==
-             Buffer.replay_after(name, [@items], cursor(0), gen)
+             Buffer.replay_after(name, [@items], cursor(1), gen)
 
     # A dropped table with no entries yet resets for every cursor.
-    assert Buffer.replay_after(name, [@orders], cursor(0), gen) == :reset
+    assert Buffer.replay_after(name, [@orders], cursor(1), gen) == :reset
 
     # Once a new entry lands, it becomes the new floor: a cursor at-or-past
     # it is fine, but any cursor from before the drop still resets.

@@ -34,6 +34,12 @@ defmodule Bier.Wal.EventsHttpTest do
     Postgrex.query!(db, "DROP SCHEMA IF EXISTS #{@schema} CASCADE", [])
     Postgrex.query!(db, "CREATE SCHEMA #{@schema}", [])
     Postgrex.query!(db, "CREATE TABLE #{@schema}.orders (id serial PRIMARY KEY, note text)", [])
+    Postgrex.query!(db, "CREATE TABLE #{@schema}.items (id serial PRIMARY KEY, sku text)", [])
+    Postgrex.query!(db, "CREATE TABLE #{@schema}.tracked (id int PRIMARY KEY, note text)", [])
+    # REPLICA IDENTITY FULL logs the whole pre-image, which is what makes an
+    # UPDATE's `old` (and a DELETE's non-key columns) observable at all —
+    # the default (`DEFAULT`) would only log the primary key.
+    Postgrex.query!(db, "ALTER TABLE #{@schema}.tracked REPLICA IDENTITY FULL", [])
     Postgrex.query!(db, "CREATE TABLE #{@schema}.hidden (id int)", [])
     Postgrex.query!(db, "CREATE TABLE #{@schema}.locked (id int)", [])
     Postgrex.query!(db, "ALTER TABLE #{@schema}.locked ENABLE ROW LEVEL SECURITY", [])
@@ -44,8 +50,8 @@ defmodule Bier.Wal.EventsHttpTest do
 
     Postgrex.query!(
       db,
-      "CREATE PUBLICATION #{@pub} FOR TABLE #{@schema}.orders, #{@schema}.locked, " <>
-        "#{@other_schema}.orders",
+      "CREATE PUBLICATION #{@pub} FOR TABLE #{@schema}.orders, #{@schema}.items, " <>
+        "#{@schema}.tracked, #{@schema}.locked, #{@other_schema}.orders",
       []
     )
 
@@ -184,22 +190,37 @@ defmodule Bier.Wal.EventsHttpTest do
   # drop the event (fire-and-forget by design) and hang the test on
   # heartbeats until ExUnit's timeout.
   defp wait_wal_streaming(db, name) do
+    SSETestClient.wait_until(fn -> not Enum.empty?(streaming_slots(db, name)) end)
+  end
+
+  # The slot names THIS instance currently has streaming.
+  defp streaming_slots(db, name) do
     prefix = "bier_#{:erlang.phash2(name)}_%"
 
-    SSETestClient.wait_until(fn ->
-      %{rows: rows} =
-        Postgrex.query!(
-          db,
-          """
-          SELECT 1 FROM pg_stat_replication sr
-          JOIN pg_replication_slots rs ON rs.active_pid = sr.pid
-          WHERE rs.slot_name LIKE $1 AND sr.state = 'streaming'
-          """,
-          [prefix]
-        )
+    %{rows: rows} =
+      Postgrex.query!(
+        db,
+        """
+        SELECT rs.slot_name FROM pg_stat_replication sr
+        JOIN pg_replication_slots rs ON rs.active_pid = sr.pid
+        WHERE rs.slot_name LIKE $1 AND sr.state = 'streaming'
+        """,
+        [prefix]
+      )
 
-      rows != []
-    end)
+    rows |> List.flatten() |> MapSet.new()
+  end
+
+  # "Some slot of this instance is streaming" does not prove a RESTART
+  # finished: right after a kill, `pg_stat_replication` can still list the
+  # dead connection's slot. Wait for a slot name that did not exist before
+  # the kill instead — the consumer mints a fresh one on every reconnect.
+  # Generous retries: `auto_reconnect` backs off ~500ms before retrying.
+  defp wait_wal_restarted(db, name, before) do
+    SSETestClient.wait_until(
+      fn -> Enum.any?(streaming_slots(db, name), &(&1 not in before)) end,
+      500
+    )
   end
 
   # A revoked/closed stream still writes the chunked terminator
@@ -222,6 +243,12 @@ defmodule Bier.Wal.EventsHttpTest do
     end
   end
 
+  # The `data:` payload of the LAST frame in `raw`, decoded. Chunked framing
+  # is tolerated the same way `recv_until/3` tolerates it: by splitting on
+  # the `data: ` marker rather than parsing the transfer encoding.
+  defp decode_frame(raw),
+    do: raw |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+
   test "insert arrives as a typed frame with an id", %{db: db, port: port} do
     sock = SSETestClient.connect_sse(port, "/events?table=orders")
     SSETestClient.recv_until(sock, ": connected")
@@ -238,6 +265,39 @@ defmodule Bier.Wal.EventsHttpTest do
     assert data["type"] == "INSERT"
     assert data["schema"] == @schema and data["table"] == "orders"
     assert data["row"]["note"] == "hello"
+  end
+
+  test "update and delete carry the logged old image under REPLICA IDENTITY FULL", %{
+    db: db,
+    port: port
+  } do
+    sock = SSETestClient.connect_sse(port, "/events?table=tracked")
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.tracked (id, note) VALUES (1, 'before')", [])
+    assert decode_frame(SSETestClient.recv_until(sock, "data: {"))["type"] == "INSERT"
+
+    Postgrex.query!(db, "UPDATE #{@schema}.tracked SET note = 'after' WHERE id = 1", [])
+    update = SSETestClient.recv_until(sock, "data: {")
+    assert update =~ "event: tracked\n"
+
+    updated = decode_frame(update)
+    assert updated["type"] == "UPDATE"
+    assert updated["row"] == %{"id" => 1, "note" => "after"}
+    # REPLICA IDENTITY FULL ⇒ the whole pre-image, announced as such so a
+    # client can tell it apart from the key-only image a DEFAULT identity
+    # would give it.
+    assert updated["old"] == %{"id" => 1, "note" => "before"}
+    assert updated["old_kind"] == "full"
+
+    Postgrex.query!(db, "DELETE FROM #{@schema}.tracked WHERE id = 1", [])
+    deleted = decode_frame(SSETestClient.recv_until(sock, "data: {"))
+    assert deleted["type"] == "DELETE"
+    assert deleted["old"] == %{"id" => 1, "note" => "after"}
+    assert deleted["old_kind"] == "full"
+    # A DELETE has no post-image at all: the key must be absent, not null.
+    refute Map.has_key?(deleted, "row")
+    refute Map.has_key?(deleted, "unchanged")
   end
 
   test "qualified names and channel+table multiplex on one connection", %{
@@ -388,6 +448,43 @@ defmodule Bier.Wal.EventsHttpTest do
     assert data["row"]["note"] == "two"
   end
 
+  test "one cursor resumes every table of a multi-table subscription", %{db: db, port: port} do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders,items")
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('o-1')", [])
+    SSETestClient.recv_until(sock, "data: {")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.items (sku) VALUES ('i-1')", [])
+    last = SSETestClient.recv_until(sock, "data: {")
+    [_, id] = Regex.run(~r/id: ([^\n]+)\n/, last)
+    :gen_tcp.close(sock)
+
+    # Missed while disconnected, on BOTH tables. LSNs are global, so the
+    # single `Last-Event-ID` SSE gives us covers the whole subscription: the
+    # reconnect must replay both tables from that one cursor.
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('o-2')", [])
+    Postgrex.query!(db, "INSERT INTO #{@schema}.items (sku) VALUES ('i-2')", [])
+
+    sock2 = SSETestClient.connect_sse(port, "/events?table=orders,items&last_event_id=#{id}")
+    # Wait for the LATER of the two (items): its arrival means the orders
+    # frame is already in the accumulated buffer.
+    replay = SSETestClient.recv_until(sock2, "event: items\n")
+
+    frames =
+      ~r/event: ([^\n]+)\nid: ([^\n]+)\ndata: (\{.*?\})\n/
+      |> Regex.scan(replay)
+      |> Enum.map(fn [_, name, frame_id, data] -> {name, frame_id, JSON.decode!(data)} end)
+
+    assert [{"orders", first_id, orders}, {"items", second_id, items}] = frames
+    assert orders["row"]["note"] == "o-2"
+    assert items["row"]["sku"] == "i-2"
+
+    # Replay order is cursor order, not per-table grouping.
+    assert {:ok, first} = Bier.Wal.Cursor.parse(first_id)
+    assert {:ok, second} = Bier.Wal.Cursor.parse(second_id)
+    assert Bier.Wal.Cursor.compare(first, second) == :lt
+  end
+
   test "an unknown cursor produces an immediate bier:reset", %{db: db} do
     %{port: port, name: name} = start_small_buffer_instance!()
     wait_wal_streaming(db, name)
@@ -435,6 +532,46 @@ defmodule Bier.Wal.EventsHttpTest do
 
     data = frame |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
     assert data["reason"] == "stream_restarted"
+  end
+
+  test "a cursor from before a consumer restart resets instead of silently skipping history", %{
+    db: db,
+    port: port,
+    name: name
+  } do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(sock, ": connected")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('pre-restart')", [])
+    frame = SSETestClient.recv_until(sock, "data: {")
+    [_, id] = Regex.run(~r/id: ([^\n]+)\n/, frame)
+    :gen_tcp.close(sock)
+
+    before = streaming_slots(db, name)
+    [{pid, _}] = Registry.lookup(Bier.Registry, {name, Bier.Wal.Consumer})
+    Process.exit(pid, :kill)
+    wait_wal_restarted(db, name, before)
+
+    # Anchor the NEW epoch before resuming: with history restarted and
+    # nothing appended yet every cursor resets trivially, which would prove
+    # nothing about this cursor specifically. The live spectator is what
+    # makes the anchoring deterministic — the consumer appends to the
+    # Buffer before it broadcasts, so a delivered frame means the post-
+    # restart event is already in history.
+    spectator = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(spectator, ": connected")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('post-restart')", [])
+    SSETestClient.recv_until(spectator, "data: {")
+
+    # The cursor predates the restart, so the events between it and the new
+    # epoch's first id are gone for good: the contract is an announced
+    # reset, never a quiet resume from post-restart history.
+    sock2 = SSETestClient.connect_sse(port, "/events?table=orders&last_event_id=#{id}")
+    first = SSETestClient.recv_until(sock2, "data: {")
+
+    assert first =~ "event: bier:reset\n",
+           "a pre-restart cursor must reset, not silently skip the gap: #{inspect(first)}"
+
+    assert decode_frame(first)["reason"] == "history_evicted"
   end
 
   test "replay does not leak filtered columns for a partial-grant role", %{db: db} do

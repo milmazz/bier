@@ -9,6 +9,11 @@ defmodule Bier.Wal.Authorize do
   role zero visible columns. All failures share ONE error shape so the
   endpoint cannot be used as an existence oracle (the #81 lesson): callers
   can't distinguish "doesn't exist" from "exists but you can't see it".
+
+  Only ordinary tables (`relkind = 'r'`) are subscribable: views, foreign
+  tables and — deliberately, in v1 — partitioned parents all fail the same
+  way, since WAL routes changes per child partition, so subscribing to the
+  parent would silently deliver nothing.
   """
 
   @type table_key :: {String.t(), String.t()}

@@ -71,15 +71,24 @@ defmodule Bier.Wal.ConsumerTest do
   end
 
   test "commits land in the buffer with sequential cursors", %{db: db, name: name} do
+    table = {@schema, "orders"}
     gen = Buffer.generation(name)
+
+    # An anchoring commit first, whose broadcast cursor is what the replay
+    # below starts from. "Everything in the buffer" cannot be spelled
+    # `{{0, 0}, 0}` any more: a cursor older than this generation's first
+    # appended id names pre-restart history and resets by design.
+    :ok = Bier.Events.Registry.register_table(name, table)
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('anchor')", [])
+    assert_receive {:bier_wal_event, ^table, anchor, %{kind: :insert}}, 5_000
+
     Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('a'), ('b')", [])
 
     SSETestClient.wait_until(fn ->
-      match?({:ok, [_, _]}, Buffer.replay_after(name, [{@schema, "orders"}], {{0, 0}, 0}, gen))
+      match?({:ok, [_, _]}, Buffer.replay_after(name, [table], anchor, gen))
     end)
 
-    {:ok, [{c1, _, e1}, {c2, _, e2}]} =
-      Buffer.replay_after(name, [{@schema, "orders"}], {{0, 0}, 0}, gen)
+    {:ok, [{c1, _, e1}, {c2, _, e2}]} = Buffer.replay_after(name, [table], anchor, gen)
 
     assert e1.kind == :insert and e1.row["note"] == "a"
     assert e2.row["note"] == "b"
@@ -114,8 +123,18 @@ defmodule Bier.Wal.ConsumerTest do
     db: db,
     name: name
   } do
-    :ok = Bier.Events.Registry.register_table(name, {@schema, "orders"})
+    table = {@schema, "orders"}
+    :ok = Bier.Events.Registry.register_table(name, table)
     gen = Buffer.generation(name)
+
+    # A one-row transaction fits under the cap of 1: it anchors the Buffer's
+    # epoch floor and hands us a cursor that is genuinely replayable right
+    # up until the overflow below, so the reset asserted at the end can only
+    # come from the dropped history — not from a cursor that predated this
+    # generation's first id to begin with.
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('anchor')", [])
+    assert_receive {:bier_wal_event, ^table, anchor, %{kind: :insert}}, 5_000
+    assert {:ok, []} = Buffer.replay_after(name, [table], anchor, gen)
 
     # One transaction, two insert events — one over the cap of 1.
     Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('x'), ('y')", [])
@@ -126,7 +145,7 @@ defmodule Bier.Wal.ConsumerTest do
     # discarded, and Buffer.drop marked the table as having lost history: a
     # cursor from before the overflow — same generation — now resets rather
     # than replaying anything.
-    assert Buffer.replay_after(name, [{@schema, "orders"}], {{0, 0}, 0}, gen) == :reset
+    assert Buffer.replay_after(name, [table], anchor, gen) == :reset
   end
 
   test "boot fails fast when the publication does not exist" do

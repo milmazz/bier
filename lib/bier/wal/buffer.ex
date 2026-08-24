@@ -8,6 +8,16 @@ defmodule Bier.Wal.Buffer do
   (bumped by the consumer on every (re)start) invalidates history wholesale,
   which is what turns a bier restart into an explicit `bier:reset` instead
   of a silent gap.
+
+  Each generation also carries an **epoch floor**: the very first cursor
+  appended since the bump, `:unanchored` until then. It is the floor that
+  actually catches a client resuming across a restart — the endpoint reads
+  the current generation straight out of this Buffer and hands it back to
+  `replay_after/4`, so the generation guard only ever fires for a caller
+  that remembered an older one. Any cursor below the floor (and, while
+  unanchored, every cursor, since no ids have been issued yet) names
+  history this generation never had: `:reset`, never a quiet resume from
+  post-restart events only.
   """
 
   use GenServer
@@ -37,14 +47,25 @@ defmodule Bier.Wal.Buffer do
   @impl true
   def init(conf) do
     tid = :ets.new(__MODULE__, [:ordered_set, :private])
-    {:ok, %{tid: tid, limit: conf.events_buffer_size, generation: 0, counts: %{}, oldest: %{}}}
+
+    {:ok,
+     %{
+       tid: tid,
+       limit: conf.events_buffer_size,
+       generation: 0,
+       floor: :unanchored,
+       counts: %{},
+       oldest: %{}
+     }}
   end
 
   @impl true
   def handle_call(:new_generation, _from, state) do
     :ets.delete_all_objects(state.tid)
     generation = state.generation + 1
-    {:reply, generation, %{state | generation: generation, counts: %{}, oldest: %{}}}
+
+    {:reply, generation,
+     %{state | generation: generation, floor: :unanchored, counts: %{}, oldest: %{}}}
   end
 
   def handle_call(:generation, _from, state), do: {:reply, state.generation, state}
@@ -55,7 +76,11 @@ defmodule Bier.Wal.Buffer do
         :ets.insert(acc.tid, {{table_key, cursor}, event})
         counts = Map.update(acc.counts, table_key, 1, &(&1 + 1))
         oldest = restore_oldest(acc.oldest, table_key, cursor)
-        evict(%{acc | counts: counts, oldest: oldest}, table_key)
+
+        evict(
+          %{acc | counts: counts, oldest: oldest, floor: anchor(acc.floor, cursor)},
+          table_key
+        )
       end)
 
     {:reply, :ok, state}
@@ -77,7 +102,8 @@ defmodule Bier.Wal.Buffer do
   end
 
   def handle_call({:replay_after, tables, cursor, generation}, _from, state) do
-    if generation != state.generation or Enum.any?(tables, &stale?(state, &1, cursor)) do
+    if generation != state.generation or before_floor?(state, cursor) or
+         Enum.any?(tables, &stale?(state, &1, cursor)) do
       {:reply, :reset, state}
     else
       replayed =
@@ -88,6 +114,22 @@ defmodule Bier.Wal.Buffer do
       {:reply, {:ok, replayed}, state}
     end
   end
+
+  # The epoch floor, checked before any per-table history: the earliest
+  # cursor this generation ever issued. `:unanchored` means it has issued
+  # none at all yet, so every cursor a client can present was minted before
+  # it — a pre-restart cursor by construction. Once anchored, anything
+  # strictly below the floor is equally from a previous epoch. Both are the
+  # spec's reset contract, not a gap: the per-table `oldest` map cannot see
+  # this on its own, because a bump clears it and a never-touched table
+  # reads as `nil` ("nothing to compare against").
+  defp before_floor?(%{floor: :unanchored}, _cursor), do: true
+  defp before_floor?(%{floor: floor}, cursor), do: Cursor.compare(cursor, floor) == :lt
+
+  # The first cursor appended after a generation bump anchors that epoch's
+  # floor; every later append leaves it alone.
+  defp anchor(:unanchored, cursor), do: cursor
+  defp anchor(floor, _cursor), do: floor
 
   # A table forces a reset once it has lost history — via `drop/2` or via
   # ring-buffer eviction — AND the caller's cursor doesn't cover what's

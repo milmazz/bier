@@ -357,6 +357,9 @@ privilege is still gone, gets the ordinary `BIER003` refusal (see
   the qualifier is split off at the first dot only.
 * **A multi-table subscription resets as a whole** when any one of its
   tables loses history (see [Resume and reset](#resume-and-reset) above).
+* **Connections that stop reading are disconnected** once ~1,000 frames
+  back up in their mailbox — bounded memory by construction; reconnecting
+  with the cursor resumes from the ring buffer.
 * **`REPLICA IDENTITY` governs `old`** — see above.
 * A bier restart always starts a fresh replication slot at the current LSN;
   there is no cross-restart resume in v1 (a possible future addition), only

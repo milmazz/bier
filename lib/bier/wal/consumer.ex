@@ -6,10 +6,12 @@ defmodule Bier.Wal.Consumer do
   streams it, assembling each transaction and delivering it at Commit: the
   events go into `Bier.Wal.Buffer` (for `Last-Event-ID` replay) and out to
   live subscribers via `Bier.Events.Registry`. Because the slot is
-  temporary, a (re)start begins at the current LSN: the Buffer generation is
-  bumped and subscribers get an explicit `{:bier_wal_reset, ...}` rather
-  than a silent gap. Transactions larger than `events_max_tx_events` are
-  dropped the same announced way (`"transaction_too_large"`).
+  temporary, a (re)start begins at the current LSN: once the new slot
+  actually exists the Buffer generation is bumped and subscribers get an
+  explicit `{:bier_wal_reset, ...}` rather than a silent gap — once per
+  successful restart, never per failed slot-creation attempt. Transactions
+  larger than `events_max_tx_events` are dropped the same announced way
+  (`"transaction_too_large"`).
 
   A `TRUNCATE` can name several relations at once; `Bier.Wal.Render.data/3`
   renders one event per relation (`%{kind: :truncate, relation: rel}`,
@@ -51,12 +53,6 @@ defmodule Bier.Wal.Consumer do
 
   @impl true
   def handle_connect(state) do
-    # A (re)connect means history restarts at the current LSN: announce it.
-    Buffer.new_generation(state.conf.name)
-
-    for pid <- Events.table_subscribers(state.conf.name),
-        do: send(pid, {:bier_wal_reset, "stream_restarted"})
-
     # Minted fresh on every (re)connect, never in init/1: the slot is
     # TEMPORARY and tied to the connection that created it, so reusing a
     # name minted once for the whole process would collide (`42710 slot
@@ -70,6 +66,20 @@ defmodule Bier.Wal.Consumer do
 
   @impl true
   def handle_result(results, state) when is_list(results) do
+    # The slot now exists, so this is a real restart rather than another
+    # failed attempt at one: history restarts at the current LSN, announce
+    # it. Deliberately here and NOT in `handle_connect/1` — a persistently
+    # failing CREATE_REPLICATION_SLOT (`max_replication_slots` exhausted, a
+    # name collision) is retried on `auto_reconnect`'s ~500ms backoff, and
+    # bumping/broadcasting per ATTEMPT would push `bier:reset` at every
+    # subscriber twice a second. The documented client contract answers each
+    # one with a fresh bootstrapping `GET`, so that turns a slot outage into
+    # a request storm. One reset per successful restart, none per failure.
+    Buffer.new_generation(state.conf.name)
+
+    for pid <- Events.table_subscribers(state.conf.name),
+        do: send(pid, {:bier_wal_reset, "stream_restarted"})
+
     {:stream,
      "START_REPLICATION SLOT #{state.slot} LOGICAL 0/0 " <>
        "(proto_version '1', publication_names '#{state.conf.events_publication}')", [], state}
