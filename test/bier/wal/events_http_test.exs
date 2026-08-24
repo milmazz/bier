@@ -70,6 +70,10 @@ defmodule Bier.Wal.EventsHttpTest do
         events_publication: @pub,
         events_channels: ["chat"],
         events_heartbeat_interval: 50,
+        # Deliberately tiny so the overflow test can force a real
+        # events_max_tx_events breach with a handful of rows instead of
+        # thousands.
+        events_max_tx_events: 5,
         router: [port: port, scheme: :http]
       )
 
@@ -398,5 +402,46 @@ defmodule Bier.Wal.EventsHttpTest do
 
     data = replay |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
     assert data["row"] == %{"id" => 102}
+  end
+
+  test "a transaction beyond events_max_tx_events resets the live stream and any earlier cursor",
+       %{db: db, port: port} do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(sock, ": connected")
+
+    # A baseline event before the overflow, whose id becomes a cursor that
+    # the overflow must invalidate below.
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('baseline')", [])
+    baseline = SSETestClient.recv_until(sock, "data: {")
+    [_, id] = Regex.run(~r/id: ([^\n]+)\n/, baseline)
+
+    # One transaction, 20 insert events — well over the cap of 5 set on this
+    # instance in setup/0.
+    Postgrex.query!(
+      db,
+      "INSERT INTO #{@schema}.orders (note) SELECT 'bulk' FROM generate_series(1, 20)",
+      []
+    )
+
+    frame = SSETestClient.recv_until(sock, "data: {")
+    assert frame =~ "event: bier:reset\n"
+
+    data = frame |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["reason"] == "transaction_too_large"
+
+    # New wire behavior beyond the live reset above: `Bier.Wal.Consumer`
+    # drops the whole table's buffered history on overflow (Task 5,
+    # exercised at the registry-message level in Bier.Wal.ConsumerTest), so
+    # a reconnect with a cursor from BEFORE the overflow must also get an
+    # explicit reset — end to end over the wire — rather than replaying
+    # nothing or hanging.
+    sock2 = SSETestClient.connect_sse(port, "/events?table=orders&last_event_id=#{id}")
+    reset = SSETestClient.recv_until(sock2, "data: {")
+    assert reset =~ "event: bier:reset\n"
+
+    reset_data =
+      reset |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+
+    assert reset_data["reason"] == "history_evicted"
   end
 end

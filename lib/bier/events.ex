@@ -35,6 +35,20 @@ defmodule Bier.Events do
   alias Bier.Plugs.ActionController
   alias Bier.Wal.{Authorize, Buffer, Cursor, Render}
 
+  # A subscriber that stops reading (a slow client, or a dead TCP peer the
+  # OS hasn't noticed yet) lets WAL frames pile up in this process's own
+  # mailbox — unlike NOTIFY, which is fire-and-forget and never backs up.
+  # Past this mark the connection is closed instead of growing our heap
+  # unbounded; the client reconnects with `Last-Event-ID` and replays from
+  # `Bier.Wal.Buffer`'s ring instead.
+  @max_queue 1_000
+
+  @doc false
+  def queue_overloaded? do
+    {:message_queue_len, len} = Process.info(self(), :message_queue_len)
+    len > @max_queue
+  end
+
   @doc """
   True when this request targets the events endpoint: the feature is enabled
   (a non-empty channel allowlist or a configured WAL publication) and the
@@ -331,19 +345,8 @@ defmodule Bier.Events do
         end
 
       {:bier_wal_event, table_key, cursor, event} ->
-        allowed = Map.fetch!(sub.columns, table_key)
-        json = Render.data(event, event.commit_at, allowed)
-        payload = Bier.json_library().encode!(json)
-        name = Map.fetch!(sub.names, table_key)
-        frame = SSE.frame(name, payload, Cursor.encode(cursor))
-
-        case chunk(conn, frame) do
-          {:ok, conn} ->
-            loop(conn, config, sub, delivered + 1, start, metadata)
-
-          {:error, reason} ->
-            finish(conn, delivered, start, Map.put(metadata, :reason, reason))
-        end
+        wal_event = {table_key, cursor, event}
+        deliver_wal_event(conn, config, sub, delivered, start, metadata, wal_event)
 
       {:bier_wal_reset, reset_reason} ->
         payload = Bier.json_library().encode!(%{"reason" => reset_reason})
@@ -367,6 +370,34 @@ defmodule Bier.Events do
           {:error, reason} ->
             finish(conn, delivered, start, Map.put(metadata, :reason, reason))
         end
+    end
+  end
+
+  # Split out of `loop/6`'s `{:bier_wal_event, ...}` clause to keep it
+  # under credo's complexity threshold. A subscriber whose mailbox has
+  # backed up past `queue_overloaded?/0`'s high-water mark is cut loose
+  # here, before rendering or writing anything: the client reconnects and
+  # resumes via `Last-Event-ID` instead of this process growing its heap
+  # forever behind a slow (or dead) peer.
+  defp deliver_wal_event(conn, config, sub, delivered, start, metadata, wal_event) do
+    {table_key, cursor, event} = wal_event
+
+    if queue_overloaded?() do
+      finish(conn, delivered, start, Map.put(metadata, :reason, :overloaded))
+    else
+      allowed = Map.fetch!(sub.columns, table_key)
+      json = Render.data(event, event.commit_at, allowed)
+      payload = Bier.json_library().encode!(json)
+      name = Map.fetch!(sub.names, table_key)
+      frame = SSE.frame(name, payload, Cursor.encode(cursor))
+
+      case chunk(conn, frame) do
+        {:ok, conn} ->
+          loop(conn, config, sub, delivered + 1, start, metadata)
+
+        {:error, reason} ->
+          finish(conn, delivered, start, Map.put(metadata, :reason, reason))
+      end
     end
   end
 
