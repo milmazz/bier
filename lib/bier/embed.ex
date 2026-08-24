@@ -5,7 +5,7 @@ defmodule Bier.Embed do
   Given the parsed select tree, the source `Relation`, its SQL alias, and the
   full introspection map, this module produces:
 
-    * `build_row_select/6` — the named select list (`{expr, out_name}` pairs)
+    * `build_row_select/7` — the named select list (`{expr, out_name}` pairs)
       for a derived table whose row record the executor aggregates with
       `json_agg`. Scalar fields, json-paths, casts, aggregates, computed
       columns, embeds (many-to-one / one-to-many / many-to-many / one-to-one /
@@ -14,8 +14,9 @@ defmodule Bier.Embed do
     * `inner_join_where/6` — the extra `WHERE` predicate that an `!inner` embed
       (or an embedded filter that implies inner) adds to the *source* query so
       rows whose embedding is empty are dropped.
-    * `group_by/3` — the implicit `GROUP BY` clause when plain fields are mixed
-      with aggregates.
+    * `group_by/4` — the implicit `GROUP BY` clause when plain fields are mixed
+      with aggregates, including the ones a to-one spread hoists up.
+    * `validate_aggregates/2` — the `db-aggregates-enabled` gate (PGRST123).
 
   Relationship resolution walks the foreign keys discovered by
   `Bier.Introspection`, plus computed relationships (SETOF-returning functions).
@@ -87,6 +88,38 @@ defmodule Bier.Embed do
     Map.new(map, fn {path, value} -> {Map.get(rewrites, path, path), value} end)
   end
 
+  @doc """
+  Reject aggregate functions when `db-aggregates-enabled` is off.
+
+  PostgREST's `validateAggFunctions` walks the *whole* read-plan tree and fails
+  as soon as any node's select list carries an aggregate, so an aggregate
+  nested in an embed — spread or not — is rejected exactly like a top-level
+  one. It runs BEFORE `hoistSpreadAggFunctions` (`Plan.hs` L387-L389), which is
+  what keeps a hoisted spread aggregate in scope: hoisting moves the aggregate
+  off the child's select list, so a check running after it would let
+  `?select=...projects(id.count())` through.
+  """
+  @spec validate_aggregates(map(), boolean()) :: {:ok, map()} | {:error, :aggregates_not_allowed}
+  def validate_aggregates(plan, true), do: {:ok, plan}
+
+  def validate_aggregates(plan, _enabled?) do
+    if any_aggregate?(Map.get(plan, :select)) do
+      {:error, :aggregates_not_allowed}
+    else
+      {:ok, plan}
+    end
+  end
+
+  defp any_aggregate?(nodes) when is_list(nodes) do
+    Enum.any?(nodes, fn
+      %{kind: :agg} -> true
+      %{kind: :embed} = e -> any_aggregate?(e.select)
+      _ -> false
+    end)
+  end
+
+  defp any_aggregate?(_nodes), do: false
+
   # Resolve one level of the select tree: group the paths by their head, hand
   # each group to the node that owns it, then recurse with the tails.
   defp resolve_level(nodes, paths, legacy?) when is_list(nodes) and paths != [] do
@@ -154,27 +187,73 @@ defmodule Bier.Embed do
 
   @doc """
   Build the named select list for a single row of `relation` (aliased as `al`),
-  given the select `nodes`. Returns `{cols, laterals, state}`: `cols` is a list
-  of `{expr, out_name}` pairs (rendered with `render_cols/1`), `laterals` is a
-  list of ` LEFT JOIN LATERAL (...) ON true` clauses contributed by spread
-  embeds. Aggregating the derived table's row record (instead of a
+  given the select `nodes`. Returns `{cols, laterals, meta, state}`: `cols` is a
+  list of `{expr, out_name}` pairs (rendered with `render_cols/1`), `laterals` is
+  a list of ` LEFT JOIN LATERAL (...) ON true` clauses contributed by spread
+  embeds, and `meta` is what this level reports back to the one above it (see
+  `empty_meta/0`). Aggregating the derived table's row record (instead of a
   `json_build_object` scalar, which spaces `"k" : v`) matches PostgREST's
   wire bytes — see issue #31. `embed_filters` maps embed paths to filter
   nodes. `qe` is the executor module (passed to avoid a compile cycle).
+
+  `spread?` says whether these nodes belong to a **to-one spread** embed. Such a
+  level does not aggregate: its aggregates are projected as bare operands and
+  handed to the level above through `meta.hoists`, which is where they get
+  applied — see `spread_entry/8`.
   """
-  def build_row_select(nodes, %Relation{} = relation, al, embed_filters, state, qe) do
+  def build_row_select(
+        nodes,
+        %Relation{} = relation,
+        al,
+        embed_filters,
+        state,
+        qe,
+        spread? \\ false
+      ) do
     {entries, state} =
       Enum.flat_map_reduce(nodes, state, fn node, st ->
-        build_node(node, relation, al, embed_filters, st, qe)
+        build_node(node, relation, al, embed_filters, st, qe, spread?)
       end)
 
-    Enum.reduce(entries, {[], [], state}, fn
-      {:spread_cols, spread_cols, lateral}, {cols, lats, st} ->
-        {cols ++ spread_cols, lats ++ [lateral], st}
+    {cols, laterals, meta} =
+      Enum.reduce(entries, {[], [], empty_meta()}, fn
+        {:col, expr, name, group, agg}, {cols, lats, meta} ->
+          {cols ++ [{expr, name}], lats, note_col(meta, name, group, agg)}
 
-      {_expr, _name} = col, {cols, lats, st} ->
-        {cols ++ [col], lats, st}
-    end)
+        {:lateral, sql}, {cols, lats, meta} ->
+          {cols, lats ++ [sql], meta}
+
+        {:spread_alias, key, spr}, {cols, lats, meta} ->
+          {cols, lats, %{meta | spread_aliases: Map.put(meta.spread_aliases, key, spr)}}
+      end)
+
+    {cols, laterals, meta, state}
+  end
+
+  # What one level of the select list reports to the level above:
+  #
+  #   * `aggregated?` — an aggregate is applied HERE, so this level needs the
+  #     implicit `GROUP BY` (PostgREST's `noSelectsAreAggregated &&
+  #     noRelSelectsAreAggregated`). It is also what makes an aggregate under a
+  #     to-many spread detectable, i.e. PGRST127.
+  #   * `hoists` — `{out_name, agg}` pairs a to-one spread defers to its parent.
+  #   * `group_terms` — the `GROUP BY` terms spread columns contribute
+  #     (`groupTermFromRelSelectField`); plain fields of this level are still
+  #     collected by `group_by/4` straight off the nodes.
+  #   * `spread_aliases` — `canonical embed name => LATERAL alias`, so a related
+  #     `order=<spread>(<col>)` can read the joined column instead of building a
+  #     correlated subquery the `GROUP BY` would then reject.
+  defp empty_meta,
+    do: %{aggregated?: false, hoists: [], group_terms: [], spread_aliases: %{}}
+
+  defp note_col(meta, name, group, agg) do
+    meta = if group, do: %{meta | group_terms: meta.group_terms ++ [group]}, else: meta
+
+    case agg do
+      :applied -> %{meta | aggregated?: true}
+      {:hoist, fun} -> %{meta | hoists: meta.hoists ++ [{name, fun}]}
+      nil -> meta
+    end
   end
 
   @doc false
@@ -185,53 +264,86 @@ defmodule Bier.Embed do
 
   # ---- node dispatch -------------------------------------------------------
 
-  defp build_node(node, relation, al, _ef, state, _qe) when node == :star do
+  defp build_node(node, relation, al, _ef, state, _qe, _spread?) when node == :star do
     {star_pairs(relation, al), state}
   end
 
-  defp build_node(%{kind: :star}, relation, al, _ef, state, _qe) do
+  defp build_node(%{kind: :star}, relation, al, _ef, state, _qe, _spread?) do
     {star_pairs(relation, al), state}
   end
 
-  defp build_node(%{kind: :field} = f, relation, al, _ef, state, _qe) do
+  defp build_node(%{kind: :field} = f, relation, al, _ef, state, _qe, _spread?) do
     name = f.alias || QE.json_output_name(f.column, f.json_path)
     expr = field_expr(f, relation, al)
-    {[{expr, name}], state}
+    {[plain_col(expr, name)], state}
   end
 
   # `AGG(<field>)::<result cast>` — PostgREST's `pgFmtApplyAggregate agg aggCast
   # (pgFmtApplyCast cast (pgFmtTableCoerce table fld))`: the aggregated operand
   # is an ordinary select field (json path, read representation and *input* cast
   # included), and only the trailing cast applies to the aggregate's result.
-  defp build_node(%{kind: :agg} = a, relation, al, _ef, state, _qe) do
+  defp build_node(%{kind: :agg} = a, relation, al, _ef, state, _qe, false) do
     inner =
       case a.column do
         nil -> "#{a.fun}(*)"
         col -> "#{a.fun}(#{field_expr(agg_operand(a, col), relation, al)})"
       end
 
-    inner = if a.cast, do: "#{inner}::#{QE.quote_type(a.cast)}", else: inner
-    name = a.alias || a.fun
-    {[{inner, name}], state}
+    {[{:col, apply_agg_cast(inner, a.cast), agg_name(a), nil, :applied}], state}
+  end
+
+  # The same aggregate one level inside a to-one spread: `hoistFromSelectFields`
+  # strips the function (and its result cast) off the field and leaves the bare
+  # operand behind, so the LATERAL projects a plain column and the parent
+  # applies `AGG(...)` over the joined result. Aggregating in here instead would
+  # run over the single joined row and be a no-op (`Plan.hs` L721-L733).
+  #
+  # A field-less `count()` has no operand to leave behind, so — exactly as
+  # PostgREST's `cfFullRow` field does — it projects the whole row and the
+  # parent counts that, which keeps a to-one embed that matched nothing (a NULL
+  # composite from the outer join) out of the count.
+  defp build_node(%{kind: :agg} = a, relation, al, _ef, state, _qe, true) do
+    operand =
+      case a.column do
+        nil -> QE.quote_ident(al)
+        col -> field_expr(agg_operand(a, col), relation, al)
+      end
+
+    {[{:col, operand, agg_name(a), nil, {:hoist, a}}], state}
   end
 
   # An empty-projection embed (`rel()`) establishes the relationship for null
   # filtering but contributes no key to the output row.
-  defp build_node(%{kind: :embed, empty: true}, _relation, _al, _ef, state, _qe) do
+  defp build_node(%{kind: :embed, empty: true}, _relation, _al, _ef, state, _qe, _spread?) do
     {[], state}
   end
 
-  defp build_node(%{kind: :embed} = e, relation, al, ef, state, qe) do
+  defp build_node(%{kind: :embed} = e, relation, al, ef, state, qe, spread?) do
     rel = resolve_relationship(e, relation, state.relations)
-    build_embed(e, rel, relation, al, ef, state, qe)
+    build_embed(e, rel, relation, al, ef, state, qe, spread?)
   end
+
+  # A column that carries no aggregate and no GROUP BY term of its own.
+  defp plain_col(expr, name), do: {:col, expr, name, nil, nil}
+
+  # PostgREST's `addAliases`/`fieldAliasForSpreadAgg`: an unaliased aggregate is
+  # keyed by its function name, which is also the label Postgres would give the
+  # column.
+  defp agg_name(a), do: a.alias || a.fun
+
+  # `pgFmtApplyAggregate agg aggCast` — only the trailing cast applies to the
+  # aggregate's *result*; the operand's own `::cast` is already in `expr`.
+  defp apply_agg(expr, a), do: apply_agg_cast("#{a.fun}(#{expr})", a.cast)
+
+  defp apply_agg_cast(expr, nil), do: expr
+  defp apply_agg_cast(expr, cast), do: "#{expr}::#{QE.quote_type(cast)}"
 
   defp agg_operand(a, col),
     do: %{column: col, json_path: a.json_path, cast: a.input_cast}
 
   defp star_pairs(relation, al) do
     Enum.map(relation.columns, fn c ->
-      {star_col_expr(relation, al, c.name), c.name}
+      plain_col(star_col_expr(relation, al, c.name), c.name)
     end)
   end
 
@@ -258,7 +370,7 @@ defmodule Bier.Embed do
 
   # ---- embed rendering -----------------------------------------------------
 
-  defp build_embed(e, rel, _source, src_alias, ef, state, qe) do
+  defp build_embed(e, rel, _source, src_alias, ef, state, qe, spread?) do
     %{relation: target, kind: kind, join_cond: join} = rel
 
     seq = state.embed_seq + 1
@@ -297,8 +409,29 @@ defmodule Bier.Embed do
         embed_offsets: deeper_offsets
     }
 
-    {child_cols, child_laterals, state} =
-      build_row_select(e.select, target, child_alias, deeper_filters, child_scope, qe)
+    # Only a TO-ONE spread defers its aggregates upward; a to-many spread and a
+    # plain JSON embed both aggregate in place (`Plan.hs` L755-L757).
+    to_one_spread? = e.spread and kind == :one
+
+    {child_cols, child_laterals, child_meta, state} =
+      build_row_select(
+        e.select,
+        target,
+        child_alias,
+        deeper_filters,
+        child_scope,
+        qe,
+        to_one_spread?
+      )
+
+    # PGRST127: an aggregate under a one-to-many / many-to-many spread — its own
+    # (`anyAggSel`) or one a nested to-one spread hoisted into it
+    # (`anyAggRelSel`) — is rejected outright rather than aggregated over the
+    # json_agg'd array, where the result would be meaningless
+    # (`addToManyOrderSelects`).
+    if e.spread and kind == :many and child_meta.aggregated? do
+      throw({:embed_error_raw, :agg_in_to_many_spread})
+    end
 
     # An `!inner` embedding NESTED inside this one propagates its filter up to
     # here as well: a child row whose own inner embedding is empty is dropped
@@ -318,7 +451,15 @@ defmodule Bier.Embed do
     state = struct!(state, saved)
 
     {order_sql, state} =
-      build_order_advanced(own_order, e.select, target, child_alias, state, qe)
+      build_order_advanced(
+        own_order,
+        e.select,
+        target,
+        child_alias,
+        state,
+        qe,
+        child_meta.spread_aliases
+      )
 
     page_sql = paginate_sql(own_limit, own_offset)
 
@@ -326,39 +467,54 @@ defmodule Bier.Embed do
     lateral_sql = Enum.join(child_laterals, "")
     child_select = child_select_list(child_cols)
 
-    inner_base = "SELECT #{child_select} FROM #{from}#{lateral_sql}#{where_sql}#{order_sql}"
+    # `readPlanToQuery` emits `groupF` at every level, not just the root: an
+    # embed that mixes plain fields with an aggregate needs its own implicit
+    # GROUP BY inside the subquery. A to-one spread never has one — its
+    # aggregates were hoisted out, leaving nothing to group by.
+    {group_sql, having} = group_by(e.select, child_alias, target, child_meta)
+
+    inner_base =
+      "SELECT #{child_select} FROM #{from}#{lateral_sql}#{where_sql}" <>
+        group_sql <> having <> order_sql
 
     if e.spread do
-      spread_entry(kind, child_cols, inner_base, page_sql, state)
+      spread_entry(
+        kind,
+        child_cols,
+        child_meta,
+        inner_base,
+        page_sql,
+        state,
+        canonical_name(e),
+        spread?
+      )
     else
-      # Embed internals go through jsonb (to_jsonb / json_agg(to_jsonb(…))):
-      # PostgREST renders embedded objects jsonb-style — `": "` spacing and
-      # jsonb key normalization — while parent rows stay compact. Live-verified
-      # against PostgREST 14.12 (spec §0). An all-empty child select (only
-      # empty embeds, e.g. `rel(sub())`) still renders `{}` rows, as
-      # json_build_object() did — the jsonb wrapper over the `_bier_empty_row`
-      # placeholder column would produce `{"_bier_empty_row": {}}`, so it is
-      # special-cased to a bare `'{}'::json`.
-      sub =
-        case {kind, child_cols} do
-          {:one, []} ->
-            inner = "SELECT 1 FROM #{from}#{where_sql}#{order_sql} LIMIT 1"
-            "(SELECT '{}'::json FROM (#{inner}) _bier_c)"
-
-          {:many, []} ->
-            inner = "SELECT 1 FROM #{from}#{where_sql}#{order_sql}#{page_sql}"
-            "COALESCE((SELECT json_agg('{}'::json) FROM (#{inner}) _bier_c), '[]'::json)"
-
-          {:one, _cols} ->
-            "(SELECT to_jsonb(_bier_c) FROM (#{inner_base} LIMIT 1) _bier_c)"
-
-          {:many, _cols} ->
-            "COALESCE((SELECT json_agg(to_jsonb(_bier_c)) " <>
-              "FROM (#{inner_base}#{page_sql}) _bier_c), '[]'::json)"
-        end
-
-      {[{sub, out_name}], state}
+      empty_inner = "SELECT 1 FROM #{from}#{where_sql}#{order_sql}"
+      sub = json_embed_expr(kind, child_cols, inner_base, empty_inner, page_sql)
+      {[plain_col(sub, out_name)], state}
     end
+  end
+
+  # Embed internals go through jsonb (to_jsonb / json_agg(to_jsonb(…))):
+  # PostgREST renders embedded objects jsonb-style — `": "` spacing and jsonb
+  # key normalization — while parent rows stay compact. Live-verified against
+  # PostgREST 14.12 (spec §0). An all-empty child select (only empty embeds,
+  # e.g. `rel(sub())`) still renders `{}` rows, as json_build_object() did — the
+  # jsonb wrapper over the `_bier_empty_row` placeholder column would produce
+  # `{"_bier_empty_row": {}}`, so it is special-cased to a bare `'{}'::json`.
+  defp json_embed_expr(:one, [], _inner_base, empty_inner, _page_sql),
+    do: "(SELECT '{}'::json FROM (#{empty_inner} LIMIT 1) _bier_c)"
+
+  defp json_embed_expr(:many, [], _inner_base, empty_inner, page_sql),
+    do:
+      "COALESCE((SELECT json_agg('{}'::json) FROM (#{empty_inner}#{page_sql}) _bier_c), '[]'::json)"
+
+  defp json_embed_expr(:one, _cols, inner_base, _empty_inner, _page_sql),
+    do: "(SELECT to_jsonb(_bier_c) FROM (#{inner_base} LIMIT 1) _bier_c)"
+
+  defp json_embed_expr(:many, _cols, inner_base, _empty_inner, page_sql) do
+    "COALESCE((SELECT json_agg(to_jsonb(_bier_c)) " <>
+      "FROM (#{inner_base}#{page_sql}) _bier_c), '[]'::json)"
   end
 
   # A child select that projects no columns (e.g. every node is an empty
@@ -372,7 +528,16 @@ defmodule Bier.Embed do
   # keys stay present, value null) with no COALESCE template needed. A to-many
   # spread aggregates each child column into a JSON array under its key
   # (PostgREST v12.1 semantics).
-  defp spread_entry(kind, child_cols, inner_base, page_sql, state) do
+  #
+  # Aggregates the child hoisted (`child_meta.hoists`) are applied HERE, over
+  # the joined column — `hoistIntoRelSelectFields` + `pgFmtSpreadSelectItem`.
+  # Unless this level is itself a to-one spread, in which case they ride one
+  # more level up under the same name, which is what makes a chain of nested
+  # spreads aggregate at the outermost level ("we hoist until we reach the root
+  # node, or until we reach a ReadPlan that will be embedded a JSON object or
+  # JSON array"). Every column that is NOT aggregated becomes a `GROUP BY` term
+  # for this level (`groupTermFromRelSelectField`).
+  defp spread_entry(kind, child_cols, child_meta, inner_base, page_sql, state, key, spread?) do
     seq = state.embed_seq + 1
     state = %{state | embed_seq: seq}
     spr = QE.quote_ident("_bier_spr#{seq}")
@@ -393,8 +558,20 @@ defmodule Bier.Embed do
             "#{spr} ON true"
       end
 
-    cols = Enum.map(child_cols, fn {_expr, name} -> {"#{spr}.#{QE.quote_ident(name)}", name} end)
-    {[{:spread_cols, cols, lateral}], state}
+    hoists = Map.new(child_meta.hoists)
+
+    cols =
+      Enum.map(child_cols, fn {_expr, name} ->
+        ref = "#{spr}.#{QE.quote_ident(name)}"
+
+        case {Map.fetch(hoists, name), spread?} do
+          {{:ok, agg}, true} -> {:col, ref, name, nil, {:hoist, agg}}
+          {{:ok, agg}, false} -> {:col, apply_agg(ref, agg), name, nil, :applied}
+          {:error, _} -> {:col, ref, name, ref, nil}
+        end
+      end)
+
+    {cols ++ [{:lateral, lateral}, {:spread_alias, key, spr}], state}
   end
 
   defp from_clause(target, child_alias, %{via: nil, join_cond: jc}, _src) when jc != :computed do
@@ -640,19 +817,30 @@ defmodule Bier.Embed do
   Related ordering validates against the request's `select` tree: the named
   relation must be embedded (else PGRST108) and must be to-one (else PGRST118).
   """
-  def build_order_advanced([], _select, _relation, _al, state, _qe), do: {"", state}
+  def build_order_advanced(terms, select, relation, al, state, qe, spread_aliases \\ %{})
 
-  def build_order_advanced(terms, select, relation, al, state, qe) do
+  def build_order_advanced([], _select, _relation, _al, state, _qe, _spread_aliases),
+    do: {"", state}
+
+  def build_order_advanced(terms, select, relation, al, state, qe, spread_aliases) do
     {clauses, state} =
       Enum.map_reduce(terms, state, fn term, st ->
-        build_order_term(term, select, relation, al, st, qe)
+        build_order_term(term, select, relation, al, st, qe, spread_aliases)
       end)
 
     {" ORDER BY " <> Enum.join(clauses, ", "), state}
   end
 
   # Related order term: order by a column of a to-one embedded resource.
-  defp build_order_term(%{relation: rel_name} = term, select, relation, al, state, qe) do
+  defp build_order_term(
+         %{relation: rel_name} = term,
+         select,
+         relation,
+         al,
+         state,
+         qe,
+         spr_aliases
+       ) do
     embed = find_order_embed(select, rel_name)
 
     if embed == nil do
@@ -665,6 +853,56 @@ defmodule Bier.Embed do
       throw({:embed_error_raw, {:related_order_not_to_one, relation.name, rel_name}})
     end
 
+    case spread_order_expr(embed, term, spr_aliases) do
+      nil -> correlated_order_term(term, rel, al, state, qe)
+      expr -> {expr <> dir_nulls(term), state}
+    end
+  end
+
+  # Computed-column / plain order term.
+  defp build_order_term(%{column: col} = term, _select, relation, al, state, qe, _spr_aliases) do
+    expr =
+      if col in relation.computed_columns do
+        QE.computed_field_call(relation, col, al)
+      else
+        qe.column_expr_aliased(col, term.json_path, al, relation)
+      end
+
+    {expr <> dir_nulls(term), state}
+  end
+
+  # A spread embed is already pulled up through a LATERAL, so PostgREST orders
+  # by the joined column (`addRelatedOrders` rewrites the term's relation to the
+  # embed's `relAggAlias`). Reading it off the join instead of re-deriving it is
+  # what keeps the term groupable: a correlated subquery would reference the
+  # PARENT's key column, which the implicit GROUP BY does not carry, and
+  # Postgres would reject the whole query (cases 11115/11117).
+  #
+  # nil when the ordered column is not among the ones the LATERAL projects,
+  # leaving the correlated subquery to answer for it as before.
+  defp spread_order_expr(embed, term, spread_aliases) do
+    with spr when is_binary(spr) <- Map.get(spread_aliases, canonical_name(embed)),
+         name when is_binary(name) <- spread_col_name(embed.select, term) do
+      "#{spr}.#{QE.quote_ident(name)}"
+    else
+      _ -> nil
+    end
+  end
+
+  defp spread_col_name(select, term) when is_list(select) do
+    Enum.find_value(select, fn
+      %{kind: :field, column: col, json_path: jp} = f
+      when col == term.column and jp == term.json_path ->
+        f.alias || QE.json_output_name(col, jp)
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp spread_col_name(_select, _term), do: nil
+
+  defp correlated_order_term(term, rel, al, state, qe) do
     %{relation: target, join_cond: join} = rel
     child_alias = "#{target.name}_o#{state.embed_seq + 1}"
     state = %{state | embed_seq: state.embed_seq + 1}
@@ -677,18 +915,6 @@ defmodule Bier.Embed do
     sub = "(SELECT #{col_expr} FROM #{from}#{where} LIMIT 1)"
 
     {sub <> dir_nulls(term), state}
-  end
-
-  # Computed-column / plain order term.
-  defp build_order_term(%{column: col} = term, _select, relation, al, state, qe) do
-    expr =
-      if col in relation.computed_columns do
-        QE.computed_field_call(relation, col, al)
-      else
-        qe.column_expr_aliased(col, term.json_path, al, relation)
-      end
-
-    {expr <> dir_nulls(term), state}
   end
 
   defp dir_nulls(term) do
@@ -715,21 +941,27 @@ defmodule Bier.Embed do
   @doc """
   When the select mixes plain fields with aggregates, returns the implicit
   `GROUP BY` clause; otherwise `{"", ""}`.
-  """
-  def group_by(nodes, al, relation) do
-    has_agg? = Enum.any?(nodes, &match?(%{kind: :agg}, &1))
 
+  `meta` is what `build_row_select/7` reported for the same level: it says
+  whether an aggregate is applied here at all (a spread's hoisted aggregate
+  counts, and is the only thing that makes `?select=...rel(x.sum()),y` group)
+  and carries the terms the spread columns contribute. `groupF` emits nothing
+  when either half is missing — no aggregate, or nothing to group by (the
+  aggregates-only spread of case 11116, which collapses to one row).
+  """
+  def group_by(nodes, al, relation, meta) do
     plain =
       Enum.filter(nodes, fn
         %{kind: :field} -> true
         _ -> false
       end)
 
-    if has_agg? and plain != [] do
-      exprs =
-        Enum.map_join(plain, ", ", &QE.column_expr_aliased(&1.column, &1.json_path, al, relation))
+    terms =
+      Enum.map(plain, &QE.column_expr_aliased(&1.column, &1.json_path, al, relation)) ++
+        meta.group_terms
 
-      {" GROUP BY " <> exprs, ""}
+    if meta.aggregated? and terms != [] do
+      {" GROUP BY " <> Enum.join(terms, ", "), ""}
     else
       {"", ""}
     end

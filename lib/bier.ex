@@ -200,6 +200,16 @@ defmodule Bier do
         lookup.
         """
       ],
+      db_aggregates_enabled: [
+        type: :boolean,
+        default: env(:db_aggregates_enabled, false),
+        doc: """
+        Allows aggregate functions (`select=amount.sum()`) in a request's
+        select tree (PostgREST db-aggregates-enabled). Defaults to `false`, in
+        which case any aggregate — including one inside a spread embed — is
+        rejected with 400 PGRST123.
+        """
+      ],
       db_anon_role: [
         type: {:or, [:string, nil]},
         default: env(:db_anon_role, nil),
