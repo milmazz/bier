@@ -106,6 +106,36 @@ defmodule Bier.Wal.EventsHttpTest do
     %{port: port, name: name}
   end
 
+  # Boots a fourth instance with a deliberately tiny `events_buffer_size` so
+  # a couple of inserts force real ring-buffer eviction. This is the only
+  # way to manufacture a legitimately "evicted" cursor: an untouched
+  # table's history is never stale (Buffer.stale?/3's `nil -> false`
+  # clause), so a bare, never-seen cursor alone does NOT produce a reset —
+  # only an actual drop or eviction older than the requested cursor does
+  # (see `Bier.Wal.BufferTest`'s "a cursor older than a wrapped table's
+  # history resets").
+  defp start_small_buffer_instance! do
+    port = TestPorts.free_port()
+    name = :"wal_http_smallbuf_#{System.unique_integer([:positive])}"
+
+    opts =
+      Bier.ConformanceServer.base_opts()
+      |> Keyword.merge(
+        name: name,
+        pool_size: 2,
+        db_schemas: [@schema],
+        db_channel_enabled: false,
+        events_publication: @pub,
+        events_heartbeat_interval: 50,
+        events_buffer_size: 1,
+        router: [port: port, scheme: :http]
+      )
+
+    start_supervised!({Bier, opts})
+    TestPorts.wait_until_listening(port)
+    %{port: port, name: name}
+  end
+
   # Boots a third instance with `events_publication` unset entirely (nil) —
   # `events_channels` stays non-empty so `/events` is still routed at all —
   # to prove the "table subscriptions disabled" refusal renders exactly like
@@ -271,5 +301,102 @@ defmodule Bier.Wal.EventsHttpTest do
       )
 
     assert resp.status == 406
+  end
+
+  test "reconnecting with the last id replays missed events", %{db: db, port: port} do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(sock, ": connected")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('one')", [])
+    frame = SSETestClient.recv_until(sock, "data: {")
+    [_, id] = Regex.run(~r/id: ([^\n]+)\n/, frame)
+    :gen_tcp.close(sock)
+
+    # Missed while disconnected.
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('two')", [])
+
+    sock2 = SSETestClient.connect_sse(port, "/events?table=orders&last_event_id=#{id}")
+    replay = SSETestClient.recv_until(sock2, "data: {")
+
+    data = replay |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["row"]["note"] == "two"
+  end
+
+  test "an unknown cursor produces an immediate bier:reset", %{db: db} do
+    %{port: port, name: name} = start_small_buffer_instance!()
+    wait_wal_streaming(db, name)
+
+    # Establish a live spectator and wait for BOTH inserts to have flowed
+    # through the consumer before probing for a reset: with
+    # `events_buffer_size: 1` the second insert evicts the first, which is
+    # what makes any cursor at or before it legitimately "history_evicted".
+    spectator = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(spectator, ": connected")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('evict-1')", [])
+    SSETestClient.recv_until(spectator, "data: {")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('evict-2')", [])
+    SSETestClient.recv_until(spectator, "data: {")
+
+    # A real LSN's high 32 bits stay 0 for a local test cluster's lifetime
+    # (crossing to 1 needs 4 GiB of WAL past cursor 0), so `0/1.0` compares
+    # strictly less than any real post-insert cursor here — genuinely
+    # "ancient" rather than merely unfamiliar to the buffer.
+    sock = SSETestClient.connect_sse(port, "/events?table=orders&last_event_id=0/1.0")
+    frame = SSETestClient.recv_until(sock, "data: {")
+    assert frame =~ "event: bier:reset\n"
+
+    data = frame |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["reason"] == "history_evicted"
+  end
+
+  test "a malformed cursor is treated as no cursor (live head)", %{db: db, port: port} do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders&last_event_id=garbage")
+    SSETestClient.recv_until(sock, ": connected")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('after')", [])
+    frame = SSETestClient.recv_until(sock, "data: {")
+    assert frame =~ "after"
+  end
+
+  test "killing the consumer mid-stream delivers stream_restarted", %{port: port, name: name} do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(sock, ": connected")
+
+    [{pid, _}] = Registry.lookup(Bier.Registry, {name, Bier.Wal.Consumer})
+    Process.exit(pid, :kill)
+
+    frame = SSETestClient.recv_until(sock, "data: {")
+    assert frame =~ "event: bier:reset\n"
+
+    data = frame |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["reason"] == "stream_restarted"
+  end
+
+  test "replay does not leak filtered columns for a partial-grant role", %{db: db} do
+    %{port: port, name: auth_name} = start_auth_instance!()
+    wait_wal_streaming(db, auth_name)
+    token = SSETestClient.sign_hs256(%{"role" => "postgrest_test_anonymous"}, @jwt_secret)
+
+    sock = SSETestClient.connect_sse(port, "/events?table=orders&access_token=#{token}")
+    SSETestClient.recv_until(sock, ": connected")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (id, note) VALUES (101, 'baseline')", [])
+    frame = SSETestClient.recv_until(sock, "data: {")
+    [_, id] = Regex.run(~r/id: ([^\n]+)\n/, frame)
+    :gen_tcp.close(sock)
+
+    # Missed while disconnected — the row a partial-grant role must NOT see
+    # `note` for, replayed from the buffer this time instead of delivered
+    # live.
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (id, note) VALUES (102, 'top-secret')", [])
+
+    sock2 =
+      SSETestClient.connect_sse(
+        port,
+        "/events?table=orders&access_token=#{token}&last_event_id=#{id}"
+      )
+
+    replay = SSETestClient.recv_until(sock2, "data: {")
+    refute replay =~ "top-secret"
+
+    data = replay |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["row"] == %{"id" => 102}
   end
 end

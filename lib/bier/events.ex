@@ -16,16 +16,24 @@ defmodule Bier.Events do
   `{:bier_wal_reset, ...}` messages from `Bier.Wal.Consumer` (via
   `Bier.Events.Registry`) as SSE frames.
 
-  Delivery is fire-and-forget (at-most-once): NOTIFY is ephemeral, so events
-  fired while a client is disconnected are lost. Clients get a `retry:` hint
-  and periodic keepalive comments; reconnection does not replay.
+  Channel delivery is fire-and-forget (at-most-once): NOTIFY is ephemeral, so
+  a `channel=` event fired while a client is disconnected is lost. Table
+  delivery is different: `Bier.Wal.Buffer` retains a bounded ring of recent
+  history per table, and a reconnecting client that sends `Last-Event-ID`
+  (as a header, or a `last_event_id` query param for clients that cannot set
+  arbitrary headers — the header wins when both are present) has it replayed
+  before rejoining the live stream. A cursor the buffer can no longer honor
+  — evicted by the ring, dropped, or from before a bier restart — gets an
+  explicit `bier:reset` frame instead of a silent gap; a missing or
+  malformed id just starts at the live head. Clients also get a `retry:`
+  hint and periodic keepalive comments.
   """
 
   import Plug.Conn
 
   alias Bier.Events.SSE
   alias Bier.Plugs.ActionController
-  alias Bier.Wal.{Authorize, Cursor, Render}
+  alias Bier.Wal.{Authorize, Buffer, Cursor, Render}
 
   @doc """
   True when this request targets the events endpoint: the feature is enabled
@@ -193,7 +201,19 @@ defmodule Bier.Events do
         Enum.each(channels, &Bier.Events.Registry.register(config.name, &1))
         Enum.each(tables, &Bier.Events.Registry.register_table(config.name, &1))
         sub = %{columns: columns, tables: tables, names: table_names(tables, config)}
-        loop(conn, config, sub, 0, start, metadata)
+
+        # Registration happens BEFORE replay, so an event landing while
+        # history is being replayed is already queued in this process's
+        # mailbox and gets delivered again by `loop/6` right after — an
+        # accepted, documented at-least-once duplicate window (the client
+        # dedupes by `id:`), not a gap.
+        case resume(conn, config, sub) do
+          {:live, conn, delivered} ->
+            loop(conn, config, sub, delivered, start, metadata)
+
+          {:error, reason, delivered} ->
+            finish(conn, delivered, start, Map.put(metadata, :reason, reason))
+        end
 
       {:error, reason} ->
         finish(conn, 0, start, Map.put(metadata, :reason, reason))
@@ -209,6 +229,88 @@ defmodule Bier.Events do
     Map.new(tables, fn {schema, table} = key ->
       {key, if(schema == default, do: table, else: schema <> "." <> table)}
     end)
+  end
+
+  # `Last-Event-ID` (header, then `last_event_id` query param fallback) is
+  # resolved into either the live head or replayed history. Returns
+  # `{:live, conn, delivered}` — `delivered` counts frames written here so
+  # the caller's telemetry stays accurate whether resume replayed history,
+  # sent a reset, or did neither — or `{:error, reason, delivered}` on a
+  # write failure (mirrors the preamble's own `chunk/2` error shape).
+  defp resume(conn, config, sub) do
+    case last_event_id(conn) do
+      nil ->
+        {:live, conn, 0}
+
+      raw ->
+        case Cursor.parse(raw) do
+          # A malformed id is not a protocol error; start at the live head.
+          :error -> {:live, conn, 0}
+          {:ok, cursor} -> replay(conn, config, sub, cursor)
+        end
+    end
+  end
+
+  # Nothing to replay for a channel-only subscription: skip the Buffer
+  # entirely rather than calling `Buffer.generation/1`, which would crash
+  # (no Buffer process exists) on an instance with WAL disabled entirely
+  # (`events_publication: nil`) — the only shape a table-less `sub` can have,
+  # since `authorize_tables/3` already refuses table subscriptions there.
+  defp replay(conn, _config, %{tables: []}, _cursor), do: {:live, conn, 0}
+
+  defp replay(conn, config, sub, cursor) do
+    name = config.name
+    generation = Buffer.generation(name)
+
+    case Buffer.replay_after(name, sub.tables, cursor, generation) do
+      :reset ->
+        payload = Bier.json_library().encode!(%{"reason" => "history_evicted"})
+
+        case chunk_or_halt(conn, SSE.frame("bier:reset", payload)) do
+          {:live, conn} -> {:live, conn, 0}
+          {:error, reason} -> {:error, reason, 0}
+        end
+
+      {:ok, entries} ->
+        Enum.reduce_while(entries, {:live, conn, 0}, fn {c, table_key, event},
+                                                        {:live, conn, delivered} ->
+          allowed = Map.fetch!(sub.columns, table_key)
+          json = Render.data(event, event.commit_at, allowed)
+          name = Map.fetch!(sub.names, table_key)
+          frame = SSE.frame(name, Bier.json_library().encode!(json), Cursor.encode(c))
+
+          case chunk_or_halt(conn, frame) do
+            {:live, conn} -> {:cont, {:live, conn, delivered + 1}}
+            {:error, reason} -> {:halt, {:error, reason, delivered}}
+          end
+        end)
+    end
+  end
+
+  defp chunk_or_halt(conn, iodata) do
+    case chunk(conn, iodata) do
+      {:ok, conn} -> {:live, conn}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # The browser EventSource API cannot set arbitrary headers on the FIRST
+  # connect either, so this endpoint also accepts the resume cursor as a
+  # `last_event_id` query param; browsers DO send `Last-Event-ID` on their
+  # own automatic reconnects, so the header wins whenever both are present.
+  defp last_event_id(conn) do
+    case get_req_header(conn, "last-event-id") do
+      [id | _] ->
+        id
+
+      [] ->
+        conn.query_string
+        |> URI.query_decoder()
+        |> Enum.find_value(fn
+          {"last_event_id", value} -> value
+          _other -> nil
+        end)
+    end
   end
 
   # Runs in the Bandit connection process. Registry entries die with it, so
