@@ -237,9 +237,13 @@ defmodule Bier.Embed do
   #     noRelSelectsAreAggregated`). It is also what makes an aggregate under a
   #     to-many spread detectable, i.e. PGRST127.
   #   * `hoists` — `{out_name, agg}` pairs a to-one spread defers to its parent.
-  #   * `group_terms` — the `GROUP BY` terms spread columns contribute
-  #     (`groupTermFromRelSelectField`); plain fields of this level are still
-  #     collected by `group_by/4` straight off the nodes.
+  #   * `group_terms` — the `GROUP BY` terms this level's columns contribute
+  #     (`groupTermFromRelSelectField`): a spread's joined columns, a `*`'s
+  #     expanded column list, and the source-side join columns a non-spread
+  #     embed's correlated subquery reads. Plain fields of this level are still
+  #     collected by `group_by/4` straight off the nodes. A column may
+  #     contribute several terms (a composite foreign key), so `group` is a
+  #     term, a list of them, or nil.
   #   * `spread_aliases` — `canonical embed name => LATERAL alias`, so a related
   #     `order=<spread>(<col>)` can read the joined column instead of building a
   #     correlated subquery the `GROUP BY` would then reject.
@@ -247,7 +251,7 @@ defmodule Bier.Embed do
     do: %{aggregated?: false, hoists: [], group_terms: [], spread_aliases: %{}}
 
   defp note_col(meta, name, group, agg) do
-    meta = if group, do: %{meta | group_terms: meta.group_terms ++ [group]}, else: meta
+    meta = %{meta | group_terms: meta.group_terms ++ List.wrap(group)}
 
     case agg do
       :applied -> %{meta | aggregated?: true}
@@ -341,9 +345,15 @@ defmodule Bier.Embed do
   defp agg_operand(a, col),
     do: %{column: col, json_path: a.json_path, cast: a.input_cast}
 
+  # `*` expands to the relation's whole column list, and each of those columns
+  # groups itself: paired with an aggregate they are ordinary ungrouped columns
+  # as far as Postgres is concerned, so without the terms the query is rejected
+  # with `42803` (#145). PostgREST reaches the same place by expanding `*` in
+  # the plan before `groupF` runs over the resulting fields.
   defp star_pairs(relation, al) do
     Enum.map(relation.columns, fn c ->
-      plain_col(star_col_expr(relation, al, c.name), c.name)
+      expr = star_col_expr(relation, al, c.name)
+      {:col, expr, c.name, expr, nil}
     end)
   end
 
@@ -491,7 +501,7 @@ defmodule Bier.Embed do
     else
       empty_inner = "SELECT 1 FROM #{from}#{where_sql}#{order_sql}"
       sub = json_embed_expr(kind, child_cols, inner_base, empty_inner, page_sql)
-      {[plain_col(sub, out_name)], state}
+      {[{:col, sub, out_name, source_join_terms(join, src_alias), nil}], state}
     end
   end
 
@@ -639,6 +649,24 @@ defmodule Bier.Embed do
   end
 
   defp render_join(:computed, _child_alias, _src_alias), do: ""
+
+  # The SOURCE-side columns an embed's correlated subquery reads from the outer
+  # query. Paired with an aggregate they have to be grouped, or Postgres
+  # rejects the whole statement with "subquery uses ungrouped column ... from
+  # outer query" (`42803`, #145). PostgREST renders embeds as LATERALs and
+  # groups by the join alias (`groupTermFromRelSelectField (JsonEmbed …)`);
+  # bier renders a correlated subquery, so the equivalent terms are the outer
+  # columns that subquery correlates on — the same ones `render_join/3` puts on
+  # the source side of the join predicate.
+  defp source_join_terms({:direct, pairs}, src_alias),
+    do: Enum.map(pairs, fn {_ccol, scol} -> col_expr(src_alias, scol) end)
+
+  defp source_join_terms({:via, jpairs, _tpairs}, src_alias),
+    do: Enum.map(jpairs, fn {_jcol, scol} -> col_expr(src_alias, scol) end)
+
+  # A computed relationship passes the whole source row to the function, so the
+  # row itself is the grouping term.
+  defp source_join_terms(:computed, src_alias), do: [QE.quote_ident(src_alias)]
 
   # ---- inner join propagation ---------------------------------------------
 
