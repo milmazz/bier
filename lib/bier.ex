@@ -624,7 +624,9 @@ defmodule Bier do
           {DynamicSupervisor,
            strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
           {Bier.HttpServerStarter, conf}
-        ] ++ listener_children(conf) ++ events_children(conf) ++ admin_children(conf)
+        ] ++
+        listener_children(conf) ++
+        events_children(conf) ++ wal_children(conf) ++ admin_children(conf)
 
     Supervisor.init(children, strategy: :one_for_one)
   end
@@ -652,6 +654,12 @@ defmodule Bier do
   defp events_children(%Bier.Config{events_channels: []}), do: []
 
   defp events_children(%Bier.Config{} = conf), do: [{Bier.Events.Listener, conf}]
+
+  # The WAL change feed runs only when an operator publication is configured:
+  # the Buffer must precede the Consumer (the consumer's connect callback
+  # bumps the Buffer generation).
+  defp wal_children(%Bier.Config{events_publication: nil}), do: []
+  defp wal_children(conf), do: [{Bier.Wal.Buffer, conf}, {Bier.Wal.Consumer, conf}]
 
   # The JWT verification cache only runs when it can do work: a secret is
   # configured and jwt-cache-max-entries is positive (PostgREST's JwtNoCache

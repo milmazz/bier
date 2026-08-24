@@ -37,4 +37,27 @@ defmodule Bier.Events.Registry do
   def subscriber_count(instance, channel) do
     length(Registry.lookup(__MODULE__, {instance, channel}))
   end
+
+  @doc "Subscribe the calling process to a table's WAL change feed."
+  @spec register_table(term(), {String.t(), String.t()}) :: :ok
+  def register_table(instance, table_key) do
+    {:ok, _owner} = Registry.register(__MODULE__, {instance, {:table, table_key}}, nil)
+    :ok
+  end
+
+  @doc "Send `message` to every WAL subscriber of `table_key` on `instance`."
+  @spec broadcast_table(term(), {String.t(), String.t()}, term()) :: non_neg_integer()
+  def broadcast_table(instance, table_key, message) do
+    entries = Registry.lookup(__MODULE__, {instance, {:table, table_key}})
+    for {pid, _value} <- entries, do: send(pid, message)
+    length(entries)
+  end
+
+  @doc "Every live WAL table subscriber on `instance`, across all tables."
+  @spec table_subscribers(term()) :: [pid()]
+  def table_subscribers(instance) do
+    Registry.select(__MODULE__, [
+      {{{instance, {:table, :_}}, :"$1", :_}, [], [:"$1"]}
+    ])
+  end
 end

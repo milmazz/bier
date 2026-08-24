@@ -17,6 +17,7 @@ defmodule Bier.HttpServerStarter do
     # keyed by the instance name — see Bier.SchemaCache. The catch-all router
     # forwards everything to ActionController.
     cache = Bier.SchemaCache.load!(name, conn, schemas, conf.db_extra_search_path)
+    :ok = Bier.Wal.validate!(conn, conf)
 
     {:module, plug, _binary, _} = Bier.RouterBuilder.build(conf, cache.relations)
 
