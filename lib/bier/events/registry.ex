@@ -53,11 +53,18 @@ defmodule Bier.Events.Registry do
     length(entries)
   end
 
-  @doc "Every live WAL table subscriber on `instance`, across all tables."
+  @doc """
+  Every live WAL table subscriber on `instance`, across all tables.
+
+  Deduplicated: a process registered on several tables (e.g. it wants the
+  reset/recheck broadcasts regardless of which table triggered them) would
+  otherwise appear once per table it is registered on.
+  """
   @spec table_subscribers(term()) :: [pid()]
   def table_subscribers(instance) do
     Registry.select(__MODULE__, [
       {{{instance, {:table, :_}}, :"$1", :_}, [], [:"$1"]}
     ])
+    |> Enum.uniq()
   end
 end

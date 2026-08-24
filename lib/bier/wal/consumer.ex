@@ -21,12 +21,21 @@ defmodule Bier.Wal.Consumer do
 
   use Postgrex.ReplicationConnection
 
+  require Logger
+
   alias Bier.Events.Registry, as: Events
   alias Bier.Wal.{Buffer, Pgoutput}
 
   def start_link(%Bier.Config{} = conf) do
     {pg_opts, _} =
-      Keyword.split(Bier.postgrex_opts(conf), [:hostname, :port, :database, :username, :password])
+      Keyword.split(Bier.postgrex_opts(conf), [
+        :hostname,
+        :port,
+        :database,
+        :username,
+        :password,
+        :ssl
+      ])
 
     Postgrex.ReplicationConnection.start_link(
       __MODULE__,
@@ -37,13 +46,7 @@ defmodule Bier.Wal.Consumer do
 
   @impl true
   def init(conf) do
-    {:ok,
-     %{
-       conf: conf,
-       registry: %{},
-       tx: nil,
-       slot: "bier_#{:erlang.phash2(conf.name)}_#{System.unique_integer([:positive])}"
-     }}
+    {:ok, %{conf: conf, registry: %{}, tx: nil, slot: nil}}
   end
 
   @impl true
@@ -54,8 +57,15 @@ defmodule Bier.Wal.Consumer do
     for pid <- Events.table_subscribers(state.conf.name),
         do: send(pid, {:bier_wal_reset, "stream_restarted"})
 
-    {:query, "CREATE_REPLICATION_SLOT #{state.slot} TEMPORARY LOGICAL pgoutput NOEXPORT_SNAPSHOT",
-     state}
+    # Minted fresh on every (re)connect, never in init/1: the slot is
+    # TEMPORARY and tied to the connection that created it, so reusing a
+    # name minted once for the whole process would collide (`42710 slot
+    # already exists`) if a reconnect races the server reaping the previous
+    # connection's slot.
+    slot = "bier_#{:erlang.phash2(state.conf.name)}_#{System.unique_integer([:positive])}"
+
+    {:query, "CREATE_REPLICATION_SLOT #{slot} TEMPORARY LOGICAL pgoutput NOEXPORT_SNAPSHOT",
+     %{state | slot: slot}}
   end
 
   @impl true
@@ -63,6 +73,19 @@ defmodule Bier.Wal.Consumer do
     {:stream,
      "START_REPLICATION SLOT #{state.slot} LOGICAL 0/0 " <>
        "(proto_version '1', publication_names '#{state.conf.events_publication}')", [], state}
+  end
+
+  # CREATE_REPLICATION_SLOT failed (e.g. max_replication_slots exhausted, or
+  # a name collision). Disconnect in a controlled way instead of crashing:
+  # with auto_reconnect: true the connection backs off and retries, minting
+  # a fresh slot name on the next handle_connect/1.
+  def handle_result(%Postgrex.Error{} = error, state) do
+    Logger.error(
+      "Bier WAL consumer for #{inspect(state.conf.name)} failed to create its replication " <>
+        "slot: #{Exception.message(error)}"
+    )
+
+    {:disconnect, error}
   end
 
   @impl true
@@ -79,6 +102,29 @@ defmodule Bier.Wal.Consumer do
       end
 
     {:noreply, messages, state}
+  end
+
+  # CopyDone: Postgres ended the replication stream gracefully (e.g. the
+  # slot was invalidated, or the server is shutting down). Reconnect rather
+  # than idling on a connection that will never stream again.
+  def handle_data(:done, state) do
+    Logger.warning(
+      "Bier WAL consumer for #{inspect(state.conf.name)} lost its replication stream " <>
+        "(CopyDone); reconnecting"
+    )
+
+    {:disconnect, "replication stream ended (CopyDone)"}
+  end
+
+  # Any other frame (future protocol additions, or a bug upstream) — log and
+  # keep the connection alive rather than crashing the process.
+  def handle_data(other, state) do
+    Logger.warning(
+      "Bier WAL consumer for #{inspect(state.conf.name)} received an unexpected " <>
+        "replication frame: #{inspect(other)}"
+    )
+
+    {:noreply, state}
   end
 
   defp handle_event(%{kind: :begin}, state),

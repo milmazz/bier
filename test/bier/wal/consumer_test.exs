@@ -16,8 +16,12 @@ defmodule Bier.Wal.ConsumerTest do
 
   @schema "wal_consumer_test"
 
-  setup do
-    {:ok, db} = Postgrex.start_link(Bier.ConformanceServer.base_opts())
+  setup context do
+    # A dedicated connection just for setup/teardown DDL: one connection is
+    # plenty (default pool_size: 10 would needlessly add to the suite's
+    # shared connection budget — see start_link_past_pool_exhaustion/2).
+    {:ok, db} =
+      Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
 
     Postgrex.query!(db, "DROP SCHEMA IF EXISTS #{@schema} CASCADE", [])
     Postgrex.query!(db, "CREATE SCHEMA #{@schema}", [])
@@ -26,7 +30,9 @@ defmodule Bier.Wal.ConsumerTest do
     Postgrex.query!(db, "CREATE PUBLICATION wal_consumer_pub FOR TABLE #{@schema}.orders", [])
 
     on_exit(fn ->
-      {:ok, cleanup} = Postgrex.start_link(Bier.ConformanceServer.base_opts())
+      {:ok, cleanup} =
+        Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
+
       Postgrex.query!(cleanup, "DROP PUBLICATION IF EXISTS wal_consumer_pub", [])
       Postgrex.query!(cleanup, "DROP SCHEMA IF EXISTS #{@schema} CASCADE", [])
     end)
@@ -45,6 +51,10 @@ defmodule Bier.Wal.ConsumerTest do
         pool_size: 2,
         db_schemas: [@schema],
         events_publication: "wal_consumer_pub",
+        # Overridable per test via `@tag events_max_tx_events: N` (the
+        # overflow test needs a tiny cap); defaults to the same value
+        # Bier.Config itself defaults to.
+        events_max_tx_events: Map.get(context, :events_max_tx_events, 10_000),
         router: [port: Bier.TestPorts.free_port(), scheme: :http]
       )
 
@@ -99,17 +109,36 @@ defmodule Bier.Wal.ConsumerTest do
     SSETestClient.wait_until(fn -> Buffer.generation(name) > gen end)
   end
 
-  # Retrying past sustained pool exhaustion (see below) needs more than
-  # ExUnit's default 60s test timeout.
-  @tag timeout: 120_000
+  @tag events_max_tx_events: 1
+  test "a transaction over the cap is dropped and announced, resetting replay", %{
+    db: db,
+    name: name
+  } do
+    :ok = Bier.Events.Registry.register_table(name, {@schema, "orders"})
+    gen = Buffer.generation(name)
+
+    # One transaction, two insert events — one over the cap of 1.
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('x'), ('y')", [])
+
+    assert_receive {:bier_wal_reset, "transaction_too_large"}, 5_000
+
+    # The whole transaction (including the event that fit under the cap) was
+    # discarded, and Buffer.drop marked the table as having lost history: a
+    # cursor from before the overflow — same generation — now resets rather
+    # than replaying anything.
+    assert Buffer.replay_after(name, [{@schema, "orders"}], {{0, 0}, 0}, gen) == :reset
+  end
+
   test "boot fails fast when the publication does not exist" do
     opts =
       Bier.ConformanceServer.base_opts()
       |> Keyword.merge(
         name: :"wal_badpub_#{System.unique_integer([:positive])}",
         pool_size: 2,
-        # This test only needs the pool connection introspection runs on;
-        # skip the extra schema-cache-reload LISTEN connection.
+        # Scope introspection to one schema, and skip the extra
+        # schema-cache-reload LISTEN connection: this instance only needs
+        # to reach Bier.Wal.validate! as cheaply as possible.
+        db_schemas: [@schema],
         db_channel_enabled: false,
         events_publication: "does_not_exist",
         router: [port: Bier.TestPorts.free_port(), scheme: :http]
@@ -122,19 +151,63 @@ defmodule Bier.Wal.ConsumerTest do
     assert message =~ "CREATE PUBLICATION"
   end
 
+  test "boot fails fast when the connecting role lacks REPLICATION", %{db: db} do
+    role = "wal_norepl_#{System.unique_integer([:positive])}"
+
+    Postgrex.query!(db, ~s(CREATE ROLE "#{role}" LOGIN PASSWORD '#{role}'), [])
+    Postgrex.query!(db, ~s(GRANT USAGE ON SCHEMA #{@schema} TO "#{role}"), [])
+    Postgrex.query!(db, ~s(GRANT SELECT ON ALL TABLES IN SCHEMA #{@schema} TO "#{role}"), [])
+
+    on_exit(fn ->
+      {:ok, cleanup} =
+        Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
+
+      # DROP OWNED revokes the grants above (and anything else the role
+      # might hold) so the role itself can then be dropped, regardless of
+      # whether this runs before or after the schema/publication cleanup
+      # registered in `setup` (on_exit callbacks run LIFO).
+      Postgrex.query!(cleanup, ~s(DROP OWNED BY "#{role}"), [])
+      Postgrex.query!(cleanup, ~s(DROP ROLE IF EXISTS "#{role}"), [])
+    end)
+
+    opts =
+      Bier.ConformanceServer.base_opts()
+      |> Keyword.merge(
+        name: :"wal_norepl_#{System.unique_integer([:positive])}",
+        username: role,
+        password: role,
+        pool_size: 1,
+        db_schemas: [@schema],
+        db_channel_enabled: false,
+        # A real, existing publication: this boot must fail on the
+        # REPLICATION-attribute check specifically, not an earlier one.
+        events_publication: "wal_consumer_pub",
+        router: [port: Bier.TestPorts.free_port(), scheme: :http]
+      )
+
+    Process.flag(:trap_exit, true)
+    assert {:error, reason} = start_link_past_pool_exhaustion(opts)
+    message = inspect(reason)
+    assert message =~ "REPLICATION attribute"
+    assert message =~ "ALTER ROLE"
+  end
+
   # Under this suite's peak connection pressure (the shared ConformanceServer
   # instances plus every other async test file's own instance, all competing
-  # for Postgres' default max_connections=100), boot can occasionally fail on
-  # an unrelated pool/queue-timeout error instead of the validation failure
-  # this test exercises, and the underlying DBConnection queue timeout itself
-  # already runs several seconds per attempt — so this retries with a
-  # generous budget. Retry past that specific noise only — a real validation
-  # failure (or any other error) is returned immediately.
-  defp start_link_past_pool_exhaustion(opts, retries \\ 12) do
+  # for Postgres' default max_connections=100), boot has been observed to
+  # fail on an unrelated pool/queue-timeout error instead of the validation
+  # failure these tests exercise. This file's own contribution to that
+  # pressure is now minimal (pool_size 1 utility connections, schema-scoped
+  # introspection on every instance it boots), so this retry is kept small —
+  # a modest safety net against pressure from OTHER concurrently-running test
+  # files, not a crutch for this file's own footprint. Retries past that
+  # specific noise only — a real validation failure (or any other error) is
+  # returned immediately.
+  defp start_link_past_pool_exhaustion(opts, retries \\ 3) do
     case Bier.start_link(opts) do
       {:error, reason} = error ->
         if retries > 0 and inspect(reason) =~ ~r/too_many_connections|queue_timeout/ do
-          Process.sleep(1_000)
+          Process.sleep(500)
           start_link_past_pool_exhaustion(opts, retries - 1)
         else
           error
