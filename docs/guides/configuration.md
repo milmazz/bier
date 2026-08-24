@@ -114,10 +114,6 @@ PostgREST's reloadable whitelist are honored — notably `db-uri` and the
 `server-*` bind settings are **not**, since the server would have to already
 be connected and listening to read them.
 
-`db_aggregates_enabled` is deliberately absent from that whitelist, matching
-upstream's `dbSettingsNames`: it is settable from the environment, the config
-file and the CLI flag only, so a role cannot turn aggregates on for itself.
-
 The practical consequence: if a `PGRST_*` environment variable seems to have
 no effect, check for an `ALTER ROLE … SET pgrst.*` on the connecting role,
 because that is what is winning.

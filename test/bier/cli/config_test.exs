@@ -422,12 +422,21 @@ defmodule Bier.CLI.ConfigTest do
       assert "pgrst.url_use_legacy_target_names" in names
       assert "pgrst.server_timing_enabled" in names
 
+      # db_aggregates_enabled is the FIRST entry of upstream's dbSettingsNames
+      # (Config/Database.hs#L47), so a role can turn aggregates on for itself.
+      # This assertion previously read the other way round, on a claim nothing
+      # checked (#146 item 4).
+      assert "pgrst.db_aggregates_enabled" in names
+
       # Non-reloadable / unimplemented keys stay out.
       refute "pgrst.server_port" in names
       refute "pgrst.db_config" in names
       refute "pgrst.log_level" in names
 
-      assert length(names) == 21
+      # Upstream lists 25 names; the three Bier does not implement
+      # (db_pre_config, db_hoisted_tx_settings, jwt_cache_max_lifetime) are the
+      # only ones missing here.
+      assert length(names) == 22
     end
 
     test "dump output is reparse-stable (case 1726)" do

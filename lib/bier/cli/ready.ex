@@ -16,16 +16,13 @@ defmodule Bier.CLI.Ready do
   # than :httpc's infinity.
   @timeout_ms 30_000
 
-  @doc """
-  Validate `url` the way http-client's `parseRequest` does, before any socket
-  is opened: an unparseable URL — e.g. the negative port a misconfigured
-  `admin-server-port` produces — raises `InvalidUrlException`, which
-  PostgREST's `handleHttpException` renders as `ERROR: invalid url - <url>`, a
-  distinct flavor from the connection-refused message every *transport*
-  failure collapses into.
-  """
-  @spec validate_url(String.t()) :: :ok | {:error, String.t()}
-  def validate_url(url) do
+  # Validate `url` the way http-client's `parseRequest` does, before any socket
+  # is opened: an unparseable URL — e.g. the negative port a misconfigured
+  # `admin-server-port` produces — raises `InvalidUrlException`, which
+  # PostgREST's `handleHttpException` renders as `ERROR: invalid url - <url>`, a
+  # distinct flavor from the connection-refused message every *transport*
+  # failure collapses into.
+  defp validate_url(url) do
     case URI.new(url) do
       {:ok, %URI{host: host, port: port}}
       when is_binary(host) and host != "" and is_integer(port) ->

@@ -27,6 +27,34 @@ defmodule Bier.Embed do
   alias Bier.Introspection.Relation
   alias Bier.QueryExecutor, as: QE
 
+  defmodule Meta do
+    @moduledoc false
+    # What one level of the select list reports to the level above:
+    #
+    #   * `aggregated?` — an aggregate is applied HERE, so this level needs the
+    #     implicit `GROUP BY` (PostgREST's `noSelectsAreAggregated &&
+    #     noRelSelectsAreAggregated`). It is also what makes an aggregate under
+    #     a to-many spread detectable, i.e. PGRST127.
+    #   * `hoists` — `{out_name, agg}` pairs a to-one spread defers to its
+    #     parent.
+    #   * `group_terms` — the `GROUP BY` terms this level's columns contribute
+    #     (`groupTermFromRelSelectField`): a spread's joined columns, a `*`'s
+    #     expanded column list, and the source-side join columns a non-spread
+    #     embed's correlated subquery reads. Plain fields of this level are
+    #     still collected by `group_by/4` straight off the nodes. A column may
+    #     contribute several terms (a composite foreign key), so `group` is a
+    #     term, a list of them, or nil.
+    #   * `spread_aliases` — `canonical embed name => LATERAL alias`, so a
+    #     related `order=<spread>(<col>)` can read the joined column instead of
+    #     building a correlated subquery the `GROUP BY` would then reject.
+    #
+    # A struct rather than a bare map so `%Meta{meta | …}` catches a typo'd key
+    # at compile time. `hoists` and `group_terms` accumulate in reverse and are
+    # flipped once by `finish_meta/1`. Declared up here because a nested module
+    # must exist before the struct is expanded at its first use below.
+    defstruct aggregated?: false, hoists: [], group_terms: [], spread_aliases: %{}
+  end
+
   # The plan keys whose map is keyed by an embed path.
   @embed_path_keys [:embed_filters, :embed_orders, :embed_limits, :embed_offsets]
 
@@ -191,7 +219,7 @@ defmodule Bier.Embed do
   list of `{expr, out_name}` pairs (rendered with `render_cols/1`), `laterals` is
   a list of ` LEFT JOIN LATERAL (...) ON true` clauses contributed by spread
   embeds, and `meta` is what this level reports back to the one above it (see
-  `empty_meta/0`). Aggregating the derived table's row record (instead of a
+  `Meta`). Aggregating the derived table's row record (instead of a
   `json_build_object` scalar, which spaces `"k" : v`) matches PostgREST's
   wire bytes — see issue #31. `embed_filters` maps embed paths to filter
   nodes. `qe` is the executor module (passed to avoid a compile cycle).
@@ -216,46 +244,35 @@ defmodule Bier.Embed do
       end)
 
     {cols, laterals, meta} =
-      Enum.reduce(entries, {[], [], empty_meta()}, fn
-        {:col, expr, name, group, agg}, {cols, lats, meta} ->
-          {cols ++ [{expr, name}], lats, note_col(meta, name, group, agg)}
+      Enum.reduce(entries, {[], [], %Meta{}}, fn
+        {:col, expr, name, group, agg}, {cols, lats, %Meta{} = meta} ->
+          {[{expr, name} | cols], lats, note_col(meta, name, group, agg)}
 
-        {:lateral, sql}, {cols, lats, meta} ->
-          {cols, lats ++ [sql], meta}
+        {:lateral, sql}, {cols, lats, %Meta{} = meta} ->
+          {cols, [sql | lats], meta}
 
-        {:spread_alias, key, spr}, {cols, lats, meta} ->
-          {cols, lats, %{meta | spread_aliases: Map.put(meta.spread_aliases, key, spr)}}
+        {:spread_alias, key, spr}, {cols, lats, %Meta{} = meta} ->
+          {cols, lats, %Meta{meta | spread_aliases: Map.put(meta.spread_aliases, key, spr)}}
       end)
 
-    {cols, laterals, meta, state}
+    {Enum.reverse(cols), Enum.reverse(laterals), finish_meta(meta), state}
   end
 
-  # What one level of the select list reports to the level above:
-  #
-  #   * `aggregated?` — an aggregate is applied HERE, so this level needs the
-  #     implicit `GROUP BY` (PostgREST's `noSelectsAreAggregated &&
-  #     noRelSelectsAreAggregated`). It is also what makes an aggregate under a
-  #     to-many spread detectable, i.e. PGRST127.
-  #   * `hoists` — `{out_name, agg}` pairs a to-one spread defers to its parent.
-  #   * `group_terms` — the `GROUP BY` terms this level's columns contribute
-  #     (`groupTermFromRelSelectField`): a spread's joined columns, a `*`'s
-  #     expanded column list, and the source-side join columns a non-spread
-  #     embed's correlated subquery reads. Plain fields of this level are still
-  #     collected by `group_by/4` straight off the nodes. A column may
-  #     contribute several terms (a composite foreign key), so `group` is a
-  #     term, a list of them, or nil.
-  #   * `spread_aliases` — `canonical embed name => LATERAL alias`, so a related
-  #     `order=<spread>(<col>)` can read the joined column instead of building a
-  #     correlated subquery the `GROUP BY` would then reject.
-  defp empty_meta,
-    do: %{aggregated?: false, hoists: [], group_terms: [], spread_aliases: %{}}
+  # Every accumulator above prepends, so the built order is reversed exactly
+  # once here rather than by appending per element. `group_terms` becomes SQL
+  # text (`GROUP BY a, b`) and `hoists` is keyed by name, so neither depends on
+  # the order — it is preserved to keep the generated SQL stable and diffable.
+  defp finish_meta(%Meta{} = meta) do
+    %Meta{meta | hoists: Enum.reverse(meta.hoists), group_terms: Enum.reverse(meta.group_terms)}
+  end
 
-  defp note_col(meta, name, group, agg) do
-    meta = %{meta | group_terms: meta.group_terms ++ List.wrap(group)}
+  # Records one column's contribution into the level's `Meta`.
+  defp note_col(%Meta{} = meta, name, group, agg) do
+    meta = %Meta{meta | group_terms: Enum.reverse(List.wrap(group)) ++ meta.group_terms}
 
     case agg do
-      :applied -> %{meta | aggregated?: true}
-      {:hoist, fun} -> %{meta | hoists: meta.hoists ++ [{name, fun}]}
+      :applied -> %Meta{meta | aggregated?: true}
+      {:hoist, agg} -> %Meta{meta | hoists: [{name, agg} | meta.hoists]}
       nil -> meta
     end
   end
@@ -557,6 +574,10 @@ defmodule Bier.Embed do
         :one ->
           " LEFT JOIN LATERAL (#{inner_base} LIMIT 1) #{spr} ON true"
 
+        # `child_cols` is never empty here: an embed that projects nothing
+        # (`...rel()`) is short-circuited by the empty-projection clause in
+        # `build_node/7` long before this point, so the join below always has
+        # at least one aggregate to render.
         :many ->
           aggs =
             Enum.map_join(child_cols, ", ", fn {_expr, name} ->

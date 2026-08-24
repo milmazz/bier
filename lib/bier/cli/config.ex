@@ -300,16 +300,15 @@ defmodule Bier.CLI.Config do
   def spec, do: @entries
 
   # Keys settable from the in-database config source (`ALTER ROLE ... SET
-  # pgrst.*`): upstream's dbSettingsNames whitelist (Config/Database.hs,
-  # v16.0) intersected with the keys Bier implements. Names not mirrored here:
-  # db_pre_config, db_hoisted_tx_settings, jwt_cache_max_lifetime (Bier's
-  # jwt-cache-max-entries is a different knob) — upstream-only. And
-  # db_aggregates_enabled, which Bier does implement but upstream's
-  # dbSettingsNames omits, so it stays settable by env/file/flag only.
+  # pgrst.*`): upstream's `dbSettingsNames` whitelist, verbatim at
+  # https://github.com/PostgREST/postgrest/blob/v16.0/src/library/PostgREST/Config/Database.hs#L47-L71,
+  # intersected with the keys Bier implements. The three names not mirrored
+  # here are upstream-only: db_pre_config, db_hoisted_tx_settings and
+  # jwt_cache_max_lifetime (Bier's jwt-cache-max-entries is a different knob).
   # Everything else — notably server-* bind settings and db-uri — is
   # non-reloadable and ignored when set via the database (case 1725).
   @db_settable_keys ~w(
-    client-error-verbosity
+    client-error-verbosity db-aggregates-enabled
     db-anon-role db-extra-search-path db-max-rows db-plan-enabled
     db-pre-request db-prepared-statements db-root-spec db-schemas db-tx-end
     jwt-aud jwt-role-claim-key jwt-secret jwt-secret-is-base64
