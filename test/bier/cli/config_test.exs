@@ -408,6 +408,25 @@ defmodule Bier.CLI.ConfigTest do
       assert resolved["db-max-rows"] == :unset
     end
 
+    test "in-db source: db-aggregates-enabled resolves from the database" do
+      # The behavior the whitelist entry buys: a role setting actually reaches
+      # the resolved config and the start opts, like every other db-settable
+      # bool (#146 item 4).
+      {:ok, resolved} = Config.load(%{}, nil, %{}, %{"db-aggregates-enabled" => "true"})
+      assert resolved["db-aggregates-enabled"] == true
+      assert Config.to_start_opts(resolved)[:db_aggregates_enabled] == true
+    end
+
+    test "in-db source: a malformed db-aggregates-enabled falls back, never to true" do
+      # The surface a role setting opens up: a junk value must not coerce to a
+      # truthy config that turns aggregates on for an unprivileged caller.
+      # `coerce(:bool, _)` reads it as Nothing and `resolve/5` lands on the
+      # key's default, which is off.
+      {:ok, resolved} = Config.load(%{}, nil, %{}, %{"db-aggregates-enabled" => "banana"})
+      assert resolved["db-aggregates-enabled"] == false
+      assert Config.to_start_opts(resolved)[:db_aggregates_enabled] == false
+    end
+
     test "db_settings_names/0 is upstream's whitelist ∩ implemented keys" do
       names = Config.db_settings_names()
 

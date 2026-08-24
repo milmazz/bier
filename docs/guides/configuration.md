@@ -248,8 +248,8 @@ relation name answered by 400 `PGRST108`. See
 has it: with it off, any aggregate — including one nested in an embed or a
 spread — is answered 400 `PGRST123`, because an unprivileged caller can
 otherwise turn one request into an arbitrarily expensive scan. Turn it on to
-serve them. It is the one implemented key that is *not* settable from the
-in-database config source (see below). See
+serve them. Like every other key on upstream's `dbSettingsNames` list, it is
+settable from the in-database config source as well. See
 [Aggregates](api.md#aggregates).
 
 ### Realtime events (SSE)

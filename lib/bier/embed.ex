@@ -574,10 +574,18 @@ defmodule Bier.Embed do
         :one ->
           " LEFT JOIN LATERAL (#{inner_base} LIMIT 1) #{spr} ON true"
 
-        # `child_cols` is never empty here: an embed that projects nothing
-        # (`...rel()`) is short-circuited by the empty-projection clause in
-        # `build_node/7` long before this point, so the join below always has
-        # at least one aggregate to render.
+        # `child_cols` CAN be empty here, and the result is wrong when it is.
+        # The empty-projection clause in `build_node/7` only catches a
+        # literally-empty parens list (`...rel()`, parser `empty: true`); a
+        # spread whose projection is made up entirely of empty embeds —
+        # `...processes(process_costs())` — reaches this branch with
+        # `child_cols == []`. `aggs` is then "", and `SELECT  FROM (…)` is
+        # legal SQL that is no longer an aggregate query, so the LATERAL
+        # returns one row per child and MULTIPLIES the parent rows instead of
+        # contributing nothing (case 11138 pins one row per parent for the
+        # `...rel()` spelling). Pre-existing; the fix is probably to treat a
+        # spread with no projected columns exactly like `empty: true`, but the
+        # `!inner` interaction via `inner_join_where/6` needs checking first.
         :many ->
           aggs =
             Enum.map_join(child_cols, ", ", fn {_expr, name} ->
