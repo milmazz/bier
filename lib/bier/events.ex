@@ -8,10 +8,11 @@ defmodule Bier.Events do
   validity — this prevents an unauthenticated channel/table-enumeration
   oracle), then validates the requested `channel=` subscriptions against the
   `events_channels` allowlist and the requested `table=` subscriptions
-  against `Bier.Wal.Authorize` (publication membership + RLS + per-role
-  column grants — the same uniform-refusal shape so the endpoint cannot be
-  used as an existence oracle either), then holds the connection open inside
-  the Bandit connection process, relaying `{:bier_event, channel, payload}`
+  against `db_schemas` exposure and `Bier.Wal.Authorize` (publication
+  membership + RLS + per-role column grants — the same uniform-refusal shape
+  so the endpoint cannot be used as an existence oracle either), then holds
+  the connection open inside the Bandit connection process, relaying
+  `{:bier_event, channel, payload}`
   messages from `Bier.Events.Listener` and `{:bier_wal_event, ...}` /
   `{:bier_wal_reset, ...}` messages from `Bier.Wal.Consumer` (via
   `Bier.Events.Registry`) as SSE frames.
@@ -136,18 +137,36 @@ defmodule Bier.Events do
 
   defp authorize_tables(_conn, [], _config, _role), do: {:ok, %{}}
 
-  # WAL table subscriptions require `events_publication`. `tables` is
-  # guaranteed non-empty here (the `[]` clause above precedes this one), so
-  # naming the first REQUESTED table renders through the exact same
-  # `{:events_unknown_table, "schema.table"}` shape and BIER003 envelope as
-  # an unpublished/RLS-enabled/unprivileged table — the client only ever
-  # sees its own table name echoed back, the same way it would if the
-  # publication were configured, so this still can't be used to learn
-  # whether table subscriptions are enabled at all.
-  defp authorize_tables(_conn, [{schema, table} | _], %{events_publication: nil}, _role),
-    do: {:error, {:events_unknown_table, schema <> "." <> table}}
+  # `table=` may only reference schemas this instance actually exposes
+  # (`db_schemas`) — a request naming an unexposed schema is refused before
+  # anything else (no DB round trip, no publication check), through the
+  # SAME uniform shape as every other refusal below: the first offending
+  # table in request order, so a qualified name still can't be used to
+  # probe which schemas are configured.
+  defp authorize_tables(conn, tables, config, role) do
+    case Enum.find(tables, fn {schema, _table} -> schema not in config.db_schemas end) do
+      {schema, table} -> {:error, {:events_unknown_table, schema <> "." <> table}}
+      nil -> authorize_published_tables(conn, tables, config, role)
+    end
+  end
 
-  defp authorize_tables(_conn, tables, config, role) do
+  # WAL table subscriptions require `events_publication`. `tables` is
+  # guaranteed non-empty here (the `[]` clause on `authorize_tables/4`
+  # precedes it), so naming the first REQUESTED table renders through the
+  # exact same `{:events_unknown_table, "schema.table"}` shape and BIER003
+  # envelope as an unpublished/RLS-enabled/unprivileged table — the client
+  # only ever sees its own table name echoed back, the same way it would if
+  # the publication were configured, so this still can't be used to learn
+  # whether table subscriptions are enabled at all.
+  defp authorize_published_tables(
+         _conn,
+         [{schema, table} | _],
+         %{events_publication: nil},
+         _role
+       ),
+       do: {:error, {:events_unknown_table, schema <> "." <> table}}
+
+  defp authorize_published_tables(_conn, tables, config, role) do
     pool = Bier.Registry.via(config.name, Postgrex)
     Authorize.check(pool, role, config.events_publication, tables)
   rescue
@@ -257,9 +276,10 @@ defmodule Bier.Events do
   defp put_recheckable_close_header(conn, _tables),
     do: put_resp_header(conn, "connection", "close")
 
-  # The `event:` field for each subscribed table: the name as subscribed
-  # (qualified iff the client qualified it, or the schema is not the
-  # instance's default).
+  # The `event:` field for each subscribed table: derived from the
+  # RESOLVED schema, not from how the client spelled it — qualified iff
+  # that schema differs from the instance's default, so a redundant
+  # `table=<default_schema>.orders` still renders as unqualified `orders`.
   defp table_names(tables, config) do
     default = hd(config.db_schemas)
 

@@ -16,6 +16,12 @@ defmodule Bier.Wal.EventsHttpTest do
   @moduletag :integration
 
   @schema "wal_http_test"
+  # A second scratch schema, deliberately NOT listed in the instance's
+  # `db_schemas` below (which is `[@schema]` only), with a table added to
+  # the SAME publication — proves the `db_schemas` exposure gate refuses a
+  # published, RLS-free, fully-privileged table anyway, purely because its
+  # schema isn't one the instance exposes.
+  @other_schema "wal_http_other"
   @pub "wal_http_pub"
   @jwt_secret "reallyreallyreallyreallyverysafe"
 
@@ -31,11 +37,15 @@ defmodule Bier.Wal.EventsHttpTest do
     Postgrex.query!(db, "CREATE TABLE #{@schema}.hidden (id int)", [])
     Postgrex.query!(db, "CREATE TABLE #{@schema}.locked (id int)", [])
     Postgrex.query!(db, "ALTER TABLE #{@schema}.locked ENABLE ROW LEVEL SECURITY", [])
+    Postgrex.query!(db, "DROP SCHEMA IF EXISTS #{@other_schema} CASCADE", [])
+    Postgrex.query!(db, "CREATE SCHEMA #{@other_schema}", [])
+    Postgrex.query!(db, "CREATE TABLE #{@other_schema}.orders (id serial PRIMARY KEY)", [])
     Postgrex.query!(db, "DROP PUBLICATION IF EXISTS #{@pub}", [])
 
     Postgrex.query!(
       db,
-      "CREATE PUBLICATION #{@pub} FOR TABLE #{@schema}.orders, #{@schema}.locked",
+      "CREATE PUBLICATION #{@pub} FOR TABLE #{@schema}.orders, #{@schema}.locked, " <>
+        "#{@other_schema}.orders",
       []
     )
 
@@ -55,6 +65,7 @@ defmodule Bier.Wal.EventsHttpTest do
 
       Postgrex.query!(cleanup, "DROP PUBLICATION IF EXISTS #{@pub}", [])
       Postgrex.query!(cleanup, "DROP SCHEMA IF EXISTS #{@schema} CASCADE", [])
+      Postgrex.query!(cleanup, "DROP SCHEMA IF EXISTS #{@other_schema} CASCADE", [])
     end)
 
     port = TestPorts.free_port()
@@ -269,15 +280,30 @@ defmodule Bier.Wal.EventsHttpTest do
     assert table_frame =~ ~r/connection:\s*close/i
   end
 
-  test "unknown / unpublished / RLS / publication-disabled tables get the uniform 404 payload",
+  test "unknown / unpublished / RLS / unexposed-schema / publication-disabled tables get " <>
+         "the uniform 404 payload",
        %{port: port} do
+    # {query-string `table=` value, the "schema.table" identifier the error
+    # envelope will echo back}. The fourth case is qualified and names a
+    # table that IS in the publication, has no RLS, and the connecting role
+    # (nil here — falls back to the pool's own privileged user) can select
+    # from — the only thing wrong with it is that `@other_schema` isn't in
+    # this instance's `db_schemas`, proving that gate on its own.
+    cases = [
+      {"missing", "#{@schema}.missing"},
+      {"hidden", "#{@schema}.hidden"},
+      {"locked", "#{@schema}.locked"},
+      {"#{@other_schema}.orders", "#{@other_schema}.orders"}
+    ]
+
     bodies =
-      for table <- ["missing", "hidden", "locked"] do
-        resp = Req.get!("http://127.0.0.1:#{port}/events?table=#{table}", retry: false)
+      for {query, identifier} <- cases do
+        resp = Req.get!("http://127.0.0.1:#{port}/events?table=#{query}", retry: false)
         assert resp.status == 404
-        # Normalize the table name out so the envelopes must otherwise be
-        # equal (String.replace/3 replaces every occurrence by default).
-        resp.body |> Bier.json_library().encode!() |> String.replace(table, "T")
+        # Normalize the "schema.table" identifier out so the envelopes must
+        # otherwise be equal (String.replace/3 replaces every occurrence by
+        # default).
+        resp.body |> Bier.json_library().encode!() |> String.replace(identifier, "T")
       end
 
     disabled_port = start_publication_disabled_instance!()
@@ -288,9 +314,11 @@ defmodule Bier.Wal.EventsHttpTest do
     assert disabled_resp.status == 404
 
     disabled_body =
-      disabled_resp.body |> Bier.json_library().encode!() |> String.replace("orders", "T")
+      disabled_resp.body
+      |> Bier.json_library().encode!()
+      |> String.replace("#{@schema}.orders", "T")
 
-    assert [b, b, b] = bodies, "the three refusals must be indistinguishable"
+    assert [b, b, b, b] = bodies, "the four refusals must be indistinguishable"
 
     assert disabled_body == b,
            "a disabled-publication refusal must be indistinguishable from the others too"

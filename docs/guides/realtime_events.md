@@ -211,8 +211,11 @@ nonexistent one is.
 
 ### Frame format
 
-`event:` is the subscription name exactly as written in `table=` (qualified
-only if the client qualified it, or its schema isn't the default); `id:` is
+`event:` is derived from the *resolved* schema, not from how the client
+happened to spell it: qualified (`schema.table`) only when that resolved
+schema differs from the default (the first of `db_schemas`), unqualified
+otherwise — so a redundant `table=<default_schema>.orders` still yields
+`event: orders`, exactly like an unqualified `table=orders` would. `id:` is
 a resume cursor; `data:` is one JSON object per row-level change:
 
 ```
@@ -223,6 +226,10 @@ data: {"type":"UPDATE","schema":"api","table":"orders",
        "row":{"id":3,"name":"grace","payload":{"answer":42},"tags":"{a,b}"},
        "old":{"id":3},"old_kind":"key","unchanged":[]}
 ```
+
+(`data:` is wrapped above across four lines for readability only — on the
+wire it is a single `data:` line, one complete JSON object with no
+embedded newlines, per the SSE spec.)
 
 * `type` — `INSERT`, `UPDATE`, `DELETE`, or `TRUNCATE` (a `TRUNCATE` frame
   carries no `row`/`old`; a `DELETE` frame carries `old` but no `row`).
@@ -263,11 +270,19 @@ How much of the previous row a change carries is entirely the table's
 ```sql
 ALTER TABLE orders REPLICA IDENTITY FULL;    -- old carries every column ("full")
 ALTER TABLE orders REPLICA IDENTITY DEFAULT; -- old carries only the primary key ("key")
-ALTER TABLE orders REPLICA IDENTITY NOTHING; -- no old image logged at all
+ALTER TABLE orders REPLICA IDENTITY NOTHING; -- see below: mutations stop working instead
 ```
 
-Under `NOTHING`, a `DELETE` frame carries no `old` at all — there is
-nothing left to say *which* row was removed beyond the event having fired.
+`NOTHING` is not a quieter version of `DEFAULT` — for a table in a
+publication that publishes `UPDATE`/`DELETE` (the default), PostgreSQL
+refuses the mutation outright at the SQL level: `UPDATE`/`DELETE` against
+that table fails with `cannot update/delete from table "orders" because it
+does not have a replica identity and publishes updates/deletes`. No frame
+is ever produced, because the write itself never succeeds. In practice:
+leave tables at the default identity (`old` carries the primary key) unless
+you need the full previous row (`FULL`); reach for `NOTHING` only on a
+table you also exclude from `UPDATE`/`DELETE` in the publication (e.g.
+`FOR TABLE ... WITH (publish = 'insert')`).
 
 ### Resume and reset
 
