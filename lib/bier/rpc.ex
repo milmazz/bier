@@ -15,7 +15,7 @@ defmodule Bier.Rpc do
       object); a single unnamed json/jsonb parameter receives the whole body;
     * unsupported methods (PATCH/PUT/DELETE) are rejected with PGRST101 (405);
     * an unresolvable proc/signature returns PGRST202 (404) with PostgREST's
-      hint/details (reported against the base `test` schema for area mirrors).
+      hint/details, qualified by the request's active schema.
 
   Content negotiation runs first (`Bier.Negotiation`), so an Accept that no
   producer can satisfy yields 406 / PGRST107 before any SQL runs.
@@ -35,11 +35,6 @@ defmodule Bier.Rpc do
 
   # Reserved query params that shape the result rather than bind arguments.
   @reserved ~w(select order limit offset on_conflict columns and or not)
-
-  # Area-mirror schemas: PostgREST's RPC cases were authored against `test`, so
-  # the not-found PGRST202 envelope reports `test.<fn>` even when resolution went
-  # through a mirror label (e.g. `rpc`).
-  @mirror_schemas ~w(rpc operators ordering pagination representations mutations config domain_representations)
 
   @doc """
   Resolve and run an RPC in the (already resolved) profile `schema`.
@@ -837,8 +832,11 @@ defmodule Bier.Rpc do
     end)
   end
 
-  # Build the PGRST202 not-found envelope (`Error.hs#L246-L272`), reporting
-  # against the base `test` schema for mirror labels.
+  # Build the PGRST202 not-found envelope (`Error.hs#L246-L272`). The function
+  # is qualified with the request's active schema (`Error.hs#L249` builds
+  # `qi <> "." <> procName` from the resolved profile), mirror label or not —
+  # the same active-schema rule PGRST205 follows (cases 1360/1368/1373,
+  # spec >= v16.0.0-suite.3).
   #
   # `argumentKeys` is a Set upstream, so the supplied names are reported sorted.
   # `fmtPrms` renders them as a parenthesized list in the message and as
@@ -849,9 +847,8 @@ defmodule Bier.Rpc do
   # arguments at all — `onlySingleParams` — so it names the parameter's type
   # instead and carries no hint.
   defp not_found(conn, schema, fn_name, supplied, overloads, functions) do
-    reported = reported_schema(schema)
     named = supplied |> Map.drop([:__body__]) |> Map.keys() |> Enum.sort()
-    func = "#{reported}.#{fn_name}"
+    func = "#{schema}.#{fn_name}"
     single_body = single_body_param(conn)
 
     %{
@@ -862,7 +859,7 @@ defmodule Bier.Rpc do
       details:
         "Searched for the function #{func}#{details_params(named, single_body, conn)}," <>
           " but no matches were found in the schema cache.",
-      hint: not_found_hint(schema, reported, fn_name, overloads, named, functions, single_body)
+      hint: not_found_hint(schema, fn_name, overloads, named, functions, single_body)
     }
   end
 
@@ -915,21 +912,21 @@ defmodule Bier.Rpc do
   # hint entirely.
   @rpc_hint_min_score 0.75
 
-  defp not_found_hint(_schema, _reported, _fn_name, _overloads, _named, _functions, kind)
+  defp not_found_hint(_schema, _fn_name, _overloads, _named, _functions, kind)
        when is_binary(kind),
        do: nil
 
-  defp not_found_hint(schema, reported, fn_name, [], _named, functions, nil) do
+  defp not_found_hint(schema, fn_name, [], _named, functions, nil) do
     candidates = for {{^schema, name}, _overloads} <- functions, do: name
 
     case Bier.Fuzzy.best_match(fn_name, candidates, @rpc_hint_min_score) do
       nil -> nil
-      match -> "Perhaps you meant to call the function #{reported}.#{match}"
+      match -> "Perhaps you meant to call the function #{schema}.#{match}"
     end
   end
 
-  defp not_found_hint(_schema, reported, fn_name, overloads, named, _functions, nil) do
-    hint_signature(reported, fn_name, overloads, named)
+  defp not_found_hint(schema, fn_name, overloads, named, _functions, nil) do
+    hint_signature(schema, fn_name, overloads, named)
   end
 
   # The closest real signature for an existing function name, rendered as
@@ -937,7 +934,7 @@ defmodule Bier.Rpc do
   # least one parameter name with what was supplied (e.g. add_them(a,b) for a
   # call carrying a, b, smthelse); a wholly-disjoint signature gets no hint.
   # `listToText` sorts the parameter list it renders.
-  defp hint_signature(reported, fn_name, overloads, named_keys) do
+  defp hint_signature(schema, fn_name, overloads, named_keys) do
     supplied = MapSet.new(named_keys)
 
     candidate =
@@ -952,12 +949,9 @@ defmodule Bier.Rpc do
 
       fn_def ->
         arg_names = fn_def.args |> Enum.map(& &1.name) |> Enum.sort() |> Enum.join(", ")
-        "Perhaps you meant to call the function #{reported}.#{fn_name}(#{arg_names})"
+        "Perhaps you meant to call the function #{schema}.#{fn_name}(#{arg_names})"
     end
   end
-
-  defp reported_schema(schema) when schema in @mirror_schemas, do: "test"
-  defp reported_schema(schema), do: schema
 
   defp qfn(%{schema: schema, name: name}), do: "#{q(schema)}.#{q(name)}"
 

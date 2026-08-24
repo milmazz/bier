@@ -8,6 +8,13 @@ and this project adheres to
 
 ## Unreleased
 
+- PGRST205/PGRST202 not-found errors (and their "Perhaps you meant" hints)
+  now qualify the missing table/function with the request's active schema,
+  matching real PostgREST (`Error.hs` builds `qi <> "." <> name` from the
+  resolved profile). Previously area-mirror schemas were reported as
+  `test.<name>` — an assumption the conformance suite's oracle disproved.
+  Conformance `spec/` bumped to `v16.0.0-suite.3`, which pins the corrected
+  behavior (cases 1360/1368/1373).
 - Added `db_prepared_statements` (PostgREST `db-prepared-statements`,
   `PGRST_DB_PREPARED_STATEMENTS`, default `true`): the hot-path statements —
   the auth preamble, reads, mutations, and RPC — are cached as named prepared
