@@ -549,6 +549,19 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
+  # Deliberately identical for a nonexistent table, an unpublished table, an
+  # RLS-enabled table, and one the role has no SELECT-able column on: the
+  # endpoint must not be usable as an existence/RLS oracle (see
+  # `Bier.Wal.Authorize`).
+  def call(conn, {:error, {:events_unknown_table, table}}) do
+    error(conn, 404, %{
+      code: "BIER003",
+      message: "Unknown event table",
+      details: "Table '#{table}' is not exposed",
+      hint: "The table must be in the configured publication and readable by your role"
+    })
+  end
+
   # ---- client disconnect (#82, Bier-specific) ------------------------------
   # The query was cancelled because the client went away mid-flight
   # (`Bier.Cancellation`). There is nobody to respond to, so this terminates
