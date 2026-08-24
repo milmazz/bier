@@ -27,12 +27,13 @@ defmodule Bier.CLI.ReadyTest do
     port
   end
 
-  defp free_port do
-    {:ok, socket} = :gen_tcp.listen(0, [])
-    {:ok, port} = :inet.port(socket)
-    :ok = :gen_tcp.close(socket)
-    port
-  end
+  # Delegates to the shared helper rather than re-probing an ephemeral
+  # port: those come from the same range the suite's own outgoing
+  # connections use, so one could be taken between the probe closing and
+  # this instance binding it — an :eaddrinuse that surfaces as an
+  # unrelated test failure. `Bier.TestPorts` also reserves what it hands
+  # out, so two callers cannot receive the same port.
+  defp free_port, do: Bier.TestPorts.free_port()
 
   test "a 2xx /ready prints OK with the URL and exits 0" do
     port = start_stub(200)

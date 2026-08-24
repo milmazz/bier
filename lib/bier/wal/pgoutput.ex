@@ -1,0 +1,223 @@
+defmodule Bier.Wal.Pgoutput do
+  @moduledoc """
+  Decoder for PostgreSQL's `pgoutput` logical-replication output plugin,
+  protocol version 1.
+
+  `decode/2` takes one pgoutput message (the payload of an XLogData frame)
+  plus the relation registry accumulated from prior Relation messages, and
+  returns `{event, registry}`. Column values arrive in Postgres text
+  representation; converting them to JSON terms is `Bier.Wal.Render`'s
+  concern. Validated against a live PostgreSQL 17 stream.
+  """
+
+  import Bitwise, only: [&&&: 2]
+
+  # Microseconds between the Postgres epoch (2000-01-01) and the Unix epoch.
+  @pg_epoch_offset 946_684_800_000_000
+
+  @spec decode(binary(), map()) :: {map(), map()}
+  def decode(message, registry)
+
+  def decode(<<?B, final_lsn::64, commit_ts::64, xid::32>>, reg),
+    do: {%{kind: :begin, final_lsn: lsn(final_lsn), commit_at: ts(commit_ts), xid: xid}, reg}
+
+  def decode(<<?C, _flags::8, commit_lsn::64, end_lsn::64, commit_ts::64>>, reg),
+    do:
+      {%{kind: :commit, lsn: lsn(commit_lsn), end_lsn: lsn(end_lsn), commit_at: ts(commit_ts)},
+       reg}
+
+  def decode(<<?O, origin_lsn::64, rest::binary>>, reg) do
+    {name, ""} = cstring(rest)
+    {%{kind: :origin, lsn: lsn(origin_lsn), name: name}, reg}
+  end
+
+  def decode(<<?R, oid::32, rest::binary>>, reg) do
+    {namespace, rest} = cstring(rest)
+    {relname, rest} = cstring(rest)
+    <<replident::8, ncols::16, rest::binary>> = rest
+
+    relation = %{
+      oid: oid,
+      schema: namespace,
+      table: relname,
+      replica_identity: replident(replident),
+      columns: decode_columns(ncols, rest, [])
+    }
+
+    {%{kind: :relation, relation: relation}, Map.put(reg, oid, relation)}
+  end
+
+  def decode(<<?Y, oid::32, rest::binary>>, reg) do
+    {namespace, rest} = cstring(rest)
+    {name, ""} = cstring(rest)
+    {%{kind: :type, oid: oid, schema: namespace, name: name}, reg}
+  end
+
+  def decode(<<?I, oid::32, ?N, rest::binary>>, reg) do
+    {row, ""} = tuple_data(rest)
+    {%{kind: :insert, relation: rel!(reg, oid), row: named(reg, oid, row)}, reg}
+  end
+
+  def decode(<<?U, oid::32, tag, rest::binary>>, reg) when tag in [?K, ?O] do
+    {old, <<?N, rest::binary>>} = tuple_data(rest)
+    {row, ""} = tuple_data(rest)
+    old_kind = if(tag == ?K, do: :key, else: :full)
+
+    {%{
+       kind: :update,
+       relation: rel!(reg, oid),
+       old: old_named(reg, oid, old, old_kind),
+       old_kind: old_kind,
+       row: named(reg, oid, row)
+     }, reg}
+  end
+
+  def decode(<<?U, oid::32, ?N, rest::binary>>, reg) do
+    {row, ""} = tuple_data(rest)
+
+    {%{
+       kind: :update,
+       relation: rel!(reg, oid),
+       old: nil,
+       old_kind: nil,
+       row: named(reg, oid, row)
+     }, reg}
+  end
+
+  def decode(<<?D, oid::32, tag, rest::binary>>, reg) when tag in [?K, ?O] do
+    {old, ""} = tuple_data(rest)
+    old_kind = if(tag == ?K, do: :key, else: :full)
+
+    {%{
+       kind: :delete,
+       relation: rel!(reg, oid),
+       old: old_named(reg, oid, old, old_kind),
+       old_kind: old_kind
+     }, reg}
+  end
+
+  def decode(<<?T, nrels::32, options::8, rest::binary>>, reg) do
+    oids = for <<oid::32 <- rest>>, do: oid
+
+    {%{
+       kind: :truncate,
+       cascade: (options &&& 1) == 1,
+       restart_identity: (options &&& 2) == 2,
+       relations: Enum.map(oids, &rel!(reg, &1)),
+       count: nrels
+     }, reg}
+  end
+
+  def decode(<<?M, flags::8, message_lsn::64, rest::binary>>, reg) do
+    {prefix, <<len::32, content::binary-size(len)>>} = cstring(rest)
+
+    {%{
+       kind: :message,
+       transactional: (flags &&& 1) == 1,
+       lsn: lsn(message_lsn),
+       prefix: prefix,
+       content: content
+     }, reg}
+  end
+
+  # Anything else: a protocol addition, or a message kind that cannot reach
+  # proto_version 1 today (the streaming and two-phase families). Return an
+  # inert event rather than raising — this runs inside `handle_data/2`, so a
+  # FunctionClauseError here kills the replication process, and the restart
+  # resets every subscriber. `Bier.Wal.Consumer.handle_event/2` already has
+  # a catch-all that ignores kinds it does not know; this makes the decoder
+  # match the tolerance the frame layer above it already has.
+  def decode(<<tag, _rest::binary>>, reg), do: {%{kind: :unknown, tag: tag}, reg}
+
+  # TupleData: n columns, each 'n' (null) | 'u' (unchanged TOAST) |
+  # 't' len+text | 'b' len+binary (only when the binary option is requested).
+  defp tuple_data(<<ncols::16, rest::binary>>), do: tuple_cols(ncols, rest, [])
+
+  defp tuple_cols(0, rest, acc), do: {Enum.reverse(acc), rest}
+  defp tuple_cols(n, <<?n, rest::binary>>, acc), do: tuple_cols(n - 1, rest, [nil | acc])
+
+  defp tuple_cols(n, <<?u, rest::binary>>, acc),
+    do: tuple_cols(n - 1, rest, [:unchanged_toast | acc])
+
+  defp tuple_cols(n, <<?t, len::32, value::binary-size(len), rest::binary>>, acc),
+    do: tuple_cols(n - 1, rest, [value | acc])
+
+  defp tuple_cols(n, <<?b, len::32, value::binary-size(len), rest::binary>>, acc),
+    do: tuple_cols(n - 1, rest, [{:binary, value} | acc])
+
+  defp decode_columns(0, "", acc), do: Enum.reverse(acc)
+
+  defp decode_columns(n, <<flags::8, rest::binary>>, acc) do
+    {name, <<typoid::32, typmod::signed-32, rest::binary>>} = cstring(rest)
+
+    decode_columns(n - 1, rest, [
+      %{name: name, type_oid: typoid, type_mod: typmod, key?: (flags &&& 1) == 1} | acc
+    ])
+  end
+
+  defp rel!(reg, oid),
+    do: Map.get(reg, oid) || raise("pgoutput: data message for unknown relation oid #{oid}")
+
+  # Zip a tuple's positional values with the relation's column names.
+  #
+  # The arity check is not ceremony: `Enum.zip/2` truncates to the shorter
+  # side, so a tuple that disagreed with the cached relation (a Relation
+  # message we somehow missed after a DDL) would silently DROP columns
+  # rather than fail. Losing a column quietly is the one outcome this feed
+  # must not have; raising restarts the consumer, which re-reads the
+  # relation and announces the gap as a reset.
+  defp named(reg, oid, values) do
+    %{columns: cols} = rel!(reg, oid)
+
+    length(cols) == length(values) ||
+      raise "pgoutput: relation #{oid} has #{length(cols)} columns but the tuple " <>
+              "carried #{length(values)} values"
+
+    cols |> Enum.map(& &1.name) |> Enum.zip(values) |> Map.new()
+  end
+
+  # Old images need one extra step that new images don't. A `K` tuple is
+  # built by Postgres' ExtractReplicaIdentity, which NULLs every attribute
+  # outside the replica identity and then writes them on the wire as `n`
+  # (null) — indistinguishable, once decoded, from a column that genuinely
+  # held NULL. Zipping positionally would therefore report
+  # `old: %{"id" => 1, "note" => nil}` for a table at the DEFAULT replica
+  # identity, and a client diffing `old` against `row` would conclude
+  # `note` changed from NULL when in fact it was simply never logged.
+  #
+  # Keep only the columns Postgres actually logged: the Relation message
+  # flags exactly those with LOGICALREP_IS_REPLICA_IDENTITY (`key?`). Under
+  # REPLICA IDENTITY FULL every column carries the flag and the tuple
+  # arrives as `O`, so `:full` images are passed through untouched.
+  defp old_named(reg, oid, values, :full), do: named(reg, oid, values)
+
+  defp old_named(reg, oid, values, :key) do
+    %{columns: cols} = rel!(reg, oid)
+
+    length(cols) == length(values) ||
+      raise "pgoutput: relation #{oid} has #{length(cols)} columns but the old tuple " <>
+              "carried #{length(values)} values"
+
+    cols
+    |> Enum.zip(values)
+    |> Enum.filter(fn {col, _value} -> col.key? end)
+    |> Map.new(fn {col, value} -> {col.name, value} end)
+  end
+
+  defp cstring(bin) do
+    [head, rest] = :binary.split(bin, <<0>>)
+    {head, rest}
+  end
+
+  defp replident(?d), do: :default
+  defp replident(?n), do: :nothing
+  defp replident(?f), do: :full
+  defp replident(?i), do: :index
+
+  defp lsn(int) do
+    <<hi::32, lo::32>> = <<int::64>>
+    {hi, lo}
+  end
+
+  defp ts(us), do: DateTime.from_unix!(us + @pg_epoch_offset, :microsecond)
+end

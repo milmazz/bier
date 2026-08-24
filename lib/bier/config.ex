@@ -75,7 +75,10 @@ defmodule Bier.Config do
           admin_server_port: pos_integer() | nil,
           events_channels: [String.t()],
           events_path: String.t(),
-          events_heartbeat_interval: pos_integer()
+          events_heartbeat_interval: pos_integer(),
+          events_publication: String.t() | nil,
+          events_buffer_size: pos_integer(),
+          events_max_tx_events: pos_integer()
         }
 
   defstruct [
@@ -99,6 +102,7 @@ defmodule Bier.Config do
     :server_unix_socket,
     :openapi_server_proxy_uri,
     :db_pool_max_idletime,
+    :events_publication,
     name: Bier,
     server_host: "!4",
     server_unix_socket_mode: "660",
@@ -130,7 +134,9 @@ defmodule Bier.Config do
     jwt_cache_max_entries: 1000,
     events_channels: [],
     events_path: "events",
-    events_heartbeat_interval: 15_000
+    events_heartbeat_interval: 15_000,
+    events_buffer_size: 1024,
+    events_max_tx_events: 10_000
   ]
 
   @doc """
@@ -166,6 +172,7 @@ defmodule Bier.Config do
          :ok <- validate_proxy_uri(conf[:openapi_server_proxy_uri]),
          :ok <- validate_events_channels(Keyword.get(conf, :events_channels, [])),
          :ok <- validate_events_path(Keyword.get(conf, :events_path, "events")),
+         :ok <- validate_events_publication(conf[:events_publication]),
          {:ok, conf} <- decode_jwt_secret(conf),
          {:ok, conf} <- parse_jwt_role_claim_key(conf) do
       {:ok, struct!(__MODULE__, conf)}
@@ -454,6 +461,45 @@ defmodule Bier.Config do
 
       String.contains?(channel, "\"") ->
         {:error, "events-channels entries cannot contain double quotes"}
+
+      String.starts_with?(channel, "bier:") ->
+        # The `bier:` prefix is how the SSE stream spells its own control
+        # frames (`event: bier:reset`). A channel allowed to claim it could
+        # emit a frame a client would read as a control message, with an
+        # app-controlled `data:` payload behind it.
+        {:error, "events-channels entries cannot start with the reserved \"bier:\" prefix"}
+
+      true ->
+        :ok
+    end
+  end
+
+  @doc """
+  `events-publication` names an operator-created `PUBLICATION`. Replication
+  commands take no bind parameters, so `Bier.Wal.Consumer` has to interpolate
+  the name into `START_REPLICATION ... (publication_names '<name>')`, and
+  two characters are legal in a quoted PostgreSQL identifier but not
+  survivable there: a single quote breaks out of the literal, and a COMMA is
+  that option's list separator, so `CREATE PUBLICATION "a,b"` — which
+  PostgreSQL accepts — would be read as the two publications `a` and `b`.
+
+  Operator config rather than user input, so this is a guard against a
+  legal-but-unstreamable name failing confusingly at runtime instead of at
+  boot, not a defence against an attacker.
+  """
+  @spec validate_events_publication(String.t() | nil) :: :ok | {:error, String.t()}
+  def validate_events_publication(nil), do: :ok
+
+  def validate_events_publication(publication) when is_binary(publication) do
+    cond do
+      publication == "" ->
+        {:error, "events-publication cannot be empty"}
+
+      byte_size(publication) > 63 ->
+        {:error, "events-publication cannot exceed 63 bytes"}
+
+      String.contains?(publication, [<<0>>, "\"", "'", "\\", ","]) ->
+        {:error, "events-publication cannot contain quotes, backslashes, commas, or null bytes"}
 
       true ->
         :ok

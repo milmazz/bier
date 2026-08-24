@@ -133,6 +133,18 @@ travels as a bound value, never as SQL text.
 
 ## Future work
 
+`Bier.Wal.Authorize` follows the same rule from outside the query builder:
+the requested schema/table pairs and the subscriber's role are bound as
+`$1..$4` into a `pg_catalog` lookup, never interpolated, and the schema name
+reaches `to_regnamespace/1` through `quote_ident/1` so a name that is not a
+valid identifier resolves to `NULL` (a uniform refusal) instead of raising
+`invalid name syntax`. The one identifier that *is* interpolated anywhere in
+the WAL path is `events_publication`, into `START_REPLICATION`'s
+`publication_names` — replication commands accept no bind parameters — and
+it is operator configuration validated at boot by
+`Bier.Config.validate_events_publication/1`, never anything a request can
+influence.
+
 Because every untrusted value funnels through `bind/3`, `call_arg/2`, or the
 bound-jsonb mutation payload, a property/fuzz test can target the model
 directly: generate adversarial filter values (quotes, casts, `)`/`;`

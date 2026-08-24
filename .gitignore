@@ -37,3 +37,8 @@ bier-*.tar
 
 # Claude Code worktrees (session-managed, never committed)
 .claude/worktrees/
+
+# Design specs and implementation plans (working documents, kept out of the
+# published tree by choice — see the v0.2.0 cleanup that removed docs/superpowers)
+.claude/specs/
+.claude/plans/

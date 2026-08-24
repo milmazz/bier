@@ -506,8 +506,9 @@ defmodule Bier do
         default: env(:events_channels, []),
         doc: """
         Allowlist of Postgres notification channels exposed on the SSE events
-        endpoint. The empty list (default) disables the feature entirely: no
-        listener connection is opened and no path is reserved. Bier-specific
+        endpoint. The empty list (default) disables NOTIFY channel
+        subscriptions; the endpoint itself is reserved and starts only when
+        this list is non-empty or `events_publication` is set. Bier-specific
         (no PostgREST counterpart); see the Realtime events guide.
         """
       ],
@@ -516,8 +517,9 @@ defmodule Bier do
         default: env(:events_path, "events"),
         doc: """
         Top-level path segment reserved for the SSE events endpoint while
-        `events_channels` is non-empty. Change it if a relation of the same
-        name must stay reachable. Must be a single segment (no `/`).
+        `events_channels` is non-empty or `events_publication` is set.
+        Change it if a relation of the same name must stay reachable. Must
+        be a single segment (no `/`).
         """
       ],
       events_heartbeat_interval: [
@@ -527,6 +529,29 @@ defmodule Bier do
         Milliseconds of silence on an SSE connection before a `: keepalive`
         comment frame is written. Keeps idle proxies from dropping the
         stream and bounds dead-client detection.
+        """
+      ],
+      events_publication: [
+        type: {:or, [:string, nil]},
+        default: env(:events_publication, nil),
+        doc: """
+        Name of an operator-created `PUBLICATION` to stream as a WAL change feed
+        on the events endpoint. `nil` (the default) disables the feature; when
+        set, boot validates `wal_level=logical`, the publication's existence,
+        and the connection role's `REPLICATION` attribute.
+        """
+      ],
+      events_buffer_size: [
+        type: :pos_integer,
+        default: env(:events_buffer_size, 1024),
+        doc: "Ring-buffer entries retained per table for `Last-Event-ID` resume."
+      ],
+      events_max_tx_events: [
+        type: :pos_integer,
+        default: env(:events_max_tx_events, 10_000),
+        doc: """
+        Per-transaction event cap: larger transactions are dropped from the feed
+        and affected tables receive a `bier:reset` frame.
         """
       ]
     ]
@@ -609,9 +634,12 @@ defmodule Bier do
           # `start_child` call races the DynamicSupervisor's own startup and crashes
           # (the supervisor then restarts HttpServerStarter, rebuilding the router).
           {DynamicSupervisor,
-           strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)},
-          {Bier.HttpServerStarter, conf}
-        ] ++ listener_children(conf) ++ events_children(conf) ++ admin_children(conf)
+           strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)}
+        ] ++
+        wal_buffer_children(conf) ++
+        [{Bier.HttpServerStarter, conf}] ++
+        listener_children(conf) ++
+        events_children(conf) ++ wal_consumer_children(conf) ++ admin_children(conf)
 
     Supervisor.init(children, strategy: :one_for_one)
   end
@@ -639,6 +667,24 @@ defmodule Bier do
   defp events_children(%Bier.Config{events_channels: []}), do: []
 
   defp events_children(%Bier.Config{} = conf), do: [{Bier.Events.Listener, conf}]
+
+  # The WAL change feed runs only when an operator publication is configured.
+  # The Buffer must precede the Consumer: the consumer bumps the Buffer
+  # generation from `handle_result/2`'s success arm — once the slot actually
+  # exists, not on every connect attempt — so the Buffer has to be alive by
+  # then. The Buffer also starts BEFORE HttpServerStarter: `HttpServerStarter`'s
+  # `handle_continue` starts Bandit, which can accept a `GET /events?table=…`
+  # carrying `Last-Event-ID` immediately — and that path calls
+  # `Bier.Wal.Buffer.generation/1`, which would exit `:noproc` on a
+  # not-yet-registered via-tuple and surface as a raw 500.
+  defp wal_buffer_children(%Bier.Config{events_publication: nil}), do: []
+  defp wal_buffer_children(conf), do: [{Bier.Wal.Buffer, conf}]
+
+  # The Consumer stays AFTER HttpServerStarter, whose `init/1` runs
+  # `Bier.Wal.validate!/2`: a misconfigured instance fails boot there rather
+  # than letting the consumer flap against a database that cannot stream.
+  defp wal_consumer_children(%Bier.Config{events_publication: nil}), do: []
+  defp wal_consumer_children(conf), do: [{Bier.Wal.Consumer, conf}]
 
   # The JWT verification cache only runs when it can do work: a secret is
   # configured and jwt-cache-max-entries is positive (PostgREST's JwtNoCache

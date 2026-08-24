@@ -556,9 +556,11 @@ defmodule Bier.Plugs.FallbackController do
   def call(conn, {:error, :events_missing_channel}) do
     error(conn, 400, %{
       code: "BIER002",
-      message: "Missing channel query parameter",
+      message: "Missing channel or table query parameter",
       details: nil,
-      hint: "Subscribe with ?channel=<name> (comma-separate or repeat for several)"
+      hint:
+        "Subscribe with ?channel=<name> or ?table=<name> " <>
+          "(comma-separate or repeat for several)"
     })
   end
 
@@ -568,6 +570,19 @@ defmodule Bier.Plugs.FallbackController do
       message: "Unknown event channel",
       details: "Channel '#{channel}' is not exposed",
       hint: "Expose it by adding the channel to events_channels"
+    })
+  end
+
+  # Deliberately identical for a nonexistent table, an unpublished table, an
+  # RLS-enabled table, and one the role has no SELECT-able column on: the
+  # endpoint must not be usable as an existence/RLS oracle (see
+  # `Bier.Wal.Authorize`).
+  def call(conn, {:error, {:events_unknown_table, table}}) do
+    error(conn, 404, %{
+      code: "BIER003",
+      message: "Unknown event table",
+      details: "Table '#{table}' is not exposed",
+      hint: "The table must be in the configured publication and readable by your role"
     })
   end
 

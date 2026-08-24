@@ -57,6 +57,14 @@ defmodule Bier.SchemaCache do
     Bier.Telemetry.schema_cache_load(%{instance: name, schemas: schemas}, fn ->
       cache = introspect(conn, schemas, extra_search_path)
       put(name, cache)
+
+      # WAL subscribers authorize at connect; a reload is the moment
+      # privileges may have changed under them (#96-style: the reload is
+      # the signal). Only reached after a successful swap — a failed load
+      # raises above and never gets here, so it can never trigger a
+      # recheck.
+      Bier.Wal.notify_recheck(name)
+
       {cache, %{relation_count: map_size(cache.relations)}}
     end)
   rescue

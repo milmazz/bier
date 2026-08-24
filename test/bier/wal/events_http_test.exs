@@ -1,0 +1,1078 @@
+defmodule Bier.Wal.EventsHttpTest do
+  @moduledoc """
+  HTTP-level tests for `table=` subscriptions on the `/events` SSE endpoint:
+  WAL events multiplexed with NOTIFY `channel=` subscriptions on the same
+  connection, the uniform 404 for unknown/unpublished/RLS-enabled/
+  unprivileged tables, per-role column filtering, and content negotiation.
+
+  Reuses Task 5/6's scratch-schema + publication setup shape. Not async:
+  real ports, a real replication slot, and DB-global publication state.
+  """
+  use ExUnit.Case, async: false
+
+  alias Bier.SSETestClient
+  alias Bier.TestPorts
+
+  @moduletag :integration
+
+  @schema "wal_http_test"
+  # A second scratch schema, deliberately NOT listed in the instance's
+  # `db_schemas` below (which is `[@schema]` only), with a table added to
+  # the SAME publication — proves the `db_schemas` exposure gate refuses a
+  # published, RLS-free, fully-privileged table anyway, purely because its
+  # schema isn't one the instance exposes.
+  @other_schema "wal_http_other"
+  @pub "wal_http_pub"
+  @jwt_secret "reallyreallyreallyreallyverysafe"
+
+  setup do
+    # A dedicated connection just for setup/teardown DDL and mutations (see
+    # Bier.Wal.ConsumerTest's own note on the shared connection budget).
+    {:ok, db} =
+      Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
+
+    Postgrex.query!(db, "DROP SCHEMA IF EXISTS #{@schema} CASCADE", [])
+    Postgrex.query!(db, "CREATE SCHEMA #{@schema}", [])
+    Postgrex.query!(db, "CREATE TABLE #{@schema}.orders (id serial PRIMARY KEY, note text)", [])
+    Postgrex.query!(db, "CREATE TABLE #{@schema}.items (id serial PRIMARY KEY, sku text)", [])
+    Postgrex.query!(db, "CREATE TABLE #{@schema}.tracked (id int PRIMARY KEY, note text)", [])
+    # REPLICA IDENTITY FULL logs the whole pre-image, which is what makes an
+    # UPDATE's `old` (and a DELETE's non-key columns) observable at all —
+    # the default (`DEFAULT`) would only log the primary key.
+    Postgrex.query!(db, "ALTER TABLE #{@schema}.tracked REPLICA IDENTITY FULL", [])
+    Postgrex.query!(db, "CREATE TABLE #{@schema}.hidden (id int)", [])
+    Postgrex.query!(db, "CREATE TABLE #{@schema}.locked (id int)", [])
+    Postgrex.query!(db, "ALTER TABLE #{@schema}.locked ENABLE ROW LEVEL SECURITY", [])
+    # A PUBLISHED partitioned parent: it passes every gate except
+    # `relkind = 'r'`, so it is the case that proves that filter end to end.
+    # Subscribing to it would otherwise succeed and then deliver nothing,
+    # since WAL routes changes through the child partitions.
+    Postgrex.query!(
+      db,
+      "CREATE TABLE #{@schema}.parted (id int, at date) PARTITION BY RANGE (at)",
+      []
+    )
+
+    Postgrex.query!(
+      db,
+      "CREATE TABLE #{@schema}.parted_2026 PARTITION OF #{@schema}.parted " <>
+        "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
+      []
+    )
+
+    Postgrex.query!(db, "DROP SCHEMA IF EXISTS #{@other_schema} CASCADE", [])
+    Postgrex.query!(db, "CREATE SCHEMA #{@other_schema}", [])
+    Postgrex.query!(db, "CREATE TABLE #{@other_schema}.orders (id serial PRIMARY KEY)", [])
+    Postgrex.query!(db, "DROP PUBLICATION IF EXISTS #{@pub}", [])
+
+    Postgrex.query!(
+      db,
+      "CREATE PUBLICATION #{@pub} FOR TABLE #{@schema}.orders, #{@schema}.items, " <>
+        "#{@schema}.tracked, #{@schema}.locked, #{@schema}.parted, #{@other_schema}.orders",
+      []
+    )
+
+    # postgrest_test_anonymous exists from the fixture chain; grant narrowly
+    # (Task 6's shape) so the column-filtering test has something to prove.
+    Postgrex.query!(db, "GRANT USAGE ON SCHEMA #{@schema} TO postgrest_test_anonymous", [])
+
+    Postgrex.query!(
+      db,
+      "GRANT SELECT (id) ON #{@schema}.orders TO postgrest_test_anonymous",
+      []
+    )
+
+    # Two granted columns (unlike `orders` above): revoking ONE of them
+    # leaves the role still authorized, which is the only way to exercise
+    # `recheck/6`'s narrowing branch — `orders` can only ever go from one
+    # column to zero, i.e. straight to the revoked branch.
+    Postgrex.query!(
+      db,
+      "GRANT SELECT (id, sku) ON #{@schema}.items TO postgrest_test_anonymous",
+      []
+    )
+
+    on_exit(fn ->
+      {:ok, cleanup} =
+        Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
+
+      Postgrex.query!(cleanup, "DROP PUBLICATION IF EXISTS #{@pub}", [])
+      Postgrex.query!(cleanup, "DROP SCHEMA IF EXISTS #{@schema} CASCADE", [])
+      Postgrex.query!(cleanup, "DROP SCHEMA IF EXISTS #{@other_schema} CASCADE", [])
+    end)
+
+    port = TestPorts.free_port()
+    name = :"wal_http_#{System.unique_integer([:positive])}"
+
+    opts =
+      Bier.ConformanceServer.base_opts()
+      |> Keyword.merge(
+        name: name,
+        pool_size: 2,
+        db_schemas: [@schema],
+        db_channel_enabled: false,
+        events_publication: @pub,
+        events_channels: ["chat"],
+        events_heartbeat_interval: 50,
+        # Deliberately tiny so the overflow test can force a real
+        # events_max_tx_events breach with a handful of rows instead of
+        # thousands.
+        events_max_tx_events: 5,
+        router: [port: port, scheme: :http]
+      )
+
+    start_supervised!({Bier, opts})
+    TestPorts.wait_until_listening(port)
+    wait_wal_streaming(db, name)
+
+    %{db: db, port: port, name: name}
+  end
+
+  # Boots a second, auth-configured instance against the same scratch
+  # schema/publication (jwt_secret + db_anon_role, as
+  # `test/bier/access_log_http_test.exs` boots its auth variant).
+  defp start_auth_instance! do
+    port = TestPorts.free_port()
+    name = :"wal_http_auth_#{System.unique_integer([:positive])}"
+
+    opts =
+      Bier.ConformanceServer.base_opts()
+      |> Keyword.merge(
+        name: name,
+        pool_size: 2,
+        db_schemas: [@schema],
+        db_channel_enabled: false,
+        events_publication: @pub,
+        events_heartbeat_interval: 50,
+        db_anon_role: "postgrest_test_anonymous",
+        jwt_secret: @jwt_secret,
+        router: [port: port, scheme: :http]
+      )
+
+    start_supervised!({Bier, opts})
+    TestPorts.wait_until_listening(port)
+    %{port: port, name: name}
+  end
+
+  # Boots a fourth instance with a deliberately tiny `events_buffer_size` so
+  # a couple of inserts force real ring-buffer eviction. This is the only
+  # way to attribute a reset to EVICTION specifically. Any cursor below the
+  # generation's epoch floor resets on its own, so an invented "ancient"
+  # cursor proves nothing about the ring buffer — it would reset on a
+  # buffer of any size. Evicting a real, known cursor is what isolates
+  # `Buffer.stale?/3` (see `Bier.Wal.BufferTest`'s "a cursor older than a
+  # wrapped table's history resets").
+  defp start_small_buffer_instance! do
+    port = TestPorts.free_port()
+    name = :"wal_http_smallbuf_#{System.unique_integer([:positive])}"
+
+    opts =
+      Bier.ConformanceServer.base_opts()
+      |> Keyword.merge(
+        name: name,
+        pool_size: 2,
+        db_schemas: [@schema],
+        db_channel_enabled: false,
+        events_publication: @pub,
+        events_heartbeat_interval: 50,
+        events_buffer_size: 1,
+        router: [port: port, scheme: :http]
+      )
+
+    start_supervised!({Bier, opts})
+    TestPorts.wait_until_listening(port)
+    %{port: port, name: name}
+  end
+
+  # Boots a third instance with `events_publication` unset entirely (nil) —
+  # `events_channels` stays non-empty so `/events` is still routed at all —
+  # to prove the "table subscriptions disabled" refusal renders exactly like
+  # every other table refusal (Important finding #1).
+  defp start_publication_disabled_instance! do
+    port = TestPorts.free_port()
+    name = :"wal_http_nopub_#{System.unique_integer([:positive])}"
+
+    opts =
+      Bier.ConformanceServer.base_opts()
+      |> Keyword.merge(
+        name: name,
+        pool_size: 1,
+        db_schemas: [@schema],
+        db_channel_enabled: false,
+        events_channels: ["chat"],
+        router: [port: port, scheme: :http]
+      )
+
+    start_supervised!({Bier, opts})
+    TestPorts.wait_until_listening(port)
+    port
+  end
+
+  # An instance exposing BOTH scratch schemas, so a table outside the
+  # default schema is reachable — the only way to exercise the qualified
+  # `event: schema.table` branch of `table_names/2`.
+  defp start_two_schema_instance! do
+    port = TestPorts.free_port()
+    name = :"wal_http_two_#{System.unique_integer([:positive])}"
+
+    opts =
+      Bier.ConformanceServer.base_opts()
+      |> Keyword.merge(
+        name: name,
+        pool_size: 2,
+        db_schemas: [@schema, @other_schema],
+        db_channel_enabled: false,
+        events_publication: @pub,
+        events_heartbeat_interval: 50,
+        events_max_tx_events: 10_000,
+        router: [port: port, scheme: :http]
+      )
+
+    start_supervised!({Bier, opts})
+    TestPorts.wait_until_listening(port)
+    %{port: port, name: name}
+  end
+
+  # Waits for THIS instance's own replication slot specifically (not just
+  # "some" consumer streaming): a test may run a second Bier instance
+  # concurrently (see `start_auth_instance!/0`), and `Bier.Wal.Consumer`
+  # mints its temporary slot name from `phash2(instance_name)`, so scoping by
+  # that prefix disambiguates which consumer is actually ready. Firing a
+  # mutation before the target instance's slot is streaming would silently
+  # drop the event (fire-and-forget by design) and hang the test on
+  # heartbeats until ExUnit's timeout.
+  defp wait_wal_streaming(db, name) do
+    # 500 retries (~5s), not `wait_until/1`'s ~1s default: creating a LOGICAL
+    # slot has to reach a consistent decoding point, which waits for every
+    # in-flight transaction to finish. On a loaded CI runner — this suite
+    # boots an instance per test — that regularly exceeds a second, and the
+    # failure would be a bare "condition never became true" rather than
+    # anything pointing at slot creation. Same budget `wait_wal_restarted/3`
+    # already uses.
+    SSETestClient.wait_until(fn -> not Enum.empty?(streaming_slots(db, name)) end, 500)
+  end
+
+  # The slot names THIS instance currently has streaming.
+  defp streaming_slots(db, name) do
+    prefix = "bier_#{:erlang.phash2(name)}_%"
+
+    %{rows: rows} =
+      Postgrex.query!(
+        db,
+        """
+        SELECT rs.slot_name FROM pg_stat_replication sr
+        JOIN pg_replication_slots rs ON rs.active_pid = sr.pid
+        WHERE rs.slot_name LIKE $1 AND sr.state = 'streaming'
+        """,
+        [prefix]
+      )
+
+    rows |> List.flatten() |> MapSet.new()
+  end
+
+  # "Some slot of this instance is streaming" does not prove a RESTART
+  # finished: right after a kill, `pg_stat_replication` can still list the
+  # dead connection's slot. Wait for a slot name that did not exist before
+  # the kill instead — the consumer mints a fresh one on every reconnect.
+  # Generous retries: `auto_reconnect` backs off ~500ms before retrying.
+  defp wait_wal_restarted(db, name, before) do
+    SSETestClient.wait_until(
+      fn -> Enum.any?(streaming_slots(db, name), &(&1 not in before)) end,
+      500
+    )
+  end
+
+  # A revoked/closed stream still writes the chunked terminator
+  # ("0\r\n\r\n") — and possibly an interleaving keepalive comment — before
+  # Bandit closes the TCP connection, so a single `:gen_tcp.recv/3` can
+  # observe that trailing data instead of the close. Drain until the peer
+  # actually closes (or flunk on an unexpected data frame, which would mean
+  # the stream kept delivering instead of ending).
+  defp assert_socket_closes(sock, deadline \\ 5_000) do
+    case :gen_tcp.recv(sock, 0, deadline) do
+      {:error, :closed} ->
+        :ok
+
+      {:ok, data} ->
+        refute data =~ "data: {", "stream kept delivering: #{inspect(data)}"
+        assert_socket_closes(sock, deadline)
+
+      {:error, reason} ->
+        flunk("expected the socket to close, got #{inspect(reason)}")
+    end
+  end
+
+  # The `data:` payload of the LAST frame in `raw`, decoded. Chunked framing
+  # is tolerated the same way `recv_until/3` tolerates it: by splitting on
+  # the `data: ` marker rather than parsing the transfer encoding.
+  defp decode_frame(raw),
+    do: raw |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+
+  test "insert arrives as a typed frame with an id", %{db: db, port: port} do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('hello')", [])
+
+    # "data: {" (not "\n\n") — a `: keepalive\n\n` heartbeat frame satisfies
+    # "\n\n" too, so on a slow WAL round trip that ambiguous pattern can
+    # return a keepalive instead of the event this test is waiting for.
+    frame = SSETestClient.recv_until(sock, "data: {")
+    assert frame =~ "event: orders\n"
+    assert frame =~ ~r/id: [0-9A-F]+\/[0-9A-F]+\.0\n/
+    data = frame |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["type"] == "INSERT"
+    assert data["schema"] == @schema and data["table"] == "orders"
+    assert data["row"]["note"] == "hello"
+  end
+
+  test "update and delete carry the logged old image under REPLICA IDENTITY FULL", %{
+    db: db,
+    port: port
+  } do
+    sock = SSETestClient.connect_sse(port, "/events?table=tracked")
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.tracked (id, note) VALUES (1, 'before')", [])
+    assert decode_frame(SSETestClient.recv_until(sock, "data: {"))["type"] == "INSERT"
+
+    Postgrex.query!(db, "UPDATE #{@schema}.tracked SET note = 'after' WHERE id = 1", [])
+    update = SSETestClient.recv_until(sock, "data: {")
+    assert update =~ "event: tracked\n"
+
+    updated = decode_frame(update)
+    assert updated["type"] == "UPDATE"
+    assert updated["row"] == %{"id" => 1, "note" => "after"}
+    # REPLICA IDENTITY FULL ⇒ the whole pre-image, announced as such so a
+    # client can tell it apart from the key-only image a DEFAULT identity
+    # would give it.
+    assert updated["old"] == %{"id" => 1, "note" => "before"}
+    assert updated["old_kind"] == "full"
+
+    Postgrex.query!(db, "DELETE FROM #{@schema}.tracked WHERE id = 1", [])
+    deleted = decode_frame(SSETestClient.recv_until(sock, "data: {"))
+    assert deleted["type"] == "DELETE"
+    assert deleted["old"] == %{"id" => 1, "note" => "after"}
+    assert deleted["old_kind"] == "full"
+    # A DELETE has no post-image at all: the key must be absent, not null.
+    refute Map.has_key?(deleted, "row")
+    refute Map.has_key?(deleted, "unchanged")
+  end
+
+  test "qualified names and channel+table multiplex on one connection", %{
+    db: db,
+    port: port,
+    name: name
+  } do
+    sock = SSETestClient.connect_sse(port, "/events?channel=chat&table=#{@schema}.orders")
+
+    SSETestClient.recv_until(sock, ": connected")
+
+    SSETestClient.wait_until(fn -> Bier.Events.Registry.subscriber_count(name, "chat") == 1 end)
+    SSETestClient.wait_until_listener_connected(name)
+    SSETestClient.notify(name, "chat", ~s({"msg":"hi"}))
+    # "data: {" — same ambiguity as above; the chat payload is also a JSON
+    # object, so this discriminates from a keepalive just as well.
+    chat = SSETestClient.recv_until(sock, "data: {")
+    assert chat =~ "event: chat\n"
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('mux')", [])
+    wal = SSETestClient.recv_until(sock, "data: {")
+    # Qualified subscription => qualified event name: db_schemas is
+    # [@schema] here, so @schema IS the default and the canonical name is
+    # unqualified (table_names/2 only qualifies when schema != default).
+    assert wal =~ "event: orders\n" and wal =~ ~s("note":"mux")
+  end
+
+  test "connection: close is scoped to WAL table subscriptions, not pure NOTIFY", %{port: port} do
+    # Only a table subscriber can ever be sent `{:bier_wal_recheck}` (see
+    # `Bier.Wal.notify_recheck/1` — it targets `table_subscribers/1`
+    # specifically), so only a table response needs the connection declared
+    # non-keepalive up front. A channel-only response on this same
+    # WAL-enabled instance must NOT pay that cost on every reconnect.
+    channel_sock = SSETestClient.connect_sse(port, "/events?channel=chat")
+    channel_frame = SSETestClient.recv_until(channel_sock, ": connected")
+    refute channel_frame =~ ~r/connection:\s*close/i
+
+    table_sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    table_frame = SSETestClient.recv_until(table_sock, ": connected")
+    assert table_frame =~ ~r/connection:\s*close/i
+  end
+
+  test "unknown / unpublished / RLS / unexposed-schema / publication-disabled tables get " <>
+         "the uniform 404 payload",
+       %{port: port} do
+    # {query-string `table=` value, the "schema.table" identifier the error
+    # envelope will echo back}. The fourth case is qualified and names a
+    # table that IS in the publication, has no RLS, and the connecting role
+    # (nil here — falls back to the pool's own privileged user) can select
+    # from — the only thing wrong with it is that `@other_schema` isn't in
+    # this instance's `db_schemas`, proving that gate on its own.
+    cases = [
+      {"missing", "#{@schema}.missing"},
+      {"hidden", "#{@schema}.hidden"},
+      {"locked", "#{@schema}.locked"},
+      {"parted", "#{@schema}.parted"},
+      {"#{@other_schema}.orders", "#{@other_schema}.orders"}
+    ]
+
+    bodies =
+      for {query, identifier} <- cases, do: refusal_body(port, query, identifier)
+
+    disabled_port = start_publication_disabled_instance!()
+    disabled_body = refusal_body(disabled_port, "orders", "#{@schema}.orders")
+
+    assert [b, b, b, b, b] = bodies, "the five refusals must be indistinguishable"
+
+    assert disabled_body == b,
+           "a disabled-publication refusal must be indistinguishable from the others too"
+  end
+
+  # The RAW response body with only the echoed identifier normalized out.
+  # `decode_body: false` matters: letting Req decode to a map and
+  # re-encoding would normalize on-the-wire key ORDER away, so the test
+  # would no longer prove the byte-equality it claims. Headers are compared
+  # too — a refusal that differed only in `proxy-status` would still be an
+  # oracle.
+  defp refusal_body(port, query, identifier) do
+    resp =
+      Req.get!("http://127.0.0.1:#{port}/events?table=#{query}",
+        retry: false,
+        decode_body: false
+      )
+
+    assert resp.status == 404
+    assert resp.headers["proxy-status"] == ["Bier; error=BIER003"]
+    assert resp.headers["content-type"] == ["application/json; charset=utf-8"]
+
+    String.replace(resp.body, identifier, "T")
+  end
+
+  test "a role with partial column grants sees only its columns", %{db: db} do
+    %{port: port, name: auth_name} = start_auth_instance!()
+    wait_wal_streaming(db, auth_name)
+    token = SSETestClient.sign_hs256(%{"role" => "postgrest_test_anonymous"}, @jwt_secret)
+
+    sock = SSETestClient.connect_sse(port, "/events?table=orders&access_token=#{token}")
+
+    SSETestClient.recv_until(sock, ": connected")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (id, note) VALUES (7, 'secret')", [])
+
+    # "data: {" — same keepalive ambiguity as the other WAL-streaming tests.
+    frame = SSETestClient.recv_until(sock, "data: {")
+    data = frame |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["row"] == %{"id" => 7}
+    refute frame =~ "secret"
+  end
+
+  test "a JWT carrying a role absent from pg_roles fails without a raw 500", %{} do
+    %{port: auth_port} = start_auth_instance!()
+    token = SSETestClient.sign_hs256(%{"role" => "wal_http_bogus_role_zzz"}, @jwt_secret)
+
+    resp =
+      Req.get!("http://127.0.0.1:#{auth_port}/events?table=orders&access_token=#{token}",
+        retry: false
+      )
+
+    # `has_column_privilege` raises 42704 (undefined_object) for a role
+    # absent from pg_roles; Bier.PgError has no specific 42704 clause so it
+    # falls through to the generic SQLSTATE mapping's `true -> 400` branch.
+    # Pinned here by direct observation against a live Postgres (verified in
+    # the task report), not guessed.
+    assert resp.status == 400
+    assert resp.body["code"] == "42704"
+    assert resp.body["message"] =~ "does not exist"
+  end
+
+  test "GET with an Accept that refuses text/event-stream is 406", %{port: port} do
+    resp =
+      Req.get!("http://127.0.0.1:#{port}/events?table=orders",
+        headers: [{"accept", "application/json"}],
+        retry: false
+      )
+
+    assert resp.status == 406
+  end
+
+  test "reconnecting with the last id replays missed events", %{db: db, port: port} do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(sock, ": connected")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('one')", [])
+    frame = SSETestClient.recv_until(sock, "data: {")
+    [_, id] = Regex.run(~r/id: ([^\n]+)\n/, frame)
+    :gen_tcp.close(sock)
+
+    # Missed while disconnected.
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('two')", [])
+
+    sock2 = SSETestClient.connect_sse(port, "/events?table=orders&last_event_id=#{id}")
+    replay = SSETestClient.recv_until(sock2, "data: {")
+
+    data = replay |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["row"]["note"] == "two"
+  end
+
+  test "one cursor resumes every table of a multi-table subscription", %{db: db, port: port} do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders,items")
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('o-1')", [])
+    SSETestClient.recv_until(sock, "data: {")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.items (sku) VALUES ('i-1')", [])
+    last = SSETestClient.recv_until(sock, "data: {")
+    [_, id] = Regex.run(~r/id: ([^\n]+)\n/, last)
+    :gen_tcp.close(sock)
+
+    # Missed while disconnected, on BOTH tables. LSNs are global, so the
+    # single `Last-Event-ID` SSE gives us covers the whole subscription: the
+    # reconnect must replay both tables from that one cursor.
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('o-2')", [])
+    Postgrex.query!(db, "INSERT INTO #{@schema}.items (sku) VALUES ('i-2')", [])
+
+    sock2 = SSETestClient.connect_sse(port, "/events?table=orders,items&last_event_id=#{id}")
+    # Wait for the LATER of the two (items): its arrival means the orders
+    # frame is already in the accumulated buffer. Wait on the frame's BODY,
+    # not its `event:` line — that line is the frame's first, so a read that
+    # split the frame across TCP segments would satisfy an `event:` pattern
+    # while the `data:` the regex below needs had not arrived yet.
+    replay = SSETestClient.recv_until(sock2, ~s("sku":"i-2"))
+
+    frames =
+      ~r/event: ([^\n]+)\nid: ([^\n]+)\ndata: (\{.*?\})\n/
+      |> Regex.scan(replay)
+      |> Enum.map(fn [_, name, frame_id, data] -> {name, frame_id, JSON.decode!(data)} end)
+
+    assert [{"orders", first_id, orders}, {"items", second_id, items}] = frames
+    assert orders["row"]["note"] == "o-2"
+    assert items["row"]["sku"] == "i-2"
+
+    # Replay order is cursor order, not per-table grouping.
+    assert {:ok, first} = Bier.Wal.Cursor.parse(first_id)
+    assert {:ok, second} = Bier.Wal.Cursor.parse(second_id)
+    assert Bier.Wal.Cursor.compare(first, second) == :lt
+  end
+
+  test "an unknown cursor produces an immediate bier:reset", %{db: db} do
+    %{port: port, name: name} = start_small_buffer_instance!()
+    wait_wal_streaming(db, name)
+
+    # Establish a live spectator and wait for BOTH inserts to have flowed
+    # through the consumer before probing for a reset: with
+    # `events_buffer_size: 1` the second insert evicts the first, which is
+    # what makes any cursor at or before it legitimately "history_evicted".
+    spectator = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(spectator, ": connected")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('evict-1')", [])
+    first = SSETestClient.recv_until(spectator, "data: {")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('evict-2')", [])
+    SSETestClient.recv_until(spectator, "data: {")
+
+    # Resume from the FIRST insert's own cursor, not an invented ancient
+    # one. That cursor is this generation's epoch floor, so `before_floor?/2`
+    # cannot fire — it is not strictly below itself — and the only thing
+    # left that can produce a reset is `events_buffer_size: 1` having
+    # evicted the entry it names. An invented cursor like `0/1.0` would sit
+    # below the floor and reset on a buffer of any size, proving nothing
+    # about eviction.
+    [_, evicted_id] = Regex.run(~r/id: ([^\n]+)\n/, first)
+
+    sock =
+      SSETestClient.connect_sse(port, "/events?table=orders&last_event_id=#{evicted_id}")
+
+    frame = SSETestClient.recv_until(sock, "data: {")
+    assert frame =~ "event: bier:reset\n"
+
+    data = frame |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["reason"] == "history_evicted"
+  end
+
+  test "a malformed cursor is treated as no cursor (live head)", %{db: db, port: port} do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders&last_event_id=garbage")
+    SSETestClient.recv_until(sock, ": connected")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('after')", [])
+    frame = SSETestClient.recv_until(sock, "data: {")
+    assert frame =~ "after"
+  end
+
+  test "killing the consumer mid-stream delivers stream_restarted", %{port: port, name: name} do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(sock, ": connected")
+
+    [{pid, _}] = Registry.lookup(Bier.Registry, {name, Bier.Wal.Consumer})
+    Process.exit(pid, :kill)
+
+    frame = SSETestClient.recv_until(sock, "data: {")
+    assert frame =~ "event: bier:reset\n"
+
+    data = frame |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["reason"] == "stream_restarted"
+  end
+
+  test "a cursor from before a consumer restart resets instead of silently skipping history", %{
+    db: db,
+    port: port,
+    name: name
+  } do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(sock, ": connected")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('pre-restart')", [])
+    frame = SSETestClient.recv_until(sock, "data: {")
+    [_, id] = Regex.run(~r/id: ([^\n]+)\n/, frame)
+    :gen_tcp.close(sock)
+
+    before = streaming_slots(db, name)
+    [{pid, _}] = Registry.lookup(Bier.Registry, {name, Bier.Wal.Consumer})
+    Process.exit(pid, :kill)
+    wait_wal_restarted(db, name, before)
+
+    # Anchor the NEW epoch before resuming: with history restarted and
+    # nothing appended yet every cursor resets trivially, which would prove
+    # nothing about this cursor specifically. The live spectator is what
+    # makes the anchoring deterministic — the consumer appends to the
+    # Buffer before it broadcasts, so a delivered frame means the post-
+    # restart event is already in history.
+    spectator = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(spectator, ": connected")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('post-restart')", [])
+    SSETestClient.recv_until(spectator, "data: {")
+
+    # The cursor predates the restart, so the events between it and the new
+    # epoch's first id are gone for good: the contract is an announced
+    # reset, never a quiet resume from post-restart history.
+    sock2 = SSETestClient.connect_sse(port, "/events?table=orders&last_event_id=#{id}")
+    first = SSETestClient.recv_until(sock2, "data: {")
+
+    assert first =~ "event: bier:reset\n",
+           "a pre-restart cursor must reset, not silently skip the gap: #{inspect(first)}"
+
+    assert decode_frame(first)["reason"] == "history_evicted"
+  end
+
+  test "replay does not leak filtered columns for a partial-grant role", %{db: db} do
+    %{port: port, name: auth_name} = start_auth_instance!()
+    wait_wal_streaming(db, auth_name)
+    token = SSETestClient.sign_hs256(%{"role" => "postgrest_test_anonymous"}, @jwt_secret)
+
+    sock = SSETestClient.connect_sse(port, "/events?table=orders&access_token=#{token}")
+    SSETestClient.recv_until(sock, ": connected")
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (id, note) VALUES (101, 'baseline')", [])
+    frame = SSETestClient.recv_until(sock, "data: {")
+    [_, id] = Regex.run(~r/id: ([^\n]+)\n/, frame)
+    :gen_tcp.close(sock)
+
+    # Missed while disconnected — the row a partial-grant role must NOT see
+    # `note` for, replayed from the buffer this time instead of delivered
+    # live.
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (id, note) VALUES (102, 'top-secret')", [])
+
+    sock2 =
+      SSETestClient.connect_sse(
+        port,
+        "/events?table=orders&access_token=#{token}&last_event_id=#{id}"
+      )
+
+    replay = SSETestClient.recv_until(sock2, "data: {")
+    refute replay =~ "top-secret"
+
+    data = replay |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["row"] == %{"id" => 102}
+  end
+
+  test "revoking SELECT closes the stream on the next schema reload", %{db: db} do
+    %{port: port, name: auth_name} = start_auth_instance!()
+    wait_wal_streaming(db, auth_name)
+    token = SSETestClient.sign_hs256(%{"role" => "postgrest_test_anonymous"}, @jwt_secret)
+
+    sock = SSETestClient.connect_sse(port, "/events?table=orders&access_token=#{token}")
+    SSETestClient.recv_until(sock, ": connected")
+
+    # The fixture role is shared with other tests (e.g. the partial-grant
+    # tests above), so the revoke must be undone even if an assertion below
+    # fails — a fresh connection, since `db` is only guaranteed alive for
+    # the duration of this test process (same convention as setup/0's own
+    # on_exit).
+    on_exit(fn ->
+      {:ok, cleanup} =
+        Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
+
+      Postgrex.query!(
+        cleanup,
+        "GRANT SELECT (id) ON #{@schema}.orders TO postgrest_test_anonymous",
+        []
+      )
+    end)
+
+    # Only column `id` was ever granted (see setup/0); revoking it leaves the
+    # role with zero SELECT-able columns on `orders`, so the next reload's
+    # recheck must find `Authorize.check/4` failing and close the stream.
+    Postgrex.query!(
+      db,
+      "REVOKE SELECT (id) ON #{@schema}.orders FROM postgrest_test_anonymous",
+      []
+    )
+
+    :ok = Bier.reload_schema_cache(auth_name)
+
+    # The stream must end rather than keep leaking rows to a subscriber
+    # whose privileges were just revoked. Bandit still writes the chunked
+    # terminator ("0\r\n\r\n") before closing the TCP connection, so drain
+    # that (and any interleaving keepalive) before asserting the eventual
+    # `:closed` — a single recv can otherwise observe the terminator instead
+    # of the close.
+    assert_socket_closes(sock)
+  end
+
+  test "a schema reload with unchanged grants leaves the stream open and delivering", %{db: db} do
+    %{port: port, name: auth_name} = start_auth_instance!()
+    wait_wal_streaming(db, auth_name)
+    token = SSETestClient.sign_hs256(%{"role" => "postgrest_test_anonymous"}, @jwt_secret)
+
+    sock = SSETestClient.connect_sse(port, "/events?table=orders&access_token=#{token}")
+    SSETestClient.recv_until(sock, ": connected")
+
+    :ok = Bier.reload_schema_cache(auth_name)
+
+    Postgrex.query!(
+      db,
+      "INSERT INTO #{@schema}.orders (id, note) VALUES (301, 'still-open')",
+      []
+    )
+
+    # "data: {" — same keepalive ambiguity as the other WAL-streaming tests.
+    frame = SSETestClient.recv_until(sock, "data: {")
+    data = frame |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["row"] == %{"id" => 301}
+  end
+
+  test "a transaction beyond events_max_tx_events resets the live stream and any earlier cursor",
+       %{db: db, port: port} do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(sock, ": connected")
+
+    # A baseline event before the overflow, whose id becomes a cursor that
+    # the overflow must invalidate below.
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('baseline')", [])
+    baseline = SSETestClient.recv_until(sock, "data: {")
+    [_, id] = Regex.run(~r/id: ([^\n]+)\n/, baseline)
+
+    # One transaction, 20 insert events — well over the cap of 5 set on this
+    # instance in setup/0.
+    Postgrex.query!(
+      db,
+      "INSERT INTO #{@schema}.orders (note) SELECT 'bulk' FROM generate_series(1, 20)",
+      []
+    )
+
+    frame = SSETestClient.recv_until(sock, "data: {")
+    assert frame =~ "event: bier:reset\n"
+
+    data = frame |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+    assert data["reason"] == "transaction_too_large"
+
+    # New wire behavior beyond the live reset above: `Bier.Wal.Consumer`
+    # drops the whole table's buffered history on overflow (Task 5,
+    # exercised at the registry-message level in Bier.Wal.ConsumerTest), so
+    # a reconnect with a cursor from BEFORE the overflow must also get an
+    # explicit reset — end to end over the wire — rather than replaying
+    # nothing or hanging.
+    sock2 = SSETestClient.connect_sse(port, "/events?table=orders&last_event_id=#{id}")
+    reset = SSETestClient.recv_until(sock2, "data: {")
+    assert reset =~ "event: bier:reset\n"
+
+    reset_data =
+      reset |> String.split("data: ") |> List.last() |> String.trim() |> JSON.decode!()
+
+    assert reset_data["reason"] == "history_evicted"
+  end
+
+  test "old under the DEFAULT replica identity carries the key columns only", %{
+    db: db,
+    port: port
+  } do
+    # `items` is left at the DEFAULT replica identity (unlike `tracked`
+    # above, which is FULL), so Postgres logs only the primary key in the
+    # old tuple and NULLs every other attribute. Those NULLed attributes
+    # arrive on the wire as 'n' — indistinguishable from a real NULL once
+    # decoded positionally, which is why `old` must report the identity
+    # columns and nothing else. A client diffing `old` against `row` would
+    # otherwise read `sku` as having changed from NULL.
+    sock = SSETestClient.connect_sse(port, "/events?table=items")
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.items (id, sku) VALUES (1, 'before')", [])
+    assert decode_frame(SSETestClient.recv_until(sock, "data: {"))["type"] == "INSERT"
+
+    # Under DEFAULT identity Postgres logs an old tuple only when the
+    # identity columns themselves changed, so an ordinary column update
+    # carries NO pre-image at all — absent, not null, and not an empty map.
+    Postgrex.query!(db, "UPDATE #{@schema}.items SET sku = 'after' WHERE id = 1", [])
+    updated = decode_frame(SSETestClient.recv_until(sock, "data: {"))
+    assert updated["type"] == "UPDATE"
+    assert updated["row"] == %{"id" => 1, "sku" => "after"}
+    refute Map.has_key?(updated, "old")
+    refute Map.has_key?(updated, "old_kind")
+
+    # Changing the key DOES log one — and it is the case that would expose
+    # the bug: `sku` is NULLed by ExtractReplicaIdentity and hits the wire
+    # as 'n', so a positional zip would report `"sku" => nil` and a client
+    # would read it as "sku changed from null".
+    Postgrex.query!(db, "UPDATE #{@schema}.items SET id = 2 WHERE id = 1", [])
+    rekeyed = decode_frame(SSETestClient.recv_until(sock, "data: {"))
+    assert rekeyed["type"] == "UPDATE"
+    assert rekeyed["row"] == %{"id" => 2, "sku" => "after"}
+    assert rekeyed["old_kind"] == "key"
+    assert rekeyed["old"] == %{"id" => 1}
+
+    # A DELETE always logs the identity, so it is the everyday path where
+    # `old` is key-only.
+    Postgrex.query!(db, "DELETE FROM #{@schema}.items WHERE id = 2", [])
+    deleted = decode_frame(SSETestClient.recv_until(sock, "data: {"))
+    assert deleted["type"] == "DELETE"
+    assert deleted["old_kind"] == "key"
+    assert deleted["old"] == %{"id" => 2}
+  end
+
+  test "TRUNCATE fans out one frame per named relation", %{db: db, port: port} do
+    # Subscribes to both tables and truncates both in ONE statement, which
+    # is a single wire message naming two relations: it exercises
+    # `Consumer.expand/2`'s fan-out (each relation needs its own table key,
+    # cursor and commit_at, or delivery raises in the connection process),
+    # and `items` is deliberately never written to on this connection first,
+    # so it also covers a truncate reaching a relation the decoder's
+    # registry has not seen through an INSERT/UPDATE/DELETE.
+    sock = SSETestClient.connect_sse(port, "/events?table=orders,items")
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "TRUNCATE #{@schema}.orders, #{@schema}.items", [])
+
+    # Both frames are written back-to-back and routinely land in a single
+    # `:gen_tcp.recv/3`, so they must be parsed out of one accumulated
+    # buffer rather than read one recv at a time. Chaining `recv_until/3`'s
+    # accumulator waits for whichever name has not arrived yet and is
+    # order-independent.
+    raw = SSETestClient.recv_until(sock, "event: orders\n")
+    raw = SSETestClient.recv_until(sock, "event: items\n", raw)
+
+    frames =
+      for [_, event, payload] <-
+            Regex.scan(~r/event: ([^\n]+)\nid: [^\n]+\ndata: (\{[^\n]*\})/, raw),
+          do: {event, JSON.decode!(payload)}
+
+    assert [{"items", items}, {"orders", orders}] = Enum.sort_by(frames, &elem(&1, 0))
+
+    for data <- [items, orders] do
+      assert data["type"] == "TRUNCATE"
+      assert data["schema"] == @schema
+      # A TRUNCATE names no row at all: neither a post-image nor a
+      # pre-image, and no `unchanged` list either.
+      refute Map.has_key?(data, "row")
+      refute Map.has_key?(data, "old")
+      refute Map.has_key?(data, "unchanged")
+    end
+
+    assert items["table"] == "items" and orders["table"] == "orders"
+  end
+
+  test "a narrowed grant drops the revoked column without closing the stream", %{db: db} do
+    %{port: port, name: auth_name} = start_auth_instance!()
+    wait_wal_streaming(db, auth_name)
+    token = SSETestClient.sign_hs256(%{"role" => "postgrest_test_anonymous"}, @jwt_secret)
+
+    sock = SSETestClient.connect_sse(port, "/events?table=items&access_token=#{token}")
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.items (id, sku) VALUES (401, 'visible')", [])
+
+    assert decode_frame(SSETestClient.recv_until(sock, "data: {"))["row"] == %{
+             "id" => 401,
+             "sku" => "visible"
+           }
+
+    on_exit(fn ->
+      {:ok, cleanup} =
+        Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
+
+      Postgrex.query!(
+        cleanup,
+        "GRANT SELECT (id, sku) ON #{@schema}.items TO postgrest_test_anonymous",
+        []
+      )
+    end)
+
+    # Narrowing, not revoking: the role keeps `id`, so the subscription
+    # stays valid and `recheck/6` must adopt the FRESH column map rather
+    # than keep streaming the column it just lost. Reusing the subscriber's
+    # remembered `columns` here would leak `sku` for the life of the
+    # connection — precisely what the recheck exists to prevent — and the
+    # revoke-to-zero test cannot catch it, because zero columns errors out
+    # long before the map is reused.
+    Postgrex.query!(
+      db,
+      "REVOKE SELECT (sku) ON #{@schema}.items FROM postgrest_test_anonymous",
+      []
+    )
+
+    # `Bier.reload_schema_cache/1` runs the re-authorization synchronously
+    # (centrally, one query per distinct role), so by the time it returns
+    # every subscriber has already been sent its new column map. No settle
+    # window to wait out, and no window during which a revoked column can
+    # still be delivered.
+    :ok = Bier.reload_schema_cache(auth_name)
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.items (id, sku) VALUES (402, 'now-hidden')", [])
+
+    raw = SSETestClient.recv_until(sock, "data: {")
+    refute raw =~ "now-hidden"
+    assert decode_frame(raw)["row"] == %{"id" => 402}
+  end
+
+  test "a table outside the default schema renders a qualified event name", %{db: db} do
+    %{port: port, name: name} = start_two_schema_instance!()
+    wait_wal_streaming(db, name)
+
+    # `@schema` is the default (first of db_schemas), so its tables render
+    # unqualified; `@other_schema` is exposed but not default, so its tables
+    # must render qualified. Both spellings on ONE connection, so the test
+    # pins the distinction rather than either branch alone.
+    sock =
+      SSETestClient.connect_sse(port, "/events?table=orders,#{@other_schema}.orders")
+
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('default-schema')", [])
+    assert SSETestClient.recv_until(sock, "data: {") =~ "event: orders\n"
+
+    Postgrex.query!(db, "INSERT INTO #{@other_schema}.orders DEFAULT VALUES", [])
+    qualified = SSETestClient.recv_until(sock, "data: {")
+    assert qualified =~ "event: #{@other_schema}.orders\n"
+    assert decode_frame(qualified)["schema"] == @other_schema
+  end
+
+  test "a subscriber whose mailbox backs up is disconnected, not buffered forever", %{
+    db: db,
+    port: port,
+    name: name
+  } do
+    sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(sock, ": connected")
+
+    key = {name, {:table, {@schema, "orders"}}}
+    SSETestClient.wait_until(fn -> Registry.lookup(Bier.Events.Registry, key) != [] end)
+    [{subscriber, _value}] = Registry.lookup(Bier.Events.Registry, key)
+
+    # Suspending the connection process is what makes this deterministic:
+    # otherwise it drains each frame to a loopback socket faster than any
+    # producer can outpace it, and the high-water mark is never reached. The
+    # events are well-formed and deliverable, so a BROKEN guard writes all
+    # 1,100 of them and the stream stays open — which is what
+    # `assert_socket_closes/2` fails on.
+    :erlang.suspend_process(subscriber)
+
+    for n <- 1..1_100 do
+      Bier.Events.Registry.broadcast_table(
+        name,
+        {@schema, "orders"},
+        {:bier_wal_event, {@schema, "orders"}, {{0, n}, 0}, backed_up_event()}
+      )
+    end
+
+    :erlang.resume_process(subscriber)
+
+    assert_socket_closes(sock)
+  end
+
+  defp backed_up_event do
+    %{
+      kind: :insert,
+      commit_at: ~U[2026-08-24 00:00:00Z],
+      relation: %{
+        oid: 1,
+        schema: @schema,
+        table: "orders",
+        replica_identity: :default,
+        columns: [%{name: "id", type_oid: 23, type_mod: -1, key?: true}]
+      },
+      row: %{"id" => "1"}
+    }
+  end
+
+  test "one reload re-authorizes every subscriber, each against its own tables", %{db: db} do
+    %{port: port, name: auth_name} = start_auth_instance!()
+    wait_wal_streaming(db, auth_name)
+    token = SSETestClient.sign_hs256(%{"role" => "postgrest_test_anonymous"}, @jwt_secret)
+
+    # Two subscribers on the same instance and the same role but DIFFERENT
+    # tables. `Bier.Wal.notify_recheck/1` asks the database once per role,
+    # over the union of both, and derives each subscriber's verdict from
+    # that one answer — so this pins that the union does not leak across
+    # subscribers: revoking on `items` must not disturb the `orders` one.
+    orders_sock = SSETestClient.connect_sse(port, "/events?table=orders&access_token=#{token}")
+    SSETestClient.recv_until(orders_sock, ": connected")
+    items_sock = SSETestClient.connect_sse(port, "/events?table=items&access_token=#{token}")
+    SSETestClient.recv_until(items_sock, ": connected")
+
+    on_exit(fn ->
+      {:ok, cleanup} =
+        Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
+
+      Postgrex.query!(
+        cleanup,
+        "GRANT SELECT (id, sku) ON #{@schema}.items TO postgrest_test_anonymous",
+        []
+      )
+    end)
+
+    Postgrex.query!(
+      db,
+      "REVOKE SELECT (id, sku) ON #{@schema}.items FROM postgrest_test_anonymous",
+      []
+    )
+
+    :ok = Bier.reload_schema_cache(auth_name)
+
+    # The items subscriber lost its last visible column: revoked.
+    assert_socket_closes(items_sock)
+
+    # The orders subscriber is untouched and still delivering.
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (id, note) VALUES (501, 'fine')", [])
+    assert decode_frame(SSETestClient.recv_until(orders_sock, "data: {"))["row"] == %{"id" => 501}
+  end
+
+  test "the Last-Event-ID header wins over the last_event_id query param", %{
+    db: db,
+    port: port
+  } do
+    # Both spellings exist because `EventSource` can set neither on a first
+    # connect (hence the query param) but DOES send the header on its own
+    # reconnects — so a resuming browser sends the header while the original
+    # query param is still in the URL it reconnects to. The header has to
+    # win, or every browser reconnect would rewind to where the client first
+    # started.
+    sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('first')", [])
+    [_, first_id] = Regex.run(~r/id: ([^\n]+)\n/, SSETestClient.recv_until(sock, "data: {"))
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('second')", [])
+    [_, second_id] = Regex.run(~r/id: ([^\n]+)\n/, SSETestClient.recv_until(sock, "data: {"))
+    :gen_tcp.close(sock)
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('third')", [])
+
+    # Query param points at the FIRST event, header at the second. If the
+    # query param won, 'second' would be replayed as well.
+    {:ok, resumed} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false], 1_000)
+
+    :ok =
+      :gen_tcp.send(
+        resumed,
+        "GET /events?table=orders&last_event_id=#{first_id} HTTP/1.1\r\n" <>
+          "host: 127.0.0.1\r\naccept: text/event-stream\r\n" <>
+          "last-event-id: #{second_id}\r\n\r\n"
+      )
+
+    replay = SSETestClient.recv_until(resumed, ~s("note":"third"))
+    refute replay =~ ~s("note":"second")
+  end
+end

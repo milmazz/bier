@@ -56,4 +56,56 @@ defmodule Bier.EventsConfigTest do
       new!(events_channels: ["chat"], events_path: "a/b")
     end
   end
+
+  describe "WAL change-feed options" do
+    test "default to disabled" do
+      conf = new!([])
+      assert conf.events_publication == nil
+      assert conf.events_buffer_size == 1024
+      assert conf.events_max_tx_events == 10_000
+    end
+
+    test "accept a publication name and sizes" do
+      conf =
+        new!(
+          events_publication: "bier_events",
+          events_buffer_size: 16,
+          events_max_tx_events: 100
+        )
+
+      assert conf.events_publication == "bier_events"
+      assert conf.events_buffer_size == 16
+      assert conf.events_max_tx_events == 100
+    end
+
+    test "reject a publication name that cannot be safely interpolated" do
+      # START_REPLICATION takes no bind parameters, so the name is
+      # interpolated into a single-quoted literal; a quote or backslash in
+      # it would break out of that literal rather than produce a clear
+      # error.
+      # A comma is legal in a quoted PostgreSQL identifier (`CREATE
+      # PUBLICATION "a,b"` succeeds) but is the list separator in
+      # `publication_names`, so such a name would silently be read as two
+      # publications rather than one.
+      for bad <- [~s(with'quote), ~s(with"quote), "back\\slash", "a,b", <<?a, 0, ?b>>] do
+        assert_raise ArgumentError,
+                     ~r/events-publication cannot contain quotes, backslashes, commas, or null bytes/,
+                     fn -> new!(events_publication: bad) end
+      end
+
+      assert_raise ArgumentError, ~r/events-publication cannot be empty/, fn ->
+        new!(events_publication: "")
+      end
+
+      assert_raise ArgumentError, ~r/events-publication cannot exceed 63 bytes/, fn ->
+        new!(events_publication: String.duplicate("p", 64))
+      end
+    end
+
+    test "reject a non-positive buffer size" do
+      assert_raise ArgumentError, ~r/events_buffer_size option: expected positive integer/, fn ->
+        new!(events_buffer_size: 0)
+      end
+    end
+  end
 end
