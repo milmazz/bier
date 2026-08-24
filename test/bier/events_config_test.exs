@@ -83,9 +83,13 @@ defmodule Bier.EventsConfigTest do
       # interpolated into a single-quoted literal; a quote or backslash in
       # it would break out of that literal rather than produce a clear
       # error.
-      for bad <- [~s(with'quote), ~s(with"quote), "back\\slash", <<?a, 0, ?b>>] do
+      # A comma is legal in a quoted PostgreSQL identifier (`CREATE
+      # PUBLICATION "a,b"` succeeds) but is the list separator in
+      # `publication_names`, so such a name would silently be read as two
+      # publications rather than one.
+      for bad <- [~s(with'quote), ~s(with"quote), "back\\slash", "a,b", <<?a, 0, ?b>>] do
         assert_raise ArgumentError,
-                     ~r/events-publication cannot contain quotes, backslashes, or null bytes/,
+                     ~r/events-publication cannot contain quotes, backslashes, commas, or null bytes/,
                      fn -> new!(events_publication: bad) end
       end
 

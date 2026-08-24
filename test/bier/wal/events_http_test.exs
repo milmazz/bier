@@ -156,12 +156,12 @@ defmodule Bier.Wal.EventsHttpTest do
 
   # Boots a fourth instance with a deliberately tiny `events_buffer_size` so
   # a couple of inserts force real ring-buffer eviction. This is the only
-  # way to manufacture a legitimately "evicted" cursor: an untouched
-  # table's history is never stale (Buffer.stale?/3's `nil -> false`
-  # clause), so a bare, never-seen cursor alone does NOT produce a reset —
-  # only an actual drop or eviction older than the requested cursor does
-  # (see `Bier.Wal.BufferTest`'s "a cursor older than a wrapped table's
-  # history resets").
+  # way to attribute a reset to EVICTION specifically. Any cursor below the
+  # generation's epoch floor resets on its own, so an invented "ancient"
+  # cursor proves nothing about the ring buffer — it would reset on a
+  # buffer of any size. Evicting a real, known cursor is what isolates
+  # `Buffer.stale?/3` (see `Bier.Wal.BufferTest`'s "a cursor older than a
+  # wrapped table's history resets").
   defp start_small_buffer_instance! do
     port = TestPorts.free_port()
     name = :"wal_http_smallbuf_#{System.unique_integer([:positive])}"
@@ -531,8 +531,11 @@ defmodule Bier.Wal.EventsHttpTest do
 
     sock2 = SSETestClient.connect_sse(port, "/events?table=orders,items&last_event_id=#{id}")
     # Wait for the LATER of the two (items): its arrival means the orders
-    # frame is already in the accumulated buffer.
-    replay = SSETestClient.recv_until(sock2, "event: items\n")
+    # frame is already in the accumulated buffer. Wait on the frame's BODY,
+    # not its `event:` line — that line is the frame's first, so a read that
+    # split the frame across TCP segments would satisfy an `event:` pattern
+    # while the `data:` the regex below needs had not arrived yet.
+    replay = SSETestClient.recv_until(sock2, ~s("sku":"i-2"))
 
     frames =
       ~r/event: ([^\n]+)\nid: ([^\n]+)\ndata: (\{.*?\})\n/
@@ -560,15 +563,22 @@ defmodule Bier.Wal.EventsHttpTest do
     spectator = SSETestClient.connect_sse(port, "/events?table=orders")
     SSETestClient.recv_until(spectator, ": connected")
     Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('evict-1')", [])
-    SSETestClient.recv_until(spectator, "data: {")
+    first = SSETestClient.recv_until(spectator, "data: {")
     Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('evict-2')", [])
     SSETestClient.recv_until(spectator, "data: {")
 
-    # A real LSN's high 32 bits stay 0 for a local test cluster's lifetime
-    # (crossing to 1 needs 4 GiB of WAL past cursor 0), so `0/1.0` compares
-    # strictly less than any real post-insert cursor here — genuinely
-    # "ancient" rather than merely unfamiliar to the buffer.
-    sock = SSETestClient.connect_sse(port, "/events?table=orders&last_event_id=0/1.0")
+    # Resume from the FIRST insert's own cursor, not an invented ancient
+    # one. That cursor is this generation's epoch floor, so `before_floor?/2`
+    # cannot fire — it is not strictly below itself — and the only thing
+    # left that can produce a reset is `events_buffer_size: 1` having
+    # evicted the entry it names. An invented cursor like `0/1.0` would sit
+    # below the floor and reset on a buffer of any size, proving nothing
+    # about eviction.
+    [_, evicted_id] = Regex.run(~r/id: ([^\n]+)\n/, first)
+
+    sock =
+      SSETestClient.connect_sse(port, "/events?table=orders&last_event_id=#{evicted_id}")
+
     frame = SSETestClient.recv_until(sock, "data: {")
     assert frame =~ "event: bier:reset\n"
 
@@ -1026,5 +1036,43 @@ defmodule Bier.Wal.EventsHttpTest do
     # The orders subscriber is untouched and still delivering.
     Postgrex.query!(db, "INSERT INTO #{@schema}.orders (id, note) VALUES (501, 'fine')", [])
     assert decode_frame(SSETestClient.recv_until(orders_sock, "data: {"))["row"] == %{"id" => 501}
+  end
+
+  test "the Last-Event-ID header wins over the last_event_id query param", %{
+    db: db,
+    port: port
+  } do
+    # Both spellings exist because `EventSource` can set neither on a first
+    # connect (hence the query param) but DOES send the header on its own
+    # reconnects — so a resuming browser sends the header while the original
+    # query param is still in the URL it reconnects to. The header has to
+    # win, or every browser reconnect would rewind to where the client first
+    # started.
+    sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(sock, ": connected")
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('first')", [])
+    [_, first_id] = Regex.run(~r/id: ([^\n]+)\n/, SSETestClient.recv_until(sock, "data: {"))
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('second')", [])
+    [_, second_id] = Regex.run(~r/id: ([^\n]+)\n/, SSETestClient.recv_until(sock, "data: {"))
+    :gen_tcp.close(sock)
+
+    Postgrex.query!(db, "INSERT INTO #{@schema}.orders (note) VALUES ('third')", [])
+
+    # Query param points at the FIRST event, header at the second. If the
+    # query param won, 'second' would be replayed as well.
+    {:ok, resumed} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false], 1_000)
+
+    :ok =
+      :gen_tcp.send(
+        resumed,
+        "GET /events?table=orders&last_event_id=#{first_id} HTTP/1.1\r\n" <>
+          "host: 127.0.0.1\r\naccept: text/event-stream\r\n" <>
+          "last-event-id: #{second_id}\r\n\r\n"
+      )
+
+    replay = SSETestClient.recv_until(resumed, ~s("note":"third"))
+    refute replay =~ ~s("note":"second")
   end
 end

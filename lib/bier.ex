@@ -668,10 +668,11 @@ defmodule Bier do
 
   defp events_children(%Bier.Config{} = conf), do: [{Bier.Events.Listener, conf}]
 
-  # The WAL change feed runs only when an operator publication is configured:
-  # the Buffer must precede the Consumer (the consumer's connect callback
-  # bumps the Buffer generation).
-  # The Buffer starts BEFORE HttpServerStarter: `HttpServerStarter`'s
+  # The WAL change feed runs only when an operator publication is configured.
+  # The Buffer must precede the Consumer: the consumer bumps the Buffer
+  # generation from `handle_result/2`'s success arm — once the slot actually
+  # exists, not on every connect attempt — so the Buffer has to be alive by
+  # then. The Buffer also starts BEFORE HttpServerStarter: `HttpServerStarter`'s
   # `handle_continue` starts Bandit, which can accept a `GET /events?table=…`
   # carrying `Last-Event-ID` immediately — and that path calls
   # `Bier.Wal.Buffer.generation/1`, which would exit `:noproc` on a

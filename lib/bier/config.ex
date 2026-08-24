@@ -477,11 +477,15 @@ defmodule Bier.Config do
   @doc """
   `events-publication` names an operator-created `PUBLICATION`. Replication
   commands take no bind parameters, so `Bier.Wal.Consumer` has to interpolate
-  the name into `START_REPLICATION ... (publication_names '<name>')` — a name
-  carrying a single quote would break out of that literal. Operator config
-  rather than user input, so this is a guard against a typo becoming a
-  confusing replication error, not a defence against an attacker; it holds
-  the name to the same identifier shape `events-channels` uses.
+  the name into `START_REPLICATION ... (publication_names '<name>')`, and
+  two characters are legal in a quoted PostgreSQL identifier but not
+  survivable there: a single quote breaks out of the literal, and a COMMA is
+  that option's list separator, so `CREATE PUBLICATION "a,b"` — which
+  PostgreSQL accepts — would be read as the two publications `a` and `b`.
+
+  Operator config rather than user input, so this is a guard against a
+  legal-but-unstreamable name failing confusingly at runtime instead of at
+  boot, not a defence against an attacker.
   """
   @spec validate_events_publication(String.t() | nil) :: :ok | {:error, String.t()}
   def validate_events_publication(nil), do: :ok
@@ -494,8 +498,8 @@ defmodule Bier.Config do
       byte_size(publication) > 63 ->
         {:error, "events-publication cannot exceed 63 bytes"}
 
-      String.contains?(publication, [<<0>>, "\"", "'", "\\"]) ->
-        {:error, "events-publication cannot contain quotes, backslashes, or null bytes"}
+      String.contains?(publication, [<<0>>, "\"", "'", "\\", ","]) ->
+        {:error, "events-publication cannot contain quotes, backslashes, commas, or null bytes"}
 
       true ->
         :ok

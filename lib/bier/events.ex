@@ -45,6 +45,7 @@ defmodule Bier.Events do
   @max_queue 1_000
 
   @doc false
+  @spec queue_overloaded?() :: boolean()
   def queue_overloaded? do
     {:message_queue_len, len} = Process.info(self(), :message_queue_len)
     len > @max_queue

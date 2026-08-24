@@ -139,11 +139,18 @@ defmodule Bier.Wal.BufferTest do
     # A dropped table with no entries yet resets for every cursor.
     assert Buffer.replay_after(name, [@orders], cursor(1), gen) == :reset
 
-    # Once a new entry lands, it becomes the new floor: a cursor at-or-past
-    # it is fine, but any cursor from before the drop still resets.
+    # Once a new entry lands it re-anchors the table: a cursor at-or-past it
+    # is fine, anything older still resets.
     :ok = Buffer.append(name, [{cursor(9), @orders, event(9)}])
     assert {:ok, []} = Buffer.replay_after(name, [@orders], cursor(9), gen)
-    assert Buffer.replay_after(name, [@orders], cursor(0), gen) == :reset
+
+    # cursor(8), NOT cursor(0). cursor(0) is below this generation's epoch
+    # floor (cursor(1)), so `before_floor?/2` would reset it whatever
+    # `restore_oldest/3` did — the assertion would hold even if the
+    # re-anchor were broken. cursor(8) sits above the floor and below the
+    # re-anchored `oldest`, so only the per-table staleness check can
+    # produce this reset.
+    assert Buffer.replay_after(name, [@orders], cursor(8), gen) == :reset
   end
 
   test "replay re-attaches each table's interned relation" do
