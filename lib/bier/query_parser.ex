@@ -1,5 +1,5 @@
 # Generated from lib/bier/query_parser.ex.exs, do not edit.
-# Generated at 2026-08-10 03:19:53Z.
+# Generated at 2026-08-24 14:37:12Z.
 
 defmodule Bier.QueryParser do
   @moduledoc """
@@ -1722,6 +1722,12 @@ defmodule Bier.QueryParser do
 
   @reserved ~w(select order limit offset on_conflict columns and or not)
 
+  # The aggregate functions PostgREST exposes in `select=` (`pAggregation`).
+  # Declared here rather than beside the other select helpers below because a
+  # module attribute is only readable after the point it is set, and
+  # `parse_aggregate/1` is the first reader.
+  @agg_functions ~w(avg count max min sum)
+
   @doc """
   Parse a full request query string into a structured query plan.
 
@@ -1965,11 +1971,21 @@ defmodule Bier.QueryParser do
   # trailing call: the FIRST cast is the aggregate's *input* cast
   # (`SUM(CAST(fld AS int))`) and the one after `()` casts its *result*
   # (`SqlFragment.pgFmtSelectItem`).
+  #
+  # The function name is checked against `@agg_functions` here, not in
+  # `split_agg_call/1`: that helper reports the *shape* of the field, which is
+  # what `aggregate?/1` routes on, so a bad name has to reach this parser to be
+  # answered as a select parse error (400 PGRST100) rather than fall through to
+  # the scalar/embed branches. Upstream's `pAggregation` likewise accepts only
+  # these five names, and the name reaches SQL verbatim in
+  # `Bier.Embed.apply_agg/2` — anything else would be an arbitrary
+  # single-argument function call as the request role.
   defp parse_aggregate(field) do
     {out_alias, rest} = split_alias(field)
     {agg_cast, rest} = peel_agg_cast(rest)
 
     with {:ok, operand, fun} <- split_agg_call(rest),
+         true <- fun in @agg_functions,
          {:ok, col, json_path, input_cast} <- parse_agg_operand(operand) do
       {:ok,
        %{
@@ -2461,8 +2477,6 @@ defmodule Bier.QueryParser do
   # regex/`String.split` parsing (1.6x-5.9x faster per function, proven
   # behavior-identical against the conformance suite -- see `bench/REPORT.md`).
   # ===========================================================================
-
-  @agg_functions ~w(avg count max min sum)
 
   # Shared `post_traverse` tail: prepend the tagged remaining binary to the acc
   # and consume the rest of the input. All capture callbacks below funnel through

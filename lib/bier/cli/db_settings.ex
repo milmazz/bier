@@ -47,23 +47,63 @@ defmodule Bier.CLI.DbSettings do
   # rather than one long unattended wait; the budget itself is PostgREST's
   # `db-pool-acquisition-timeout` default. Postgres errors (a revoked
   # privilege, say) are answered immediately — they will not fix themselves.
-  # The cost is that a server that is down, rather than busy, is reported at
-  # the deadline instead of at the first drop.
   @queue_opts [queue_target: 50, queue_interval: 500]
   @acquire_deadline_ms 10_000
   @acquire_pause_ms 100
+
+  # The drop itself cannot tell "busy" from "not there": a pool holding no live
+  # connection queues the checkout either way, so an unreachable server and a
+  # slot-starved one both arrive as the same `reason: :queue_timeout` error with
+  # the same message. Classify the endpoint up front instead. A socket that is
+  # refused, unroutable, or never answers is fatal immediately — it will not fix
+  # itself within the deadline, and making the CLI sit silent for it is the
+  # worst answer to the most common misconfiguration (wrong port, server not
+  # started). A server that is merely out of connection slots *accepts* the
+  # socket and rejects later, at the startup packet (`53300`), so it still
+  # reaches the retry above — which is the case the retry exists for.
+  @probe_timeout_ms 2_000
 
   @doc """
   Connect with the resolved `db-uri` (plus `PG*` fallbacks, see
   `Bier.CLI.Config.connection_opts/2`), read the role settings, and return
   them keyed by kebab config key. Connection or query failures come back as
-  `{:error, message}` for the CLI's fatal-error path, after retrying a
-  connection the pool could not hand out in time.
+  `{:error, message}` for the CLI's fatal-error path: an endpoint nothing is
+  listening on fails at once, while a connection the pool could not hand out in
+  time is retried to the acquisition deadline first.
   """
   @spec fetch(map(), map()) :: {:ok, map()} | {:error, String.t()}
   def fetch(resolved, env) do
     opts = Config.connection_opts(resolved, env) ++ [pool_size: 1] ++ @queue_opts
 
+    with :ok <- probe(opts) do
+      connect_and_read(opts)
+    end
+  rescue
+    # A config missing required connection fields (e.g. no database name and
+    # no username to fall back to) raises in Postgrex.start_link.
+    e in ArgumentError ->
+      {:error, "in-database config (db-config): " <> Exception.message(e)}
+  end
+
+  # Is anything listening on the resolved endpoint? `Config.connection_opts/2`
+  # always resolves a hostname and port (defaulting to localhost:5432), so this
+  # is a well-defined TCP check.
+  defp probe(opts) do
+    host = to_charlist(opts[:hostname])
+
+    case :gen_tcp.connect(host, opts[:port], [:binary, active: false], @probe_timeout_ms) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        :ok
+
+      {:error, reason} ->
+        {:error,
+         "in-database config (db-config): could not connect to " <>
+           "#{opts[:hostname]}:#{opts[:port]} (#{inspect(reason)})"}
+    end
+  end
+
+  defp connect_and_read(opts) do
     case Postgrex.start_link(opts) do
       {:ok, conn} ->
         try do
@@ -75,11 +115,6 @@ defmodule Bier.CLI.DbSettings do
       {:error, reason} ->
         {:error, "in-database config (db-config): #{inspect(reason)}"}
     end
-  rescue
-    # A config missing required connection fields (e.g. no database name and
-    # no username to fall back to) raises in Postgrex.start_link.
-    e in ArgumentError ->
-      {:error, "in-database config (db-config): " <> Exception.message(e)}
   end
 
   defp run_query(conn, deadline) do
