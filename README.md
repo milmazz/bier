@@ -387,17 +387,16 @@ and regenerate; never edit the generated `.ex` directly.
 ## Conformance
 
 Bier reproduces the request/response behavior of **PostgREST v16.0**, and is
-developed against a frozen conformance suite derived from it: 762 cases across
+developed against a frozen conformance suite derived from it: 801 cases across
 17 areas — URL grammar, operators, select/embedding, filters, ordering,
 pagination, representations, mutations, RPC, auth, errors, headers, content
 negotiation, OpenAPI, config, observability, and domain representations.
 PostgREST is the ground truth — each case cites the exact upstream source line,
 and a difference from upstream is treated as a Bier bug.
 
-**All 758 active cases pass.** Four are excluded: three assert the HTTP reason
-phrase, which the test client cannot read ([#42][]), and one pins the `Server`
-header's product token, which Bier deliberately answers differently (see
-below).
+**All 796 active cases pass.** Five are excluded: three assert the HTTP reason
+phrase, which the test client cannot read ([#42][]), and two pin upstream
+behavior Bier deliberately answers differently (see below).
 
 The suite and the behavior models it is built from live under [`spec/`][spec]
 in the repository, and [`docs/CONFORMANCE_IMPL.md`][conformance-impl] documents
@@ -425,6 +424,18 @@ PostgREST release this build reproduces. The exemption is declared in the
 conformance harness rather than by editing the case, so `spec/` keeps recording
 what PostgREST really does. See
 [#122](https://github.com/milmazz/bier/issues/122).
+
+**Unbalanced parentheses in `select`.** Upstream parses the `select` parameter
+with `pFieldForest` and no `eof` terminator (`QueryParams.hs`), so Parsec keeps
+the longest valid prefix and silently discards whatever input follows it —
+`select=name,...processes(process:name,...process_costs(cost)))` is accepted
+with the stray `)` simply never read, and conformance case 11125 pins that
+tolerance. Bier answers `400 PGRST100` instead. Matching upstream would mean
+accepting arbitrary trailing garbage after a well-formed tree, so a select
+truncated by a stray token would come back silently short with a `200`. The
+same select without the stray `)` already returns exactly the body the case
+expects, so only the handling of malformed input differs. See
+[#138](https://github.com/milmazz/bier/issues/138).
 
 **`Vary: Origin` on CORS responses.** `Bier.Plugs.Cors` echoes the request's
 `Origin` into `Access-Control-Allow-Origin` rather than sending `*`, and a
