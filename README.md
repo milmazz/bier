@@ -102,7 +102,7 @@ New to Bier? Start with the tutorials, then reach for the reference guides.
 - [API reference](docs/guides/api.md) — reading, filtering, ordering, pagination, embedding, mutations, RPC, time zones, and content negotiation.
 - [Configuration](docs/guides/configuration.md) — every option, the `PGRST_*` environment variables, and standalone/Docker/CLI operation.
 - [Observability](docs/guides/observability.md) — telemetry events, Server-Timing, health endpoints, and the error envelope.
-- [Realtime events](docs/guides/realtime_events.md) — the SSE endpoint: channels, auth, delivery semantics, telemetry.
+- [Realtime events](docs/guides/realtime_events.md) — the SSE endpoint: channels, auth, delivery semantics, telemetry, and — with `events_publication` — a WAL change feed with typed row events and `Last-Event-ID` resume.
 - [Injection safety](docs/injection_safety.md) — what is bound vs. escaped in the generated SQL, and why.
 
 ## Configuration

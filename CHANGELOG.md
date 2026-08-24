@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- WAL change feed on the events endpoint: with `events_publication` naming an
+  operator-created publication, `GET /events?table=<name>` streams typed
+  INSERT/UPDATE/DELETE/TRUNCATE events with row images over SSE — no NOTIFY
+  payload cap, no triggers. Frames carry an LSN cursor (`id:`) and reconnects
+  resume via `Last-Event-ID` within a bounded in-memory window; anything the
+  server can no longer replay is announced with an explicit `bier:reset`
+  frame, never silently skipped. Subscriptions require SELECT on the table
+  (column images are filtered per role); tables with RLS refuse subscription
+  in this release. Boot fails fast (with remediation hints) unless
+  `wal_level=logical`, the publication exists, and the role has REPLICATION.
+  A response carrying a table subscription also sends `Connection: close`
+  (the WAL stream can end at any time, unlike a NOTIFY-only response); an
+  unknown, unpublished, RLS-enabled, or unprivileged table all refuse with
+  the same 404 (`BIER003`), so the endpoint cannot be used as an existence
+  or privilege oracle.
+
 ## v0.2.0 — 2026-08-23
 
 ### Added

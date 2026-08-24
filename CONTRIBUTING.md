@@ -29,6 +29,18 @@ chain's `spec/fixtures/04_postgis.sql` depends on it (CI uses the
 `postgis/postgis` images). Connection parameters come from the standard `PG*`
 environment variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`).
 
+The WAL change-feed tests (`test/bier/wal/`) additionally need
+`wal_level=logical` on that instance — it defaults to `replica` and cannot
+be changed without a restart:
+
+```sh
+psql -c "ALTER SYSTEM SET wal_level = logical;"
+pg_ctl restart   # or: brew services restart postgresql / systemctl restart postgresql
+```
+
+CI sets this via `POSTGRES_INITDB_ARGS: "-c wal_level=logical"` on the
+`postgres` service (see `.github/workflows/elixir.yml`).
+
 ## Running the suite
 
 ```sh

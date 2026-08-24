@@ -249,9 +249,18 @@ relation name answered by 400 `PGRST108`. See
 | `events_channels` | `[string]` | `[]` | — (Bier-only; PostgREST has no equivalent) |
 | `events_path` | `string` | `"events"` | — (Bier-only) |
 | `events_heartbeat_interval` | `pos_integer` | `15_000` | — (Bier-only) |
+| `events_publication` | `string \| nil` | `nil` | — (Bier-only) |
+| `events_buffer_size` | `pos_integer` | `1024` | — (Bier-only) |
+| `events_max_tx_events` | `pos_integer` | `10_000` | — (Bier-only) |
 
-The SSE endpoint is off until `events_channels` lists at least one channel.
-See the [Realtime events guide](realtime_events.md).
+The SSE endpoint is off until `events_channels` lists at least one channel
+or `events_publication` names an operator-created publication. The latter
+turns the endpoint into a WAL change feed as well as a NOTIFY bridge:
+`events_publication` names the publication to stream, `events_buffer_size`
+bounds the per-table `Last-Event-ID` resume window, and
+`events_max_tx_events` caps how many events a single transaction may
+contribute before it is dropped and an explicit reset is announced. See the
+[Realtime events guide](realtime_events.md#change-feed-wal).
 
 ### Schema-cache reload options
 

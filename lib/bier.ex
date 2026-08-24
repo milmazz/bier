@@ -496,8 +496,9 @@ defmodule Bier do
         default: env(:events_channels, []),
         doc: """
         Allowlist of Postgres notification channels exposed on the SSE events
-        endpoint. The empty list (default) disables the feature entirely: no
-        listener connection is opened and no path is reserved. Bier-specific
+        endpoint. The empty list (default) disables NOTIFY channel
+        subscriptions; the endpoint itself is reserved and starts only when
+        this list is non-empty or `events_publication` is set. Bier-specific
         (no PostgREST counterpart); see the Realtime events guide.
         """
       ],
@@ -506,8 +507,9 @@ defmodule Bier do
         default: env(:events_path, "events"),
         doc: """
         Top-level path segment reserved for the SSE events endpoint while
-        `events_channels` is non-empty. Change it if a relation of the same
-        name must stay reachable. Must be a single segment (no `/`).
+        `events_channels` is non-empty or `events_publication` is set.
+        Change it if a relation of the same name must stay reachable. Must
+        be a single segment (no `/`).
         """
       ],
       events_heartbeat_interval: [

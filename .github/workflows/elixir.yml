@@ -31,6 +31,9 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          # wal_level=logical is required by the WAL change-feed tests
+          # (test/bier/wal/), which create a real temporary replication slot.
+          POSTGRES_INITDB_ARGS: "-c wal_level=logical"
         ports:
           - 5432:5432
         # Wait for the server to accept connections before the job runs.
