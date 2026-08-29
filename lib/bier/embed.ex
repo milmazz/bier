@@ -564,6 +564,28 @@ defmodule Bier.Embed do
   # node, or until we reach a ReadPlan that will be embedded a JSON object or
   # JSON array"). Every column that is NOT aggregated becomes a `GROUP BY` term
   # for this level (`groupTermFromRelSelectField`).
+  #
+  # A spread that merges no columns contributes nothing at all, so it emits no
+  # LATERAL — the same answer `build_node/7` gives the literally-empty parens
+  # list (`...rel()`, parser `empty: true`, case 11138). The two spellings reach
+  # this differently: `...rel()` short-circuits at the node, while a spread
+  # whose projection is made up entirely of empty embeds
+  # (`...processes(process_costs())`) is `empty: false` at the outer node and
+  # only turns out to project nothing once its children have been built.
+  #
+  # Dropping the join is safe because a spread's LATERAL is a pure column
+  # source: it is always a LEFT JOIN, so it never filters (`!inner` propagates
+  # through the parent's `EXISTS` clauses in `inner_join_clauses/6` instead),
+  # and the alias it registers is read only by spread order terms
+  # (`spread_order_expr/3`), which have no column here to name. Keeping it is
+  # what is unsafe: with no `child_cols` there are no `json_agg`s, and the
+  # aggregate list is the only thing making the `:many` subquery an aggregate
+  # query — one that returns exactly one row over zero rows. `SELECT  FROM (…)`
+  # is legal SQL that is not an aggregate query, so the join would return one
+  # row per child and multiply the parent rows (#154).
+  defp spread_entry(_kind, [], _child_meta, _inner_base, _page_sql, state, _key, _spread?),
+    do: {[], state}
+
   defp spread_entry(kind, child_cols, child_meta, inner_base, page_sql, state, key, spread?) do
     seq = state.embed_seq + 1
     state = %{state | embed_seq: seq}
@@ -574,18 +596,7 @@ defmodule Bier.Embed do
         :one ->
           " LEFT JOIN LATERAL (#{inner_base} LIMIT 1) #{spr} ON true"
 
-        # `child_cols` CAN be empty here, and the result is wrong when it is.
-        # The empty-projection clause in `build_node/7` only catches a
-        # literally-empty parens list (`...rel()`, parser `empty: true`); a
-        # spread whose projection is made up entirely of empty embeds —
-        # `...processes(process_costs())` — reaches this branch with
-        # `child_cols == []`. `aggs` is then "", and `SELECT  FROM (…)` is
-        # legal SQL that is no longer an aggregate query, so the LATERAL
-        # returns one row per child and MULTIPLIES the parent rows instead of
-        # contributing nothing (case 11138 pins one row per parent for the
-        # `...rel()` spelling). Pre-existing, tracked as #154 — what upstream
-        # returns for this shape is not pinned by any case yet, so that is the
-        # first thing the fix needs.
+        # `child_cols` is never empty here — the clause above took that case.
         :many ->
           aggs =
             Enum.map_join(child_cols, ", ", fn {_expr, name} ->
