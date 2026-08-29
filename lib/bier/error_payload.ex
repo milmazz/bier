@@ -3,7 +3,9 @@ defmodule Bier.ErrorPayload do
   Serializes PostgREST's error envelope to its exact wire bytes.
 
   Two properties are pinned by the conformance suite and neither survives a
-  plain map encode, so every error body goes through here.
+  plain map encode, so every error body goes through here. A third guarantee —
+  the bytes handed to the encoder are always valid UTF-8 — is enforced here for
+  the same reason: this is the one place every error body passes.
 
   ## Key emission order is ALPHABETICAL
 
@@ -30,6 +32,18 @@ defmodule Bier.ErrorPayload do
   produces (`App.hs#L154`), so it governs database errors as much as the
   `PGRSTxxx` ones, and `Response.hs` passes the same setting to the 416 body it
   builds inline while assembling a normal read response.
+
+  ## Values are scrubbed to valid UTF-8
+
+  `details`/`message`/`hint` routinely echo client-controlled text — an unknown
+  channel/table/column name, a malformed relation — decoded straight from the
+  request. Neither `URI.decode_www_form/1` nor the CSV column parser validates
+  UTF-8, so those values can carry byte sequences the stdlib `JSON` encoder
+  rejects outright (`{:invalid_byte, _}`), which would turn the response meant
+  to report the *original* error into an unhandled 500. Every key and every
+  value is passed through `String.replace_invalid/1` first, so an invalid
+  sequence becomes U+FFFD and the original error still gets reported with its
+  own status. Valid input is returned unchanged, byte for byte.
   """
 
   @minimal_keys ~w(code message)
@@ -78,9 +92,32 @@ defmodule Bier.ErrorPayload do
 
     members =
       Enum.map_intersperse(pairs, ",", fn {key, value} ->
-        [json.encode_to_iodata!(key), ?:, json.encode_to_iodata!(value)]
+        [json.encode_to_iodata!(sanitize(key)), ?:, json.encode_to_iodata!(sanitize(value))]
       end)
 
     IO.iodata_to_binary([?{, members, ?}])
   end
+
+  # See the "Values are scrubbed to valid UTF-8" moduledoc section. The valid
+  # case — every error body Bier itself produces — returns the same binary and
+  # allocates nothing; only a value carrying client bytes pays for a rewrite.
+  # `String.replace_invalid/1` is linear and does the maximal-subpart
+  # substitution Unicode specifies (one U+FFFD per invalid *sequence*, not per
+  # byte); a hand-rolled loop over `:unicode.characters_to_binary/1` is
+  # quadratic in the number of bad bytes, which an uncapped request body turns
+  # into a CPU-exhaustion vector.
+  defp sanitize(value) when is_binary(value) do
+    if String.valid?(value), do: value, else: String.replace_invalid(value)
+  end
+
+  # `details` is not always a scalar: PGRST201 builds it as a list of maps
+  # (`Bier.Embed.ambiguous_error/3`), so the walk has to reach inside
+  # containers or the guarantee above would be silently partial. Structs are
+  # left whole — they carry their own encoder.
+  defp sanitize(value) when is_list(value), do: Enum.map(value, &sanitize/1)
+
+  defp sanitize(value) when is_map(value) and not is_struct(value),
+    do: Map.new(value, fn {key, val} -> {sanitize(key), sanitize(val)} end)
+
+  defp sanitize(value), do: value
 end

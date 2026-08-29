@@ -41,6 +41,22 @@ defmodule Bier.EventsHttpTest do
     assert resp.headers["proxy-status"] == ["Bier; error=BIER002"]
   end
 
+  test "a channel with an invalid-UTF-8 percent-escape is 404, not a raw 500", %{port: port} do
+    {status_line, body} = raw_get(port, "/events?channel=%e2%28%a1")
+
+    assert status_line == "HTTP/1.1 404 Not Found"
+    assert_clean_envelope(body, "BIER001")
+  end
+
+  test "a table with an invalid-UTF-8 percent-escape is 404, not a raw 500", %{port: port} do
+    {status_line, body} = raw_get(port, "/events?table=%e2%28%a1")
+
+    assert status_line == "HTTP/1.1 404 Not Found"
+    # An unknown table is BIER003, not the channel path's BIER001: the point is
+    # that the ORIGINAL error still gets reported, whichever one it was.
+    assert_clean_envelope(body, "BIER003")
+  end
+
   test "GET /events with a channel outside the allowlist is 404 BIER001", %{port: port} do
     resp = Req.get!("http://127.0.0.1:#{port}/events?channel=nope", retry: false)
     assert resp.status == 404
@@ -105,5 +121,48 @@ defmodule Bier.EventsHttpTest do
     assert frames =~ ~s(data: {"msg":"hi"})
 
     :gen_tcp.close(sock)
+  end
+
+  # ---- helpers --------------------------------------------------------------
+
+  # `%e2%28%a1` percent-decodes to a byte sequence that is not valid UTF-8
+  # (`URI.decode_www_form/1` never validates it). A raw socket is required:
+  # an HTTP client (Req/Mint) refuses to even send a request target with a
+  # malformed percent-escape, so the only way to put invalid bytes on the
+  # wire is to write the request line ourselves (see #142).
+  defp raw_get(port, target) do
+    {:ok, sock} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false], 1_000)
+
+    try do
+      :ok = :gen_tcp.send(sock, "GET #{target} HTTP/1.1\r\nhost: 127.0.0.1\r\n\r\n")
+      raw = recv_until(sock, "\r\n\r\n")
+      [head, started] = String.split(raw, "\r\n\r\n", parts: 2)
+      [status_line | _] = String.split(head, "\r\n")
+      {status_line, recv_body(sock, head, started)}
+    after
+      :gen_tcp.close(sock)
+    end
+  end
+
+  # These error bodies are fixed-length (every Bier error sets content-length),
+  # so read exactly that many bytes instead of matching on a terminator —
+  # `recv_until/2` stops at the header break and would leave the body behind.
+  defp recv_body(sock, head, acc) do
+    [_, len] = Regex.run(~r/content-length: (\d+)/i, head)
+    remaining = String.to_integer(len) - byte_size(acc)
+
+    if remaining <= 0 do
+      acc
+    else
+      {:ok, rest} = :gen_tcp.recv(sock, remaining, 3_000)
+      acc <> rest
+    end
+  end
+
+  # The status line alone would pass even if the invalid bytes had mangled the
+  # body: #142 is about the envelope surviving, so assert on it.
+  defp assert_clean_envelope(body, code) do
+    assert String.valid?(body)
+    assert Bier.json_library().decode!(body)["code"] == code
   end
 end
