@@ -427,6 +427,12 @@ defmodule Bier.CLI.Config do
     end
   end
 
+  # Shared by :csv and :csv_emptyable. Dropping empty entries means a
+  # separators-only value resolves to `[]` rather than to blank entries, so
+  # `PGRST_DB_SCHEMAS=","` reaches the boot validator as `[]`. That is benign
+  # for :csv_emptyable (db-extra-search-path treats `[]` as "no extra path");
+  # for db-schemas it is a boot fatal, raised by Bier.Config.new/2 and not
+  # here — --dump-config must still print what it parsed.
   defp split_csv(s) do
     s |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
   end
@@ -552,7 +558,12 @@ defmodule Bier.CLI.Config do
          :ok <- run_validator(resolved, "jwt-aud", &Bier.Config.validate_jwt_aud/1),
          :ok <- validate_socket_mode(resolved, "server-unix-socket-mode"),
          :ok <- validate_socket_mode(resolved, "admin-server-unix-socket-mode"),
-         :ok <- run_validator(resolved, "db-schemas", &Bier.Config.validate_db_schemas/1),
+         :ok <-
+           run_validator(
+             resolved,
+             "db-schemas",
+             &Bier.Config.validate_db_schemas_restricted/1
+           ),
          :ok <-
            run_validator(resolved, "openapi-server-proxy-uri", &Bier.Config.validate_proxy_uri/1),
          :ok <- validate_secret_base64(resolved),

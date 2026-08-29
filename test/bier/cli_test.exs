@@ -15,6 +15,15 @@ defmodule Bier.CLITest do
     assert IO.iodata_to_binary(result.stderr) == ""
   end
 
+  test "--dump-config still prints a separators-only db-schemas instead of failing" do
+    # The emptiness rule is boot-only: upstream's parseDbSchemas rejects only
+    # catalog names, so --dump-config must keep printing what it parsed.
+    result = CLI.run(["--dump-config"], env: Map.merge(@no_db, %{"PGRST_DB_SCHEMAS" => ","}))
+    assert result.exit == 0
+    assert IO.iodata_to_binary(result.stdout) =~ ~s(db-schemas = "")
+    assert IO.iodata_to_binary(result.stderr) == ""
+  end
+
   test "--dump-config with an invalid value prints the message to stderr, nonzero exit" do
     result = CLI.run(["--dump-config"], env: %{"PGRST_JWT_SECRET" => "short_secret"})
     assert result.exit != 0

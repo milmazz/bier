@@ -43,6 +43,13 @@ and this project adheres to
   it are refused at boot, and a `table=` subscription naming such a table is
   refused like any other unavailable table. Without the reservation a
   channel or table could emit a frame a client reads as a control message.
+- `db_schemas` is validated at boot: the list must be non-empty and no entry
+  may be blank. An empty list previously aborted the schema-cache load with an
+  opaque `FunctionClauseError` behind a PGRST002 log, and a blank entry booted
+  a working instance whose default schema silently resolved nothing. Both are
+  Bier-only rules — PostgREST's comma-separated `db-schemas` cannot express an
+  empty list — so they run at boot only and `--dump-config` still prints
+  whatever it parsed (#143).
 
 ### Changed
 

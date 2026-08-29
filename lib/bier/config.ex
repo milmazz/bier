@@ -158,13 +158,16 @@ defmodule Bier.Config do
   schema plus the semantic validators and returns `{:ok, config}` or
   `{:error, message}`. The standalone/CLI boot path uses this to turn a bad
   config into a clean fatal message instead of a raised exception.
+
+  "Non-raising" covers validation failures, not a malformed `schema` argument:
+  a schema that omits a key this function reads still raises.
   """
   @spec new(Keyword.t(), Keyword.t()) :: {:ok, t()} | {:error, String.t()}
   def new(opts, schema) do
     with {:ok, conf} <- validate_schema(opts, schema),
          :ok <-
            validate_admin_server_port(conf[:admin_server_port], get_in(conf, [:router, :port])),
-         :ok <- validate_db_schemas(Keyword.get(conf, :db_schemas, [])),
+         :ok <- validate_db_schemas(Keyword.fetch!(conf, :db_schemas)),
          :ok <- validate_jwt_secret(conf[:jwt_secret]),
          :ok <- validate_jwt_aud(conf[:jwt_aud]),
          :ok <- validate_db_channel(conf[:db_channel]),
@@ -342,9 +345,49 @@ defmodule Bier.Config do
   the comma split, so a restricted name anywhere in the list aborts startup
   (Config.hs `parseDbSchemas`). v14.12 accepted them and failed per request
   instead. Mirrors conformance cases 1733/1734.
+
+  The list must also be non-empty, and no entry may be blank. Neither rule has
+  an upstream counterpart: PostgREST takes `db-schemas` as a comma-separated
+  string (`Config.hs parseDbSchemas`; `spec/spec/config.yaml` types it
+  `comma-separated-nonempty`) which cannot express an empty list, and
+  `parseDbSchemas` rejects only the catalog names above. Bier takes a real
+  list, and the first entry is the default schema.
+
+  Without these clauses an empty list aborts boot inside
+  `Bier.SchemaCache.load!/4` — `Bier.Introspection.run/3` is guarded
+  `schemas != []`, so introspection dies with a bare `FunctionClauseError`
+  logged as a PGRST002 schema-cache-load failure, and the first-entry reads on
+  the request path (`hd/1` in `Bier.Events`, `[schema | _]` matches in
+  `Bier.Plugs.ActionController`) are never reached. A blank entry is worse: it
+  passes introspection, so the instance boots and silently serves a broken
+  default schema. Failing here names the cause instead.
+
+  Both rules are boot-only. They are deliberately not run by the CLI parse
+  layer, which must keep printing whatever was parsed for `--dump-config` —
+  see `Bier.CLI.Config.validated_start_opts/1`. Only the catalog-name rule is
+  a parse-layer fatal upstream, pinned by conformance cases 1733/1734.
   """
   @spec validate_db_schemas([String.t()]) :: :ok | {:error, String.t()}
+  def validate_db_schemas([]), do: {:error, "db-schemas cannot be empty"}
+
   def validate_db_schemas(schemas) when is_list(schemas) do
+    case Enum.find(schemas, &(String.trim(&1) == "")) do
+      nil -> validate_db_schemas_restricted(schemas)
+      _blank -> {:error, "db-schemas entries cannot be empty"}
+    end
+  end
+
+  @doc """
+  The catalog-name half of `validate_db_schemas/1`, on its own.
+
+  This is the only `db-schemas` rule PostgREST enforces while parsing, so it is
+  the only one the CLI parse layer may run: conformance cases 1733/1734 pin it
+  as a `--dump-config` fatal. The emptiness and blank-entry rules are Bier-only
+  and boot-only — running them here would make `--dump-config` exit non-zero on
+  input upstream prints without complaint.
+  """
+  @spec validate_db_schemas_restricted([String.t()]) :: :ok | {:error, String.t()}
+  def validate_db_schemas_restricted(schemas) when is_list(schemas) do
     case Enum.find(schemas, &(&1 in @restricted_db_schemas)) do
       nil -> :ok
       schema -> {:error, "db-schemas does not allow schema: '#{schema}'"}

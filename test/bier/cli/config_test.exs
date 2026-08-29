@@ -176,6 +176,36 @@ defmodule Bier.CLI.ConfigTest do
     end
   end
 
+  describe "load/3 leaves an empty db-schemas to the boot layer" do
+    # `:csv` coercion drops empty entries (see split_csv/1), so a separators-only
+    # value resolves to `[]`. The parse layer must still accept it — --dump-config
+    # prints what it parsed, and upstream's parseDbSchemas rejects only catalog
+    # names (cases 1733/1734). The emptiness rule is boot-only.
+    test "a separators-only PGRST_DB_SCHEMAS parses to an empty list" do
+      assert {:ok, resolved} = Config.load(%{"PGRST_DB_SCHEMAS" => ","}, nil, %{})
+      assert resolved["db-schemas"] == []
+
+      assert {:ok, resolved} = Config.load(%{"PGRST_DB_SCHEMAS" => " , "}, nil, %{})
+      assert resolved["db-schemas"] == []
+    end
+
+    test "but the boot layer rejects it" do
+      {:ok, resolved} = Config.load(%{"PGRST_DB_SCHEMAS" => ","}, nil, %{})
+
+      assert Config.validated_start_opts(resolved) ==
+               {:error, "db-schemas cannot be empty"}
+    end
+
+    test "a catalog schema is still a parse-layer fatal (cases 1733/1734)" do
+      assert Config.load(%{"PGRST_DB_SCHEMAS" => "public,pg_catalog"}, nil, %{}) ==
+               {:error, "db-schemas does not allow schema: 'pg_catalog'"}
+    end
+
+    test "an ordinary value still loads" do
+      assert {:ok, _resolved} = Config.load(%{"PGRST_DB_SCHEMAS" => "api,public"}, nil, %{})
+    end
+  end
+
   describe "to_start_opts/1" do
     test "maps resolved keys to Bier.start_link/1 options" do
       {:ok, resolved} =

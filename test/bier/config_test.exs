@@ -57,6 +57,12 @@ defmodule Bier.ConfigTest do
         Bier.Config.new!([jwt_aud: "foo://%%$$^^.com"], Bier.schema())
       end
     end
+
+    test "an empty db_schemas raises a named error, not an opaque FunctionClauseError" do
+      assert_raise ArgumentError, ~r/db-schemas cannot be empty/, fn ->
+        Bier.Config.new!([db_schemas: []], Bier.schema())
+      end
+    end
   end
 
   describe "decode_base64_secret/1 (jwt-secret-is-base64)" do
@@ -156,6 +162,47 @@ defmodule Bier.ConfigTest do
       assert_raise ArgumentError, ~r/not an octal/, fn ->
         Bier.Config.new!([server_unix_socket_mode: "abc"], Bier.schema())
       end
+    end
+  end
+
+  describe "validate_db_schemas/1" do
+    test "a non-empty list of unrestricted schemas is ok" do
+      assert Bier.Config.validate_db_schemas(["public"]) == :ok
+      assert Bier.Config.validate_db_schemas(["v1", "v2"]) == :ok
+    end
+
+    test "a catalog schema anywhere in the list is rejected" do
+      assert Bier.Config.validate_db_schemas(["public", "pg_catalog"]) ==
+               {:error, "db-schemas does not allow schema: 'pg_catalog'"}
+    end
+
+    test "an empty list is rejected — introspection is guarded schemas != []" do
+      assert Bier.Config.validate_db_schemas([]) ==
+               {:error, "db-schemas cannot be empty"}
+    end
+
+    # A blank entry is worse than an empty list: introspection accepts it, so
+    # the instance boots and serves a broken default schema with no diagnostic
+    # (`[" ", "test"]` 404s every unqualified request while Accept-Profile
+    # still works). Matches validate_events_channels/1, which rejects blank
+    # entries rather than only a blank list.
+    test "a blank or whitespace-only entry is rejected" do
+      assert Bier.Config.validate_db_schemas([""]) ==
+               {:error, "db-schemas entries cannot be empty"}
+
+      assert Bier.Config.validate_db_schemas([" "]) ==
+               {:error, "db-schemas entries cannot be empty"}
+
+      assert Bier.Config.validate_db_schemas([" ", "test"]) ==
+               {:error, "db-schemas entries cannot be empty"}
+    end
+
+    test "the catalog-name half is separately callable for the CLI parse layer" do
+      assert Bier.Config.validate_db_schemas_restricted([]) == :ok
+      assert Bier.Config.validate_db_schemas_restricted([""]) == :ok
+
+      assert Bier.Config.validate_db_schemas_restricted(["public", "pg_catalog"]) ==
+               {:error, "db-schemas does not allow schema: 'pg_catalog'"}
     end
   end
 
