@@ -57,6 +57,12 @@ defmodule Bier.ConfigTest do
         Bier.Config.new!([jwt_aud: "foo://%%$$^^.com"], Bier.schema())
       end
     end
+
+    test "an empty db_schemas raises a named error, not a bare hd/1 ArgumentError" do
+      assert_raise ArgumentError, ~r/db-schemas cannot be empty/, fn ->
+        Bier.Config.new!([db_schemas: []], Bier.schema())
+      end
+    end
   end
 
   describe "decode_base64_secret/1 (jwt-secret-is-base64)" do
@@ -156,6 +162,23 @@ defmodule Bier.ConfigTest do
       assert_raise ArgumentError, ~r/not an octal/, fn ->
         Bier.Config.new!([server_unix_socket_mode: "abc"], Bier.schema())
       end
+    end
+  end
+
+  describe "validate_db_schemas/1" do
+    test "a non-empty list of unrestricted schemas is ok" do
+      assert Bier.Config.validate_db_schemas(["public"]) == :ok
+      assert Bier.Config.validate_db_schemas(["v1", "v2"]) == :ok
+    end
+
+    test "a catalog schema anywhere in the list is rejected" do
+      assert Bier.Config.validate_db_schemas(["public", "pg_catalog"]) ==
+               {:error, "db-schemas does not allow schema: 'pg_catalog'"}
+    end
+
+    test "an empty list is rejected — hd/1 on it would abort schema-cache load" do
+      assert Bier.Config.validate_db_schemas([]) ==
+               {:error, "db-schemas cannot be empty"}
     end
   end
 

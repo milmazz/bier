@@ -164,7 +164,10 @@ defmodule Bier do
       db_schemas: [
         type: {:list, :string},
         default: env(:db_schemas, ["public"]),
-        doc: "Ordered list of exposed schemas; the first is the default schema."
+        doc: """
+        Ordered list of exposed schemas; the first is the default schema.
+        Must contain at least one schema.
+        """
       ],
       db_profile_default: [
         type: {:or, [:string, nil]},

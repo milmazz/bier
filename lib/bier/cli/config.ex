@@ -427,6 +427,10 @@ defmodule Bier.CLI.Config do
     end
   end
 
+  # Unlike PostgREST's plain `T.splitOn`, this drops empty entries — which is
+  # what makes an empty list reachable at all: `PGRST_DB_SCHEMAS=","` resolves
+  # to `[]` here where upstream would carry `["", ""]` through. That is why
+  # `Bier.Config.validate_db_schemas/1` has to reject `[]` on this path too.
   defp split_csv(s) do
     s |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
   end

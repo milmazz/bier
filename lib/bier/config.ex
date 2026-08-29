@@ -164,7 +164,7 @@ defmodule Bier.Config do
     with {:ok, conf} <- validate_schema(opts, schema),
          :ok <-
            validate_admin_server_port(conf[:admin_server_port], get_in(conf, [:router, :port])),
-         :ok <- validate_db_schemas(Keyword.get(conf, :db_schemas, [])),
+         :ok <- validate_db_schemas(Keyword.fetch!(conf, :db_schemas)),
          :ok <- validate_jwt_secret(conf[:jwt_secret]),
          :ok <- validate_jwt_aud(conf[:jwt_aud]),
          :ok <- validate_db_channel(conf[:db_channel]),
@@ -342,8 +342,19 @@ defmodule Bier.Config do
   the comma split, so a restricted name anywhere in the list aborts startup
   (Config.hs `parseDbSchemas`). v14.12 accepted them and failed per request
   instead. Mirrors conformance cases 1733/1734.
+
+  The list must also be non-empty. This has no upstream counterpart: PostgREST
+  takes `db-schemas` as a comma-separated string, which cannot express an empty
+  list, so the condition is unreachable there. Bier takes a real list, and the
+  first element is the default schema — `hd/1` on it in
+  `Bier.SchemaCache.load!/4` would otherwise abort boot with a bare `hd/1`
+  `ArgumentError` logged as a PGRST002 schema-cache-load failure, and the same
+  `hd/1` in `Bier.Plugs.ActionController` and `Bier.Events` would crash every
+  request. Failing here names the cause instead.
   """
   @spec validate_db_schemas([String.t()]) :: :ok | {:error, String.t()}
+  def validate_db_schemas([]), do: {:error, "db-schemas cannot be empty"}
+
   def validate_db_schemas(schemas) when is_list(schemas) do
     case Enum.find(schemas, &(&1 in @restricted_db_schemas)) do
       nil -> :ok

@@ -176,6 +176,23 @@ defmodule Bier.CLI.ConfigTest do
     end
   end
 
+  describe "load/3 rejects an empty db-schemas" do
+    # `:csv` coercion drops empty entries (see split_csv/1), so a value that is
+    # only separators resolves to `[]` — reachable here in a way PostgREST's
+    # plain splitOn is not. It is a startup fatal, not a silently empty config.
+    test "a separators-only PGRST_DB_SCHEMAS is a fatal, not an empty list" do
+      assert Config.load(%{"PGRST_DB_SCHEMAS" => ","}, nil, %{}) ==
+               {:error, "db-schemas cannot be empty"}
+
+      assert Config.load(%{"PGRST_DB_SCHEMAS" => " , "}, nil, %{}) ==
+               {:error, "db-schemas cannot be empty"}
+    end
+
+    test "an ordinary value still loads" do
+      assert {:ok, _resolved} = Config.load(%{"PGRST_DB_SCHEMAS" => "api,public"}, nil, %{})
+    end
+  end
+
   describe "to_start_opts/1" do
     test "maps resolved keys to Bier.start_link/1 options" do
       {:ok, resolved} =

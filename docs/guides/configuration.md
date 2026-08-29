@@ -192,8 +192,8 @@ track session-scoped prepared statements.
 | `db_max_rows_by_schema` | `%{string => pos_integer}` | `%{}` | — (library-only) |
 | `db_safe_update_tables` | `[string]` | `[]` | — (library-only) |
 
-`db_schemas` is ordered; the first entry is the default schema for requests
-without an `Accept-Profile`/`Content-Profile` header. `db_tx_end` accepts
+`db_schemas` is ordered and must be non-empty; the first entry is the default
+schema for requests without an `Accept-Profile`/`Content-Profile` header. `db_tx_end` accepts
 PostgREST's `PGRST_DB_TX_END` values `commit`, `commit-allow-override`,
 `rollback`, and `rollback-allow-override` on the standalone surface — the
 `-allow-override` variants collapse onto their base mode (`:commit` /
@@ -548,13 +548,14 @@ cross-field/semantic validators before a config is accepted — so `start_link/1
 | `jwt_aud` | Any string is accepted, unless it contains `:`, in which case it must parse as an absolute URI (a scheme is required; a host is not) | `"jwt-aud should be a string or a valid URI"` |
 | `jwt_secret_is_base64` | When `true`, `jwt_secret` must decode as base64 after URL-safe normalization (`-`→`+`, `_`→`/`, `.`→`=`, whitespace stripped) | `"the jwt-secret is not valid base64"` |
 | `jwt_role_claim_key` | Must parse as an RFC 9535 JSON Path in the supported subset — rooted at `$`, dotted/bracketed name selectors, `[n]` indices, one comparison or `search()` filter | `"failed to parse role-claim-key value (<input>)"` |
-| `db_schemas` | No entry may be `pg_catalog` or `information_schema` | `"db-schemas does not allow schema: '<name>'"` |
+| `db_schemas` | Must be non-empty; no entry may be `pg_catalog` or `information_schema` | `"db-schemas cannot be empty"` / `"db-schemas does not allow schema: '<name>'"` |
 | `server_unix_socket_mode` | The longest leading run of octal digits (Haskell `readOct` semantics — so `"599"` reads as `5`, `"800"` has no octal prefix at all) must fall within `0o600`..`0o777`; checked at boot even with no socket configured | `"...needs to be between 600 and 777"` or `"...not an octal"` |
 | `openapi_server_proxy_uri` | Must be an absolute `http`/`https` URI with a non-empty host | `"Malformed proxy uri, a correct example: https://example.com:8443/basePath"` |
 | `admin_server_port` | When set, must differ from `router[:port]` (`server-port`) | `"admin-server-port cannot be the same as server-port"` |
 | `db_channel` | Non-empty, ≤ 63 bytes (the Postgres identifier limit), no null byte | `"db-channel cannot be empty"` / `"...cannot exceed 63 bytes"` / `"...cannot contain null bytes"` |
 
-Every rule above except `db_channel` reproduces PostgREST's own validation.
+Every rule above except `db_channel` and the `db_schemas` non-emptiness rule
+reproduces PostgREST's own validation.
 `db_channel`'s length/null-byte
 rule is Bier-only — PostgREST does not validate this key itself; Bier
 validates it at boot because `Postgrex.Notifications.listen/3` would
