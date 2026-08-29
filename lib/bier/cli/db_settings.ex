@@ -146,6 +146,13 @@ defmodule Bier.CLI.DbSettings do
   # TCP check. That coupling is why unix-socket support would have to teach
   # this probe about `{:local, path}` (or skip it) rather than let it reject a
   # good socket configuration before Postgrex sees it — see #146.
+  #
+  # The single-endpoint assumption is also what makes acquire_opts/0's split
+  # a real bound: connect_endpoints/6 recurses with the same connect_timeout
+  # per endpoint and handshake/3 arms a fresh timer for each, so N endpoints
+  # would cost N times the budget, not one. connection_opts/2 never emits
+  # :endpoints today, so N is 1 — but anything that teaches it to (or teaches
+  # this probe about {:local, path}) has to revisit the split too.
   defp probe(opts) do
     host = to_charlist(opts[:hostname])
 
