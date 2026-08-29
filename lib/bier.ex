@@ -166,7 +166,7 @@ defmodule Bier do
         default: env(:db_schemas, ["public"]),
         doc: """
         Ordered list of exposed schemas; the first is the default schema.
-        Must contain at least one schema.
+        Must contain at least one schema, and no entry may be blank.
         """
       ],
       db_profile_default: [

@@ -58,7 +58,7 @@ defmodule Bier.ConfigTest do
       end
     end
 
-    test "an empty db_schemas raises a named error, not a bare hd/1 ArgumentError" do
+    test "an empty db_schemas raises a named error, not an opaque FunctionClauseError" do
       assert_raise ArgumentError, ~r/db-schemas cannot be empty/, fn ->
         Bier.Config.new!([db_schemas: []], Bier.schema())
       end
@@ -176,9 +176,33 @@ defmodule Bier.ConfigTest do
                {:error, "db-schemas does not allow schema: 'pg_catalog'"}
     end
 
-    test "an empty list is rejected — hd/1 on it would abort schema-cache load" do
+    test "an empty list is rejected — introspection is guarded schemas != []" do
       assert Bier.Config.validate_db_schemas([]) ==
                {:error, "db-schemas cannot be empty"}
+    end
+
+    # A blank entry is worse than an empty list: introspection accepts it, so
+    # the instance boots and serves a broken default schema with no diagnostic
+    # (`[" ", "test"]` 404s every unqualified request while Accept-Profile
+    # still works). Matches validate_events_channels/1, which rejects blank
+    # entries rather than only a blank list.
+    test "a blank or whitespace-only entry is rejected" do
+      assert Bier.Config.validate_db_schemas([""]) ==
+               {:error, "db-schemas entries cannot be empty"}
+
+      assert Bier.Config.validate_db_schemas([" "]) ==
+               {:error, "db-schemas entries cannot be empty"}
+
+      assert Bier.Config.validate_db_schemas([" ", "test"]) ==
+               {:error, "db-schemas entries cannot be empty"}
+    end
+
+    test "the catalog-name half is separately callable for the CLI parse layer" do
+      assert Bier.Config.validate_db_schemas_restricted([]) == :ok
+      assert Bier.Config.validate_db_schemas_restricted([""]) == :ok
+
+      assert Bier.Config.validate_db_schemas_restricted(["public", "pg_catalog"]) ==
+               {:error, "db-schemas does not allow schema: 'pg_catalog'"}
     end
   end
 
