@@ -69,42 +69,48 @@ defmodule Bier.CLI.DbSettings do
 
   # The connection options this read adds on top of
   # Bier.CLI.Config.connection_opts/2, all derived from @acquire_deadline_ms so
-  # the budget and the transport timeouts cannot drift apart (#149).
+  # the budget and the transport bounds cannot drift apart (#149).
   #
   # An endpoint that *accepts* the socket but never completes the startup
   # packet (a stale port-forward, a wrong-service port, a Postgres wedged
-  # before the startup packet) is the case that escapes: the TCP probe passes,
-  # so it reaches Postgrex. Three separate defaults each overshot the budget
-  # there, and all three have to be pinned:
+  # before the startup packet) is the case that escapes the TCP probe. What
+  # actually overshot the budget there is `:shutdown`: a connection wedged
+  # mid-handshake ignores a graceful stop until its own timer fires, so the
+  # GenServer.stop/1 in connect_and_read/1 sat on it, capped only by the pool
+  # supervisor's 5s default child shutdown. The retry loop was already giving
+  # up on schedule.
   #
-  #   * :timeout (15s) is what Postgrex derives connect/handshake from when
-  #     they are unset — and it alone governs the TLS handshake and the query
-  #     itself, so setting only the other two still leaves an unbounded path.
-  #   * :connect_timeout and :handshake_timeout run serially per endpoint
-  #     (connect/3 then handshake/3, each with its own timer), so each gets
-  #     half the budget rather than all of it.
-  #   * :shutdown — a connection wedged mid-handshake ignores a graceful stop
-  #     until its own timer fires, so the GenServer.stop/1 in connect_and_read/1
-  #     would sit on it, capped only by the pool supervisor's 5s child
-  #     shutdown. That teardown, not the wait, is what actually spent the extra
-  #     time: the retry loop was already giving up on schedule.
+  # The transport timeouts are pinned alongside it so none of them can
+  # reintroduce an overshoot on its own. They compose serially — connect/5
+  # then handshake/3 — so the budget is split rather than shared, and it is
+  # split where the work is: probe/1 has already proved the endpoint reachable
+  # within @probe_timeout_ms, so connect cannot need more than that, while the
+  # handshake window has to cover the TLS upgrade, authentication, init_recv's
+  # role GUCs, and — on a cold CLI process with an empty type-server cache —
+  # the whole pg_type bootstrap. An even split starved it and rejected servers
+  # that merely handshake slowly.
+  #
+  # `:timeout` here is NOT the query bound — Postgrex documents the start-time
+  # option as the idle socket receive timeout, and db_connection reads the one
+  # that bounds a query from the *call* opts (see query_opts/1). What it does
+  # cover is the teardown: when a query deadline fires, Postgrex's disconnect
+  # path issues a cancel_request over a **fresh** TCP connection, and that one
+  # is bounded by this option alone. Left at the 15s default it added 15s after
+  # a query that had just been correctly cut off at the budget. It is pinned to
+  # the probe timeout because a cancel to an endpoint already known to be
+  # wedged is worth ~2s, not another full budget.
   @doc false
   @spec acquire_opts() :: keyword()
   def acquire_opts do
-    half = div(@acquire_deadline_ms, 2)
-
     [
       pool_size: 1,
-      timeout: @acquire_deadline_ms,
-      connect_timeout: half,
-      handshake_timeout: half,
+      timeout: @probe_timeout_ms,
+      connect_timeout: @probe_timeout_ms,
+      handshake_timeout: @acquire_deadline_ms - @probe_timeout_ms,
       shutdown: :brutal_kill
     ] ++ @queue_opts
   end
 
-  # Keyword.merge, not ++: later keys win, so the acquisition bounds always
-  # beat anything connection_opts/2 resolves from db-uri query params. With
-  # ++ a future libpq connect_timeout mapping would silently outrank them.
   @doc false
   @spec connect_opts(map(), map()) :: keyword()
   def connect_opts(resolved, env) do
@@ -122,9 +128,10 @@ defmodule Bier.CLI.DbSettings do
   @spec fetch(map(), map()) :: {:ok, map()} | {:error, String.t()}
   def fetch(resolved, env) do
     opts = connect_opts(resolved, env)
+    started_at = System.monotonic_time(:millisecond)
 
     with :ok <- probe(opts) do
-      connect_and_read(opts)
+      connect_and_read(opts, started_at)
     end
   rescue
     # A config missing required connection fields (e.g. no database name and
@@ -154,11 +161,11 @@ defmodule Bier.CLI.DbSettings do
     end
   end
 
-  defp connect_and_read(opts) do
+  defp connect_and_read(opts, started_at) do
     case Postgrex.start_link(opts) do
       {:ok, conn} ->
         try do
-          run_query(conn, System.monotonic_time(:millisecond))
+          run_query(conn, started_at)
         after
           GenServer.stop(conn)
         end
@@ -168,8 +175,24 @@ defmodule Bier.CLI.DbSettings do
     end
   end
 
+  # db_connection reads BOTH of these from the call opts, never from the pool's
+  # start opts (DBConnection.available_connection_options/0 lists :timeout;
+  # available_start_options/0 does not, and Holder.abs_timeout/2 defaults it to
+  # 15s). Left unset, a server that completes the handshake and then stalls —
+  # pgbouncer with an exhausted server pool, a post-connect blackhole, a wedged
+  # backend — runs one query for 15s and db_connection retries it three more
+  # times: 60s against a 10s budget. Passing the *remaining* budget also bounds
+  # an attempt admitted late in the window, which the loop's own between-attempt
+  # check cannot do.
+  defp query_opts(started_at) do
+    [
+      timeout: max(@acquire_deadline_ms - elapsed_ms(started_at), 1),
+      checkout_retries: 0
+    ]
+  end
+
   defp run_query(conn, started_at) do
-    case Postgrex.query(conn, @query, [Config.db_settings_names()]) do
+    case Postgrex.query(conn, @query, [Config.db_settings_names()], query_opts(started_at)) do
       {:ok, %Postgrex.Result{rows: rows}} ->
         {:ok, Map.new(rows, fn [k, v] -> {String.replace(k, "_", "-"), v} end)}
 
@@ -198,7 +221,8 @@ defmodule Bier.CLI.DbSettings do
   # spent against, then the error that ended it.
   defp gave_up_message(started_at, err) do
     "in-database config (db-config): gave up after #{elapsed_ms(started_at)}ms " <>
-      "(db-pool-acquisition-timeout #{@acquire_deadline_ms}ms); last error: " <>
+      "(budget #{@acquire_deadline_ms}ms, PostgREST's db-pool-acquisition-timeout " <>
+      "default — Bier does not expose it as a setting); last error: " <>
       Exception.message(err)
   end
 
