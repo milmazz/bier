@@ -5,7 +5,7 @@ defmodule Bier.SpreadEmptyEmbedTest do
 
   **Nested empty SPREAD — one row per parent (#154).** `...processes()` and
   `...processes(...process_costs())` both resolve to a projection of no
-  columns. `Bier.Embed.spread_entry/8`'s `:many` branch builds its LATERAL by
+  columns. `Bier.Embed.spread_entry/7`'s `:many` branch builds its LATERAL by
   folding `child_cols` into a list of `json_agg(…)` aggregates; that list is
   what makes the subquery an aggregate query, and an aggregate query over zero
   rows still returns exactly one row — which is what keeps the
@@ -43,9 +43,13 @@ defmodule Bier.SpreadEmptyEmbedTest do
     filtering never lived in the LATERAL (it propagates through the parent's
     `EXISTS`, `inner_join_clauses/6`), and the alias the LATERAL registered was
     read only by `spread_order_expr/3`, which has no column to name here.
-  * The **sibling 42703 spellings** 11139's own notes name but do not issue —
-    `!inner`, an extra real column alongside the empty embed, the to-one
-    direction, and the phantom propagating up through a nested spread.
+  * The **sibling 42703 spellings**: the two 11139's notes name but do not
+    issue — an extra real column alongside the empty embed, and the to-one
+    direction — plus three this file adds beyond them: `!inner` on the spread,
+    `!inner` on the empty embed, and the phantom propagating up through a
+    nested spread. (11139's third named sibling, the junction
+    `/processes?select=name,...process_supervisor(supervisors())`, is not
+    covered here.)
 
   Not async: binds a real port and runs DB introspection at boot.
   """
@@ -99,8 +103,9 @@ defmodule Bier.SpreadEmptyEmbedTest do
 
   # Spellings carrying a nested empty EMBED, each with the deterministic
   # `<source>_<relation>_<depth>` aggregate alias PostgreSQL quotes back
-  # (`Plan.hs:541`). Case 11139 issues the first; the rest are the siblings its
-  # notes name.
+  # (`Plan.hs:541`). Case 11139 issues the first. Two more are siblings its
+  # notes name but do not issue — the extra-real-column and to-one rows; the
+  # remaining three go beyond the notes.
   @phantom_spellings [
     {"/factories", "name,...processes(process_costs())",
      "column factories_processes_1.process_costs does not exist"},
@@ -253,10 +258,11 @@ defmodule Bier.SpreadEmptyEmbedTest do
     end
   end
 
-  # Case 11139 issues exactly one of these. The rest are the spellings its
-  # notes assert give "the same message with their own aliases" — the claim is
-  # cheap to state upstream and worth holding down here, since each one is a
-  # different path into `relSelectToSpread`.
+  # Case 11139 issues exactly the first. Two of the rest are spellings its
+  # notes assert give "the same message with their own aliases" (the
+  # extra-real-column and to-one rows); the other three go beyond the notes.
+  # Each is a different path into `relSelectToSpread`, so all five are worth
+  # holding down here.
   describe "a nested empty embed inside a spread is a 42703 (case 11139)" do
     for {path, select, message} <- @phantom_spellings do
       test "#{path}?select=#{select}", %{base: base} do
@@ -282,6 +288,24 @@ defmodule Bier.SpreadEmptyEmbedTest do
         get(base, "/factories", "name,...processes(process_costs())", [
           {"processes.name", "eq.Process A1"},
           {"name", "neq.Factory A"}
+        ])
+
+      assert resp.status == 400
+      assert resp.body["code"] == "42703"
+      assert resp.body["message"] == "column factories_processes_1.process_costs does not exist"
+    end
+
+    # `!inner` on the empty embed AND a filter reaching through it. This is the
+    # one empty-embed shape whose relationship bier actually resolves —
+    # `inner_join_clauses/6` matches on `join: :inner` before emptiness is
+    # considered — so it binds a parameter into the parent's `EXISTS` *and*
+    # emits a phantom. Distinct bind-accumulator path from either half alone,
+    # and the combination this file asserted at 200 before suite.5 inverted it.
+    test "!inner on the empty embed, with a filter through it, still surfaces the phantom",
+         %{base: base} do
+      resp =
+        get(base, "/factories", "name,...processes(process_costs!inner())", [
+          {"processes.process_costs.cost", "gt.100"}
         ])
 
       assert resp.status == 400

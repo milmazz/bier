@@ -699,9 +699,17 @@ defmodule Bier.Embed do
   #
   # A non-empty embed is absent from both lists: it projects a real column into
   # `child_cols` under the same name, so its spread reference resolves.
+  #
+  # The `spread: true` clause is load-bearing and must stay ordered first: a
+  # nested empty spread is BOTH `spread: true` and `empty: true`, and letting
+  # the second clause claim it would emit a phantom for `...process_costs()`
+  # and break 11140. It contributes nothing of its own, though — a nested
+  # spread's own phantoms already reach this projection through `phantom_cols`
+  # above, so recursing into `e.select` here would name them a second time,
+  # where `Plan.hs` L718 splices them exactly once.
   defp spread_phantom_fields(nodes) when is_list(nodes) do
     Enum.flat_map(nodes, fn
-      %{kind: :embed, spread: true} = e -> spread_phantom_fields(e.select)
+      %{kind: :embed, spread: true} -> []
       %{kind: :embed, empty: true} = e -> [canonical_name(e)]
       _node -> []
     end)
@@ -1372,6 +1380,16 @@ defmodule Bier.Embed do
   # Both branches go through plain `Fuzzy.get`/`getOne`, whose minimum score is
   # fuzzyset-0.2.4's default 0.33 — markedly more permissive than the 0.75
   # `getFuzzyHint` gate PGRST205's table hint uses (`Error.hs#L400`).
+  #
+  # SINGLE-SCHEMA ASSUMPTION. Upstream's map is keyed
+  # `(QualifiedIdentifier, Schema)` whose second component is the FOREIGN
+  # table's schema, not the origin's (`Relationship.hs#L64`,
+  # `SchemaCache.hs#L203`), so `Error.hs#L327`'s `snd p == schema` selects the
+  # relationships pointing INTO `schema`. The reconstruction below filters on
+  # the origin's schema instead. The two agree whenever a relationship stays
+  # inside one schema, which is every shape the suite exercises; under
+  # multi-schema `db_schemas` with cross-schema foreign keys they can disagree
+  # on both the branch selector and the candidate set. No case pins it.
   @no_rel_hint_min_score 0.33
 
   defp no_rel_between_hint(source, target_name, relations) do
@@ -1395,8 +1413,12 @@ defmodule Bier.Embed do
   # set and returns it alone with score 1.0, which `headMay [snd k | k <- …,
   # fst k < 1.0]` (`Error.hs#L331`) then drops — so an embed naming a relation
   # that really is related yields no suggestion at all (case 1124). The parent
-  # branch cannot reach that guard: a name in `fuzzySetOfParents` is a key of
-  # the map, and the branch only runs when the origin is not.
+  # branch cannot normally reach that guard: a name in `fuzzySetOfParents` is a
+  # key of the map, and the branch only runs when the origin is not — modulo
+  # case-folding, since the comparison below downcases both sides and
+  # upstream's `exactSet` is keyed on `Text.toLower` too (`FuzzySet.hs#L398`).
+  # Two relations differing only in case would let upstream short-circuit to a
+  # suggestion where this returns nil; no fixture spells that.
   defp best_relation_match(term, candidates) do
     normalized = String.downcase(term)
 
@@ -1407,10 +1429,18 @@ defmodule Bier.Embed do
     end
   end
 
-  # The foreign table of every relationship `source` takes part in — the same
-  # four kinds `candidate_relationships/4` resolves an embed against. An empty
-  # list is also how this answers `findParent` (`Error.hs#L322`): a relation
-  # with no relationships is not a key of the map.
+  # The foreign table of every relationship `source` takes part in —
+  # `fuzzySetOfChildren` is `qiName (relForeignTable c)` (`Error.hs#L328`).
+  #
+  # Note the `computed` arm collects `cr.ref_relation`, the table the function
+  # RETURNS, while `computed_candidates/3` resolves an embed against `cr.name`,
+  # the function itself. That is deliberate, not a slip: `relForeignTable` on a
+  # `ComputedRelationship` is the returned table (`Relationship.hs#L31`), so
+  # upstream genuinely suggests a name you cannot embed by. Do not "fix" it
+  # toward `cr.name` — it would break fidelity.
+  #
+  # An empty list is also how this answers `findParent` (`Error.hs#L322`): a
+  # relation with no relationships is not a key of the map.
   defp origin_children(source, relations) do
     junctions =
       Enum.filter(relations, fn {_key, rel} -> references?(rel, source) end)
@@ -1428,9 +1458,10 @@ defmodule Bier.Embed do
     Enum.uniq(m2o ++ o2m ++ computed ++ m2m)
   end
 
-  # The keys of the relationships map that live in `schema` (`Error.hs#L327`'s
-  # `snd p == schema` filter): every relation holding a foreign key, referenced
-  # by one, or carrying a computed relationship.
+  # The keys of the relationships map, approximated as every relation in
+  # `schema` holding a foreign key, referenced by one, or carrying a computed
+  # relationship. Upstream's `snd p == schema` filter (`Error.hs#L327`) keys on
+  # the FOREIGN table's schema — see the single-schema note above.
   defp relationship_origins(schema, relations) do
     referenced =
       for {_key, rel} <- relations,
