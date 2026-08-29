@@ -622,6 +622,12 @@ defmodule Bier.Plugs.FallbackController do
   # error_description="<message>"` header (PostgREST Auth error rendering). The
   # `error_description` is the message alone — `details`, when a decode error
   # carries one, appears only in the body.
+  #
+  # This is the one place an error string leaves `Bier.ErrorPayload`'s control,
+  # so it does NOT get that module's invalid-UTF-8 scrub. Every `message`
+  # reaching here is a literal (the only interpolations are an integer segment
+  # count and an internal `exp`/`nbf`/`iat` claim name); keep it that way — a
+  # client-derived message would put raw request bytes into a response header.
   defp jwt_error(conn, code, message, details \\ nil) do
     www = ~s(Bearer error="invalid_token", error_description="#{message}")
 

@@ -94,12 +94,14 @@ and this project adheres to
   out of connection slots: the in-database config read retries a checkout the
   pool dropped as backpressure, up to the acquisition deadline. An endpoint
   nothing is listening on still fails immediately, now naming the host and port.
-- A query parameter whose percent-escape decodes to invalid UTF-8 (e.g.
-  `?channel=%e2%28%a1`) no longer crashes the error response it triggers: the
-  stdlib `JSON` encoder rejects non-UTF-8 binaries outright, and an unknown
-  channel/table/relation echoes the client's own (invalid) input back in
-  `details`. `Bier.ErrorPayload` — the single choke point every error body
-  serializes through — now scrubs invalid byte sequences before encoding
+- Request text that is not valid UTF-8 — a query parameter whose percent-escape
+  decodes to invalid bytes (e.g. `?channel=%e2%28%a1`), or a `text/csv` body
+  whose header row carries them with no escaping at all — no longer crashes the
+  error response it triggers: the stdlib `JSON` encoder rejects non-UTF-8
+  binaries outright, and an unknown channel/table/column echoes the client's own
+  (invalid) input back in `message`/`details`. `Bier.ErrorPayload` — the single
+  choke point every error body serializes through — now scrubs invalid byte
+  sequences, in keys and in nested `details` structures alike, before encoding,
   instead of letting the request answer a raw 500 (#142).
 
 Conformance `spec/` bumped to `v16.0.0-suite.4`, which adds the 39
