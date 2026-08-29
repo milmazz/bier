@@ -1,34 +1,51 @@
 defmodule Bier.SpreadEmptyEmbedTest do
   @moduledoc """
-  A to-many spread whose projection contributes no columns must still yield one
-  row per parent (#154, from the #147 review).
+  A spread whose projection contributes no columns has two answers, not one,
+  and which one you get turns on how the emptiness is spelled.
 
-  `Bier.Embed.spread_entry/8`'s `:many` branch builds its LATERAL by folding
-  `child_cols` into a list of `json_agg(…)` aggregates. That list is what makes
-  the subquery an aggregate query, and an aggregate query over zero rows still
-  returns exactly one row — which is what keeps the `LEFT JOIN LATERAL` from
-  changing the parent's cardinality.
+  **Nested empty SPREAD — one row per parent (#154).** `...processes()` and
+  `...processes(...process_costs())` both resolve to a projection of no
+  columns. `Bier.Embed.spread_entry/8`'s `:many` branch builds its LATERAL by
+  folding `child_cols` into a list of `json_agg(…)` aggregates; that list is
+  what makes the subquery an aggregate query, and an aggregate query over zero
+  rows still returns exactly one row — which is what keeps the
+  `LEFT JOIN LATERAL` from changing the parent's cardinality. When `child_cols`
+  is empty the aggregate list renders as `""`, and `SELECT  FROM (…)` is legal
+  SQL that is no longer an aggregate query: the LATERAL would return one row
+  per child and multiply the parent rows while contributing no keys. Dropping
+  the join is the fix, and cases 11138/11140 pin the result.
 
-  `child_cols` can be empty. The empty-projection short-circuit in
-  `build_node/7` matches `%{kind: :embed, empty: true}`, which the parser sets
-  only for a *literally* empty parens list (`...processes()`, case 11138). A
-  spread whose projection consists entirely of empty embeds —
-  `...processes(process_costs())` — is `empty: false` at the outer node, so it
-  descends into `build_embed/8` and every child contributes zero entries. The
-  aggregate list renders as `""`, and `SELECT  FROM (…)` is legal SQL that is no
-  longer an aggregate query: the LATERAL returns one row per child and
-  multiplies the parent rows while contributing no keys.
+  **Nested empty EMBED — 400 (case 11139).** `...processes(process_costs())` is
+  *not* the same statement. Upstream's `relSelectToSpread` (`Plan.hs:716`)
+  emits one `SpreadSelectField` named after every embedded relation in its
+  `JsonEmbed` branch unconditionally — it never consults the `rsEmptyEmbed`
+  flag the non-spread path computes — so the projection names a column the
+  subquery does not project and PostgreSQL raises `42703`. Its `Spread` branch
+  (`L718`) instead splices a nested spread's own field list, which is why the
+  spelling above stays a 200.
 
-  Case 11138 pins one row per parent for the `...rel()` spelling, and a spread
-  that merges no columns is the same statement about the output, so that is the
-  behavior asserted here. No conformance case covers the nested-empty spelling —
-  what upstream returns for it is unverified, and that question belongs in
-  postgrest-conformance, not here.
+  That second half is what this file used to get wrong. It was written for
+  #154 with no conformance case covering the nested-empty spelling, and it
+  said so: *"what upstream returns for it is unverified, and that question
+  belongs in postgrest-conformance, not here."* Suite.5 answered it — 11139 is
+  a 400, read off a live run of the pinned v16.0 binary — so every assertion
+  here that expected a 200 from an empty embed has been inverted.
 
-  Dropping the join has to leave the *parameter* accumulator consistent as well
-  as the SQL: the subtree binds its filters before it is known to project
-  nothing, and `QE.bind/3` never renumbers. The filter cases below are the ones
-  that hold that end down.
+  What the conformance cases do not cover, and this file therefore still owns:
+
+  * The **parameter accumulator** under a dropped LATERAL. The subtree binds
+    its filters before it is known to project nothing, and `QE.bind/3` is a
+    monotonic counter that never renumbers. Discarding the SQL without
+    discarding those binds hands Postgrex a parameter the statement no longer
+    mentions — or, with a root filter alongside, a statement that references
+    `$2` and never `$1` (`42P18`, raised at Parse).
+  * The two interactions the drop reasons about rather than changes: `!inner`
+    filtering never lived in the LATERAL (it propagates through the parent's
+    `EXISTS`, `inner_join_clauses/6`), and the alias the LATERAL registered was
+    read only by `spread_order_expr/3`, which has no column to name here.
+  * The **sibling 42703 spellings** 11139's own notes name but do not issue —
+    `!inner`, an extra real column alongside the empty embed, the to-one
+    direction, and the phantom propagating up through a nested spread.
 
   Not async: binds a real port and runs DB introspection at boot.
   """
@@ -71,20 +88,37 @@ defmodule Bier.SpreadEmptyEmbedTest do
   # count must survive the spread (`spec/fixtures/02_base.sql:2045-2048`).
   @factories ["Factory A", "Factory B", "Factory C", "Factory D"]
 
-  # The spread spellings this module covers, for the closing sweep.
-  @spellings [
-    "name,...processes(process_costs())",
-    "name,...processes!inner(process_costs())",
-    "name,...processes(...process_costs())",
-    "name,...processes(...process_costs(processes()))",
+  # Spellings whose projection resolves to no columns through nested empty
+  # SPREADS. These drop the LATERAL and answer 200 (cases 11138/11140).
+  @merging_spellings [
     "name,...processes()",
-    "name,processes(...process_costs())",
-    "factory:name,...processes(name,process_costs())"
+    "name,...processes(...process_costs())",
+    "name,...processes!inner(...process_costs())",
+    "name,processes(...process_costs())"
   ]
 
-  describe "a to-many spread whose projection is all empty embeds (#154)" do
+  # Spellings carrying a nested empty EMBED, each with the deterministic
+  # `<source>_<relation>_<depth>` aggregate alias PostgreSQL quotes back
+  # (`Plan.hs:541`). Case 11139 issues the first; the rest are the siblings its
+  # notes name.
+  @phantom_spellings [
+    {"/factories", "name,...processes(process_costs())",
+     "column factories_processes_1.process_costs does not exist"},
+    {"/factories", "name,...processes!inner(process_costs())",
+     "column factories_processes_1.process_costs does not exist"},
+    {"/factories", "factory:name,...processes(name,process_costs())",
+     "column factories_processes_1.process_costs does not exist"},
+    {"/factories", "name,...processes(process_costs!inner())",
+     "column factories_processes_1.process_costs does not exist"},
+    {"/factories", "name,...processes(...process_costs(processes()))",
+     "column processes_process_costs_2.processes does not exist"},
+    {"/processes", "name,...factories(factory_buildings())",
+     "column processes_factories_1.factory_buildings does not exist"}
+  ]
+
+  describe "a to-many spread whose projection resolves to nothing (#154)" do
     test "contributes no keys and leaves the parent row count alone", %{base: base} do
-      resp = get(base, "/factories", "name,...processes(process_costs())")
+      resp = get(base, "/factories", "name,...processes(...process_costs())")
 
       assert resp.status == 200
 
@@ -103,7 +137,7 @@ defmodule Bier.SpreadEmptyEmbedTest do
     # one row whatever the projection was — but the fix drops that join too, so
     # this pins the equivalence rather than a change.
     test "the to-one spelling is unchanged by dropping its LATERAL", %{base: base} do
-      resp = get(base, "/processes", "name,...factories(factory_buildings())")
+      resp = get(base, "/processes", "name,...factories(...factory_buildings())")
 
       assert resp.status == 200
 
@@ -112,29 +146,12 @@ defmodule Bier.SpreadEmptyEmbedTest do
       assert length(resp.body) == 8
       assert Enum.map(resp.body, &Map.keys/1) == List.duplicate(["name"], 8)
     end
-
-    # A spread nested inside a spread collapses inner-first: the innermost
-    # `processes()` is `empty: true` at the node, which leaves `...process_costs`
-    # merging nothing, which in turn leaves `...processes` merging nothing.
-    test "a nested spread that merges nothing collapses at every level", %{base: base} do
-      resp = get(base, "/factories", "name,...processes(...process_costs(processes()))")
-
-      assert resp.status == 200
-      assert length(resp.body) == 4
-      assert Enum.map(resp.body, &Map.keys/1) == List.duplicate(["name"], 4)
-    end
   end
 
-  # The dropped subtree has already bound its filters into the parameter
-  # accumulator by the time it turns out to project nothing, and `QE.bind/3` is
-  # a monotonic counter that never renumbers. Discarding the SQL without
-  # discarding those binds hands Postgrex a parameter the statement no longer
-  # mentions — or, with a root filter alongside, a statement that references
-  # `$2` and never `$1` (`42P18`, raised at Parse).
   describe "filters on a spread that merges nothing (#154, bind accumulator)" do
     test "a filter on the dropped embed does not orphan its bind", %{base: base} do
       resp =
-        get(base, "/factories", "name,...processes(process_costs())", [
+        get(base, "/factories", "name,...processes(...process_costs())", [
           {"processes.name", "eq.Process A1"}
         ])
 
@@ -146,7 +163,7 @@ defmodule Bier.SpreadEmptyEmbedTest do
 
     test "a root filter alongside it still binds contiguously", %{base: base} do
       resp =
-        get(base, "/factories", "name,...processes(process_costs())", [
+        get(base, "/factories", "name,...processes(...process_costs())", [
           {"processes.name", "eq.Process A1"},
           {"name", "neq.Factory A"}
         ])
@@ -162,7 +179,7 @@ defmodule Bier.SpreadEmptyEmbedTest do
     test "a filter on a nested embed under the dropped spread does not orphan its bind",
          %{base: base} do
       resp =
-        get(base, "/factories", "name,...processes(process_costs!inner())", [
+        get(base, "/factories", "name,...processes(...process_costs!inner())", [
           {"processes.process_costs.cost", "gt.100"}
         ])
 
@@ -177,7 +194,7 @@ defmodule Bier.SpreadEmptyEmbedTest do
   # read only by `spread_order_expr/3`, which had no column to name here.
   describe "what dropping the LATERAL must not take with it (#154)" do
     test "!inner still filters the parent through its EXISTS", %{base: base} do
-      resp = get(base, "/factories", "name,...processes!inner(process_costs())")
+      resp = get(base, "/factories", "name,...processes!inner(...process_costs())")
 
       assert resp.status == 200
 
@@ -190,7 +207,7 @@ defmodule Bier.SpreadEmptyEmbedTest do
     test "ordering by a spread that merges nothing falls back to a correlated term",
          %{base: base} do
       resp =
-        get(base, "/processes", "name,...factories(factory_buildings())", [
+        get(base, "/processes", "name,...factories(...factory_buildings())", [
           {"order", "factories(name).desc,name.asc"}
         ])
 
@@ -214,9 +231,9 @@ defmodule Bier.SpreadEmptyEmbedTest do
   end
 
   describe "a spread that still projects something (#154 guard)" do
-    test "an empty embed alongside a real column merges that column as normal", %{base: base} do
+    test "a real column alongside an empty spread merges as normal", %{base: base} do
       resp =
-        get(base, "/factories", "factory:name,...processes(name,process_costs())", [
+        get(base, "/factories", "factory:name,...processes(name,...process_costs())", [
           {"processes.order", "name"}
         ])
 
@@ -224,7 +241,7 @@ defmodule Bier.SpreadEmptyEmbedTest do
       assert length(resp.body) == 4
 
       # The short-circuit keys on the spread projecting nothing, NOT on it
-      # containing an empty embed: `name` is still merged, and a to-many spread
+      # containing an empty child: `name` is still merged, and a to-many spread
       # merges it as the aggregated array. `processes.order` pins the array
       # order the way case 11110 does.
       by_factory =
@@ -236,8 +253,45 @@ defmodule Bier.SpreadEmptyEmbedTest do
     end
   end
 
-  test "no spread spelling leaks a raw SQLSTATE or a bind mismatch", %{base: base} do
-    for select <- @spellings, params <- [[], [{"processes.name", "eq.Process A1"}]] do
+  # Case 11139 issues exactly one of these. The rest are the spellings its
+  # notes assert give "the same message with their own aliases" — the claim is
+  # cheap to state upstream and worth holding down here, since each one is a
+  # different path into `relSelectToSpread`.
+  describe "a nested empty embed inside a spread is a 42703 (case 11139)" do
+    for {path, select, message} <- @phantom_spellings do
+      test "#{path}?select=#{select}", %{base: base} do
+        resp = get(base, unquote(path), unquote(select))
+
+        assert resp.status == 400
+
+        assert resp.body == %{
+                 "code" => "42703",
+                 "details" => nil,
+                 "hint" => nil,
+                 "message" => unquote(message)
+               }
+      end
+    end
+
+    # The phantom is not swallowed by a filter that would otherwise prune the
+    # subtree: the projection names the missing column whatever the WHERE says,
+    # and the bind accumulator must still hand Postgrex a coherent statement —
+    # a 42P18 here would surface as a bind mismatch, not as 42703.
+    test "a filter on the empty embed does not mask it", %{base: base} do
+      resp =
+        get(base, "/factories", "name,...processes(process_costs())", [
+          {"processes.name", "eq.Process A1"},
+          {"name", "neq.Factory A"}
+        ])
+
+      assert resp.status == 400
+      assert resp.body["code"] == "42703"
+      assert resp.body["message"] == "column factories_processes_1.process_costs does not exist"
+    end
+  end
+
+  test "no merging spelling leaks a raw SQLSTATE or a bind mismatch", %{base: base} do
+    for select <- @merging_spellings, params <- [[], [{"processes.name", "eq.Process A1"}]] do
       resp = get(base, "/factories", select, params)
 
       assert resp.status == 200,

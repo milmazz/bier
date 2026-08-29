@@ -397,13 +397,25 @@ defmodule Bier.Embed do
 
   # ---- embed rendering -----------------------------------------------------
 
-  defp build_embed(e, rel, _source, src_alias, ef, state, qe, spread?) do
+  defp build_embed(e, rel, source, src_alias, ef, state, qe, spread?) do
     %{relation: target, kind: kind, join_cond: join} = rel
 
     seq = state.embed_seq + 1
     state = %{state | embed_seq: seq}
     child_alias = "#{target.name}_e#{seq}"
     out_name = e.alias || rel.embed_key
+
+    # PostgREST's `relAggAlias` (`Plan.hs` L541):
+    # `qiName (relTable r) <> "_" <> fromMaybe relName relAlias <> "_" <> show depth`
+    # — the SOURCE table's name, the embed as the request spelled it (alias
+    # wins), and the node's depth in the read plan. It is only ever an internal
+    # identifier, so bier reproduces the formula for one reason: it is the name
+    # Postgres quotes back when a spread's projection references a column the
+    # LATERAL under that alias does not project, and case 11139 pins that
+    # message verbatim (`column factories_processes_1.process_costs does not
+    # exist`).
+    depth = state.embed_depth + 1
+    agg_alias = "#{source.name}_#{canonical_name(e)}_#{depth}"
 
     # Every parameter this subtree binds from here on is bound INTO the SQL it
     # is about to build, and `QE.bind/3` is a strict stack: prepend the value,
@@ -433,11 +445,12 @@ defmodule Bier.Embed do
     # orders/limits/offsets routed deeper), then restore the parent scope —
     # only the parameter accumulator and embed sequence survive the descent.
     saved =
-      Map.take(state, [:relation, :embed_orders, :embed_limits, :embed_offsets])
+      Map.take(state, [:relation, :embed_depth, :embed_orders, :embed_limits, :embed_offsets])
 
     child_scope = %{
       state
       | relation: target,
+        embed_depth: depth,
         embed_orders: deeper_orders,
         embed_limits: deeper_limits,
         embed_offsets: deeper_offsets
@@ -504,18 +517,30 @@ defmodule Bier.Embed do
       "SELECT #{child_select} FROM #{from}#{lateral_sql}#{where_sql}" <>
         group_sql <> having <> order_sql
 
+    # `generateSpreadSelectFields`'s `JsonEmbed` branch (`Plan.hs` L716) names one
+    # spread field after every embedded relation UNCONDITIONALLY — it never
+    # consults the `rsEmptyEmbed` flag L693-L697 computes for the non-spread
+    # path. So a nested EMPTY embed still puts its name in the spread's
+    # projection while contributing no column to the LATERAL that projection
+    # reads from, and the reference dangles (case 11139). The `Spread` branch
+    # (L718) splices the nested spread's own field list instead, which for an
+    # empty nested spread is `[]` — so that spelling really does contribute
+    # nothing (case 11140).
+    phantoms = if e.spread, do: spread_phantom_fields(e.select), else: []
+
     cond do
       # A spread that merges no columns contributes nothing at all, so it emits
       # no LATERAL — the same answer `build_node/7` gives the literally-empty
       # parens list (`...rel()`, parser `empty: true`, case 11138). The two
       # spellings reach this differently: `...rel()` short-circuits at the node,
-      # while a spread whose projection is made up entirely of empty embeds
-      # (`...processes(process_costs())`) is `empty: false` at the outer node
-      # and only turns out to project nothing once its children have been built.
-      # Which is why the decision is here and not up beside that short-circuit:
-      # the emptiness is not knowable before the descent, and the descent is
-      # also what resolves the relationship (PGRST200) and pops this embed's
-      # filters, neither of which may be skipped.
+      # while a spread whose projection is made up entirely of nested empty
+      # SPREADS (`...processes(...process_costs())`, case 11140) is
+      # `empty: false` at the outer node and only turns out to project nothing
+      # once its children have been built. Which is why the decision is here and
+      # not up beside that short-circuit: the emptiness is not knowable before
+      # the descent, and the descent is also what resolves the relationship
+      # (PGRST200) and pops this embed's filters, neither of which may be
+      # skipped.
       #
       # Keeping the join is what is unsafe: with no `child_cols` there are no
       # `json_agg`s, and the aggregate list is the only thing making the `:many`
@@ -538,19 +563,23 @@ defmodule Bier.Embed do
       # the binds this subtree made on the way down, which have to be rewound
       # with it, or Postgrex is handed a parameter the final statement no longer
       # mentions (and, with a root filter alongside, a `$2` with no `$1`).
-      e.spread and child_cols == [] ->
+      e.spread and child_cols == [] and phantoms == [] ->
         {count, params} = binds
         {[], %{state | count: count, params: params}}
 
       e.spread ->
         spread_entry(
           kind,
-          child_cols,
+          %{
+            cols: child_cols,
+            phantoms: phantoms,
+            key: canonical_name(e),
+            alias: agg_alias
+          },
           child_meta,
           inner_base,
           page_sql,
           state,
-          canonical_name(e),
           spread?
         )
 
@@ -604,13 +633,20 @@ defmodule Bier.Embed do
   # JSON array"). Every column that is NOT aggregated becomes a `GROUP BY` term
   # for this level (`groupTermFromRelSelectField`).
   #
-  # `child_cols` is never empty here: a spread that merges nothing emits no
-  # LATERAL at all, and `build_embed/8` takes that case before this is called
-  # (#154).
-  defp spread_entry(kind, child_cols, child_meta, inner_base, page_sql, state, key, spread?) do
-    seq = state.embed_seq + 1
-    state = %{state | embed_seq: seq}
-    spr = QE.quote_ident("_bier_spr#{seq}")
+  # `spread.cols` and `spread.phantoms` are never BOTH empty here: a spread that
+  # merges nothing at all emits no LATERAL, and `build_embed/8` takes that case
+  # before this is called (#154). `phantoms` are the spread fields a nested
+  # empty embed names without projecting (see `spread_phantom_fields/1`): they
+  # join the parent's reference list but not the LATERAL's projection, which is
+  # exactly the dangling reference PostgREST emits and Postgres rejects with
+  # `42703` (case 11139). Reaching here on phantoms alone leaves the `:many`
+  # aggregate list empty, so that LATERAL is no longer an aggregate query and
+  # would multiply the parent rows (#154) — which never shows, because the
+  # dangling reference fails the statement at parse analysis, before a row is
+  # read.
+  defp spread_entry(kind, spread, child_meta, inner_base, page_sql, state, spread?) do
+    %{cols: child_cols, phantoms: phantoms, key: key, alias: agg_alias} = spread
+    spr = QE.quote_ident(agg_alias)
 
     lateral =
       case kind do
@@ -641,8 +677,37 @@ defmodule Bier.Embed do
         end
       end)
 
-    {cols ++ [{:lateral, lateral}, {:spread_alias, key, spr}], state}
+    phantom_cols =
+      Enum.map(phantoms, fn name ->
+        ref = "#{spr}.#{QE.quote_ident(name)}"
+        {:col, ref, name, ref, nil}
+      end)
+
+    {cols ++ phantom_cols ++ [{:lateral, lateral}, {:spread_alias, key, spr}], state}
   end
+
+  # The spread fields a nested EMPTY embed contributes without projecting a
+  # column for them — PostgREST's `relSelectToSpread` (`Plan.hs` L714-L719):
+  #
+  #   * its `JsonEmbed` branch (L716) emits a field named after the embed
+  #     unconditionally, `rsEmptyEmbed` or not, so `...processes(process_costs())`
+  #     references a column the LATERAL never projects and Postgres answers
+  #     `42703` (case 11139);
+  #   * its `Spread` branch (L718) splices the nested spread's own field list,
+  #     which is `[]` for an empty one — so `...processes(...process_costs())`
+  #     contributes nothing and stays a 200 (case 11140).
+  #
+  # A non-empty embed is absent from both lists: it projects a real column into
+  # `child_cols` under the same name, so its spread reference resolves.
+  defp spread_phantom_fields(nodes) when is_list(nodes) do
+    Enum.flat_map(nodes, fn
+      %{kind: :embed, spread: true} = e -> spread_phantom_fields(e.select)
+      %{kind: :embed, empty: true} = e -> [canonical_name(e)]
+      _node -> []
+    end)
+  end
+
+  defp spread_phantom_fields(_nodes), do: []
 
   # PGRST127: an aggregate under a one-to-many / many-to-many spread — its own
   # (`anyAggSel`) or one a nested to-one spread hoisted into it
@@ -1075,7 +1140,7 @@ defmodule Bier.Embed do
         one
 
       [] ->
-        throw({:embed_error, no_relationship_error(source, e.target, e.hint)})
+        throw({:embed_error, no_relationship_error(source, e.target, e.hint, relations)})
 
       many ->
         throw({:embed_error, ambiguous_error(source, e.target, many)})
@@ -1272,7 +1337,7 @@ defmodule Bier.Embed do
 
   # ---- error envelopes -----------------------------------------------------
 
-  defp no_relationship_error(source, target_name, hint) do
+  defp no_relationship_error(source, target_name, hint, relations) do
     hint_clause = if hint, do: " using the hint '#{hint}'", else: ""
 
     %{
@@ -1283,9 +1348,107 @@ defmodule Bier.Embed do
           "Could not find a relationship between '#{source.name}' and '#{target_name}' in the schema cache",
         details:
           "Searched for a foreign key relationship between '#{source.name}' and '#{target_name}'#{hint_clause} in the schema '#{source.schema}', but no matches were found.",
-        hint: nil
+        hint: no_rel_between_hint(source, target_name, relations)
       }
     }
+  end
+
+  # PGRST200's `hint` is `noRelBetweenHint` (`Error.hs#L276` -> `#L320`), and it
+  # is NOT derived from the request's own `!hint` — it is a fuzzy suggestion
+  # drawn from the schema cache, with two branches selected by `isJust
+  # findParent` (`Error.hs#L322`):
+  #
+  #   * the origin IS a key of the relationships map — it participates in at
+  #     least one relationship — so the near miss is assumed to be the CHILD,
+  #     and the suggestion comes from `fuzzySetOfChildren`, the foreign tables
+  #     of that origin's own relationships (`Error.hs#L328`), rendered with the
+  #     CHILD in the second slot (`Error.hs#L323`, case 1530);
+  #   * the origin is NOT a key — it has no relationships at all, so no child
+  #     could have resolved — and the suggestion is a near-miss PARENT drawn
+  #     from `fuzzySetOfParents`, the map's keys in this schema
+  #     (`Error.hs#L327`), rendered with the ORIGIN in the second slot
+  #     (`Error.hs#L324`, cases 1527/1529).
+  #
+  # Both branches go through plain `Fuzzy.get`/`getOne`, whose minimum score is
+  # fuzzyset-0.2.4's default 0.33 — markedly more permissive than the 0.75
+  # `getFuzzyHint` gate PGRST205's table hint uses (`Error.hs#L400`).
+  @no_rel_hint_min_score 0.33
+
+  defp no_rel_between_hint(source, target_name, relations) do
+    case origin_children(source, relations) do
+      [] -> suggestion(source.name, relationship_origins(source.schema, relations))
+      children -> suggestion(target_name, children)
+    end
+  end
+
+  # Both branches score the very name they then quote back, so one renderer
+  # serves both: `<match> instead of <term>`.
+  defp suggestion(term, candidates) do
+    case best_relation_match(term, candidates) do
+      nil -> nil
+      match -> "Perhaps you meant '#{match}' instead of '#{term}'."
+    end
+  end
+
+  # `fuzzySetOfChildren` (`Error.hs#L328`) is only ever consulted after an exact
+  # hit has been ruled out: `Fuzzy.get` short-circuits on a name already in the
+  # set and returns it alone with score 1.0, which `headMay [snd k | k <- …,
+  # fst k < 1.0]` (`Error.hs#L331`) then drops — so an embed naming a relation
+  # that really is related yields no suggestion at all (case 1124). The parent
+  # branch cannot reach that guard: a name in `fuzzySetOfParents` is a key of
+  # the map, and the branch only runs when the origin is not.
+  defp best_relation_match(term, candidates) do
+    normalized = String.downcase(term)
+
+    if Enum.any?(candidates, &(String.downcase(&1) == normalized)) do
+      nil
+    else
+      Bier.Fuzzy.best_match(term, candidates, @no_rel_hint_min_score)
+    end
+  end
+
+  # The foreign table of every relationship `source` takes part in — the same
+  # four kinds `candidate_relationships/4` resolves an embed against. An empty
+  # list is also how this answers `findParent` (`Error.hs#L322`): a relation
+  # with no relationships is not a key of the map.
+  defp origin_children(source, relations) do
+    junctions =
+      Enum.filter(relations, fn {_key, rel} -> references?(rel, source) end)
+
+    m2o = Enum.map(source.foreign_keys, & &1.ref_relation)
+    o2m = Enum.map(junctions, fn {_key, rel} -> rel.name end)
+    computed = Enum.map(source.computed_relations, & &1.ref_relation)
+
+    m2m =
+      for {_key, rel} <- junctions,
+          fk <- rel.foreign_keys,
+          {fk.ref_schema, fk.ref_relation} != {source.schema, source.name},
+          do: fk.ref_relation
+
+    Enum.uniq(m2o ++ o2m ++ computed ++ m2m)
+  end
+
+  # The keys of the relationships map that live in `schema` (`Error.hs#L327`'s
+  # `snd p == schema` filter): every relation holding a foreign key, referenced
+  # by one, or carrying a computed relationship.
+  defp relationship_origins(schema, relations) do
+    referenced =
+      for {_key, rel} <- relations,
+          fk <- rel.foreign_keys,
+          into: MapSet.new(),
+          do: {fk.ref_schema, fk.ref_relation}
+
+    for {{^schema, name}, rel} <- relations,
+        rel.foreign_keys != [] or rel.computed_relations != [] or
+          MapSet.member?(referenced, {schema, name}),
+        do: name
+  end
+
+  defp references?(rel, source) do
+    Enum.any?(
+      rel.foreign_keys,
+      &(&1.ref_schema == source.schema and &1.ref_relation == source.name)
+    )
   end
 
   defp ambiguous_error(source, target_name, candidates) do
