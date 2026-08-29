@@ -405,6 +405,13 @@ defmodule Bier.Embed do
     child_alias = "#{target.name}_e#{seq}"
     out_name = e.alias || rel.embed_key
 
+    # Every parameter this subtree binds from here on is bound INTO the SQL it
+    # is about to build, and `QE.bind/3` is a strict stack: prepend the value,
+    # increment the counter, never renumber. So this pair is exactly the prefix
+    # to rewind to if that SQL is thrown away — which is what a spread merging
+    # no columns does below.
+    binds = {state.count, state.params}
+
     # Filter/order/limit/offset keys have already been resolved to this embed's
     # canonical name by `resolve_target_names/2` (which is where the alias vs
     # relation-name spellings are reconciled), so routing is an exact match.
@@ -451,14 +458,7 @@ defmodule Bier.Embed do
         to_one_spread?
       )
 
-    # PGRST127: an aggregate under a one-to-many / many-to-many spread — its own
-    # (`anyAggSel`) or one a nested to-one spread hoisted into it
-    # (`anyAggRelSel`) — is rejected outright rather than aggregated over the
-    # json_agg'd array, where the result would be meaningless
-    # (`addToManyOrderSelects`).
-    if e.spread and kind == :many and child_meta.aggregated? do
-      throw({:embed_error_raw, :agg_in_to_many_spread})
-    end
+    check_to_many_spread_agg(e, kind, child_meta)
 
     # An `!inner` embedding NESTED inside this one propagates its filter up to
     # here as well: a child row whose own inner embedding is empty is dropped
@@ -504,21 +504,60 @@ defmodule Bier.Embed do
       "SELECT #{child_select} FROM #{from}#{lateral_sql}#{where_sql}" <>
         group_sql <> having <> order_sql
 
-    if e.spread do
-      spread_entry(
-        kind,
-        child_cols,
-        child_meta,
-        inner_base,
-        page_sql,
-        state,
-        canonical_name(e),
-        spread?
-      )
-    else
-      empty_inner = "SELECT 1 FROM #{from}#{where_sql}#{order_sql}"
-      sub = json_embed_expr(kind, child_cols, inner_base, empty_inner, page_sql)
-      {[{:col, sub, out_name, source_join_terms(join, src_alias), nil}], state}
+    cond do
+      # A spread that merges no columns contributes nothing at all, so it emits
+      # no LATERAL — the same answer `build_node/7` gives the literally-empty
+      # parens list (`...rel()`, parser `empty: true`, case 11138). The two
+      # spellings reach this differently: `...rel()` short-circuits at the node,
+      # while a spread whose projection is made up entirely of empty embeds
+      # (`...processes(process_costs())`) is `empty: false` at the outer node
+      # and only turns out to project nothing once its children have been built.
+      # Which is why the decision is here and not up beside that short-circuit:
+      # the emptiness is not knowable before the descent, and the descent is
+      # also what resolves the relationship (PGRST200) and pops this embed's
+      # filters, neither of which may be skipped.
+      #
+      # Keeping the join is what is unsafe: with no `child_cols` there are no
+      # `json_agg`s, and the aggregate list is the only thing making the `:many`
+      # subquery an aggregate query — one that returns exactly one row over zero
+      # rows. `SELECT  FROM (…)` is legal SQL that is not an aggregate query, so
+      # the join would return one row per child and multiply the parent rows
+      # (#154).
+      #
+      # Dropping it is safe because a spread's LATERAL is a pure column source:
+      # it is always a LEFT JOIN, so it never filters (`!inner` propagates
+      # through the parent's `EXISTS` clauses in `inner_join_clauses/6`, built
+      # separately from this select list), and the alias it registers is read
+      # only by spread order terms (`spread_order_expr/3`), which have no column
+      # here to name — `spread_col_name/2` only matches `%{kind: :field}` nodes,
+      # precisely the nodes whose absence makes `child_cols` empty.
+      #
+      # `child_meta` is discardable for the same reason: every hoist and every
+      # `:applied` flag on it originates from a `{:col, …}` entry, so an empty
+      # `child_cols` implies an empty `Meta`. `inner_base` is not — it carries
+      # the binds this subtree made on the way down, which have to be rewound
+      # with it, or Postgrex is handed a parameter the final statement no longer
+      # mentions (and, with a root filter alongside, a `$2` with no `$1`).
+      e.spread and child_cols == [] ->
+        {count, params} = binds
+        {[], %{state | count: count, params: params}}
+
+      e.spread ->
+        spread_entry(
+          kind,
+          child_cols,
+          child_meta,
+          inner_base,
+          page_sql,
+          state,
+          canonical_name(e),
+          spread?
+        )
+
+      true ->
+        empty_inner = "SELECT 1 FROM #{from}#{where_sql}#{order_sql}"
+        sub = json_embed_expr(kind, child_cols, inner_base, empty_inner, page_sql)
+        {[{:col, sub, out_name, source_join_terms(join, src_alias), nil}], state}
     end
   end
 
@@ -564,6 +603,10 @@ defmodule Bier.Embed do
   # node, or until we reach a ReadPlan that will be embedded a JSON object or
   # JSON array"). Every column that is NOT aggregated becomes a `GROUP BY` term
   # for this level (`groupTermFromRelSelectField`).
+  #
+  # `child_cols` is never empty here: a spread that merges nothing emits no
+  # LATERAL at all, and `build_embed/8` takes that case before this is called
+  # (#154).
   defp spread_entry(kind, child_cols, child_meta, inner_base, page_sql, state, key, spread?) do
     seq = state.embed_seq + 1
     state = %{state | embed_seq: seq}
@@ -574,18 +617,6 @@ defmodule Bier.Embed do
         :one ->
           " LEFT JOIN LATERAL (#{inner_base} LIMIT 1) #{spr} ON true"
 
-        # `child_cols` CAN be empty here, and the result is wrong when it is.
-        # The empty-projection clause in `build_node/7` only catches a
-        # literally-empty parens list (`...rel()`, parser `empty: true`); a
-        # spread whose projection is made up entirely of empty embeds —
-        # `...processes(process_costs())` — reaches this branch with
-        # `child_cols == []`. `aggs` is then "", and `SELECT  FROM (…)` is
-        # legal SQL that is no longer an aggregate query, so the LATERAL
-        # returns one row per child and MULTIPLIES the parent rows instead of
-        # contributing nothing (case 11138 pins one row per parent for the
-        # `...rel()` spelling). Pre-existing, tracked as #154 — what upstream
-        # returns for this shape is not pinned by any case yet, so that is the
-        # first thing the fix needs.
         :many ->
           aggs =
             Enum.map_join(child_cols, ", ", fn {_expr, name} ->
@@ -612,6 +643,16 @@ defmodule Bier.Embed do
 
     {cols ++ [{:lateral, lateral}, {:spread_alias, key, spr}], state}
   end
+
+  # PGRST127: an aggregate under a one-to-many / many-to-many spread — its own
+  # (`anyAggSel`) or one a nested to-one spread hoisted into it
+  # (`anyAggRelSel`) — is rejected outright rather than aggregated over the
+  # json_agg'd array, where the result would be meaningless
+  # (`addToManyOrderSelects`).
+  defp check_to_many_spread_agg(%{spread: true}, :many, %Meta{aggregated?: true}),
+    do: throw({:embed_error_raw, :agg_in_to_many_spread})
+
+  defp check_to_many_spread_agg(_e, _kind, _child_meta), do: :ok
 
   defp from_clause(target, child_alias, %{via: nil, join_cond: jc}, _src) when jc != :computed do
     "#{QE.qrel(target)} #{QE.quote_ident(child_alias)}"
