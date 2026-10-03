@@ -50,6 +50,31 @@ Credo is configured in `.credo.exs` (strict mode). The generated
 `query_parser.ex` is excluded, but its `query_parser.ex.exs` template IS
 analyzed. No dialyzer step is configured.
 
+## Worktree-isolated sessions
+
+Feature work usually happens in `.claude/worktrees/<name>`. When a session is
+isolated there, the harness refuses any Bash command it cannot prove stays inside
+the worktree — anything chained with `;`, `&&`, `|`, a loop, or a redirect — and any
+`git -C` aimed at the shared checkout. Three habits avoid nearly all of it:
+
+- **Don't redirect test output to a log and grep it.** Run
+  `mix test --only area:config`, not
+  `mix test --only area:config >/tmp/cfg.log 2>&1; echo "EXIT=$status"; grep ...`.
+  The tool already returns stdout, stderr and the exit code, so the redirect buys
+  nothing and is exactly what trips the guard.
+- **Create scratch files with the Write/Edit tools, not shell heredocs.** The guard
+  applies to Bash only: `cat > /tmp/e2e.exs <<'EOF'` is refused, but writing that
+  file with Write and then running `elixir /tmp/e2e.exs` as one plain command is
+  fine.
+- **One plain command per call** for git inspection — no
+  `pwd; git branch --show-current; git -C ... status` chains, and never `git -C`
+  out of the worktree.
+
+Match the worktree to the work: isolation fits a focused single-issue branch. For
+broad cleanup that needs constant comparison against the shared checkout, work on a
+branch in the main checkout instead — sweeping sessions spend more time fighting the
+guard than the isolation is worth.
+
 ## Architecture
 
 ### Two-layer supervision (intentional)
