@@ -144,6 +144,20 @@ and 11125 are recorded as deliberate divergences (#122, #138); 11125 pins
 upstream's tolerance of an unbalanced trailing `)` in `select`, which Bier
 rejects with 400 `PGRST100`.
 
+- The in-database config read no longer overshoots its own acquisition
+  deadline. Two shapes escaped it. An endpoint that accepts the TCP connection
+  but never completes the Postgres handshake ran to ~15s against a 10s budget:
+  the retry loop gave up on time, but tearing down the wedged connection waited
+  on its handshake, capped only by the pool supervisor's 5s child shutdown. And
+  a server that completes the handshake and then stalls ran to ~60s, because
+  db_connection reads `:timeout` and `:checkout_retries` from the call options,
+  not from the pool's start options, so one query ran on the 15s default and
+  was retried three more times. The read now derives every bound from the same
+  budget, passes the remaining budget at the query call site, and tears the
+  pool down with `:brutal_kill`; both shapes finish in ~10-12s. The error also
+  leads with the time actually spent rather than the ~1s queue drop of the last
+  checkout (#149).
+
 ## v0.2.0 — 2026-08-23
 
 ### Added
