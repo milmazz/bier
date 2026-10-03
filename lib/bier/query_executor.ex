@@ -32,6 +32,11 @@ defmodule Bier.QueryExecutor do
               relations: %{},
               alias_name: nil,
               embed_seq: 0,
+              # Depth of the node currently being built, root = 0. PostgREST
+              # bakes it into the alias it gives an embed's LATERAL
+              # (`Plan.hs` L541), and that alias is what a dangling spread
+              # reference names in its `42703` message (case 11139).
+              embed_depth: 0,
               embed_orders: %{},
               embed_limits: %{},
               embed_offsets: %{},

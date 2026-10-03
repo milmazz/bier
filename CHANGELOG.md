@@ -43,6 +43,23 @@ and this project adheres to
   it are refused at boot, and a `table=` subscription naming such a table is
   refused like any other unavailable table. Without the reservation a
   channel or table could emit a frame a client reads as a control message.
+- `db_schemas` is validated at boot: the list must be non-empty and no entry
+  may be blank. An empty list previously aborted the schema-cache load with an
+  opaque `FunctionClauseError` behind a PGRST002 log, and a blank entry booted
+  a working instance whose default schema silently resolved nothing. Both are
+  Bier-only rules — PostgREST's comma-separated `db-schemas` cannot express an
+  empty list — so they run at boot only and `--dump-config` still prints
+  whatever it parsed (#143).
+
+PGRST200 ("Could not find a relationship…") errors now carry PostgREST's fuzzy
+`hint`, which was previously always `null`. It is a suggestion computed off the
+schema cache rather than an echo of the request's own `!hint`: a near-miss child
+drawn from the origin's own relationships when the origin participates in any,
+and a near-miss parent drawn from the relationships map's keys when it does not
+(`Error.hs` L320-331). Both sit at fuzzyset's default 0.33 minimum score —
+markedly more permissive than the 0.75 gate PGRST205's table hint uses — with
+the exact-hit short-circuit and `< 1.0` guard reproduced, so an embed naming a
+relation that really is related still yields no hint (cases 1527/1529/1530).
 
 ### Changed
 
@@ -104,11 +121,29 @@ and this project adheres to
   sequences, in keys and in nested `details` structures alike, before encoding,
   instead of letting the request answer a raw 500 (#142).
 
-Conformance `spec/` bumped to `v16.0.0-suite.4`, which adds the 39
+A nested *empty embed* inside a spread (`...processes(process_costs())`) now
+answers 400 `42703` like PostgREST, instead of silently contributing nothing.
+`generateSpreadSelectFields`'s `JsonEmbed` branch names one spread field per
+embedded relation unconditionally, never consulting the `rsEmptyEmbed` flag the
+non-spread path computes, so the projection references a column the LATERAL
+never projects. The nested empty *spread* spelling
+(`...processes(...process_costs())`) takes the other branch and is unaffected,
+still answering 200 (cases 11139/11140). Spread LATERALs are now named with
+PostgREST's deterministic `<parent>_<relation>_<depth>` `relAggAlias` formula
+(`Plan.hs` L541), which is what the `42703` message quotes back.
+
+Conformance `spec/` bumped to `v16.0.0-suite.5`, which adds the 39
 spread/aggregate cases 11100–11138 and the four `--ready` health-check cases
-1745–1748, taking the tree to 805 cases. Case 11125 is recorded as a deliberate
-divergence (#138): it pins upstream's tolerance of an unbalanced trailing `)` in
-`select`, which Bier rejects with 400 `PGRST100`.
+1745–1748, then the seven cases the upstream v16.0 → v16.2 re-sync ranked —
+`db-aggregates-enabled` via the in-database config source (1749), the
+resolved-empty spread projections (11139–11140), and PGRST200's fuzzy parent
+hint (1527–1530) — taking the tree to 812 cases. Upstream's own `PIN` stays at
+PostgREST v16.0; the one v16.2 drift the re-sync found (case 1711,
+`jwt-role-claim-key` validation) is recorded upstream, not folded. Cases 1771
+and 11125 are recorded as deliberate divergences (#122, #138); 11125 pins
+upstream's tolerance of an unbalanced trailing `)` in `select`, which Bier
+rejects with 400 `PGRST100`.
+
 - The in-database config read no longer overshoots its own acquisition
   deadline. Two shapes escaped it. An endpoint that accepts the TCP connection
   but never completes the Postgres handshake ran to ~15s against a 10s budget:

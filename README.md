@@ -119,7 +119,7 @@ equivalents):
 | `hostname` / `port` / `database` / `username` / `password` | `localhost` / `5432` / `bier` / — / — | Postgres connection. |
 | `pool_size` | `10` | Per-instance Postgrex pool size. |
 | `db_prepared_statements` | `true` | Cache hot-path statements as prepared statements per connection; disable behind transaction-mode poolers. |
-| `db_schemas` | `["public"]` | Ordered list of exposed schemas; the first is the default. |
+| `db_schemas` | `["public"]` | Ordered list of exposed schemas; the first is the default. Must be non-empty, with no blank entry. |
 | `db_anon_role` | `nil` | Role assumed for unauthenticated requests. |
 | `db_extra_search_path` | `["public"]` | Extra schemas appended to the search path. |
 | `db_max_rows` | `nil` | Cap on rows returned per request. |
@@ -387,14 +387,14 @@ and regenerate; never edit the generated `.ex` directly.
 ## Conformance
 
 Bier reproduces the request/response behavior of **PostgREST v16.0**, and is
-developed against a frozen conformance suite derived from it: 805 cases across
+developed against a frozen conformance suite derived from it: 812 cases across
 17 areas — URL grammar, operators, select/embedding, filters, ordering,
 pagination, representations, mutations, RPC, auth, errors, headers, content
 negotiation, OpenAPI, config, observability, and domain representations.
 PostgREST is the ground truth — each case cites the exact upstream source line,
 and a difference from upstream is treated as a Bier bug.
 
-**All 800 active cases pass.** Five are excluded: three assert the HTTP reason
+**All 807 active cases pass.** Five are excluded: three assert the HTTP reason
 phrase, which the test client cannot read ([#42][]), and two pin upstream
 behavior Bier deliberately answers differently (see below).
 
