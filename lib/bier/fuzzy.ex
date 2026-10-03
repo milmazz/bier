@@ -12,6 +12,22 @@ defmodule Bier.Fuzzy do
 
   Matching is case-insensitive, mirroring the normalization `FuzzySet` applies
   before indexing.
+
+  ## Fidelity: score yes, retrieval no
+
+  `score/2` is the function `fuzzyset` actually returns. `Fuzzy.fromList` builds
+  a `defaultSet = emptySet 2 3 True`, and with `useLevenshtein = True` the gram
+  cosine is only a candidate *pre-filter* — the returned score is replaced by
+  `levenshteinNorm` over the lowercased strings, which is exactly what `score/2`
+  computes.
+
+  What is not reproduced is the retrieval stage that runs before that
+  rescoring: upstream only ever scores candidates sharing an n-gram with the
+  term, consults gram size 2 only when size 3 yields nothing, and truncates to
+  the top 50 by cosine. All three make upstream *stricter*, so this module can
+  offer a hint where upstream stays silent, never the reverse. The gap widens
+  as `min_score` falls — it is negligible at the 0.75 table/procedure gate and
+  reachable in principle at the 0.33 gate `no_rel_between_hint/3` uses.
   """
 
   # Longest `term` that is scored at all. Scoring is O(|term| · |candidate|) per
@@ -20,7 +36,11 @@ defmodule Bier.Fuzzy do
   # `FuzzySet`. PostgreSQL identifiers stop at NAMEDATALEN-1 = 63 bytes, so
   # nothing past this length can be the name the client meant; refusing to score
   # it bounds the per-404 cost without giving up a hint anyone would recognize
-  # (#102).
+  # (#102). Upstream has no such cap.
+  #
+  # Caveat: this counts BYTES while `score/2` counts characters, so a
+  # multi-byte name is refused well below 64 characters. Immaterial at the 0.75
+  # gate — nothing that long clears it — but reachable at the 0.33 gate.
   @max_term_length 64
 
   @doc """
