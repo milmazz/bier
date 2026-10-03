@@ -302,6 +302,26 @@ defmodule Bier.Wal.EventsHttpTest do
     end
   end
 
+  # A revoked subscription's terminal `bier:closed` frame, then the close
+  # itself. Matched on the whole `data:` line, not just its start: the frame
+  # and Bandit's chunked terminator can arrive in one recv, so the frame has
+  # to be picked out of `raw` rather than decoded from its tail.
+  defp assert_revoked_then_closed(sock) do
+    raw = SSETestClient.recv_until(sock, ~r/data: \{[^\n]*\}\n/)
+
+    assert [_, event, data] =
+             Regex.run(~r/event: ([^\n]+)\n(?:id: [^\n]*\n)?data: ([^\n]*)\n/, raw),
+           "expected a terminal control frame, got #{inspect(raw)}"
+
+    # Never `bier:reset` — that means "history is gone", not "you are no
+    # longer authorized" — and no `id:`: there is nothing to resume.
+    assert event == "bier:closed"
+    refute raw =~ ~r/^id:/m
+    assert JSON.decode!(data) == %{"reason" => "revoked"}
+
+    assert_socket_closes(sock)
+  end
+
   # The `data:` payload of the LAST frame in `raw`, decoded. Chunked framing
   # is tolerated the same way `recv_until/3` tolerates it: by splitting on
   # the `data: ` marker rather than parsing the transfer encoding.
@@ -716,13 +736,15 @@ defmodule Bier.Wal.EventsHttpTest do
 
     :ok = Bier.reload_schema_cache(auth_name)
 
-    # The stream must end rather than keep leaking rows to a subscriber
-    # whose privileges were just revoked. Bandit still writes the chunked
-    # terminator ("0\r\n\r\n") before closing the TCP connection, so drain
-    # that (and any interleaving keepalive) before asserting the eventual
-    # `:closed` — a single recv can otherwise observe the terminator instead
-    # of the close.
-    assert_socket_closes(sock)
+    # The stream says WHY it is ending before it ends (#150): without a
+    # terminal frame the client cannot tell a revocation from a network
+    # drop, and EventSource would reconnect straight into a 404 it treats
+    # as fatal. Deliberately `bier:closed`, never `bier:reset` — a reset
+    # means "history is gone", not "you are no longer authorized".
+    #
+    # The stream must then end rather than keep leaking rows to a subscriber
+    # whose privileges were just revoked.
+    assert_revoked_then_closed(sock)
   end
 
   test "a schema reload with unchanged grants leaves the stream open and delivering", %{db: db} do
@@ -1034,7 +1056,7 @@ defmodule Bier.Wal.EventsHttpTest do
     :ok = Bier.reload_schema_cache(auth_name)
 
     # The items subscriber lost its last visible column: revoked.
-    assert_socket_closes(items_sock)
+    assert_revoked_then_closed(items_sock)
 
     # The orders subscriber is untouched and still delivering.
     Postgrex.query!(db, "INSERT INTO #{@schema}.orders (id, note) VALUES (501, 'fine')", [])

@@ -337,7 +337,9 @@ data: {"reason":"history_evicted"}
 ```
 
 `bier:` is a reserved `event:` prefix that can never collide with a channel
-or table name. v1 defines exactly three reset reasons:
+or table name; it spells the stream's control frames, `bier:reset` and
+`bier:closed` (see [Connection lifecycle](#connection-lifecycle)). v1
+defines exactly three reset reasons:
 
 | Reason | When |
 |---|---|
@@ -365,11 +367,29 @@ finding the subscriber's role lost `SELECT`), so the connection is declared
 non-keepalive up front rather than handed back to a pool as if it were
 reusable.
 
-A revoked subscription's stream simply **ends** — no `bier:reset`, no error
-frame, because a reset only ever means "history is gone," never "you're no
-longer authorized." Reconnecting re-authorizes from scratch and, if the
-privilege is still gone, gets the ordinary `BIER003` refusal (see
-[Errors](#errors) above) instead of a stream.
+A revoked subscription's stream **ends** with one terminal frame, then the
+connection closes:
+
+```
+event: bier:closed
+data: {"reason":"revoked"}
+```
+
+It is deliberately not a `bier:reset`: a reset only ever means "history is
+gone, re-bootstrap and keep listening," never "you're no longer
+authorized," and the connection stays open across a reset but not across
+this. There is no `id:` — there is nothing to resume.
+
+A client that receives `bier:closed` should **stop reconnecting** — call
+`EventSource.close()` from a `bier:closed` listener — rather than let the
+transport retry. Reconnecting re-authorizes from scratch and, while the
+privilege is still gone, gets the ordinary `404 BIER003` refusal (see
+[Errors](#errors) above) instead of a stream; `EventSource` treats any
+non-2xx response as fatal and stops retrying for good, so a later re-grant
+would never bring that subscription back on its own. Once access is
+restored (the user re-authenticates, or the app learns of the re-grant),
+open a fresh subscription and re-bootstrap with a plain `GET` exactly as
+after a `bier:reset`.
 
 ### Limits
 
@@ -395,8 +415,8 @@ privilege is still gone, gets the ordinary `BIER003` refusal (see
   `pg_publication_tables`, and the parent is exactly what v1 refuses.
 * **A table whose name begins with `bier:` cannot be subscribed** — that
   prefix is reserved for the stream's own control frames (`event:
-  bier:reset`), and `events_channels` is held to the same reservation at
-  boot.
+  bier:reset`, `event: bier:closed`), and `events_channels` is held to the
+  same reservation at boot.
 * **Table names containing a literal `.` must be written schema-qualified**
   — the qualifier is split off at the first dot only, so the bare form is
   unaddressable.
@@ -423,7 +443,8 @@ privilege is still gone, gets the ordinary `BIER003` refusal (see
   costs a handful of round trips however many subscribers there are. A
   subscription whose grants merely narrowed keeps streaming with the
   reduced column set; one that lost its last visible column, its
-  publication membership, or its table is closed.
+  publication membership, or its table is closed, after a terminal
+  `bier:closed` frame (see [Connection lifecycle](#connection-lifecycle)).
 * **A subscription ends when its JWT expires.** The token is verified at
   connect like any request; the stream is then bounded by that token's
   `exp` (plus the same 30s skew allowance the request path uses) rather

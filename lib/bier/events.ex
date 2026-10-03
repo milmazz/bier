@@ -166,7 +166,8 @@ defmodule Bier.Events do
   # Refused before any database work, through the same uniform shape as
   # every other refusal: a schema this instance does not expose, or a table
   # whose name would claim the `bier:` prefix the stream reserves for its own
-  # control frames (`event: bier:reset`). `events_channels` is held to the
+  # control frames (`event: bier:reset`, `event: bier:closed`).
+  # `events_channels` is held to the
   # same reservation in `Bier.Config`; this is the half of it that cannot be
   # checked at boot, because the name comes from the database.
   defp refused_outright?({schema, table}, config),
@@ -535,7 +536,8 @@ defmodule Bier.Events do
   # narrowed (a partial-grant role losing one of several visible columns),
   # and reusing the remembered map would keep streaming a column the role
   # can no longer see. `:revoked` closes the stream rather than keep leaking
-  # rows. `:keep` means the check could not be completed (pool contention,
+  # rows — after one terminal `bier:closed` frame saying so (see
+  # `close_revoked/4`). `:keep` means the check could not be completed (pool contention,
   # not evidence of lost privilege), so the subscription stands and the next
   # reload gets another chance.
   #
@@ -550,8 +552,34 @@ defmodule Bier.Events do
         loop(conn, config, sub, delivered, start, metadata)
 
       :revoked ->
-        finish(conn, delivered, start, Map.put(metadata, :reason, :revoked))
+        close_revoked(conn, delivered, start, metadata)
     end
+  end
+
+  # A bare close is indistinguishable, from the client's side, from a
+  # network drop: `EventSource` reconnects on its own, re-authorization now
+  # fails with `404 BIER003`, and `EventSource` treats any non-2xx as fatal
+  # and stops retrying FOR GOOD — a silently dead subscription that a later
+  # re-grant cannot revive without a page reload. One terminal frame first
+  # lets a client tell the two apart and stop (or re-bootstrap once access
+  # is restored) deliberately.
+  #
+  # `bier:closed`, deliberately NOT `bier:reset`: a reset means "history is
+  # gone, re-bootstrap and keep listening" and the connection stays open
+  # across it; this one means "you are no longer authorized" and the
+  # connection ends. No `id:` — there is nothing to resume. Best-effort: if
+  # the write fails the client is already gone, and the stream ends either
+  # way, so telemetry still reports the termination as `:revoked`.
+  defp close_revoked(conn, delivered, start, metadata) do
+    payload = Bier.json_library().encode!(%{"reason" => "revoked"})
+
+    conn =
+      case chunk(conn, SSE.frame("bier:closed", payload)) do
+        {:ok, conn} -> conn
+        {:error, _reason} -> conn
+      end
+
+    finish(conn, delivered, start, Map.put(metadata, :reason, :revoked))
   end
 
   defp finish(conn, delivered, start, metadata) do
