@@ -88,6 +88,16 @@ defmodule Bier.Wal.Consumer do
     create_slot(%{state | slot_backoff: nil, tx: nil})
   end
 
+  # The same discard, at the moment the connection is lost. `handle_connect/1`
+  # only runs after a SUCCESSFUL reconnect: through a database outage
+  # postgrex keeps retrying `connect` on its backoff without calling it, so
+  # clearing `tx` there alone would keep the partial transaction on the heap
+  # for the whole outage. Kept in both places: this one bounds the outage,
+  # `handle_connect/1` covers any path that reconnects without a disconnect
+  # callback first.
+  @impl true
+  def handle_disconnect(state), do: {:noreply, %{state | tx: nil}}
+
   # Minted fresh on every attempt, never in init/1: the slot is TEMPORARY
   # and tied to the connection that created it, so reusing a name minted
   # once for the whole process would collide (`42710 slot already exists`)
@@ -380,12 +390,12 @@ defmodule Bier.Wal.Consumer do
   #
   # Note for that feature (#153): `confirmed` is 0 only until the first
   # Commit after init/1, and it is NOT reset on reconnect (postgrex keeps the
-  # module state across auto_reconnect, and handle_connect/1 resets only
-  # `slot_backoff` and `tx` — clearing `tx` means a keepalive that lands
-  # before the new session's first Begin acks `wal_end`, never a stale
-  # `confirmed` from a transaction the old session abandoned). So inside
-  # the first transaction of a fresh stream this
-  # acks either 0 or the previous stream's last end LSN. Both are server-side
+  # module state across auto_reconnect, and handle_disconnect/1 and
+  # handle_connect/1 reset only `tx` and `slot_backoff` — clearing `tx`
+  # means a keepalive that lands before the new session's first Begin acks
+  # `wal_end`, never a stale `confirmed` from a transaction the old session
+  # abandoned). So inside the first transaction of a fresh stream this acks
+  # either 0 or the previous stream's last end LSN. Both are server-side
   # no-ops: walsender ignores a flush position of InvalidXLogRecPtr, and
   # LogicalConfirmReceivedLocation never moves `confirmed_flush` backwards —
   # an under-ack costs at most WAL retention until the first Commit, never

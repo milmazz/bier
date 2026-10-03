@@ -86,4 +86,19 @@ defmodule Bier.Wal.ConsumerSlotRetryTest do
     assert {:query, _sql, reconnected} = Consumer.handle_connect(partial)
     assert reconnected.tx == nil
   end
+
+  test "a disconnect discards a partially assembled transaction", %{state: state} do
+    # `handle_connect/1` only runs after a SUCCESSFUL reconnect. During a
+    # database outage postgrex keeps failing `connect` on its backoff and
+    # never calls it, so clearing `tx` there alone would leave the partial
+    # transaction on the heap for the whole outage. `handle_disconnect/1`
+    # runs as soon as the connection is lost.
+    partial = %{
+      state
+      | tx: %{events: [:row], count: 1, bytes: 3, overflow: false, tables: MapSet.new()}
+    }
+
+    assert {:noreply, disconnected} = Consumer.handle_disconnect(partial)
+    assert disconnected.tx == nil
+  end
 end
