@@ -3,27 +3,29 @@ defmodule Bier.Wal.PartitionTest do
   Partitioned tables on the WAL change feed (#140), against a real
   logical-replication stream.
 
+  A partitioned table is subscribable only through a publication created
+  `WITH (publish_via_partition_root = true)`: PostgreSQL then names the
+  topmost published ancestor itself on every change, resolved against the
+  catalog AS OF that change. Bier routes by exactly the relation pgoutput
+  names and never consults the current catalog, so DDL racing the
+  replication lag (ATTACH, DETACH) cannot misroute a row.
+
   The fixture is a two-level tree:
 
       orders            PARTITION BY LIST (region)
       ├── orders_eu     PARTITION BY RANGE (id)
       │   ├── orders_eu_low   [0, 1000)
       │   └── orders_eu_high  [1000, ∞)
-      └── orders_us     (created standalone with its columns in a DIFFERENT
-                          order, then ATTACHed)
+      └── orders_us     (created standalone with its columns in a different
+                          order, then ATTACHed; REPLICA IDENTITY FULL)
 
-  and two publications of the root, one per `publish_via_partition_root`
-  setting, because the two settings put changes on the wire under different
-  names: with it off (the default) pgoutput names the LEAF a row landed in,
-  with it on it names the root. Every test boots its own instance against
-  one of them (`@tag pub: :on`, default `:off`).
+  plus `staging`, a standalone table with the same columns, published but
+  not (yet) a partition. Three publications, one per test via
+  `@tag pub: ...` (default `:on`):
 
-  `orders_us`'s shuffled column order is deliberate. Partitions share their
-  parent's column names and types but not their attribute numbers, so the
-  Relation messages pgoutput sends for two leaves of one root list the same
-  columns in different orders — which is exactly what would make the
-  Buffer's per-table relation interning think the root's relation "changed"
-  every time consecutive changes came from different leaves.
+    * `:on`  — `orders` and `staging`, `publish_via_partition_root = true`;
+    * `:off` — `orders`, the default `publish_via_partition_root = false`;
+    * `:mid` — the intermediate `orders_eu` alone, via the root.
 
   Not async: real ports, real replication slots, DB-global publications.
   """
@@ -31,13 +33,13 @@ defmodule Bier.Wal.PartitionTest do
 
   alias Bier.SSETestClient
   alias Bier.TestPorts
-  alias Bier.Wal.Buffer
+  alias Bier.Wal.Authorize
 
   @moduletag :integration
 
   @schema "wal_partition_test"
-  @pub_off "wal_part_off"
-  @pub_on "wal_part_on"
+  @other_schema "wal_partition_other"
+  @pubs %{on: "wal_part_on", off: "wal_part_off", mid: "wal_part_mid"}
 
   setup context do
     # A dedicated connection just for setup/teardown DDL and mutations (see
@@ -45,9 +47,7 @@ defmodule Bier.Wal.PartitionTest do
     {:ok, db} =
       Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
 
-    Postgrex.query!(db, "DROP PUBLICATION IF EXISTS #{@pub_off}", [])
-    Postgrex.query!(db, "DROP PUBLICATION IF EXISTS #{@pub_on}", [])
-    Postgrex.query!(db, "DROP SCHEMA IF EXISTS #{@schema} CASCADE", [])
+    drop_all(db)
     Postgrex.query!(db, "CREATE SCHEMA #{@schema}", [])
 
     for sql <- [
@@ -62,8 +62,13 @@ defmodule Bier.Wal.PartitionTest do
           "CREATE TABLE #{@schema}.orders_us (note text, region text NOT NULL, id int NOT NULL)",
           "ALTER TABLE #{@schema}.orders ATTACH PARTITION #{@schema}.orders_us " <>
             "FOR VALUES IN ('us')",
-          "CREATE PUBLICATION #{@pub_off} FOR TABLE #{@schema}.orders",
-          "CREATE PUBLICATION #{@pub_on} FOR TABLE #{@schema}.orders " <>
+          "ALTER TABLE #{@schema}.orders_us REPLICA IDENTITY FULL",
+          "CREATE TABLE #{@schema}.staging (id int NOT NULL, region text NOT NULL, " <>
+            "note text, PRIMARY KEY (id, region))",
+          "CREATE PUBLICATION #{@pubs.on} FOR TABLE #{@schema}.orders, #{@schema}.staging " <>
+            "WITH (publish_via_partition_root = true)",
+          "CREATE PUBLICATION #{@pubs.off} FOR TABLE #{@schema}.orders",
+          "CREATE PUBLICATION #{@pubs.mid} FOR TABLE #{@schema}.orders_eu " <>
             "WITH (publish_via_partition_root = true)"
         ],
         do: Postgrex.query!(db, sql, [])
@@ -72,13 +77,19 @@ defmodule Bier.Wal.PartitionTest do
       {:ok, cleanup} =
         Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
 
-      Postgrex.query!(cleanup, "DROP PUBLICATION IF EXISTS #{@pub_off}", [])
-      Postgrex.query!(cleanup, "DROP PUBLICATION IF EXISTS #{@pub_on}", [])
-      Postgrex.query!(cleanup, "DROP SCHEMA IF EXISTS #{@schema} CASCADE", [])
+      drop_all(cleanup)
     end)
 
     port = TestPorts.free_port()
     name = :"wal_partition_#{System.unique_integer([:positive])}"
+
+    # `@tag auth: true` boots with `db_anon_role`, so an unauthenticated
+    # subscription runs as `postgrest_test_anonymous` and its column grants
+    # filter the frames.
+    auth =
+      if context[:auth],
+        do: [db_anon_role: "postgrest_test_anonymous", jwt_secret: String.duplicate("s", 32)],
+        else: []
 
     opts =
       Bier.ConformanceServer.base_opts()
@@ -87,17 +98,25 @@ defmodule Bier.Wal.PartitionTest do
         pool_size: 2,
         db_schemas: [@schema],
         db_channel_enabled: false,
-        events_publication: if(context[:pub] == :on, do: @pub_on, else: @pub_off),
+        events_publication: Map.fetch!(@pubs, context[:pub] || :on),
         events_heartbeat_interval: 50,
-        events_max_tx_events: Map.get(context, :events_max_tx_events, 10_000),
         router: [port: port, scheme: :http]
       )
+      |> Keyword.merge(auth)
 
     start_supervised!({Bier, opts})
     TestPorts.wait_until_listening(port)
     wait_wal_streaming(db, name)
 
     %{db: db, port: port, name: name}
+  end
+
+  defp drop_all(db) do
+    for pub <- Map.values(@pubs),
+        do: Postgrex.query!(db, "DROP PUBLICATION IF EXISTS #{pub}", [])
+
+    Postgrex.query!(db, "DROP SCHEMA IF EXISTS #{@schema} CASCADE", [])
+    Postgrex.query!(db, "DROP SCHEMA IF EXISTS #{@other_schema} CASCADE", [])
   end
 
   # Scoped to THIS instance's own slot — see
@@ -133,145 +152,186 @@ defmodule Bier.Wal.PartitionTest do
 
   defp sql!(db, sql), do: Postgrex.query!(db, sql, [])
 
-  describe "publish_via_partition_root = false (the default)" do
-    test "a leaf change reaches root subscribers named after the root, and leaf " <>
-           "subscribers named after the leaf, each with its own cursor",
-         %{db: db, name: name} do
-      register!(name, "orders")
-      register!(name, "orders_eu_low")
+  defp insert!(db, id, region, note),
+    do: sql!(db, "INSERT INTO #{@schema}.orders VALUES (#{id}, '#{region}', '#{note}')")
 
-      sql!(db, "INSERT INTO #{@schema}.orders (id, region, note) VALUES (1, 'eu', 'hello')")
+  # Every `{:bier_wal_event, ...}` for `table` up to and including the first
+  # one matching `stop?`, in arrival order.
+  defp events_until(table, stop?, acc \\ []) do
+    k = key(table)
 
-      assert_receive {:bier_wal_event, {@schema, "orders"}, root_cursor, root_event}, 5_000
-      assert_receive {:bier_wal_event, {@schema, "orders_eu_low"}, leaf_cursor, leaf_event}
-
-      assert root_event.kind == :insert
-      assert {root_event.relation.schema, root_event.relation.table} == key("orders")
-      assert root_event.row == %{"id" => "1", "region" => "eu", "note" => "hello"}
-
-      assert {leaf_event.relation.schema, leaf_event.relation.table} == key("orders_eu_low")
-      assert leaf_event.row == root_event.row
-
-      # Same commit, distinct sequence numbers: each copy is its own event
-      # in the cursor space, as a fanned-out TRUNCATE's copies are.
-      assert elem(root_cursor, 0) == elem(leaf_cursor, 0)
-      assert root_cursor != leaf_cursor
-
-      # The intermediate level is never a routing target: the root is the
-      # table a subscriber to the whole tree asked for.
-      refute_received {:bier_wal_event, {@schema, "orders_eu"}, _, _}
-    end
-
-    test "update and delete route to the root too", %{db: db, name: name} do
-      register!(name, "orders")
-      sql!(db, "INSERT INTO #{@schema}.orders (id, region, note) VALUES (5, 'us', 'a')")
-      assert_receive {:bier_wal_event, {@schema, "orders"}, _, %{kind: :insert}}, 5_000
-
-      sql!(db, "UPDATE #{@schema}.orders SET note = 'b' WHERE id = 5")
-      assert_receive {:bier_wal_event, {@schema, "orders"}, _, update}, 5_000
-      assert update.kind == :update and update.relation.table == "orders"
-      assert update.row["note"] == "b"
-
-      sql!(db, "DELETE FROM #{@schema}.orders WHERE id = 5")
-      assert_receive {:bier_wal_event, {@schema, "orders"}, _, delete}, 5_000
-      assert delete.kind == :delete and delete.relation.table == "orders"
-      # DEFAULT replica identity on a partitioned table: the key, (id, region).
-      assert delete.old == %{"id" => "5", "region" => "us"}
-    end
-
-    test "a truncate of the root reaches root subscribers exactly once", %{db: db, name: name} do
-      register!(name, "orders")
-      register!(name, "orders_us")
-
-      sql!(db, "TRUNCATE #{@schema}.orders")
-
-      assert_receive {:bier_wal_event, {@schema, "orders"}, _, truncate}, 5_000
-      assert truncate.kind == :truncate and truncate.relation.table == "orders"
-      assert_receive {:bier_wal_event, {@schema, "orders_us"}, _, %{kind: :truncate}}
-
-      # Every leaf in the TRUNCATE maps to the same root: one root copy,
-      # not one per leaf.
-      refute_receive {:bier_wal_event, {@schema, "orders"}, _, _}, 200
-    end
-
-    # Documented, not ideal: the TRUNCATE frame names one relation, so a
-    # single partition's truncate can only reach root subscribers as a
-    # truncate OF the root. The guide tells clients to read it as
-    # "re-bootstrap", which is right either way; withholding it would leave
-    # root subscribers holding rows that no longer exist.
-    test "a truncate of a single partition reaches root subscribers as the root",
-         %{db: db, name: name} do
-      register!(name, "orders")
-
-      sql!(db, "TRUNCATE #{@schema}.orders_us")
-
-      assert_receive {:bier_wal_event, {@schema, "orders"}, _, truncate}, 5_000
-      assert truncate.kind == :truncate and truncate.relation.table == "orders"
-    end
-
-    test "root history replays across leaves whose columns are ordered differently",
-         %{db: db, name: name} do
-      register!(name, "orders")
-      gen = Buffer.generation(name)
-
-      sql!(db, "INSERT INTO #{@schema}.orders (id, region, note) VALUES (1, 'eu', 'anchor')")
-      assert_receive {:bier_wal_event, {@schema, "orders"}, anchor, _}, 5_000
-
-      # Two more transactions, from leaves whose Relation messages list the
-      # same columns in different orders. If the root copies carried their
-      # leaf's column list verbatim, the Buffer would see the root's
-      # relation "change" between them and invalidate the root's history —
-      # a resume would read `history_evicted` instead of these two rows.
-      sql!(db, "INSERT INTO #{@schema}.orders (id, region, note) VALUES (2, 'us', 'us-row')")
-      assert_receive {:bier_wal_event, {@schema, "orders"}, _, _}, 5_000
-      sql!(db, "INSERT INTO #{@schema}.orders (id, region, note) VALUES (3, 'eu', 'eu-row')")
-      assert_receive {:bier_wal_event, {@schema, "orders"}, _, _}, 5_000
-
-      assert {:ok, [{_, _, us}, {_, _, eu}]} =
-               Buffer.replay_after(name, [key("orders")], anchor, gen)
-
-      assert {us.relation.table, us.row["note"]} == {"orders", "us-row"}
-      assert {eu.relation.table, eu.row["note"]} == {"orders", "eu-row"}
-    end
-
-    # Each fanned-out copy is a real event — its own cursor sequence, its
-    # own Buffer entry — so the cap counts copies, not wire messages, the
-    # same rule a TRUNCATE naming N relations already follows. Two rows into
-    # one leaf are FOUR events (leaf + root each) against a cap of 3.
-    @tag events_max_tx_events: 3
-    test "the per-transaction cap counts the fanned-out copies, and the overflow " <>
-           "reset reaches root subscribers",
-         %{db: db, name: name} do
-      register!(name, "orders")
-
-      sql!(
-        db,
-        "INSERT INTO #{@schema}.orders (id, region, note) VALUES (1, 'eu', 'x'), (2, 'eu', 'y')"
-      )
-
-      assert_receive {:bier_wal_reset, "transaction_too_large"}, 5_000
-      refute_received {:bier_wal_event, _, _, _}
+    receive do
+      {:bier_wal_event, ^k, _cursor, event} ->
+        acc = [event | acc]
+        if stop?.(event), do: Enum.reverse(acc), else: events_until(table, stop?, acc)
+    after
+      5_000 -> flunk("no matching event for #{table}; got #{inspect(Enum.reverse(acc))}")
     end
   end
 
-  describe "publish_via_partition_root = true" do
-    @describetag pub: :on
+  # `{old_kind, old}` per row id of the UPDATEs on `orders` up to the one
+  # for row `last_id`.
+  defp updates_until(last_id) do
+    id = Integer.to_string(last_id)
 
-    test "insert, update, delete and truncate reach root subscribers as the root",
+    events_until("orders", fn e -> e.kind == :update and e.row["id"] == id end)
+    |> Enum.filter(&(&1.kind == :update))
+    |> Map.new(&{&1.row["id"], {&1.old_kind, &1.old}})
+  end
+
+  defp consumer_pid(name) do
+    [{pid, _}] = Registry.lookup(Bier.Registry, {name, Bier.Wal.Consumer})
+    pid
+  end
+
+  describe "publish_via_partition_root = true" do
+    test "every level's changes reach root subscribers named after the root",
          %{db: db, name: name} do
       register!(name, "orders")
 
-      sql!(db, "INSERT INTO #{@schema}.orders (id, region, note) VALUES (1500, 'eu', 'a')")
-      sql!(db, "UPDATE #{@schema}.orders SET note = 'b' WHERE id = 1500")
-      sql!(db, "DELETE FROM #{@schema}.orders WHERE id = 1500")
+      # The deepest leaf (orders_eu_low, two levels down) and a shallow one.
+      insert!(db, 1, "eu", "deep")
+      insert!(db, 2, "us", "shallow")
+      sql!(db, "UPDATE #{@schema}.orders SET note = 'b' WHERE id = 1")
+      sql!(db, "DELETE FROM #{@schema}.orders WHERE id = 2")
       sql!(db, "TRUNCATE #{@schema}.orders")
 
-      for kind <- [:insert, :update, :delete, :truncate] do
+      for kind <- [:insert, :insert, :update, :delete, :truncate] do
         assert_receive {:bier_wal_event, {@schema, "orders"}, _, %{kind: ^kind} = event}, 5_000
         assert event.relation.table == "orders"
       end
 
       refute_received {:bier_wal_event, _, _, _}
+    end
+
+    # PostgreSQL decomposes an UPDATE that moves a row to another partition
+    # into a DELETE from the old leaf and an INSERT into the new one; via the
+    # root, both are reported as the root. There is no UPDATE frame to diff.
+    test "a cross-partition UPDATE arrives as DELETE then INSERT of the root",
+         %{db: db, name: name} do
+      register!(name, "orders")
+      insert!(db, 5, "eu", "moving")
+      assert_receive {:bier_wal_event, {@schema, "orders"}, _, %{kind: :insert}}, 5_000
+
+      sql!(db, "UPDATE #{@schema}.orders SET id = 1500 WHERE id = 5")
+
+      assert [delete, insert] =
+               events_until("orders", &(&1.kind == :insert))
+               |> Enum.map(&Map.take(&1, [:kind, :old, :row]))
+
+      assert delete == %{kind: :delete, old: %{"id" => "5", "region" => "eu"}}
+
+      assert insert == %{
+               kind: :insert,
+               row: %{"id" => "1500", "region" => "eu", "note" => "moving"}
+             }
+    end
+
+    # Two settings meet in `old`: the PARTITION's REPLICA IDENTITY decides
+    # what PostgreSQL logs, and the ROOT's decides how pgoutput labels it
+    # (`O` full / `K` key, from the relation it reports the change as). Bier
+    # keeps a `K` image to the root's identity columns, so the two must
+    # agree to see a full pre-image.
+    test "old follows the partition's logging and the root's REPLICA IDENTITY label",
+         %{db: db, name: name} do
+      register!(name, "orders")
+      insert!(db, 7, "eu", "eu-before")
+      insert!(db, 8, "us", "us-before")
+      sql!(db, "UPDATE #{@schema}.orders SET note = 'after' WHERE id IN (7, 8)")
+
+      updates = updates_until(8)
+
+      # orders_eu_low: DEFAULT identity, and the key did not change, so
+      # nothing was logged at all — no `old`, no `old_kind`.
+      assert updates["7"] == {nil, nil}
+      # orders_us is FULL, but the root is DEFAULT: labelled a key image and
+      # kept to the root's key columns.
+      assert updates["8"] == {:key, %{"id" => "8", "region" => "us"}}
+
+      sql!(db, "ALTER TABLE #{@schema}.orders REPLICA IDENTITY FULL")
+      sql!(db, "UPDATE #{@schema}.orders SET note = 'again' WHERE id IN (7, 8)")
+
+      updates = updates_until(8)
+      assert updates["8"] == {:full, %{"id" => "8", "region" => "us", "note" => "after"}}
+      assert updates["7"] == {nil, nil}
+
+      # The documented hazard of a mismatch: orders_eu_low (DEFAULT) logs
+      # only its key when the key changes, but the FULL root labels that a
+      # full image — so the never-logged `note` reads as NULL. The guide
+      # tells operators to give the root and every partition the same
+      # REPLICA IDENTITY.
+      sql!(db, "UPDATE #{@schema}.orders SET id = 9 WHERE id = 7")
+
+      assert updates_until(9)["9"] ==
+               {:full, %{"id" => "7", "region" => "eu", "note" => nil}}
+    end
+
+    # PostgreSQL never publishes a TRUNCATE that names only a partition when
+    # publishing via the root (pgoutput skips it). This pins that upstream
+    # behavior, because the guide documents it as a gap: if it ever changes,
+    # the guide must too.
+    test "a root TRUNCATE is published; a single partition's is not",
+         %{db: db, name: name} do
+      register!(name, "orders")
+
+      sql!(db, "TRUNCATE #{@schema}.orders_us")
+      insert!(db, 9, "eu", "sentinel")
+      sql!(db, "TRUNCATE #{@schema}.orders")
+
+      assert [%{kind: :insert}, %{kind: :truncate} = truncate] =
+               events_until("orders", &(&1.kind == :truncate))
+
+      assert truncate.relation.table == "orders"
+    end
+
+    # The leak #140's first design had: a row written to a standalone table
+    # BEFORE it was attached must never reach the root's subscribers, even
+    # when bier decodes it after the ATTACH. PostgreSQL names the relation as
+    # of each change, and bier must not second-guess it from the current
+    # catalog. Suspending the consumer forces bier to process the pre-ATTACH
+    # rows only after the ATTACH has committed.
+    test "a row written before ATTACH never reaches root subscribers", %{db: db, name: name} do
+      register!(name, "orders")
+      pid = consumer_pid(name)
+      :ok = :sys.suspend(pid)
+
+      try do
+        sql!(db, "INSERT INTO #{@schema}.staging VALUES (100, 'staging', 'staging-secret')")
+        sql!(db, "DELETE FROM #{@schema}.staging WHERE id = 100")
+
+        sql!(
+          db,
+          "ALTER TABLE #{@schema}.orders ATTACH PARTITION #{@schema}.staging " <>
+            "FOR VALUES IN ('staging')"
+        )
+
+        insert!(db, 101, "staging", "post-attach")
+      after
+        :sys.resume(pid)
+      end
+
+      events = events_until("orders", &(&1.kind == :insert and &1.row["note"] == "post-attach"))
+      assert [%{kind: :insert, relation: %{table: "orders"}}] = events
+      refute inspect(events) =~ "staging-secret"
+    end
+
+    test "a change made before DETACH still reaches root subscribers", %{db: db, name: name} do
+      register!(name, "orders")
+      pid = consumer_pid(name)
+      :ok = :sys.suspend(pid)
+
+      try do
+        insert!(db, 200, "us", "pre-detach")
+        sql!(db, "ALTER TABLE #{@schema}.orders DETACH PARTITION #{@schema}.orders_us")
+        # No longer a partition, and not published on its own: never streamed.
+        sql!(db, "INSERT INTO #{@schema}.orders_us (id, region, note) VALUES (201, 'us', 'x')")
+        insert!(db, 202, "eu", "sentinel")
+      after
+        :sys.resume(pid)
+      end
+
+      events = events_until("orders", &(&1.row["note"] == "sentinel"))
+      assert Enum.map(events, & &1.row["note"]) == ["pre-detach", "sentinel"]
     end
   end
 
@@ -280,7 +340,7 @@ defmodule Bier.Wal.PartitionTest do
       sock = SSETestClient.connect_sse(port, "/events?table=orders")
       SSETestClient.recv_until(sock, ": connected")
 
-      sql!(db, "INSERT INTO #{@schema}.orders (id, region, note) VALUES (1, 'eu', 'hi')")
+      insert!(db, 1, "eu", "hi")
 
       frame = SSETestClient.recv_until(sock, "data: {")
       assert frame =~ "event: orders\n"
@@ -290,42 +350,33 @@ defmodule Bier.Wal.PartitionTest do
       assert data["row"] == %{"id" => 1, "region" => "eu", "note" => "hi"}
     end
 
-    @tag pub: :on
-    test "a root subscription streams as the root with publish_via_partition_root on",
-         %{db: db, port: port} do
+    @tag auth: true
+    test "the root's column grants filter leaf-originated rows", %{db: db, port: port} do
+      sql!(db, "GRANT USAGE ON SCHEMA #{@schema} TO postgrest_test_anonymous")
+      sql!(db, "GRANT SELECT (id, region) ON #{@schema}.orders TO postgrest_test_anonymous")
+
       sock = SSETestClient.connect_sse(port, "/events?table=orders")
       SSETestClient.recv_until(sock, ": connected")
 
-      sql!(db, "INSERT INTO #{@schema}.orders (id, region, note) VALUES (2, 'us', 'on')")
+      insert!(db, 3, "us", "secret")
 
       frame = SSETestClient.recv_until(sock, "data: {")
-      assert frame =~ "event: orders\n"
-      assert decode_frame(frame)["row"] == %{"id" => 2, "region" => "us", "note" => "on"}
+      assert decode_frame(frame)["row"] == %{"id" => 3, "region" => "us"}
+      refute frame =~ "secret"
     end
 
-    test "a leaf subscription keeps streaming as the leaf", %{db: db, port: port} do
-      sock = SSETestClient.connect_sse(port, "/events?table=orders_eu_low")
-      SSETestClient.recv_until(sock, ": connected")
-
-      sql!(db, "INSERT INTO #{@schema}.orders (id, region, note) VALUES (3, 'eu', 'leaf')")
-
-      frame = SSETestClient.recv_until(sock, "data: {")
-      assert frame =~ "event: orders_eu_low\n"
-      assert decode_frame(frame)["table"] == "orders_eu_low"
-    end
-
-    test "Last-Event-ID resumes a root subscription from the root's own history",
+    test "Last-Event-ID resumes a root subscription from the root's history",
          %{db: db, port: port} do
       sock = SSETestClient.connect_sse(port, "/events?table=orders")
       SSETestClient.recv_until(sock, ": connected")
-      sql!(db, "INSERT INTO #{@schema}.orders (id, region, note) VALUES (10, 'eu', 'seen')")
+      insert!(db, 10, "eu", "seen")
       frame = SSETestClient.recv_until(sock, "data: {")
       [_, id] = Regex.run(~r/id: ([^\n]+)\n/, frame)
       :gen_tcp.close(sock)
 
       # Missed while disconnected, from two different leaves.
-      sql!(db, "INSERT INTO #{@schema}.orders (id, region, note) VALUES (11, 'us', 'missed-us')")
-      sql!(db, "INSERT INTO #{@schema}.orders (id, region, note) VALUES (12, 'eu', 'missed-eu')")
+      insert!(db, 11, "us", "missed-us")
+      insert!(db, 12, "eu", "missed-eu")
 
       sock2 = SSETestClient.connect_sse(port, "/events?table=orders&last_event_id=#{id}")
       replay = SSETestClient.recv_until(sock2, ~s("note":"missed-eu"))
@@ -335,37 +386,53 @@ defmodule Bier.Wal.PartitionTest do
         |> Regex.scan(replay)
         |> Enum.map(fn [_, name, _id, data] -> {name, JSON.decode!(data)["row"]["note"]} end)
 
-      # Only the root's copies: the leaf copies of the same changes live
-      # under the leaves' own keys and are not part of this subscription.
       assert frames == [{"orders", "missed-us"}, {"orders", "missed-eu"}]
     end
 
-    test "an intermediate partitioned table gets the uniform 404", %{port: port} do
-      assert refusal_body(port, "orders_eu") == refusal_body(port, "missing")
+    test "leaves and non-topmost partitioned tables get the uniform 404", %{port: port} do
+      missing = refusal_body(port, "missing")
+
+      for table <- ["orders_eu", "orders_eu_low", "orders_us"],
+          do: assert(refusal_body(port, table) == missing, table)
     end
   end
 
-  describe "subscribing to a leaf partition directly" do
-    test "is admitted with publish_via_partition_root off, where pgoutput names leaves",
-         %{db: db} do
-      assert {:ok, _} = Bier.Wal.Authorize.check(db, nil, @pub_off, [key("orders_eu_low")])
+  describe "authorization of a partitioned root" do
+    test "privileges are the root's, not a partition's", %{db: db} do
+      sql!(db, "GRANT USAGE ON SCHEMA #{@schema} TO postgrest_test_anonymous")
+      sql!(db, "GRANT USAGE ON SCHEMA #{@schema} TO postgrest_test_default_role")
+      sql!(db, "GRANT SELECT (id, note) ON #{@schema}.orders TO postgrest_test_anonymous")
+      sql!(db, "GRANT SELECT ON ALL TABLES IN SCHEMA #{@schema} TO postgrest_test_default_role")
+      sql!(db, "REVOKE SELECT ON #{@schema}.orders FROM postgrest_test_default_role")
+
+      assert {:ok, %{{@schema, "orders"} => cols}} =
+               Authorize.check(db, "postgrest_test_anonymous", @pubs.on, [key("orders")])
+
+      assert cols == MapSet.new(["id", "note"])
+
+      # SELECT on every partition but not the root: refused — a query
+      # through the root would be refused too.
+      assert {:error, {:events_unknown_table, "#{@schema}.orders"}} ==
+               Authorize.check(db, "postgrest_test_default_role", @pubs.on, [key("orders")])
     end
 
-    # pgoutput reports every change of the tree as the root, so a leaf
-    # subscription could only ever be silent: refused, through the same
-    # uniform shape as an unknown table, rather than admitted and starved.
-    @tag pub: :on
-    test "gets the uniform 404 with publish_via_partition_root on", %{port: port} do
-      assert refusal_body(port, "orders_eu_low") == refusal_body(port, "missing")
-      assert refusal_body(port, "orders_us") == refusal_body(port, "missing")
+    test "RLS is the root's: on the root it refuses, on a leaf alone it does not",
+         %{db: db} do
+      sql!(db, "ALTER TABLE #{@schema}.orders_us ENABLE ROW LEVEL SECURITY")
+      assert {:ok, _} = Authorize.check(db, nil, @pubs.on, [key("orders")])
+
+      sql!(db, "ALTER TABLE #{@schema}.orders ENABLE ROW LEVEL SECURITY")
+
+      assert {:error, {:events_unknown_table, "#{@schema}.orders"}} ==
+               Authorize.check(db, nil, @pubs.on, [key("orders")])
     end
 
-    # The refusal follows what pgoutput names, not the setting alone: a leaf
-    # published on its own, with no published ancestor, is reported as
-    # itself even with publish_via_partition_root on.
-    test "is admitted under publish_via_partition_root on when no ancestor is published",
-         %{db: db} do
-      pub = "wal_part_leaf_via_root"
+    # `TABLES IN SCHEMA` publishes the tables IN that schema: a root living in
+    # another schema is not published, so PostgreSQL names the leaves in the
+    # published schema even via the root (verified against PG 15-18).
+    # Authorization must match what pgoutput names.
+    test "a schema publication admits the leaves in it, not a root outside it", %{db: db} do
+      pub = "wal_part_schema"
 
       on_exit(fn ->
         {:ok, cleanup} =
@@ -374,107 +441,33 @@ defmodule Bier.Wal.PartitionTest do
         Postgrex.query!(cleanup, "DROP PUBLICATION IF EXISTS #{pub}", [])
       end)
 
+      sql!(db, "CREATE SCHEMA #{@other_schema}")
+
       sql!(
         db,
-        "CREATE PUBLICATION #{pub} FOR TABLE #{@schema}.orders_us " <>
+        "CREATE TABLE #{@other_schema}.events (id int, at date) PARTITION BY RANGE (at)"
+      )
+
+      sql!(
+        db,
+        "CREATE TABLE #{@schema}.events_2026 PARTITION OF #{@other_schema}.events " <>
+          "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')"
+      )
+
+      sql!(
+        db,
+        "CREATE PUBLICATION #{pub} FOR TABLES IN SCHEMA #{@schema} " <>
           "WITH (publish_via_partition_root = true)"
       )
 
-      assert {:ok, _} = Bier.Wal.Authorize.check(db, nil, pub, [key("orders_us")])
-    end
-  end
+      assert {:ok, _} = Authorize.check(db, nil, pub, [key("events_2026")])
 
-  describe "authorization of a partitioned root" do
-    alias Bier.Wal.Authorize
-
-    @all_columns MapSet.new(["id", "region", "note"])
-
-    test "a published root is admitted under either publish_via_partition_root setting",
-         %{db: db} do
-      for pub <- [@pub_off, @pub_on] do
-        assert {:ok, %{{@schema, "orders"} => @all_columns}} ==
-                 Authorize.check(db, nil, pub, [key("orders")])
-      end
-    end
-
-    test "an intermediate partitioned table is refused: changes route to the topmost root",
-         %{db: db} do
-      for pub <- [@pub_off, @pub_on] do
-        assert {:error, {:events_unknown_table, "#{@schema}.orders_eu"}} ==
-                 Authorize.check(db, nil, pub, [key("orders_eu")])
-      end
-    end
-
-    test "privileges are the root's, not a partition's", %{db: db} do
-      sql!(db, "GRANT USAGE ON SCHEMA #{@schema} TO postgrest_test_anonymous")
-      sql!(db, "GRANT USAGE ON SCHEMA #{@schema} TO postgrest_test_default_role")
-      sql!(db, "GRANT SELECT (id, note) ON #{@schema}.orders TO postgrest_test_anonymous")
-      sql!(db, "GRANT SELECT ON #{@schema}.orders_eu_low TO postgrest_test_default_role")
-
-      # SELECT on the root only: the root is admitted with exactly the
-      # root's column grants, and a leaf it holds no grant on is refused —
-      # querying the leaf directly would be refused too.
-      assert {:ok, %{{@schema, "orders"} => cols}} =
-               Authorize.check(db, "postgrest_test_anonymous", @pub_off, [key("orders")])
-
-      assert cols == MapSet.new(["id", "note"])
-
-      assert {:error, {:events_unknown_table, _}} =
-               Authorize.check(db, "postgrest_test_anonymous", @pub_off, [key("orders_eu_low")])
-
-      # SELECT on a leaf only: the leaf is admitted, the root is not — a
-      # grant on one partition must not open the whole tree.
-      assert {:ok, _} =
-               Authorize.check(db, "postgrest_test_default_role", @pub_off, [
-                 key("orders_eu_low")
-               ])
-
-      assert {:error, {:events_unknown_table, "#{@schema}.orders"}} ==
-               Authorize.check(db, "postgrest_test_default_role", @pub_off, [key("orders")])
-    end
-
-    test "RLS is the root's: on the root it refuses, on a leaf alone it does not",
-         %{db: db} do
-      sql!(db, "ALTER TABLE #{@schema}.orders_us ENABLE ROW LEVEL SECURITY")
-      assert {:ok, _} = Authorize.check(db, nil, @pub_off, [key("orders")])
-
-      sql!(db, "ALTER TABLE #{@schema}.orders ENABLE ROW LEVEL SECURITY")
-
-      assert {:error, {:events_unknown_table, "#{@schema}.orders"}} ==
-               Authorize.check(db, nil, @pub_off, [key("orders")])
-    end
-
-    test "membership is the root's own, not inferred from its published leaves", %{db: db} do
-      leaf_pub = "wal_part_leaf_only"
-      schema_pub = "wal_part_schema"
-      all_pub = "wal_part_all"
-
-      on_exit(fn ->
-        {:ok, cleanup} =
-          Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
-
-        for pub <- [leaf_pub, schema_pub, all_pub],
-            do: Postgrex.query!(cleanup, "DROP PUBLICATION IF EXISTS #{pub}", [])
-      end)
-
-      # Only one leaf published: its changes are on the wire, but the root's
-      # subscribers would see a fraction of the table, so the root is
-      # refused while the leaf itself stays subscribable.
-      sql!(db, "CREATE PUBLICATION #{leaf_pub} FOR TABLE #{@schema}.orders_us")
-
-      assert {:error, {:events_unknown_table, "#{@schema}.orders"}} ==
-               Authorize.check(db, nil, leaf_pub, [key("orders")])
-
-      assert {:ok, _} = Authorize.check(db, nil, leaf_pub, [key("orders_us")])
-
-      # The root reaches a publication through its schema, or through
-      # FOR ALL TABLES, as well as by name.
-      sql!(db, "CREATE PUBLICATION #{schema_pub} FOR TABLES IN SCHEMA #{@schema}")
-      sql!(db, "CREATE PUBLICATION #{all_pub} FOR ALL TABLES")
-
-      for pub <- [schema_pub, all_pub] do
-        assert {:ok, _} = Authorize.check(db, nil, pub, [key("orders")]), pub
-      end
+      assert {:error, _} = Authorize.check(db, nil, pub, [{@other_schema, "events"}])
+      # The partitioned `orders` lives IN the published schema: it is the
+      # topmost published ancestor of its leaves, so it is admitted and they
+      # are not.
+      assert {:ok, _} = Authorize.check(db, nil, pub, [key("orders")])
+      assert {:error, _} = Authorize.check(db, nil, pub, [key("orders_us")])
     end
   end
 
@@ -489,7 +482,7 @@ defmodule Bier.Wal.PartitionTest do
         decode_body: false
       )
 
-    assert resp.status == 404
+    assert resp.status == 404, "#{table}: #{resp.status}"
     assert resp.headers["proxy-status"] == ["Bier; error=BIER003"]
     String.replace(resp.body, "#{@schema}.#{table}", "T")
   end

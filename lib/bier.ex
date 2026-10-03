@@ -559,9 +559,7 @@ defmodule Bier do
         default: env(:events_max_tx_events, 10_000),
         doc: """
         Per-transaction event cap: larger transactions are dropped from the feed
-        and affected tables receive a `bier:reset` frame. It counts delivered
-        events, so a change to a partition counts twice when it is also
-        delivered to its partitioned root. A fixed, non-configurable
+        and affected tables receive a `bier:reset` frame. A fixed, non-configurable
         64 MiB cap on a transaction's decoded column values applies alongside it.
         """
       ]
