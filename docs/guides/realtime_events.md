@@ -328,8 +328,8 @@ header wins whenever both are present. A cursor that fails to parse
 the live head, same as supplying no cursor at all.
 
 A cursor that *does* parse but can no longer be honored — evicted from the
-ring buffer, or predating the current generation — gets an explicit control
-frame instead of a silent gap, then the live head:
+ring buffer, or minted before the consumer last restarted — gets an explicit
+control frame instead of a silent gap, then the live head:
 
 ```
 event: bier:reset
@@ -341,8 +341,8 @@ or table name. v1 defines exactly three reset reasons:
 
 | Reason | When |
 |---|---|
-| `stream_restarted` | The replication consumer (re)connected — a fresh temporary slot always begins at the current LSN — so every currently-open table subscriber gets this pushed live, mid-stream. |
-| `history_evicted` | A connection resumes with a cursor the ring buffer can no longer replay: it aged out, an oversized transaction dropped that table's history, or it predates the consumer's current generation. |
+| `stream_restarted` | The replication consumer (re)connected — a fresh temporary slot always begins at the current LSN. Every currently-open table subscriber gets this pushed live, mid-stream, and a connection that resumes with a cursor minted before that restart gets it too: everything before the restart is gone, for every subscriber. |
+| `history_evicted` | A connection resumes with a cursor from the current stream that the ring buffer can no longer replay: it aged out, an oversized transaction dropped that table's history, or a DDL changed the table's columns. History is still flowing — this subscription merely fell behind. |
 | `transaction_too_large` | A single transaction exceeded `events_max_tx_events`, or accumulated more than 64 MiB of event payload; its events are dropped rather than delivered, and every table it touched gets this pushed live (see [Limits](#limits)). |
 
 A subscription naming more than one table resets **as a whole** the moment

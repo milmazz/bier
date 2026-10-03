@@ -166,7 +166,7 @@ defmodule Bier.Wal.ConsumerTest do
     # discarded, and Buffer.drop marked the table as having lost history: a
     # cursor from before the overflow — same generation — now resets rather
     # than replaying anything.
-    assert Buffer.replay_after(name, [table], anchor, gen) == :reset
+    assert Buffer.replay_after(name, [table], anchor, gen) == {:reset, "history_evicted"}
   end
 
   test "boot fails fast when the publication does not exist" do

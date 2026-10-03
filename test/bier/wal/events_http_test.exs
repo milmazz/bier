@@ -645,7 +645,10 @@ defmodule Bier.Wal.EventsHttpTest do
     assert first =~ "event: bier:reset\n",
            "a pre-restart cursor must reset, not silently skip the gap: #{inspect(first)}"
 
-    assert decode_frame(first)["reason"] == "history_evicted"
+    # And the reason says WHY: the stream restarted (everything before it
+    # is gone cluster-wide), not that this subscription fell behind the
+    # ring — the two call for different recoveries (#150).
+    assert decode_frame(first)["reason"] == "stream_restarted"
   end
 
   test "replay does not leak filtered columns for a partial-grant role", %{db: db} do

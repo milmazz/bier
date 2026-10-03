@@ -27,8 +27,16 @@ defmodule Bier.Wal.Buffer do
   `replay_after/4`, so the generation guard only ever fires for a caller
   that remembered an older one. Any cursor below the floor (and, while
   unanchored, every cursor, since no ids have been issued yet) names
-  history this generation never had: `:reset`, never a quiet resume from
+  history this generation never had: a reset, never a quiet resume from
   post-restart events only.
+
+  A reset carries its **reason**, the same code the live stream uses, because
+  it is the client's only signal for how to recover: `"stream_restarted"`
+  when the cursor belongs to an earlier generation or epoch (everything
+  before the restart is gone, for every subscriber), `"history_evicted"`
+  when this generation did have the history but a subscribed table has
+  since lost it (ring eviction, `drop/2`, or a relation change) — this
+  subscription merely fell behind.
   """
 
   use GenServer
@@ -52,8 +60,9 @@ defmodule Bier.Wal.Buffer do
   def drop(name, tables), do: GenServer.call(Registry.via(name, __MODULE__), {:drop, tables})
 
   @doc """
-  History strictly after `cursor` for `tables`, or `:reset` when it cannot
-  be served in full.
+  History strictly after `cursor` for `tables`, or `{:reset, reason}` when
+  it cannot be served in full — `reason` being `"stream_restarted"` or
+  `"history_evicted"` (see the moduledoc).
 
   The ETS table is `:protected`, so the traversal deliberately runs in the
   CALLING process rather than inside the server. Replay is the one
@@ -86,7 +95,7 @@ defmodule Bier.Wal.Buffer do
       # path.
       case GenServer.call(server, plan) do
         {:ok, _tid, _rel_tid} -> {:ok, replayed}
-        :reset -> :reset
+        {:reset, _reason} = reset -> reset
       end
     end
   end
@@ -144,12 +153,21 @@ defmodule Bier.Wal.Buffer do
     {:reply, :ok, Enum.reduce(tables, state, &forget_table(&2, &1))}
   end
 
+  # The epoch checks come first and win: a cursor from an earlier
+  # generation or epoch has lost EVERYTHING before the restart, so even if a
+  # subscribed table also wrapped since, "the stream restarted" is the
+  # accurate (and the stronger) thing to tell the client. Only a cursor this
+  # generation could have served is a per-table `history_evicted`.
   def handle_call({:replay_plan, tables, cursor, generation}, _from, state) do
-    if generation != state.generation or before_floor?(state, cursor) or
-         Enum.any?(tables, &stale?(state, &1, cursor)) do
-      {:reply, :reset, state}
-    else
-      {:reply, {:ok, state.tid, state.rel_tid}, state}
+    cond do
+      generation != state.generation or before_floor?(state, cursor) ->
+        {:reply, {:reset, "stream_restarted"}, state}
+
+      Enum.any?(tables, &stale?(state, &1, cursor)) ->
+        {:reply, {:reset, "history_evicted"}, state}
+
+      true ->
+        {:reply, {:ok, state.tid, state.rel_tid}, state}
     end
   end
 

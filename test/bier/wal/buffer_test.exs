@@ -59,7 +59,7 @@ defmodule Bier.Wal.BufferTest do
     for n <- 1..4, do: Buffer.append(name, [{cursor(n), @orders, event(n)}])
 
     # Buffer holds cursors 3 and 4; cursor 1 predates retained history.
-    assert Buffer.replay_after(name, [@orders], cursor(1), gen) == :reset
+    assert Buffer.replay_after(name, [@orders], cursor(1), gen) == {:reset, "history_evicted"}
     assert {:ok, [_]} = Buffer.replay_after(name, [@orders], cursor(3), gen)
   end
 
@@ -79,7 +79,8 @@ defmodule Bier.Wal.BufferTest do
     {name, gen} = start!(10)
     :ok = Buffer.append(name, [{cursor(5), @orders, event(5)}])
 
-    assert Buffer.replay_after(name, [@orders], cursor(5), gen - 1) == :reset
+    assert Buffer.replay_after(name, [@orders], cursor(5), gen - 1) ==
+             {:reset, "stream_restarted"}
 
     new_gen = Buffer.new_generation(name)
     assert new_gen == gen + 1
@@ -103,7 +104,7 @@ defmodule Bier.Wal.BufferTest do
     # cursor minted before the last (re)start. Nothing has been appended
     # since the bump, so no id this Buffer could honor exists at all.
     new_gen = Buffer.new_generation(name)
-    assert Buffer.replay_after(name, [@orders], old, new_gen) == :reset
+    assert Buffer.replay_after(name, [@orders], old, new_gen) == {:reset, "stream_restarted"}
 
     # The first append after the bump anchors the epoch floor: a cursor
     # older than it belongs to the previous epoch and still resets, while
@@ -111,8 +112,10 @@ defmodule Bier.Wal.BufferTest do
     :ok =
       Buffer.append(name, [{cursor(9), @orders, event(9)}, {cursor(9, 1), @orders, event(10)}])
 
-    assert Buffer.replay_after(name, [@orders], old, new_gen) == :reset
-    assert Buffer.replay_after(name, [@orders], cursor(8), new_gen) == :reset
+    assert Buffer.replay_after(name, [@orders], old, new_gen) == {:reset, "stream_restarted"}
+
+    assert Buffer.replay_after(name, [@orders], cursor(8), new_gen) ==
+             {:reset, "stream_restarted"}
 
     assert {:ok, [{cursor(9, 1), @orders, event(10)}]} ==
              Buffer.replay_after(name, [@orders], cursor(9), new_gen)
@@ -137,7 +140,7 @@ defmodule Bier.Wal.BufferTest do
              Buffer.replay_after(name, [@items], cursor(1), gen)
 
     # A dropped table with no entries yet resets for every cursor.
-    assert Buffer.replay_after(name, [@orders], cursor(1), gen) == :reset
+    assert Buffer.replay_after(name, [@orders], cursor(1), gen) == {:reset, "history_evicted"}
 
     # Once a new entry lands it re-anchors the table: a cursor at-or-past it
     # is fine, anything older still resets.
@@ -150,7 +153,7 @@ defmodule Bier.Wal.BufferTest do
     # re-anchor were broken. cursor(8) sits above the floor and below the
     # re-anchored `oldest`, so only the per-table staleness check can
     # produce this reset.
-    assert Buffer.replay_after(name, [@orders], cursor(8), gen) == :reset
+    assert Buffer.replay_after(name, [@orders], cursor(8), gen) == {:reset, "history_evicted"}
   end
 
   test "replay re-attaches each table's interned relation" do
@@ -196,7 +199,7 @@ defmodule Bier.Wal.BufferTest do
     :ok = Buffer.append(name, [{cursor(2), @orders, event(3, @orders, ["id", "note", "extra"])}])
     :ok = Buffer.append(name, [{cursor(3), @orders, event(4, @orders, ["id", "note", "extra"])}])
 
-    assert Buffer.replay_after(name, [@orders], cursor(1), gen) == :reset
+    assert Buffer.replay_after(name, [@orders], cursor(1), gen) == {:reset, "history_evicted"}
 
     # `items` never changed, so its history survives — the invalidation is
     # per table, not a wholesale generation bump.

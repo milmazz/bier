@@ -24,8 +24,9 @@ defmodule Bier.Events do
   (as a header, or a `last_event_id` query param for clients that cannot set
   arbitrary headers — the header wins when both are present) has it replayed
   before rejoining the live stream. A cursor the buffer can no longer honor
-  — evicted by the ring, dropped, or from before a bier restart — gets an
-  explicit `bier:reset` frame instead of a silent gap; a missing or
+  gets an explicit `bier:reset` frame instead of a silent gap — reason
+  `history_evicted` when the ring evicted or dropped it, `stream_restarted`
+  when it is from before a bier (consumer) restart; a missing or
   malformed id just starts at the live head. Clients also get a `retry:`
   hint and periodic keepalive comments.
   """
@@ -352,8 +353,12 @@ defmodule Bier.Events do
     generation = Buffer.generation(name)
 
     case Buffer.replay_after(name, sub.tables, cursor, generation) do
-      :reset ->
-        payload = Bier.json_library().encode!(%{"reason" => "history_evicted"})
+      # The Buffer says WHY it cannot resume, and that reason is passed
+      # through verbatim: a client told `history_evicted` after a restart
+      # would recover as if only its own subscription fell behind, when in
+      # fact everything before the restart is gone (#150).
+      {:reset, reason} ->
+        payload = Bier.json_library().encode!(%{"reason" => reason})
 
         case chunk_or_halt(conn, SSE.frame("bier:reset", payload)) do
           {:live, conn} -> {:live, conn, 0}
