@@ -56,7 +56,12 @@ and this project adheres to
   A cross-partition `UPDATE` arrives as `DELETE` then `INSERT`. PostgreSQL
   does not publish a `TRUNCATE` of a single partition in this mode. That gap
   cannot be announced per event, so it is documented and logged as a
-  warning when the feed starts.
+  warning when the feed starts. A second warning at feed start names every
+  partition whose `REPLICA IDENTITY` differs from its partitioned table's.
+  `old` and `old_kind` are labelled and shaped from the partitioned table's
+  identity, so such a mismatch silently produces wrong `old` data: for
+  example, a `DEFAULT` partition under a `FULL` parent reports
+  never-logged columns as `null`.
 - `events_publication` is validated at boot: it must be a non-empty
   identifier of at most 63 bytes with no quotes, backslashes, or null bytes.
 - `bier:` is a reserved `event:` prefix: `events_channels` entries claiming

@@ -342,8 +342,11 @@ What the frames look like:
   IDENTITY`. A mismatch either hides logged columns (`FULL` partition,
   `DEFAULT` parent) or reports a column that was never logged as `null`
   under `"full"` (`DEFAULT` partition, `FULL` parent, when the key
-  changes). See [`REPLICA IDENTITY` and `old`](#replica-identity-and-old)
-  below.
+  changes). Bier checks this when the feed starts and logs a warning
+  naming every partition whose identity differs from its partitioned
+  table's. `USING INDEX` counts as a match only when the partition's
+  identity index is a partition of the parent's. See
+  [`REPLICA IDENTITY` and `old`](#replica-identity-and-old) below.
 * **`TRUNCATE` of the partitioned table** arrives as one `TRUNCATE` frame
   naming it.
 * **`TRUNCATE` of a single partition is never published.** PostgreSQL

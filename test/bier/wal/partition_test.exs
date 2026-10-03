@@ -38,6 +38,11 @@ defmodule Bier.Wal.PartitionTest do
   alias Bier.Wal.Authorize
 
   @moduletag :integration
+  # The fixture's orders_us is FULL under a DEFAULT root on purpose (the
+  # `old` tests need it), so every boot logs the REPLICA IDENTITY mismatch
+  # warning; keep it out of the suite's output. Tests that assert on boot
+  # logs capture them explicitly.
+  @moduletag capture_log: true
 
   @schema "wal_partition_test"
   @other_schema "wal_partition_other"
@@ -516,6 +521,59 @@ defmodule Bier.Wal.PartitionTest do
            "partitioned table" do
       assert boot_log(@pubs.on) =~ "TRUNCATE of a single partition"
       refute boot_log(@pubs.off) =~ "TRUNCATE of a single partition"
+    end
+  end
+
+  describe "REPLICA IDENTITY mismatch warning" do
+    # `old`/`old_kind` are labelled and shaped from the ROOT's identity while
+    # each partition logs by its own, so a mismatch produces wrong `old`
+    # data no event can flag. Named once at boot instead.
+    test "names partitions whose REPLICA IDENTITY differs from their root's", %{db: db} do
+      sql!(db, "ALTER TABLE #{@schema}.orders REPLICA IDENTITY FULL")
+
+      log = boot_log(@pubs.on)
+      assert log =~ "REPLICA IDENTITY differs"
+      assert log =~ "#{@schema}.orders (FULL)"
+      assert log =~ "#{@schema}.orders_eu_low (DEFAULT)"
+      assert log =~ "#{@schema}.orders_eu_high (DEFAULT)"
+      # orders_us is FULL like its root: not named.
+      refute log =~ "orders_us ("
+    end
+
+    test "is silent when the whole tree agrees, or nothing is published via the root",
+         %{db: db} do
+      sql!(db, "ALTER TABLE #{@schema}.orders_us REPLICA IDENTITY DEFAULT")
+      refute boot_log(@pubs.on) =~ "REPLICA IDENTITY differs"
+
+      sql!(db, "ALTER TABLE #{@schema}.orders REPLICA IDENTITY FULL")
+      refute boot_log(@pubs.off) =~ "REPLICA IDENTITY differs"
+    end
+
+    # USING INDEX matches only when the partition's identity index is a
+    # partition of the root's own identity index.
+    test "treats a USING INDEX on an unrelated index as a mismatch", %{db: db} do
+      sql!(db, "ALTER TABLE #{@schema}.orders_us REPLICA IDENTITY DEFAULT")
+      sql!(db, "CREATE UNIQUE INDEX orders_ident ON #{@schema}.orders (id, region)")
+      sql!(db, "ALTER TABLE #{@schema}.orders REPLICA IDENTITY USING INDEX orders_ident")
+
+      # Each partition's piece of the root's identity index: a match.
+      for {leaf, idx} <- [
+            {"orders_eu_low", "orders_eu_low_id_region_idx"},
+            {"orders_eu_high", "orders_eu_high_id_region_idx"},
+            {"orders_us", "orders_us_id_region_idx"}
+          ],
+          do: sql!(db, "ALTER TABLE #{@schema}.#{leaf} REPLICA IDENTITY USING INDEX #{idx}")
+
+      refute boot_log(@pubs.on) =~ "REPLICA IDENTITY differs"
+
+      # A standalone index on one partition: not the root's identity.
+      sql!(db, "CREATE UNIQUE INDEX orders_us_other ON #{@schema}.orders_us (region, id)")
+      sql!(db, "ALTER TABLE #{@schema}.orders_us REPLICA IDENTITY USING INDEX orders_us_other")
+
+      log = boot_log(@pubs.on)
+      assert log =~ "REPLICA IDENTITY differs"
+      assert log =~ "#{@schema}.orders_us (USING INDEX #{@schema}.orders_us_other)"
+      refute log =~ "orders_eu_low ("
     end
   end
 

@@ -46,6 +46,7 @@ defmodule Bier.Wal do
 
     warn_if_slots_tight(pool)
     warn_if_partition_truncates_unpublished(pool, publication)
+    warn_if_replica_identities_differ(pool, publication)
 
     :ok
   rescue
@@ -138,6 +139,97 @@ defmodule Bier.Wal do
 
     :ok
   end
+
+  # The other silent degradation of a via-root publication: wrong `old`
+  # data. Each partition LOGS its old tuple by its own REPLICA IDENTITY, but
+  # pgoutput LABELS it (`O` full / `K` key) from the relation it reports the
+  # change as — the root — and `Bier.Wal.Pgoutput` shapes a `K` image to the
+  # root's identity columns. A DEFAULT partition under a FULL root therefore
+  # reports every never-logged column as `null` in a `"full"` `old`; a FULL
+  # partition under a DEFAULT root loses the columns it did log. Nothing in
+  # the stream says which happened, so the mismatch is named at boot.
+  #
+  # Only leaves are compared: an intermediate partitioned table stores no
+  # rows and logs nothing. Any difference counts, including NOTHING, and a
+  # USING INDEX matches only when the leaf's identity index is a partition
+  # (at any depth) of the root's own identity index.
+  defp warn_if_replica_identities_differ(pool, publication) do
+    %{rows: rows} =
+      Postgrex.query!(
+        pool,
+        """
+        WITH roots AS (
+          SELECT r.oid, format('%I.%I', pt.schemaname, pt.tablename) AS name,
+                 r.relreplident AS ident,
+                 (SELECT i.indexrelid FROM pg_index i
+                  WHERE i.indrelid = r.oid AND i.indisreplident) AS ident_index
+          FROM pg_publication p
+          JOIN pg_publication_tables pt ON pt.pubname = p.pubname
+          JOIN pg_class r
+            ON r.relname = pt.tablename
+           AND r.relnamespace = to_regnamespace(quote_ident(pt.schemaname))
+          WHERE p.pubname = $1 AND p.pubviaroot AND r.relkind = 'p'
+        ),
+        leaves AS (
+          SELECT roots.name AS root, roots.ident AS root_ident,
+                 roots.ident_index AS root_index,
+                 format('%I.%I', n.nspname, l.relname) AS name,
+                 l.relreplident AS ident,
+                 (SELECT i.indexrelid FROM pg_index i
+                  WHERE i.indrelid = l.oid AND i.indisreplident) AS ident_index
+          FROM roots
+          CROSS JOIN LATERAL pg_partition_tree(roots.oid) t
+          JOIN pg_class l ON l.oid = t.relid
+          JOIN pg_namespace n ON n.oid = l.relnamespace
+          WHERE t.isleaf
+        )
+        SELECT root, root_ident::text, root_index::regclass::text,
+               array_agg(name || '|' || ident::text || '|' || COALESCE(ident_index::regclass::text, '')
+                         ORDER BY name)
+        FROM leaves
+        WHERE ident <> root_ident
+           OR (ident = 'i' AND NOT EXISTS (
+                 SELECT 1 FROM pg_partition_ancestors(ident_index) a
+                 WHERE a.relid = root_index))
+        GROUP BY root, root_ident, root_index
+        ORDER BY root
+        """,
+        [publication]
+      )
+
+    if rows != [] do
+      require Logger
+
+      trees =
+        Enum.map_join(rows, "; ", fn [root, ident, index, leaves] ->
+          named =
+            Enum.map_join(leaves, ", ", fn leaf ->
+              [name, leaf_ident, leaf_index] = String.split(leaf, "|", parts: 3)
+              "#{name} (#{identity_name(leaf_ident, leaf_index)})"
+            end)
+
+          "#{root} (#{identity_name(ident, index)}) -> #{named}"
+        end)
+
+      Logger.warning(
+        "Bier's WAL change feed: publication '#{publication}' publishes partitioned " <>
+          "tables via the partition root, and their partitions' REPLICA IDENTITY differs " <>
+          "from the root's: #{trees}. Each partition logs its old row by its own identity, " <>
+          "but `old` and `old_kind` are labelled and shaped from the root's, so `old` is " <>
+          "wrong for these partitions — e.g. a DEFAULT partition under a FULL root reports " <>
+          "never-logged columns as null on a key-changing UPDATE or a DELETE, and a FULL " <>
+          "partition under a DEFAULT root loses the columns it logged. Set the same " <>
+          "REPLICA IDENTITY on the partitioned table and every partition."
+      )
+    end
+
+    :ok
+  end
+
+  defp identity_name("d", _index), do: "DEFAULT"
+  defp identity_name("f", _index), do: "FULL"
+  defp identity_name("n", _index), do: "NOTHING"
+  defp identity_name("i", index), do: "USING INDEX #{index}"
 
   @doc """
   True once this instance's WAL feed has been given up on
