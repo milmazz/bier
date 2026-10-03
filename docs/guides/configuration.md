@@ -270,7 +270,9 @@ turns the endpoint into a WAL change feed as well as a NOTIFY bridge:
 `events_publication` names the publication to stream, `events_buffer_size`
 bounds the per-table `Last-Event-ID` resume window, and
 `events_max_tx_events` caps how many events a single transaction may
-contribute before it is dropped and an explicit reset is announced. See the
+contribute before it is dropped and an explicit reset is announced (a fixed,
+non-configurable 64 MiB cap on a transaction's decoded column values applies
+alongside it). See the
 [Realtime events guide](realtime_events.md#change-feed-wal).
 
 ### Schema-cache reload options

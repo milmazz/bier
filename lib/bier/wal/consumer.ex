@@ -10,7 +10,8 @@ defmodule Bier.Wal.Consumer do
   actually exists the Buffer generation is bumped and subscribers get an
   explicit `{:bier_wal_reset, ...}` rather than a silent gap — once per
   successful restart, never per failed slot-creation attempt. Transactions
-  larger than `events_max_tx_events` are dropped the same announced way
+  larger than `events_max_tx_events`, or carrying more than 64 MiB of decoded
+  column values, are dropped the same announced way
   (`"transaction_too_large"`).
 
   A `TRUNCATE` can name several relations at once; `Bier.Wal.Render.data/3`
@@ -365,6 +366,20 @@ defmodule Bier.Wal.Consumer do
   # data. It stops being belt-and-braces the moment the planned persistent-slot
   # opt-in lands: acking undelivered WAL there is a silent gap, exactly what
   # the feature's reset contract promises never to produce.
+  #
+  # Note for that feature (#153): `confirmed` is 0 only until the first
+  # Commit after init/1, and it is NOT reset on reconnect (postgrex keeps the
+  # module state across auto_reconnect, and handle_connect/1 resets only
+  # `slot_backoff`). So inside the first transaction of a fresh stream this
+  # acks either 0 or the previous stream's last end LSN. Both are server-side
+  # no-ops: walsender ignores a flush position of InvalidXLogRecPtr, and
+  # LogicalConfirmReceivedLocation never moves `confirmed_flush` backwards —
+  # an under-ack costs at most WAL retention until the first Commit, never
+  # data (the over-ack above is the dangerous direction). For an accurate
+  # `pg_stat_replication.flush_lsn`, a persistent-slot implementation should
+  # still seed `confirmed` on every (re)connect from the slot's
+  # `consistent_point` (CREATE_REPLICATION_SLOT) or `confirmed_flush_lsn`
+  # (reuse).
   defp ack_lsn(%{tx: nil}, wal_end), do: wal_end + 1
   defp ack_lsn(%{confirmed: confirmed}, _wal_end), do: confirmed
 

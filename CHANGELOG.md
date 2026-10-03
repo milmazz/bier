@@ -36,7 +36,11 @@ and this project adheres to
   malformed in HTTP/2 and is omitted there). An unknown, non-ordinary,
   unpublished, RLS-enabled, unexposed, or unprivileged table all refuse with
   the same 404 (`BIER003`), so the endpoint cannot be used as an existence
-  or privilege oracle.
+  or privilege oracle. (The refusals are byte-identical but not
+  time-identical: configuration-only refusals skip the database round trip
+  the catalog checks cost, a gap that reveals only configuration.) A
+  transaction over `events_max_tx_events`, or over a fixed 64 MiB of decoded
+  column values, is dropped with a `transaction_too_large` reset.
 - `events_publication` is validated at boot: it must be a non-empty
   identifier of at most 63 bytes with no quotes, backslashes, or null bytes.
 - `bier:` is a reserved `event:` prefix: `events_channels` entries claiming

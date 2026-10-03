@@ -28,7 +28,7 @@ children = [
 | `events_heartbeat_interval` | `15_000` | ms of silence before a `: keepalive` comment is sent. |
 | `events_publication` | `nil` | Name of an operator-created `PUBLICATION` to stream as a WAL change feed. |
 | `events_buffer_size` | `1024` | Ring-buffer entries retained per table, for `Last-Event-ID` resume. |
-| `events_max_tx_events` | `10_000` | Per-transaction event cap before the transaction is dropped and a reset is announced. |
+| `events_max_tx_events` | `10_000` | Per-transaction event cap before the transaction is dropped and a reset is announced. A fixed, non-configurable 64 MiB cap on a transaction's accumulated event payload applies alongside it (see [Limits](#limits)). |
 
 The endpoint is enabled as soon as *either* `events_channels` lists a
 channel or `events_publication` names a publication; with neither set the
@@ -216,6 +216,17 @@ replication routes changes through each child partition rather than the
 parent, so a partitioned table's own name is refused the same way a
 nonexistent one is.
 
+Every `table=` refusal is **byte-identical** — the same `404 BIER003` body
+for a given request, whatever the reason — but **not time-identical**. A name in a schema outside
+`db_schemas`, one using the reserved `bier:` prefix, and any `table=`
+request when `events_publication` is not configured are all refused without
+a database round trip; the existence, ordinary-table, publication, RLS,
+privilege and role-membership checks all run in one query and cost one. A client timing refusals can therefore tell
+"refused by the instance's configuration" from "checked against the
+database". That is a deliberate trade: the round-trip gap reveals only
+configuration the operator chose. The one query's own cost is not equalized
+either, but bier adds no data- or existence-dependent branch around it.
+
 ### Frame format
 
 `event:` is derived from the *resolved* schema, not from how the client
@@ -332,7 +343,7 @@ or table name. v1 defines exactly three reset reasons:
 |---|---|
 | `stream_restarted` | The replication consumer (re)connected — a fresh temporary slot always begins at the current LSN — so every currently-open table subscriber gets this pushed live, mid-stream. |
 | `history_evicted` | A connection resumes with a cursor the ring buffer can no longer replay: it aged out, an oversized transaction dropped that table's history, or it predates the consumer's current generation. |
-| `transaction_too_large` | A single transaction exceeded `events_max_tx_events`; its events are dropped rather than delivered, and every table it touched gets this pushed live (see [Limits](#limits)). |
+| `transaction_too_large` | A single transaction exceeded `events_max_tx_events`, or accumulated more than 64 MiB of event payload; its events are dropped rather than delivered, and every table it touched gets this pushed live (see [Limits](#limits)). |
 
 A subscription naming more than one table resets **as a whole** the moment
 any single one of them has lost history — not just that table. Client
@@ -362,6 +373,15 @@ privilege is still gone, gets the ordinary `BIER003` refusal (see
 
 ### Limits
 
+* **A transaction is also capped at 64 MiB of event payload** — the decoded
+  column values pgoutput sends, new plus old row images (an `UPDATE` under
+  `REPLICA IDENTITY FULL` counts both; unchanged TOASTed values and
+  `TRUNCATE` count zero), not the size of the rendered frames. It applies
+  independently of `events_max_tx_events` and is not configurable: it is a
+  process-heap backstop, so a transaction of few but very wide rows (large
+  `text`/`jsonb` values) can be dropped with `transaction_too_large` well
+  before it reaches the event cap. Size `events_max_tx_events` with that
+  ceiling in mind.
 * **One temporary replication slot per instance**, minted at boot and
   re-minted on every consumer restart; it counts against PostgreSQL's
   `max_replication_slots` (default `10`) like any other slot.
