@@ -194,6 +194,21 @@ defmodule Bier.Wal.PartitionTest do
       refute_receive {:bier_wal_event, {@schema, "orders"}, _, _}, 200
     end
 
+    # Documented, not ideal: the TRUNCATE frame names one relation, so a
+    # single partition's truncate can only reach root subscribers as a
+    # truncate OF the root. The guide tells clients to read it as
+    # "re-bootstrap", which is right either way; withholding it would leave
+    # root subscribers holding rows that no longer exist.
+    test "a truncate of a single partition reaches root subscribers as the root",
+         %{db: db, name: name} do
+      register!(name, "orders")
+
+      sql!(db, "TRUNCATE #{@schema}.orders_us")
+
+      assert_receive {:bier_wal_event, {@schema, "orders"}, _, truncate}, 5_000
+      assert truncate.kind == :truncate and truncate.relation.table == "orders"
+    end
+
     test "root history replays across leaves whose columns are ordered differently",
          %{db: db, name: name} do
       register!(name, "orders")

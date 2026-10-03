@@ -33,7 +33,7 @@ and this project adheres to
   publication exists, and the role has REPLICATION. A response carrying a
   table subscription also sends `Connection: close` over HTTP/1.1 (the WAL
   stream can end at any time, unlike a NOTIFY-only response; the header is
-  malformed in HTTP/2 and is omitted there). An unknown, non-ordinary,
+  malformed in HTTP/2 and is omitted there). An unknown, non-table,
   unpublished, RLS-enabled, unexposed, or unprivileged table all refuse with
   the same 404 (`BIER003`), so the endpoint cannot be used as an existence
   or privilege oracle. (The refusals are byte-identical but not
@@ -41,6 +41,18 @@ and this project adheres to
   the catalog checks cost, a gap that reveals only configuration.) A
   transaction over `events_max_tx_events`, or over a fixed 64 MiB of decoded
   column values, is dropped with a `transaction_too_large` reset.
+- WAL change feed: partitioned tables can be subscribed (#140).
+  `GET /events?table=orders` on a partitioned `orders` streams every
+  partition's changes named after the root (`event: orders`), whether or
+  not the publication sets `publish_via_partition_root`. With it off, each
+  partition change is also delivered to the leaf's own subscribers, as a
+  separate event with its own cursor. The root's privileges, column grants
+  and RLS flag decide the subscription. The root must itself be in the
+  publication, by name, through `TABLES IN SCHEMA`, or `FOR ALL TABLES`.
+  An intermediate partitioned table is refused with `404 BIER003`, and so
+  is a leaf partition when the publication publishes via the root
+  (PostgreSQL never names that leaf). A partition change counts twice
+  toward `events_max_tx_events` when it is fanned out.
 - `events_publication` is validated at boot: it must be a non-empty
   identifier of at most 63 bytes with no quotes, backslashes, or null bytes.
 - `bier:` is a reserved `event:` prefix: `events_channels` entries claiming
