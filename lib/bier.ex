@@ -30,7 +30,10 @@ defmodule Bier do
 
   use Supervisor
 
+  alias Bier.JWT.RoleClaim
   alias Bier.Registry
+
+  require Logger
 
   @type name :: term()
 
@@ -355,8 +358,10 @@ defmodule Bier do
         `$["https://example.com/roles"][0]` or
         `$.roles[?search(@, "^app_")]`. Every expression starts with the root
         identifier `$` — PostgREST v16.0 replaced the v14.12 leading-dot JSPath
-        DSL with standard JSON Path — and an expression that does not parse
-        aborts startup.
+        DSL with standard JSON Path. A value only the old DSL accepts (e.g.
+        `.roles[?(@ ^== "app_")]`) is still honored as deprecated syntax, as in
+        PostgREST v16.2+, and logs a deprecation warning at startup; an
+        expression neither grammar parses aborts startup.
         """
       ],
       jwt_cache_max_entries: [
@@ -614,6 +619,8 @@ defmodule Bier do
 
   @impl Supervisor
   def init(%Bier.Config{name: name} = conf) do
+    warn_deprecated_role_claim_key(conf)
+
     children =
       [
         # Per-instance Postgrex pool, registered via the Bier registry so that the
@@ -645,6 +652,15 @@ defmodule Bier do
         events_children(conf) ++ wal_consumer_children(conf) ++ admin_children(conf)
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  # PostgREST v16.2+ logs a deprecated-syntax jwt-role-claim-key once the app
+  # starts (App.hs `DeprecatedJSPathSyntaxObs`), whatever the log level.
+  defp warn_deprecated_role_claim_key(%Bier.Config{jwt_role_claim_path: path}) do
+    case RoleClaim.deprecation_warning(path) do
+      nil -> :ok
+      lines -> Logger.warning(Enum.join(lines, "\n"))
+    end
   end
 
   # When `db_channel_enabled` (the default, matching PostgREST), run the

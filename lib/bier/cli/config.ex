@@ -592,11 +592,26 @@ defmodule Bier.CLI.Config do
     end
   end
 
-  # jwt-role-claim-key parses as an RFC 9535 JSON Path (invalid is fatal, case
-  # 1711) and is re-serialized in the canonical form aeson-jsonpath's dumpQuery
-  # produces. The extra `--dump-config` escaping dumpJSPath applies on top of
+  # jwt-role-claim-key parses as an RFC 9535 JSON Path, or failing that as a
+  # deprecated JSPath (v16.2; neither is fatal, case 1711), and is
+  # re-serialized in the canonical form aeson-jsonpath's dumpQuery (or
+  # dumpDeprecatedJSPath) produces. The extra `--dump-config` escaping dumpJSPath applies on top of
   # that lives in `render_value/2`, because the escaped text is no longer a
   # re-parseable JSON Path and this value is also handed to `to_start_opts/1`.
+  @doc """
+  The warning lines loading `resolved` logs: today only the deprecated JSPath
+  notice for `jwt-role-claim-key` (PostgREST v16.2, Logger.hs
+  `DeprecatedJSPathSyntaxObs`), which upstream also writes to stderr under
+  `--dump-config` (case 11701).
+  """
+  @spec warnings(map()) :: [String.t()]
+  def warnings(resolved) do
+    case RoleClaim.parse(resolved["jwt-role-claim-key"]) do
+      {:ok, parsed} -> RoleClaim.deprecation_warning(parsed) || []
+      {:error, _} -> []
+    end
+  end
+
   defp canonicalize_role_claim_key(resolved) do
     case RoleClaim.parse(resolved["jwt-role-claim-key"]) do
       {:ok, path} ->
@@ -848,8 +863,10 @@ defmodule Bier.CLI.Config do
   # (Config.hs): dumpJSPath escapes `"` -> `\"` and `$` -> `$$` (JSPath.hs) on
   # the canonical query text — the `$$` being the config-file escape for a
   # literal `$`, so the dump round-trips through a config file — and `q` then
-  # quotes and escapes `"` a second time.
-  defp render_value("jwt-role-claim-key", value) when is_binary(value) do
+  # quotes and escapes `"` a second time. An RFC 9535 value always starts with
+  # `$`; anything else is a deprecated JSPath (v16.2, case 11700), which
+  # `dumpDeprecatedJSPath` renders with no extra escaping, so only `q` applies.
+  defp render_value("jwt-role-claim-key", "$" <> _rest = value) do
     value
     |> String.replace(~S("), ~S(\"))
     |> String.replace("$", "$$")

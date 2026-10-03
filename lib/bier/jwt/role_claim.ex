@@ -8,8 +8,8 @@ defmodule Bier.JWT.RoleClaim do
   package). The migration rules are:
 
     * every expression starts with the root identifier `$` — `.role` becomes
-      `$.role`, so the v14.12 spelling is now a parse error (conformance case
-      1711);
+      `$.role` (v16.0 made the v14.12 spelling a parse error; v16.2 accepts it
+      again as deprecated syntax, see "Deprecated JSPath fallback" below);
     * a member name containing anything but letters, digits and `_` needs the
       bracket selector — `.roles.write-role` becomes `$.roles["write-role"]`;
     * the DSL's string-comparison operators (`^==`, `==^`, `*==`) are gone,
@@ -90,6 +90,19 @@ defmodule Bier.JWT.RoleClaim do
   first selected node when it is a non-empty JSON string — the same rule the
   default `role` claim always had.
 
+  ## Deprecated JSPath fallback
+
+  PostgREST v16.2 (#5171) accepts the pre-v16 leading-dot DSL again, as
+  deprecated syntax: `parseRoleClaimKey` (Config.hs) tries RFC 9535 first and
+  falls back to the old grammar only when that fails. `parse/1` does the same
+  through `Bier.JWT.RoleClaim.Deprecated`, returning `{:deprecated, path}`;
+  `dump/1`, `extract/2` and `deprecation_warning/1` dispatch on that tag. A
+  value starting with `$` can never be deprecated syntax (the old grammar
+  starts with `.` or `[`), so the fallback only runs for values the RFC 9535
+  parser rejects outright — an RFC 9535 value using an unmodelled construct
+  keeps its "unsupported" message. A value neither grammar accepts fails with
+  the pinned "failed to parse" message (conformance case 1711).
+
   A filter applied to an *object* selects its members in ascending member-name
   order. RFC 9535 leaves that order implementation-defined but requires each
   implementation to pick one; upstream inherits `aeson`'s `KeyMap` traversal
@@ -117,8 +130,13 @@ defmodule Bier.JWT.RoleClaim do
 
   @type path :: [segment()]
 
+  @typedoc "A parsed `jwt-role-claim-key`: RFC 9535, or the deprecated DSL."
+  @type t :: path() | {:deprecated, Deprecated.path()}
+
   # Member-name shorthand: aeson-jsonpath's pDotted accepts an ASCII letter,
   # `_` or any codepoint >= 0x80 first, then those plus ASCII digits.
+  alias Bier.JWT.RoleClaim.Deprecated
+
   @dotted_name ~r/^[A-Za-z_\x{80}-\x{10FFFF}][A-Za-z0-9_\x{80}-\x{10FFFF}]*/u
   @index ~r/^-?[0-9]+/
   @number ~r/^-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?/
@@ -135,14 +153,15 @@ defmodule Bier.JWT.RoleClaim do
   }
 
   @doc """
-  Parse a `jwt-role-claim-key` JSON Path. Returns `{:ok, path}` or
-  `{:error, message}`.
+  Parse a `jwt-role-claim-key`. Returns `{:ok, path}` for an RFC 9535 JSON
+  Path, `{:ok, {:deprecated, path}}` for a value only the pre-v16 JSPath DSL
+  accepts, or `{:error, message}`.
 
   A *malformed* value gets PostgREST's pinned message (case 1711). A value that
   is well-formed RFC 9535 but uses a construct outside Bier's subset gets a
   distinct message naming the construct — see the moduledoc and #99.
   """
-  @spec parse(String.t()) :: {:ok, path()} | {:error, String.t()}
+  @spec parse(String.t()) :: {:ok, t()} | {:error, String.t()}
   def parse("$" <> rest = input) do
     case segments(rest, []) do
       {:ok, path} -> {:ok, path}
@@ -152,7 +171,31 @@ defmodule Bier.JWT.RoleClaim do
     {:unsupported, construct} -> unsupported_error(input, construct)
   end
 
-  def parse(input) when is_binary(input), do: parse_error(input)
+  def parse(input) when is_binary(input) do
+    case Deprecated.parse(input) do
+      {:ok, path} -> {:ok, {:deprecated, path}}
+      :error -> parse_error(input)
+    end
+  end
+
+  @doc """
+  The two lines PostgREST logs when `jwt-role-claim-key` uses the deprecated
+  JSPath syntax (Logger.hs `DeprecatedJSPathSyntaxObs`), or `nil` for an
+  RFC 9535 path. Both embed the value as `dump/1` renders it.
+  """
+  @spec deprecation_warning(t()) :: [String.t()] | nil
+  def deprecation_warning({:deprecated, _path} = parsed) do
+    value = dump(parsed)
+
+    [
+      "WARNING: The config `jwt-role-claim-key=#{value}` is using the deprecated JSPath syntax.",
+      "Update `jwt-role-claim-key=#{value}` to the new JSONPath syntax as support for " <>
+        "JSPath will be removed in a future release. See the migration guide on how to " <>
+        "update: https://github.com/PostgREST/postgrest/blob/main/CHANGELOG.md#migration-to-v16"
+    ]
+  end
+
+  def deprecation_warning(_path), do: nil
 
   defp parse_error(input), do: {:error, "failed to parse role-claim-key value (#{input})"}
 
@@ -460,9 +503,11 @@ defmodule Bier.JWT.RoleClaim do
   @doc """
   Render a parsed path as canonical RFC 9535 text, mirroring `aeson-jsonpath`'s
   `dumpQuery`: bracketed names and string literals use single quotes, indexes
-  render bare, and a filter renders as `[?<expr>]`.
+  render bare, and a filter renders as `[?<expr>]`. A deprecated-syntax path
+  renders the way `dumpDeprecatedJSPath` does (`Bier.JWT.RoleClaim.Deprecated.dump/1`).
   """
-  @spec dump(path()) :: String.t()
+  @spec dump(t()) :: String.t()
+  def dump({:deprecated, path}), do: Deprecated.dump(path)
   def dump(path), do: "$" <> Enum.map_join(path, "", &dump_segment/1)
 
   defp dump_segment({:name, :dot, name}), do: "." <> name
@@ -546,15 +591,23 @@ defmodule Bier.JWT.RoleClaim do
   @doc """
   Evaluate `path` against the decoded claims. RFC 9535 queries produce a
   nodelist; PostgREST takes its first element and uses it only when it is a
-  non-empty JSON string (missing, wrong type or empty yields `nil`).
+  non-empty JSON string (missing, wrong type or empty yields `nil`). A
+  deprecated-syntax path selects at most one value
+  (`evaluateDeprecatedJSPath`), held to the same rule.
   """
-  @spec extract(map(), path()) :: String.t() | nil
-  def extract(claims, path) do
-    case claims |> select_nodes(path, claims) |> List.first() do
-      role when is_binary(role) and role != "" -> role
-      _other -> nil
+  @spec extract(map(), t()) :: String.t() | nil
+  def extract(claims, {:deprecated, path}) do
+    case Deprecated.evaluate(claims, path) do
+      {:ok, role} -> role_or_nil(role)
+      :error -> nil
     end
   end
+
+  def extract(claims, path),
+    do: claims |> select_nodes(path, claims) |> List.first() |> role_or_nil()
+
+  defp role_or_nil(role) when is_binary(role) and role != "", do: role
+  defp role_or_nil(_other), do: nil
 
   defp select_nodes(node, path, root),
     do: Enum.reduce(path, [node], fn segment, nodes -> apply_segment(segment, nodes, root) end)

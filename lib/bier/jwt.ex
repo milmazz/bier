@@ -82,7 +82,7 @@ defmodule Bier.JWT do
   (`Bier.JWT.RoleClaim`) locating the role inside the claims; it defaults to
   PostgREST's `$.role`.
   """
-  @spec verify(String.t() | nil, String.t() | nil, String.t() | nil, RoleClaim.path()) ::
+  @spec verify(String.t() | nil, String.t() | nil, String.t() | nil, RoleClaim.t()) ::
           {:ok, :anonymous}
           | {:ok, %{role: String.t() | nil, claims: map(), claims_json: String.t()}}
           | {:error, atom() | {atom(), term()}}
@@ -155,7 +155,7 @@ defmodule Bier.JWT do
   Runs on every request — cache hit or not — so a cached token still starts
   failing once its `exp` passes.
   """
-  @spec validate_claims(map(), String.t() | nil, RoleClaim.path()) ::
+  @spec validate_claims(map(), String.t() | nil, RoleClaim.t()) ::
           {:ok, String.t() | nil} | {:error, atom() | {atom(), term()}}
   def validate_claims(claims, aud, role_claim_path) do
     with :ok <- validate_temporal(claims),

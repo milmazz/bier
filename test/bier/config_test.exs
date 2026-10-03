@@ -124,13 +124,16 @@ defmodule Bier.ConfigTest do
         Bier.Config.new!([jwt_role_claim_key: "role.other"], Bier.schema())
       end
 
-      # v16.0 retired the leading-dot spelling, so v14.12's default is now
-      # itself a fatal value (case 1711 pins exactly this).
+      # Neither RFC 9535 nor the deprecated JSPath DSL parses it (case 1711).
       assert_raise ArgumentError,
-                   ~r/failed to parse role-claim-key value \(\.role\.other\)/,
+                   ~r/failed to parse role-claim-key value \(@@\.role\.other\)/,
                    fn ->
-                     Bier.Config.new!([jwt_role_claim_key: ".role.other"], Bier.schema())
+                     Bier.Config.new!([jwt_role_claim_key: "@@.role.other"], Bier.schema())
                    end
+
+      # v16.2 accepts v14.12's leading-dot spelling again, as deprecated syntax.
+      assert %Bier.Config{jwt_role_claim_path: {:deprecated, [{:key, "role"}, {:key, "other"}]}} =
+               Bier.Config.new!([jwt_role_claim_key: ".role.other"], Bier.schema())
     end
   end
 

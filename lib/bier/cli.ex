@@ -68,7 +68,14 @@ defmodule Bier.CLI do
 
   defp apply_db_settings(_command, resolved, _env, _file), do: {:ok, resolved}
 
-  defp dispatch(:dump_config, resolved), do: ok(Config.dump(resolved))
+  # Loading the config can log warnings (a deprecated jwt-role-claim-key);
+  # PostgREST emits them while the config loads, so they reach stderr under
+  # --dump-config too (case 11701).
+  defp dispatch(:dump_config, resolved) do
+    warnings = for line <- Config.warnings(resolved), do: [line, "\n"]
+    %{ok(Config.dump(resolved)) | stderr: warnings}
+  end
+
   defp dispatch(:run, resolved), do: {:boot, resolved}
 
   # PostgREST Network.hs isSpecialHostName: bind-only aliases that cannot be

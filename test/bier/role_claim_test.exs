@@ -3,7 +3,9 @@ defmodule Bier.RoleClaimTest do
   # grammar, canonical dump form and claim extraction mirror PostgREST v16.0's
   # PostgREST.Config.JSPath, which delegates to `aeson-jsonpath` (RFC 9535).
   # v16.0 retired the v14.12 leading-dot JSPath DSL wholesale (issue #93), so
-  # every expression here starts with the root identifier `$`.
+  # every RFC 9535 expression starts with the root identifier `$`; v16.2
+  # (PostgREST#5171) accepts the old DSL again as a deprecated fallback, covered
+  # at the end of this file.
   use ExUnit.Case, async: true
 
   alias Bier.JWT.RoleClaim
@@ -70,10 +72,12 @@ defmodule Bier.RoleClaimTest do
   end
 
   describe "parse/1 rejects what PostgREST rejects, with the pinned message" do
-    test "the v14.12 leading-dot spelling is now an error (case 1711's value)" do
-      assert {:error, "failed to parse role-claim-key value (.role.other)"} =
-               RoleClaim.parse(".role.other")
+    test "a value neither RFC 9535 nor the deprecated DSL accepts (case 1711's value)" do
+      assert {:error, "failed to parse role-claim-key value (@@.role.other)"} =
+               RoleClaim.parse("@@.role.other")
 
+      # No leading `.`: invalid in both grammars (upstream's
+      # deprecatedinvalidroleclaimkeys).
       assert {:error, "failed to parse role-claim-key value (role.other)"} =
                RoleClaim.parse("role.other")
     end
@@ -125,8 +129,8 @@ defmodule Bier.RoleClaimTest do
     end
 
     test "a genuinely malformed value keeps case 1711's message verbatim" do
-      assert {:error, "failed to parse role-claim-key value (.role.other)"} =
-               RoleClaim.parse(".role.other")
+      assert {:error, "failed to parse role-claim-key value (@@.role.other)"} =
+               RoleClaim.parse("@@.role.other")
     end
   end
 
@@ -243,6 +247,106 @@ defmodule Bier.RoleClaimTest do
 
       big = Map.new(1..40, fn i -> {"k#{i}", "role#{i}"} end)
       assert extracted(%{"roles" => big}, ~S|$.roles[?search(@, "^role")]|) == "role1"
+    end
+  end
+
+  describe "the deprecated JSPath fallback (PostgREST v16.2, #5171)" do
+    test "parses keys, quoted keys, indexes and a trailing filter" do
+      assert {:ok, {:deprecated, [{:key, "postgrest"}, {:key, "a_role"}]}} =
+               RoleClaim.parse(".postgrest.a_role")
+
+      assert {:ok, {:deprecated, [{:key, "https://x.io/roles"}, {:index, 1}]}} =
+               RoleClaim.parse(~S|."https://x.io/roles"[1]|)
+
+      assert {:ok, {:deprecated, [{:key, "a$b@c_1"}]}} = RoleClaim.parse(".a$b@c_1")
+
+      for {op_text, op} <- [
+            {"==", :eq},
+            {"!=", :ne},
+            {"^==", :starts_with},
+            {"==^", :ends_with},
+            {"*==", :contains}
+          ] do
+        assert {:ok, {:deprecated, [{:key, "roles"}, {:filter, ^op, "r"}]}} =
+                 RoleClaim.parse(~s|.roles[?(@ #{op_text} "r")]|)
+      end
+
+      # Whitespace around the operator is optional.
+      assert {:ok, {:deprecated, [{:key, "roles"}, {:filter, :eq, "r"}]}} =
+               RoleClaim.parse(~S|.roles[?(@=="r")]|)
+    end
+
+    test "rejects what the deprecated grammar rejects, with case 1711's message" do
+      for bad <- [
+            ".",
+            ".a-b",
+            ".a[",
+            ".a[-1]",
+            ~S|.a["x"]|,
+            ~S|."unterminated|,
+            ~S|.roles[?(@ == "a")].next|,
+            ~S|.roles[?(@ < "a")]|,
+            ~S|.roles[?(@ == 'a')]|
+          ] do
+        assert {:error, "failed to parse role-claim-key value (" <> _} = RoleClaim.parse(bad),
+               "expected rejection of #{inspect(bad)}"
+      end
+    end
+
+    test "an RFC 9535 value never falls back, even when unsupported" do
+      assert {:ok, [{:name, :dot, "role"}]} = RoleClaim.parse("$.role")
+      assert {:error, "unsupported role-claim-key construct" <> _} = RoleClaim.parse("$..role")
+    end
+
+    test "dumps every key quoted and the filter as written" do
+      assert dumped(".roles.user_role") == ~S|."roles"."user_role"|
+      assert dumped(~S|.roles[?(@ ^== "role1")]|) == ~S|."roles"[?(@ ^== "role1")]|
+      assert dumped(~S|.a[0][?(@=="x")]|) == ~S|."a"[0][?(@ == "x")]|
+
+      # The dump re-parses to the same path (the --dump-config round trip).
+      for input <- [".roles.user_role", ~S|."a b"[2][?(@ *== "x y")]|] do
+        {:ok, parsed} = RoleClaim.parse(input)
+        assert RoleClaim.parse(RoleClaim.dump(parsed)) == {:ok, parsed}
+      end
+    end
+
+    test "extracts the role like evaluateDeprecatedJSPath" do
+      roles = %{"realm_access" => %{"roles" => ["other", "postgrest_test_author"]}}
+
+      for {expr, expected} <- [
+            {~S|.realm_access.roles[?(@ == "other")]|, "other"},
+            {~S|.realm_access.roles[?(@ != "other")]|, "postgrest_test_author"},
+            {~S|.realm_access.roles[?(@ ^== "postgrest_te")]|, "postgrest_test_author"},
+            {~S|.realm_access.roles[?(@ ==^ "author")]|, "postgrest_test_author"},
+            {~S|.realm_access.roles[?(@ *== "test")]|, "postgrest_test_author"},
+            {~S|.realm_access.roles[1]|, "postgrest_test_author"},
+            {~S|.realm_access.roles[2]|, nil},
+            {~S|.realm_access.missing|, nil}
+          ] do
+        assert extracted(roles, expr) == expected, "path #{expr}"
+      end
+
+      assert extracted(%{"postgrest" => %{"a_role" => "x"}}, ".postgrest.a_role") == "x"
+      assert extracted(%{"https://x.io/r" => "y"}, ~S|."https://x.io/r"|) == "y"
+
+      # A filter compares strings only: an object element never matches
+      # (case 11821), and a filter over a non-array selects nothing.
+      objects = %{"roles" => [%{"obj_key" => "obj_value"}]}
+      assert extracted(objects, ~S|.roles[?(@ == "string")]|) == nil
+      assert extracted(%{"roles" => "string"}, ~S|.roles[?(@ == "string")]|) == nil
+    end
+
+    test "only a deprecated path carries the deprecation warning" do
+      {:ok, parsed} = RoleClaim.parse(".roles.user_role")
+
+      assert [
+               "WARNING: The config `jwt-role-claim-key=.\"roles\".\"user_role\"` is using the deprecated JSPath syntax.",
+               "Update `jwt-role-claim-key=.\"roles\".\"user_role\"` to the new JSONPath syntax" <>
+                 _
+             ] = RoleClaim.deprecation_warning(parsed)
+
+      {:ok, parsed} = RoleClaim.parse("$.role")
+      assert RoleClaim.deprecation_warning(parsed) == nil
     end
   end
 

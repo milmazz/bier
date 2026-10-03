@@ -53,6 +53,26 @@ defmodule Bier.CLITest do
     assert IO.iodata_to_binary(result.stdout) =~ ~s|jwt-role-claim-key = "$$.aliased"|
   end
 
+  test "--dump-config keeps a deprecated jwt-role-claim-key and warns (cases 11700/11701)" do
+    result =
+      CLI.run(["--dump-config"],
+        env: Map.merge(@no_db, %{"PGRST_JWT_ROLE_CLAIM_KEY" => ~S|.roles[?(@ ^== "a$")]|})
+      )
+
+    assert result.exit == 0
+
+    # dumpDeprecatedJSPath quotes each key; unlike an RFC 9535 value, `$` is
+    # not doubled and `"` is escaped once (by `q` alone).
+    assert IO.iodata_to_binary(result.stdout) =~
+             ~S|jwt-role-claim-key = ".\"roles\"[?(@ ^== \"a$\")]"|
+
+    assert IO.iodata_to_binary(result.stderr) =~
+             ~S|WARNING: The config `jwt-role-claim-key=."roles"[?(@ ^== "a$")]` is using the deprecated JSPath syntax.|
+
+    # An RFC 9535 value warns about nothing.
+    assert IO.iodata_to_binary(CLI.run(["--dump-config"], env: @no_db).stderr) == ""
+  end
+
   test "--dump-config rejects an invalid jwt-role-claim-key (case 1711 shape)" do
     result = CLI.run(["--dump-config"], env: %{"PGRST_JWT_ROLE_CLAIM_KEY" => "role.other"})
     assert result.exit != 0

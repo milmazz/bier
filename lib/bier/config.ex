@@ -59,7 +59,7 @@ defmodule Bier.Config do
           jwt_secret: String.t() | nil,
           jwt_secret_is_base64: boolean(),
           jwt_aud: String.t() | nil,
-          jwt_role_claim_path: RoleClaim.path(),
+          jwt_role_claim_path: RoleClaim.t(),
           jwt_cache_max_entries: integer(),
           server_cors_allowed_origins: String.t() | nil,
           url_use_legacy_target_names: boolean(),
