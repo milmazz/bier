@@ -20,6 +20,26 @@ defmodule Bier.Wal.Consumer do
   member relation — each with its own cursor sequence and table key — and
   the per-transaction event cap counts every fanned-out event, not the
   single wire message.
+
+  ## Partitioned tables
+
+  With `publish_via_partition_root = false` (Postgres' default) pgoutput
+  names the LEAF partition a row landed in, never the partitioned table a
+  client queries through. So the consumer fans every change of a partition
+  out to two table keys: the leaf's own (unchanged — a leaf is an ordinary
+  table and subscribers to it keep getting its events) and the TOPMOST
+  root's, re-labelled with the root's name so `event:` and `"table"` say
+  `orders`, not `orders_2026`. Each copy gets its own cursor sequence, the
+  same way a TRUNCATE's per-relation copies do, and a TRUNCATE that names
+  several leaves of one root yields ONE root copy. With
+  `publish_via_partition_root = true` pgoutput already names the root, and
+  nothing is fanned out.
+
+  Which root a relation belongs to is resolved with `pg_partition_root/1`
+  once per Relation message — see `resolve_root/2` for where that query runs
+  and why — and cached on the relation in the decoder's registry, so a
+  re-sent Relation message (every new walsender session, and after any DDL
+  or ATTACH/DETACH that invalidates the relation) re-resolves it.
   """
 
   use Postgrex.ReplicationConnection
@@ -186,6 +206,7 @@ defmodule Bier.Wal.Consumer do
   @impl true
   def handle_data(<<?w, _start::64, _end::64, _clock::64, payload::binary>>, state) do
     {event, registry} = Pgoutput.decode(payload, state.registry)
+    registry = resolve_root(event, registry, state.conf)
     {:noreply, handle_event(event, %{state | registry: registry})}
   end
 
@@ -355,24 +376,155 @@ defmodule Bier.Wal.Consumer do
 
   # Truncate touches several relations at once; fan a copy out per table so
   # each delivered event matches Render's singular `%{kind: :truncate,
-  # relation: rel}` shape and gets its own cursor sequence.
+  # relation: rel}` shape and gets its own cursor sequence. Each relation
+  # routes to its partition root as well (`targets/1`), and the copies are
+  # de-duplicated by table key: truncating a partitioned table names every
+  # leaf, and its subscribers should hear ONE truncate of the root, not one
+  # per leaf.
   defp expand(%{kind: :truncate, relations: relations}, commit_at) do
-    for rel <- relations,
+    for rel <- truncate_targets(relations),
         do: {{rel.schema, rel.table}, %{kind: :truncate, relation: rel, commit_at: commit_at}}
   end
 
   defp expand(%{relation: rel} = event, commit_at) do
-    [{{rel.schema, rel.table}, Map.put(event, :commit_at, commit_at)}]
+    for target <- targets(rel),
+        do:
+          {{target.schema, target.table},
+           %{event | relation: target} |> Map.put(:commit_at, commit_at)}
   end
 
   # The table keys an accumulated event touches, for cap/overflow accounting.
-  # A truncate names N relations at once and is weighed accordingly, so
-  # cap/overflow accounting counts the fanned-out events, not the single
-  # wire message.
+  # It is `expand/2`'s key list exactly, so the cap counts what will be
+  # buffered and delivered — every fanned-out copy, a truncate's N relations
+  # and a partition's root copy alike — not the single wire message, and an
+  # overflow's reset reaches the root's subscribers too.
   defp event_tables(%{kind: :truncate, relations: relations}),
-    do: Enum.map(relations, &{&1.schema, &1.table})
+    do: relations |> truncate_targets() |> Enum.map(&{&1.schema, &1.table})
 
-  defp event_tables(%{relation: rel}), do: [{rel.schema, rel.table}]
+  defp event_tables(%{relation: rel}), do: rel |> targets() |> Enum.map(&{&1.schema, &1.table})
+
+  defp truncate_targets(relations),
+    do: relations |> Enum.flat_map(&targets/1) |> Enum.uniq_by(&{&1.schema, &1.table})
+
+  # The relations a change to `rel` is delivered as. `root` is set by
+  # `resolve_root/3` for any member of a partition tree:
+  #
+  #   * not in a tree (or never resolved): itself only;
+  #   * the root itself (`publish_via_partition_root = true` reports every
+  #     change this way): the root's canonical relation, in place of its
+  #     own — see `canonical_root/2` for why the two must be the same term;
+  #   * a partition: itself, then the root's canonical relation.
+  defp targets(%{root: %{oid: oid} = root, oid: oid}), do: [root]
+  defp targets(%{root: %{} = root} = rel), do: [rel, root]
+  defp targets(rel), do: [rel]
+
+  @root_sql """
+  SELECT r.oid, n.nspname, r.relname
+  FROM pg_class r JOIN pg_namespace n ON n.oid = r.relnamespace
+  WHERE r.oid = pg_partition_root($1::oid::regclass)
+  """
+
+  # Bounded retry for the root lookup: `@root_attempts` tries, sleeping
+  # `@root_backoff * attempt` ms between them, each query capped at
+  # `@root_timeout`. Worst case ~20s of blocked decoding, well inside
+  # `wal_sender_timeout` (60s by default), past which the server would drop
+  # the replication connection for not answering keepalives.
+  @root_attempts 4
+  @root_backoff 100
+  @root_timeout 5_000
+
+  # Resolves, on every Relation message, the topmost partition root of the
+  # relation it describes, and caches it on the registry entry as `:root`
+  # (`nil` for a relation outside any partition tree). `Pgoutput.decode/2`
+  # has just replaced that entry wholesale, so a re-sent Relation message
+  # always re-resolves: that is the cache invalidation, and it is exactly
+  # when the answer can change, since ATTACH/DETACH PARTITION invalidate the
+  # partition's relcache entry and make pgoutput re-send its Relation before
+  # the next change. `pg_partition_root/1` walks every level, so a leaf of a
+  # sub-partitioned table maps straight to the top.
+  #
+  # Where it runs: in this process, synchronously, through the INSTANCE
+  # POOL. The replication connection cannot run it — it is in COPY BOTH
+  # streaming mode, which admits no queries — and the root has to be known
+  # before the next data message, which may follow in the same TCP read, so
+  # it cannot be deferred to another process without holding up decoding
+  # anyway. The cost is one indexed catalog round trip per Relation message,
+  # i.e. per relation per walsender session (and after DDL), never per row.
+  #
+  # Failure: retried a few times on a short backoff (a burst of API traffic
+  # can briefly exhaust a small pool), then RAISE. Guessing "not a
+  # partition" would silently withhold every change of that leaf from its
+  # root's subscribers; raising restarts this process, and the restart's
+  # `stream_restarted` reset tells every subscriber history was lost — the
+  # feed's "announced, never silent" contract. A lookup that keeps failing
+  # keeps crashing, and `Bier.Wal.Supervisor`'s restart budget then stops
+  # the feed explicitly (`bier:closed` `feed_stopped`) rather than looping.
+  #
+  # A relation that no longer exists by the time it is looked up (dropped
+  # between the change and its decoding) resolves to no root at all: there
+  # is no tree left to route it to, and Postgres reports a vanished OID the
+  # same way as a plain table. The same lag applies to a DETACH racing its
+  # own last pre-detach changes; both windows are the replication lag.
+  defp resolve_root(%{kind: :relation, relation: %{oid: oid} = rel}, registry, conf) do
+    Map.put(registry, oid, Map.put(rel, :root, lookup_root(conf, rel, 1)))
+  end
+
+  defp resolve_root(_event, registry, _conf), do: registry
+
+  defp lookup_root(conf, rel, attempt) do
+    pool = Bier.Registry.via(conf.name, Postgrex)
+
+    case Postgrex.query(pool, @root_sql, [rel.oid], timeout: @root_timeout) do
+      {:ok, %{rows: []}} ->
+        nil
+
+      {:ok, %{rows: [[root_oid, schema, table]]}} ->
+        canonical_root(rel, {root_oid, schema, table})
+
+      {:error, error} ->
+        retry_root(conf, rel, attempt, error)
+    end
+  catch
+    # A pool checkout that cannot be served exits rather than returning.
+    :exit, reason -> retry_root(conf, rel, attempt, reason)
+  end
+
+  defp retry_root(conf, rel, attempt, reason) when attempt < @root_attempts do
+    Logger.warning(
+      "Bier WAL consumer for #{inspect(conf.name)} could not resolve the partition root " <>
+        "of #{rel.schema}.#{rel.table} (attempt #{attempt}): #{describe_reason(reason)}"
+    )
+
+    Process.sleep(@root_backoff * attempt)
+    lookup_root(conf, rel, attempt + 1)
+  end
+
+  defp retry_root(_conf, rel, _attempt, reason) do
+    raise "Bier WAL consumer could not resolve the partition root of " <>
+            "#{rel.schema}.#{rel.table}: #{describe_reason(reason)}"
+  end
+
+  defp describe_reason(%{__exception__: true} = error), do: Exception.message(error)
+  defp describe_reason(reason), do: inspect(reason)
+
+  # The relation a root copy is delivered with — the SAME term whichever
+  # leaf the change came from. Partitions share their root's column names
+  # and types but not its attribute order (a table created standalone and
+  # ATTACHed keeps its own), and their `key?` flags follow each leaf's own
+  # replica identity; carrying a leaf's column list verbatim would make the
+  # root's relation look different from one leaf to the next, and
+  # `Bier.Wal.Buffer` invalidates a table's history whenever its relation
+  # changes. So: the root's identity, and the columns reduced to what
+  # `Bier.Wal.Render` reads (name and type), in a fixed order. Row values are
+  # keyed by name, so the order carries no meaning.
+  defp canonical_root(rel, {root_oid, schema, table}) do
+    columns =
+      rel.columns
+      |> Enum.map(&%{name: &1.name, type_oid: &1.type_oid, type_mod: &1.type_mod})
+      |> Enum.sort_by(& &1.name)
+
+    %{oid: root_oid, schema: schema, table: table, columns: columns}
+  end
 
   # What to confirm in a standby status update. Outside a transaction
   # everything up to the server's `wal_end` has been decoded and fanned out,
