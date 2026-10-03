@@ -94,6 +94,7 @@ defmodule Bier.ConformanceServer do
                       [1491, 1493, 1498, 1499, 1654, 1677, 1678, 1680, 1682, 1703, 1742] ++
                       [1495, 1517, 1518, 1522, 1758, 1763, 1764] ++
                       [11800, 11802, 11803, 11804, 11805, 11807, 11818] ++
+                      [11819, 11820, 11821, 1690] ++
                       [1129, 1130, 1131, 1132, 1133, 1147, 1148, 1149] ++
                       [11115, 11116, 11117, 11118, 11119]
 
@@ -156,6 +157,9 @@ defmodule Bier.ConformanceServer do
   # no COMMENT; expose a comment-less schema so the shared "test" schema (which
   # has a comment needed by case 1656) is not affected.
   defp variant_extra_opts(1654), do: [db_schemas: ["openapi_no_comment"]]
+  # Case 1690 asserts the root document of a MIXED-CASE schema (PostgREST#5158,
+  # fixed in v16.4); expose the fixture's "SCHEMA_v3" alone.
+  defp variant_extra_opts(1690), do: [db_schemas: ["SCHEMA_v3"]]
   # Case 1764 asserts the no-JWT-secret 500 path (PGRST300); its instance must
   # run without a secret even though auth_opts configures one (db_anon_role
   # keeps auth applicable so resolve/JWT runs and yields PGRST300).
