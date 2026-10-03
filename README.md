@@ -386,15 +386,15 @@ and regenerate; never edit the generated `.ex` directly.
 
 ## Conformance
 
-Bier reproduces the request/response behavior of **PostgREST v16.0**, and is
-developed against a frozen conformance suite derived from it: 812 cases across
+Bier reproduces the request/response behavior of **PostgREST v16.4**, and is
+developed against a frozen conformance suite derived from it: 832 cases across
 17 areas — URL grammar, operators, select/embedding, filters, ordering,
 pagination, representations, mutations, RPC, auth, errors, headers, content
 negotiation, OpenAPI, config, observability, and domain representations.
 PostgREST is the ground truth — each case cites the exact upstream source line,
 and a difference from upstream is treated as a Bier bug.
 
-**All 807 active cases pass.** Five are excluded: three assert the HTTP reason
+**All 827 active cases pass.** Five are excluded: three assert the HTTP reason
 phrase, which the test client cannot read ([#42][]), and two pin upstream
 behavior Bier deliberately answers differently (see below).
 

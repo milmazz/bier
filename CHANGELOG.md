@@ -50,6 +50,18 @@ and this project adheres to
   Bier-only rules — PostgREST's comma-separated `db-schemas` cannot express an
   empty list — so they run at boot only and `--dump-config` still prints
   whatever it parsed (#143).
+- `jwt_role_claim_key` accepts the pre-v16 leading-dot JSPath syntax again
+  (`.roles.user_role`, `."https://x"[0]`, `.roles[?(@ ^== "app_")]`), as
+  PostgREST v16.2 ([PostgREST#5171][pgrst-5171]) does: a value the RFC 9535
+  parser rejects falls back to the old grammar — keys, quoted keys, indexes and
+  one trailing `==`/`!=`/`^==`/`==^`/`*==` string filter — and the role is the
+  first match. Such a value logs a deprecation `WARNING` at boot (also written
+  to stderr by `--dump-config`) and dumps with every key quoted
+  (`."roles"."user_role"`). A value neither grammar accepts stays fatal.
+- `jwt-cache-max-entries` can be set from the in-database config source
+  (`ALTER ROLE … SET pgrst.jwt_cache_max_entries`), matching PostgREST v16.4
+  ([PostgREST#5269][pgrst-5269]), whose `dbSettingsNames` previously listed a
+  key no parser reads in its place.
 
 PGRST200 ("Could not find a relationship…") errors now carry PostgREST's fuzzy
 `hint`, which was previously always `null`. It is a suggestion computed off the
@@ -144,6 +156,26 @@ and 11125 are recorded as deliberate divergences (#122, #138); 11125 pins
 upstream's tolerance of an unbalanced trailing `)` in `select`, which Bier
 rejects with 400 `PGRST100`.
 
+Conformance `spec/` bumped to `v16.4.0-suite.2`, which moves the upstream pin
+from PostgREST v16.0 to **v16.4** and takes the tree from 812 to 832 cases:
+the deprecated JSPath `jwt-role-claim-key` (11700–11706, 11819–11821, with
+1711 rewritten to a value neither grammar accepts), `jwt-cache-max-entries`
+via the in-database source (11707), the root document of a mixed-case schema
+(1690 — Bier already compared schema names as text rather than through an
+unquoted `::regnamespace` cast, so it needed only its harness variant), the
+unresolvable empty embeds (11141–11144) and the alias an embedded `42703`
+names (1531–1534). All 827 active cases pass.
+
+- An empty embed (`rel()`) whose relationship does not resolve now answers
+  400 `PGRST200`, like any other embed, instead of 200 — or, nested in a
+  spread, a phantom-column `42703`. PostgREST resolves every embed before it
+  looks at the embed's select list (cases 11141–11144, #161).
+- An embed's internal table alias is now PostgREST's `<table>_<depth>`, and a
+  many-to-many embed reads its bare table, so an unknown column inside an
+  embed names the same relation upstream's `42703` does
+  (`column factories_1.banana does not exist`) instead of a counter-based
+  name that changed with unrelated sibling embeds (cases 1531–1534, #162).
+
 - The in-database config read no longer overshoots its own acquisition
   deadline. Two shapes escaped it. An endpoint that accepts the TCP connection
   but never completes the Postgres handshake ran to ~15s against a 10s budget:
@@ -157,6 +189,9 @@ rejects with 400 `PGRST100`.
   pool down with `:brutal_kill`; both shapes finish in ~10-12s. The error also
   leads with the time actually spent rather than the ~1s queue drop of the last
   checkout (#149).
+
+[pgrst-5171]: https://github.com/PostgREST/postgrest/pull/5171
+[pgrst-5269]: https://github.com/PostgREST/postgrest/pull/5269
 
 ## v0.2.0 — 2026-08-23
 
