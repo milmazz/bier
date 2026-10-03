@@ -413,9 +413,11 @@ defmodule Bier.Events do
   # token that expired — or a user who was deprovisioned — would keep
   # receiving row images for as long as the socket stayed open. Every other
   # endpoint re-validates `exp` on every request; this is that check's
-  # equivalent for a long-lived stream. The client reconnects (EventSource
-  # does so on its own) and either presents a fresh token or gets the 401 it
-  # has been owed.
+  # equivalent for a long-lived stream. The stream ends with a `bier:closed`
+  # `token_expired` frame. An `EventSource` reconnect would resend the SAME
+  # (expired) token, get the 401 it has been owed, and give up for good, so
+  # a client has to open a NEW `EventSource` with a fresh token (and
+  # `last_event_id=` to resume).
   #
   # `@token_skew_seconds` mirrors `Bier.JWT`'s own allowance, so the stream
   # closes at exactly the moment a fresh request with the same token would
@@ -483,7 +485,7 @@ defmodule Bier.Events do
         recheck(conn, config, sub, delivered, start, metadata, verdict)
 
       :bier_token_expired ->
-        finish(conn, delivered, start, Map.put(metadata, :reason, :token_expired))
+        close_with(conn, :token_expired, delivered, start, metadata)
     after
       config.events_heartbeat_interval ->
         case chunk(conn, SSE.heartbeat()) do
@@ -537,9 +539,10 @@ defmodule Bier.Events do
   # and reusing the remembered map would keep streaming a column the role
   # can no longer see. `:revoked` closes the stream rather than keep leaking
   # rows — after one terminal `bier:closed` frame saying so (see
-  # `close_revoked/4`). `:keep` means the check could not be completed (pool contention,
-  # not evidence of lost privilege), so the subscription stands and the next
-  # reload gets another chance.
+  # `close_with/5`). `:keep` means the check could not be completed (a
+  # transient database error or pool contention, not evidence of lost
+  # privilege — see `Bier.Wal.notify_recheck/1`), so the subscription stands
+  # and the next reload gets another chance.
   #
   # A pure NOTIFY connection (`sub.tables == []`) is never registered as a
   # table subscriber, so it cannot receive any of these.
@@ -552,26 +555,31 @@ defmodule Bier.Events do
         loop(conn, config, sub, delivered, start, metadata)
 
       :revoked ->
-        close_revoked(conn, delivered, start, metadata)
+        close_with(conn, :revoked, delivered, start, metadata)
     end
   end
 
+  # Ends a stream the SERVER decided to end — `:revoked`, `:token_expired`,
+  # `:feed_stopped` — with one terminal `bier:closed` frame naming why.
+  #
   # A bare close is indistinguishable, from the client's side, from a
-  # network drop: `EventSource` reconnects on its own, re-authorization now
-  # fails with `404 BIER003`, and `EventSource` treats any non-2xx as fatal
-  # and stops retrying FOR GOOD — a silently dead subscription that a later
-  # re-grant cannot revive without a page reload. One terminal frame first
-  # lets a client tell the two apart and stop (or re-bootstrap once access
-  # is restored) deliberately.
+  # network drop, and `EventSource` answers a drop by reconnecting on its
+  # own. Each of these reconnects is doomed: re-authorization fails (`404
+  # BIER003`, or `400 42704` for a dropped role), the expired token is
+  # resent (`401`), or the feed is gone (`503 BIER004`) — and `EventSource`
+  # treats any response other than `200 text/event-stream` as fatal and
+  # stops retrying FOR GOOD: a silently dead subscription that nothing short
+  # of a page reload revives. The frame lets a client stop deliberately and
+  # decide what to do next (a fresh token, a re-grant, an operator).
   #
   # `bier:closed`, deliberately NOT `bier:reset`: a reset means "history is
   # gone, re-bootstrap and keep listening" and the connection stays open
-  # across it; this one means "you are no longer authorized" and the
-  # connection ends. No `id:` — there is nothing to resume. Best-effort: if
-  # the write fails the client is already gone, and the stream ends either
-  # way, so telemetry still reports the termination as `:revoked`.
-  defp close_revoked(conn, delivered, start, metadata) do
-    payload = Bier.json_library().encode!(%{"reason" => "revoked"})
+  # across it; this one means "this stream is over" and the connection
+  # ends. No `id:` — there is nothing to resume from it. Best-effort: if the
+  # write fails the client is already gone, and the stream ends either way,
+  # so telemetry still reports the termination under `reason`.
+  defp close_with(conn, reason, delivered, start, metadata) do
+    payload = Bier.json_library().encode!(%{"reason" => Atom.to_string(reason)})
 
     conn =
       case chunk(conn, SSE.frame("bier:closed", payload)) do
@@ -579,7 +587,7 @@ defmodule Bier.Events do
         {:error, _reason} -> conn
       end
 
-    finish(conn, delivered, start, Map.put(metadata, :reason, :revoked))
+    finish(conn, delivered, start, Map.put(metadata, :reason, reason))
   end
 
   defp finish(conn, delivered, start, metadata) do

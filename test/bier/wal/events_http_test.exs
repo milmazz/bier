@@ -302,22 +302,24 @@ defmodule Bier.Wal.EventsHttpTest do
     end
   end
 
-  # A revoked subscription's terminal `bier:closed` frame, then the close
-  # itself. Matched on the whole `data:` line, not just its start: the frame
-  # and Bandit's chunked terminator can arrive in one recv, so the frame has
-  # to be picked out of `raw` rather than decoded from its tail.
-  defp assert_revoked_then_closed(sock) do
+  # A terminal `bier:closed` frame carrying `reason`, then the close itself.
+  # Matched on the whole `data:` line, not just its start: the frame and
+  # Bandit's chunked terminator can arrive in one recv, so the frame has to
+  # be picked out of `raw` rather than decoded from its tail.
+  defp assert_revoked_then_closed(sock), do: assert_closed_then_closes(sock, "revoked")
+
+  defp assert_closed_then_closes(sock, reason) do
     raw = SSETestClient.recv_until(sock, ~r/data: \{[^\n]*\}\n/)
 
     assert [_, event, data] =
              Regex.run(~r/event: ([^\n]+)\n(?:id: [^\n]*\n)?data: ([^\n]*)\n/, raw),
            "expected a terminal control frame, got #{inspect(raw)}"
 
-    # Never `bier:reset` — that means "history is gone", not "you are no
-    # longer authorized" — and no `id:`: there is nothing to resume.
+    # Never `bier:reset` — that means "history is gone, keep listening", not
+    # "this stream is over" — and no `id:`: there is nothing to resume.
     assert event == "bier:closed"
     refute raw =~ ~r/^id:/m
-    assert JSON.decode!(data) == %{"reason" => "revoked"}
+    assert JSON.decode!(data) == %{"reason" => reason}
 
     assert_socket_closes(sock)
   end
@@ -745,6 +747,26 @@ defmodule Bier.Wal.EventsHttpTest do
     # The stream must then end rather than keep leaking rows to a subscriber
     # whose privileges were just revoked.
     assert_revoked_then_closed(sock)
+  end
+
+  test "a subscription outliving its JWT ends with bier:closed token_expired", %{db: db} do
+    %{port: port, name: auth_name} = start_auth_instance!()
+    wait_wal_streaming(db, auth_name)
+
+    # Still valid at connect thanks to the 30s skew allowance, and due to
+    # lapse about a second later — the stream's own deadline.
+    exp = System.system_time(:second) - 29
+
+    token =
+      SSETestClient.sign_hs256(%{"role" => "postgrest_test_anonymous", "exp" => exp}, @jwt_secret)
+
+    sock = SSETestClient.connect_sse(port, "/events?table=orders&access_token=#{token}")
+    SSETestClient.recv_until(sock, ": connected")
+
+    # The client is told why (#150): an EventSource reconnect would reuse
+    # the expired token, get a 401 it treats as fatal, and stop for good —
+    # so it has to know to open a NEW EventSource with a fresh token.
+    assert_closed_then_closes(sock, "token_expired")
   end
 
   test "a schema reload with unchanged grants leaves the stream open and delivering", %{db: db} do
