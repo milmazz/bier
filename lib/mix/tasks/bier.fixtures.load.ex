@@ -3,7 +3,12 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
   @moduledoc """
   Loads the conformance fixture database from the `spec/` submodule's numbered
   chain (see spec/fixtures/README.md). Idempotent. Connection parameters come
-  from the standard `PG*` environment variables.
+  from the standard `PG*` environment variables; `PGUSER` must be a superuser
+  (the chain creates roles and the PostGIS extension).
+
+  Destructive: it terminates every session still attached to the target
+  database — including any walsender holding a logical replication slot on
+  it — and then drops and recreates it. The evicted sessions are reported.
   """
   use Mix.Task
 
@@ -31,12 +36,50 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
     end
 
     Mix.shell().info("Loading conformance chain into #{cfg[:database]}")
-    run_psql!(psql, cfg, "postgres", ["-f", roles])
-    run_psql!(psql, cfg, "postgres", ["-c", ~s(DROP DATABASE IF EXISTS "#{cfg[:database]}";)])
+
+    # Evict whatever is still attached before the drop (#148): a plain DROP
+    # fails with "database ... is being accessed by other users" while any
+    # session remains — a previous run's backends that have not drained, a
+    # killed run, an open psql. Nothing evicted had durable work: the database
+    # is destroyed by the same statement. It also ends a CONCURRENT run's
+    # sessions, so the count is reported rather than evicted silently.
+    #
+    # WITH (FORCE) terminates the attached sessions and drops in one statement,
+    # but refuses a database with an ACTIVE logical replication slot, which a
+    # Bier.Wal.Consumer walsender from a killed run can still hold.
+    # Terminating those walsenders first, waiting up to 5s for each to exit,
+    # releases their temporary slots. The 2-argument pg_terminate_backend
+    # needs PostgreSQL 14+ (WITH (FORCE) alone is 13+); the suite requires 15+.
+    db_literal = quote_literal(cfg[:database])
+    db_ident = quote_ident(cfg[:database])
+
+    attached =
+      run_psql!(psql, cfg, "postgres", [
+        "-X",
+        "-At",
+        "-c",
+        "SELECT count(*) FROM pg_stat_activity " <>
+          "WHERE datname = #{db_literal} AND pid <> pg_backend_pid();"
+      ])
+      |> String.trim()
+
+    if attached not in ["", "0"] do
+      Mix.shell().info("Evicting #{attached} session(s) still attached to #{cfg[:database]}")
+    end
 
     run_psql!(psql, cfg, "postgres", [
       "-c",
-      ~s(CREATE DATABASE "#{cfg[:database]}" TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C';)
+      "SELECT pg_terminate_backend(active_pid, 5000) FROM pg_replication_slots " <>
+        "WHERE database = #{db_literal} AND active_pid IS NOT NULL;"
+    ])
+
+    run_psql!(psql, cfg, "postgres", ["-c", "DROP DATABASE IF EXISTS #{db_ident} WITH (FORCE);"])
+
+    run_psql!(psql, cfg, "postgres", ["-f", roles])
+
+    run_psql!(psql, cfg, "postgres", [
+      "-c",
+      "CREATE DATABASE #{db_ident} TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C';"
     ])
 
     Enum.each(rest, &run_psql!(psql, cfg, cfg[:database], ["-f", &1]))
@@ -44,6 +87,12 @@ defmodule Mix.Tasks.Bier.Fixtures.Load do
   end
 
   # --- helpers -------------------------------------------------------------
+
+  # The database name is operator input (PGDATABASE) spliced into SQL that
+  # psql runs: quote it as a literal or an identifier, doubling the quote
+  # character, so a name like `o'brien` or `a"b` stays one name.
+  defp quote_literal(name), do: "'" <> String.replace(name, "'", "''") <> "'"
+  defp quote_ident(name), do: ~s(") <> String.replace(name, ~s("), ~s("")) <> ~s(")
 
   # Connection params from the standard PG* environment variables (CI sets
   # PGUSER/PGPASSWORD/PGHOST/PGPORT), defaulting to a local `bier_test`. Read

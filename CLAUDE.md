@@ -29,7 +29,9 @@ mix precommit         # run every CI gate (format/audit/compile/credo/docs/test)
 ```
 
 `mix test` is aliased to `["bier.fixtures.load", "test"]` (`mix.exs`), so it
-drops+recreates a local `bier_test` PostgreSQL database and runs the `spec/`
+drops+recreates a local `bier_test` PostgreSQL database (force-terminating every
+session still attached to it, e.g. a killed run or an open `psql`, #148) and
+runs the `spec/`
 submodule's numbered fixture chain (`spec/fixtures/01_roles.sql` through
 `07_analyze.sql`) before running. A reachable local Postgres is required; see
 `docs/CONFORMANCE_IMPL.md` and `spec/HARNESS.md` for the wiring.

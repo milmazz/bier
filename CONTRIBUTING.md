@@ -49,8 +49,9 @@ mix test test/path/to/file_test.exs:LINE  # a single test
 mix test --only area:operators            # one conformance area
 ```
 
-`mix test` is aliased to `["bier.fixtures.load", "test"]`: it drops and
-recreates a local `bier_test` database and runs the `spec/` submodule's
+`mix test` is aliased to `["bier.fixtures.load", "test"]`: it force-drops
+(terminating every session still attached, including one you have open in
+`psql`) and recreates a local `bier_test` database and runs the `spec/` submodule's
 numbered fixture chain (`spec/fixtures/01_roles.sql` through
 `07_analyze.sql`) before running, so it is always safe to re-run.
 

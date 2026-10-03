@@ -185,8 +185,14 @@ area that needs a new or changed object gets that change **upstream**, in
 
 ### 2.3 How the loader runs
 - A `Mix.Task` (`lib/mix/tasks/bier.fixtures.load.ex`, namespaced
-  `mix bier.fixtures.load`) that: runs `spec/fixtures/01_roles.sql` against the
-  `postgres` maintenance DB, drops+recreates `bier_test` (pinned to
+  `mix bier.fixtures.load`) that: first evicts whatever is still attached to
+  `bier_test` — reports how many sessions it found, terminates any walsender
+  holding an active logical replication slot on it, then
+  `DROP DATABASE ... WITH (FORCE)`, which ends every remaining session (any one
+  of them otherwise fails a plain drop with "being accessed by other users",
+  #148; it also ends a concurrent run's sessions, so never run two suites at
+  once) — then runs `spec/fixtures/01_roles.sql` against the `postgres`
+  maintenance DB, recreates `bier_test` (pinned to
   `TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`, per
   `spec/HARNESS.md` §1), then runs every remaining `spec/fixtures/0N_*.sql`
   file, in sorted order, against it via `psql`. It is a pure **chain
