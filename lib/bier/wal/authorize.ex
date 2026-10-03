@@ -10,10 +10,32 @@ defmodule Bier.Wal.Authorize do
   endpoint cannot be used as an existence oracle (the #81 lesson): callers
   can't distinguish "doesn't exist" from "exists but you can't see it".
 
-  Only ordinary tables (`relkind = 'r'`) are subscribable: views, foreign
-  tables and — deliberately, in v1 — partitioned parents all fail the same
-  way, since WAL routes changes per child partition, so subscribing to the
-  parent would silently deliver nothing.
+  Ordinary tables (`relkind = 'r'`) and partitioned tables (`'p'`) are
+  subscribable; views and foreign tables fail the same uniform way. A
+  partitioned table is answered for as a whole, the way querying it is:
+
+    * **Privileges, RLS and column grants are the root's own.** Querying
+      through the root applies the root's grants and policies, never a
+      partition's, so a grant on one leaf does not open the tree and RLS on
+      a leaf alone does not close it.
+    * **Membership is the root's own too.** It is published when the root
+      itself is in the publication — by name (`pg_publication_rel`),
+      through its schema (`TABLES IN SCHEMA`), or `FOR ALL TABLES` — which
+      is when Postgres publishes every one of its partitions. It is NOT read
+      off `pg_publication_tables`: with `publish_via_partition_root = false`
+      that view lists the leaves instead of the root, and a publication of
+      only some leaves would hand root subscribers part of a table.
+    * **Only the topmost root.** `Bier.Wal.Consumer` routes every partition
+      change to its topmost root (`pg_partition_root`), so an intermediate
+      partitioned table — itself a partition — would never receive a thing.
+      Refused rather than admitted and left silent.
+
+  An ordinary table keeps the `pg_publication_tables` test, and for a leaf
+  partition that is exactly right: the view lists what pgoutput names. With
+  `publish_via_partition_root = true` it lists the root rather than the
+  leaves, and pgoutput never names a leaf either, so a leaf subscription —
+  which could only ever be silent — is refused there, while with the
+  setting off the leaf is listed and keeps streaming its own changes.
 
   The role must also be one the authenticator may actually assume. Every
   other endpoint gets that check from Postgres for free, because
@@ -30,16 +52,27 @@ defmodule Bier.Wal.Authorize do
 
   @sql """
   SELECT t.schema, t.table,
-         (pt.pubname IS NOT NULL) AS published,
+         COALESCE(CASE c.relkind
+           WHEN 'r' THEN EXISTS (
+             SELECT 1 FROM pg_publication_tables pt
+             WHERE pt.pubname = $1 AND pt.schemaname = t."schema"
+               AND pt.tablename = t."table")
+           WHEN 'p' THEN NOT c.relispartition AND EXISTS (
+             SELECT 1 FROM pg_publication p
+             WHERE p.pubname = $1
+               AND (p.puballtables
+                    OR EXISTS (SELECT 1 FROM pg_publication_rel pr
+                               WHERE pr.prpubid = p.oid AND pr.prrelid = c.oid)
+                    OR EXISTS (SELECT 1 FROM pg_publication_namespace pn
+                               WHERE pn.pnpubid = p.oid AND pn.pnnspid = c.relnamespace)))
+         END, false) AS published,
          COALESCE(c.relrowsecurity, false) AS rls,
          COALESCE(cols.names, '{}') AS selectable
   FROM unnest($2::text[], $3::text[]) AS t("schema", "table")
   LEFT JOIN pg_class c
          ON c.relname = t."table"
         AND c.relnamespace = to_regnamespace(quote_ident(t."schema"))
-        AND c.relkind = 'r'
-  LEFT JOIN pg_publication_tables pt
-         ON pt.pubname = $1 AND pt.schemaname = t."schema" AND pt.tablename = t."table"
+        AND c.relkind = ANY('{r,p}')
   LEFT JOIN LATERAL (
     SELECT array_agg(a.attname ORDER BY a.attnum) AS names
     FROM pg_attribute a

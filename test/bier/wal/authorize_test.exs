@@ -20,29 +20,12 @@ defmodule Bier.Wal.AuthorizeTest do
     Postgrex.query!(db, "CREATE TABLE #{@schema}.hidden (id int)", [])
     Postgrex.query!(db, "CREATE TABLE #{@schema}.locked (id int)", [])
     Postgrex.query!(db, "ALTER TABLE #{@schema}.locked ENABLE ROW LEVEL SECURITY", [])
-    # A partitioned parent exercises the `relkind = 'r'` filter specifically:
-    # unlike a view (which Postgres refuses to add to a publication at all,
-    # so it can only ever fail the "not published" gate), a partitioned
-    # parent CAN be published — and subscribing to it would then deliver
-    # nothing, because WAL routes its changes through the child partitions.
-    # The view is kept unpublished, covering the other path to the same
-    # uniform refusal.
+    # A view: Postgres refuses to add one to a publication at all, so it can
+    # only ever fail the "not published" gate. Partitioned tables, which
+    # pass the relkind filter too, are covered in `Bier.Wal.PartitionTest`.
     Postgrex.query!(
       db,
       "CREATE VIEW #{@schema}.orders_view AS SELECT * FROM #{@schema}.orders",
-      []
-    )
-
-    Postgrex.query!(
-      db,
-      "CREATE TABLE #{@schema}.parted (id int, at date) PARTITION BY RANGE (at)",
-      []
-    )
-
-    Postgrex.query!(
-      db,
-      "CREATE TABLE #{@schema}.parted_2026 PARTITION OF #{@schema}.parted " <>
-        "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
       []
     )
 
@@ -50,8 +33,7 @@ defmodule Bier.Wal.AuthorizeTest do
 
     Postgrex.query!(
       db,
-      "CREATE PUBLICATION #{@pub} FOR TABLE #{@schema}.orders, #{@schema}.locked, " <>
-        "#{@schema}.parted",
+      "CREATE PUBLICATION #{@pub} FOR TABLE #{@schema}.orders, #{@schema}.locked",
       []
     )
 
@@ -105,12 +87,8 @@ defmodule Bier.Wal.AuthorizeTest do
           {"locked", nil},
           {"orders", "postgrest_test_default_role"},
           {"nope", nil},
-          # A view (unpublishable, so it fails as unpublished) and a
-          # PUBLISHED partitioned parent, which passes every other gate and
-          # is refused purely by `relkind = 'r'` — without that filter it
-          # would subscribe successfully and then deliver nothing forever.
-          {"orders_view", nil},
-          {"parted", nil}
+          # A view (unpublishable, so it fails as unpublished).
+          {"orders_view", nil}
         ] do
       key = {@schema, table}
       expected = {:error, {:events_unknown_table, "#{@schema}.#{table}"}}
