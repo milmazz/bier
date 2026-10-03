@@ -33,12 +33,13 @@ and this project adheres to
   publication exists, and the role has REPLICATION. A response carrying a
   table subscription also sends `Connection: close` over HTTP/1.1 (the WAL
   stream can end at any time, unlike a NOTIFY-only response; the header is
-  malformed in HTTP/2 and is omitted there). An unknown table, a view or
-  foreign table, and an unpublished, RLS-enabled, unexposed, or
-  unprivileged table all refuse with the same 404 (`BIER003`), so the
-  endpoint cannot be used as an existence or privilege oracle. (The refusals are byte-identical but not
-  time-identical: configuration-only refusals skip the database round trip
-  the catalog checks cost, a gap that reveals only configuration.) A
+  malformed in HTTP/2 and is omitted there). An unknown table, a view,
+  materialized view or foreign table, and an unpublished, RLS-enabled,
+  unexposed, or unprivileged table all refuse with the same 404
+  (`BIER003`), so the endpoint cannot be used as an existence or privilege
+  oracle. (The refusals are byte-identical but not time-identical:
+  configuration-only refusals skip the database round trip the catalog
+  checks cost, a gap that reveals only configuration.) A
   transaction over `events_max_tx_events`, or over a fixed 64 MiB of decoded
   column values, is dropped with a `transaction_too_large` reset.
 - WAL change feed: partitioned tables can be subscribed through a
@@ -51,7 +52,7 @@ and this project adheres to
   subscription. Under that setting its leaf partitions are refused with
   `404 BIER003`, because PostgreSQL never names them. Without the setting
   it is the other way round: partitioned tables are refused and leaves stay
-  subscribable as ordinary tables. In general, a table is subscribable
+  subscribable as ordinary tables. In general, a table is published to the feed
   exactly when `pg_publication_tables` lists it.
   A cross-partition `UPDATE` arrives as `DELETE` then `INSERT`. PostgreSQL
   does not publish a `TRUNCATE` of a single partition in this mode. That gap
@@ -61,7 +62,9 @@ and this project adheres to
   `old` and `old_kind` are labelled and shaped from the partitioned table's
   identity, so such a mismatch silently produces wrong `old` data: for
   example, a `DEFAULT` partition under a `FULL` parent reports
-  never-logged columns as `null`.
+  never-logged columns as `null`. Both warnings only read the catalogs,
+  take no relation locks, and are skipped with a logged reason if they
+  fail, so they can neither block nor fail boot.
 - `events_publication` is validated at boot: it must be a non-empty
   identifier of at most 63 bytes with no quotes, backslashes, or null bytes.
 - `bier:` is a reserved `event:` prefix: `events_channels` entries claiming

@@ -302,6 +302,13 @@ at the DDL's position in the stream:
 * after a detach, the table's changes stop unless it is published on its
   own.
 
+A subscription whose table *stops* being the name PostgreSQL publishes
+stays open but receives nothing. Examples: a subscribed standalone table
+that is ATTACHed under a via-root partitioned table, or a leaf DETACHed
+from a tree published without the setting. The next schema reload re-runs
+the subscription check and closes the stream with `bier:closed`
+`revoked` (see [Connection lifecycle](#connection-lifecycle)).
+
 What the publication setting means for each kind of table:
 
 | | `publish_via_partition_root = true` | `false` (PostgreSQL's default) |
@@ -415,7 +422,10 @@ permanent contract.
 ### `REPLICA IDENTITY` and `old`
 
 How much of the previous row a change carries is entirely the table's
-`REPLICA IDENTITY`, an ordinary PostgreSQL setting the operator controls:
+`REPLICA IDENTITY`, an ordinary PostgreSQL setting the operator controls.
+For a partition tree published via its root, it also depends on the
+partitioned table's own identity (see
+[Partitioned tables](#partitioned-tables)):
 
 ```sql
 ALTER TABLE orders REPLICA IDENTITY FULL;    -- old carries every column ("full")
@@ -491,11 +501,18 @@ across a reset.
 
 Delivery promise: **in-order, exactly-once while connected; at-least-once
 across reconnects within the buffer window (dedupe by `id`); explicit reset
-beyond it.** Every degradation is announced, never silent, with one
-exception PostgreSQL imposes: a `TRUNCATE` of a single partition of a
-table published `WITH (publish_via_partition_root = true)` is never
-published at all, so nothing arrives to announce (see
-[Partitioned tables](#partitioned-tables)).
+beyond it.** Every degradation is announced, never silent, with two
+exceptions. Both are specific to partitioned tables published `WITH
+(publish_via_partition_root = true)`, and both are logged as warnings when
+the feed starts rather than announced per event (see
+[Partitioned tables](#partitioned-tables)):
+
+* **A `TRUNCATE` of a single partition is never published.** PostgreSQL
+  skips it, so nothing arrives to announce.
+* **`old` is wrong when a partition's `REPLICA IDENTITY` differs from its
+  partitioned table's.** The image is labelled and shaped from the
+  partitioned table's identity, so it can report never-logged columns as
+  `null`, or drop columns the partition did log.
 
 ### Connection lifecycle
 
