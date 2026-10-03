@@ -183,16 +183,18 @@ defmodule Bier.Wal do
           JOIN pg_namespace n ON n.oid = l.relnamespace
           WHERE t.isleaf
         )
-        SELECT root, root_ident::text, root_index::regclass::text,
-               array_agg(name || '|' || ident::text || '|' || COALESCE(ident_index::regclass::text, '')
-                         ORDER BY name)
+        SELECT root, root_ident::text,
+               (SELECT format('%I.%I', n.nspname, c.relname) FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = root_index),
+               name, ident::text,
+               (SELECT format('%I.%I', n.nspname, c.relname) FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = ident_index)
         FROM leaves
         WHERE ident <> root_ident
            OR (ident = 'i' AND NOT EXISTS (
                  SELECT 1 FROM pg_partition_ancestors(ident_index) a
                  WHERE a.relid = root_index))
-        GROUP BY root, root_ident, root_index
-        ORDER BY root
+        ORDER BY root, name
         """,
         [publication]
       )
@@ -200,11 +202,16 @@ defmodule Bier.Wal do
     if rows != [] do
       require Logger
 
+      # One row per mismatched leaf, grouped here rather than aggregated in
+      # SQL: names are %I-quoted and may contain any character, so they are
+      # never packed into a delimited string that would have to be split
+      # back apart.
       trees =
-        Enum.map_join(rows, "; ", fn [root, ident, index, leaves] ->
+        rows
+        |> Enum.chunk_by(fn [root | _] -> root end)
+        |> Enum.map_join("; ", fn [[root, ident, index | _] | _] = leaves ->
           named =
-            Enum.map_join(leaves, ", ", fn leaf ->
-              [name, leaf_ident, leaf_index] = String.split(leaf, "|", parts: 3)
+            Enum.map_join(leaves, ", ", fn [_, _, _, name, leaf_ident, leaf_index] ->
               "#{name} (#{identity_name(leaf_ident, leaf_index)})"
             end)
 
@@ -229,6 +236,9 @@ defmodule Bier.Wal do
   defp identity_name("d", _index), do: "DEFAULT"
   defp identity_name("f", _index), do: "FULL"
   defp identity_name("n", _index), do: "NOTHING"
+  # An identity index that was dropped leaves `relreplident = 'i'` behind,
+  # naming nothing (Postgres then logs as for NOTHING).
+  defp identity_name("i", nil), do: "USING INDEX (missing)"
   defp identity_name("i", index), do: "USING INDEX #{index}"
 
   @doc """

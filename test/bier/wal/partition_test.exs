@@ -549,6 +549,46 @@ defmodule Bier.Wal.PartitionTest do
       refute boot_log(@pubs.off) =~ "REPLICA IDENTITY differs"
     end
 
+    test "names the fixture's own mismatch: a FULL partition under a DEFAULT root" do
+      log = boot_log(@pubs.on)
+      assert log =~ "#{@schema}.orders (DEFAULT) -> #{@schema}.orders_us (FULL)"
+      refute log =~ "orders_eu_low ("
+    end
+
+    # Names are quoted with %I, so a `|` (or any other character) in one is
+    # only ever part of a name — never a field separator that could make
+    # the warning itself fail the instance's boot.
+    test "survives table and index names that need quoting", %{db: db} do
+      sql!(
+        db,
+        ~s[CREATE TABLE #{@schema}."orders|odd" PARTITION OF #{@schema}.orders ] <>
+          "FOR VALUES IN ('odd')"
+      )
+
+      sql!(db, ~s[CREATE UNIQUE INDEX "odd|ident" ON #{@schema}."orders|odd" (id, region)])
+
+      sql!(
+        db,
+        ~s[ALTER TABLE #{@schema}."orders|odd" REPLICA IDENTITY USING INDEX "odd|ident"]
+      )
+
+      log = boot_log(@pubs.on)
+
+      assert log =~
+               ~s[#{@schema}."orders|odd" (USING INDEX #{@schema}."odd|ident")]
+    end
+
+    # Dropping the index a table's REPLICA IDENTITY USING INDEX names leaves
+    # the identity set to an index that no longer exists (it then behaves
+    # like NOTHING).
+    test "renders a dropped identity index as missing", %{db: db} do
+      sql!(db, "CREATE UNIQUE INDEX us_ident ON #{@schema}.orders_us (id, region)")
+      sql!(db, "ALTER TABLE #{@schema}.orders_us REPLICA IDENTITY USING INDEX us_ident")
+      sql!(db, "DROP INDEX #{@schema}.us_ident")
+
+      assert boot_log(@pubs.on) =~ "#{@schema}.orders_us (USING INDEX (missing))"
+    end
+
     # USING INDEX matches only when the partition's identity index is a
     # partition of the root's own identity index.
     test "treats a USING INDEX on an unrelated index as a mismatch", %{db: db} do
