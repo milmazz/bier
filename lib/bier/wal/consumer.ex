@@ -74,8 +74,17 @@ defmodule Bier.Wal.Consumer do
 
   @impl true
   def handle_connect(state) do
-    # A real (re)connect: start the slot-creation backoff over.
-    create_slot(%{state | slot_backoff: nil})
+    # A real (re)connect: start the slot-creation backoff over, and discard
+    # any transaction the previous session was midway through assembling.
+    # The new session's first data message is always a Begin, which would
+    # overwrite `tx` anyway — but only once a slot exists, and until then a
+    # partial transaction (up to `events_max_tx_events` events, or 64 MiB of
+    # values) would sit on this process's heap for the whole length of an
+    # arbitrarily long backoff. Its rows can never be delivered: a temporary
+    # slot restarts at the current LSN, so the transaction is never resent.
+    # `registry` stays: pgoutput re-sends every Relation per walsender
+    # session before any row that needs it.
+    create_slot(%{state | slot_backoff: nil, tx: nil})
   end
 
   # Minted fresh on every attempt, never in init/1: the slot is TEMPORARY
@@ -370,7 +379,10 @@ defmodule Bier.Wal.Consumer do
   # Note for that feature (#153): `confirmed` is 0 only until the first
   # Commit after init/1, and it is NOT reset on reconnect (postgrex keeps the
   # module state across auto_reconnect, and handle_connect/1 resets only
-  # `slot_backoff`). So inside the first transaction of a fresh stream this
+  # `slot_backoff` and `tx` — clearing `tx` means a keepalive that lands
+  # before the new session's first Begin acks `wal_end`, never a stale
+  # `confirmed` from a transaction the old session abandoned). So inside
+  # the first transaction of a fresh stream this
   # acks either 0 or the previous stream's last end LSN. Both are server-side
   # no-ops: walsender ignores a flush position of InvalidXLogRecPtr, and
   # LogicalConfirmReceivedLocation never moves `confirmed_flush` backwards —

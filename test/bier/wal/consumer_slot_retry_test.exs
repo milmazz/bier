@@ -71,4 +71,19 @@ defmodule Bier.Wal.ConsumerSlotRetryTest do
     assert {:query, _sql, reconnected} = Consumer.handle_connect(failed)
     assert reconnected.slot_backoff == nil
   end
+
+  test "a reconnect discards a partially assembled transaction", %{state: state} do
+    # A Begin and one row arrive, then the connection drops before Commit.
+    # The fresh walsender session will open with its own Begin, which would
+    # overwrite `tx` anyway — but until it does, the half-transaction (up to
+    # `events_max_tx_events` events, or 64 MiB of values) would sit on this
+    # process's heap for the whole length of an arbitrarily long backoff.
+    partial = %{
+      state
+      | tx: %{events: [:row], count: 1, bytes: 3, overflow: false, tables: MapSet.new()}
+    }
+
+    assert {:query, _sql, reconnected} = Consumer.handle_connect(partial)
+    assert reconnected.tx == nil
+  end
 end
