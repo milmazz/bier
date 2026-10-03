@@ -118,6 +118,15 @@ defmodule Bier.Telemetry do
     * `[:bier, :events, :listener]` — connection status event from the database
       listener, measurement `%{count: 1}`, metadata `:instance`, `:status`
       (`:connected` or `:disconnected`).
+
+  ## WAL change feed
+
+    * `[:bier, :wal, :feed, :stopped]` — the instance's WAL change feed was
+      given up on: `Bier.Wal.Supervisor` exhausted its restart budget and
+      will not be restarted until the instance is. Measurement `%{count: 1}`,
+      metadata `:instance` and `:reason` (the supervisor's exit reason).
+      Emitted at most once per instance lifetime; alert on it — the HTTP API
+      keeps serving, so nothing else goes red.
   """
 
   @request_start [:bier, :request, :start]
@@ -132,6 +141,7 @@ defmodule Bier.Telemetry do
   @events_subscribe_stop [:bier, :events, :subscribe, :stop]
   @events_notification [:bier, :events, :notification]
   @events_listener [:bier, :events, :listener]
+  @wal_feed_stopped [:bier, :wal, :feed, :stopped]
 
   @doc """
   Emit `[:bier, :request, :start]` and return the monotonic start time to hand
@@ -274,5 +284,14 @@ defmodule Bier.Telemetry do
   @spec events_listener(:connected | :disconnected, map()) :: :ok
   def events_listener(status, metadata) do
     :telemetry.execute(@events_listener, %{count: 1}, Map.put(metadata, :status, status))
+  end
+
+  @doc """
+  The WAL change feed was given up on (`[:bier, :wal, :feed, :stopped]`).
+  Metadata: `:instance`, `:reason`.
+  """
+  @spec wal_feed_stopped(map()) :: :ok
+  def wal_feed_stopped(metadata) do
+    :telemetry.execute(@wal_feed_stopped, %{count: 1}, metadata)
   end
 end

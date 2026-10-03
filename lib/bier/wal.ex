@@ -78,6 +78,32 @@ defmodule Bier.Wal do
   end
 
   @doc """
+  True once this instance's WAL feed has been given up on
+  (`Bier.Wal.Watcher`): `Bier.Wal.Supervisor` exhausted its restart budget
+  and the feed stays stopped until the instance is restarted. Read on every
+  table subscription, so it lives in `:persistent_term` (lock-free reads;
+  the write happens at most once per instance lifetime).
+  """
+  @spec feed_stopped?(term()) :: boolean()
+  def feed_stopped?(name), do: :persistent_term.get(feed_key(name), false)
+
+  @doc false
+  @spec mark_feed_stopped(term()) :: :ok
+  def mark_feed_stopped(name), do: :persistent_term.put(feed_key(name), true)
+
+  @doc false
+  @spec mark_feed_running(term()) :: :ok
+  def mark_feed_running(name) do
+    # Only erase a flag that is actually there: erasing a persistent_term
+    # key triggers a global scan, and the common case (no prior give-up
+    # under this name) has nothing to erase.
+    if feed_stopped?(name), do: :persistent_term.erase(feed_key(name))
+    :ok
+  end
+
+  defp feed_key(name), do: {__MODULE__, :feed_stopped, name}
+
+  @doc """
   Re-authorize every live table subscriber, pushing each one its verdict.
 
   Runs the check HERE rather than waking each subscriber to run its own.

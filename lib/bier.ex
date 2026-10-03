@@ -692,14 +692,21 @@ defmodule Bier do
   # as one `Bier.Wal.Supervisor` holding the Buffer and then the Consumer
   # (`:rest_for_one`, its own restart budget, `restart: :temporary` — see
   # that module for why a feed failure must never spend this supervisor's
-  # budget). Its position here preserves two orderings:
+  # budget), followed by `Bier.Wal.Watcher`, which turns that supervisor
+  # giving up into an announced, refused state. The watcher must come AFTER
+  # it: it monitors a running WAL supervisor, and starting after it means it
+  # is stopped before it on an orderly shutdown, so it only ever sees the
+  # WAL supervisor go down when it gives up. Their position here preserves
+  # two orderings:
   #
   # * It starts BEFORE HttpServerStarter, so the Buffer is registered before
   #   Bandit serves: `HttpServerStarter`'s `handle_continue` starts Bandit,
   #   which can accept a `GET /events?table=…` carrying `Last-Event-ID`
-  #   immediately — and that path calls `Bier.Wal.Buffer.generation/1`,
-  #   which would exit `:noproc` on a not-yet-registered via-tuple and
-  #   surface as a raw 500.
+  #   immediately — and that path calls `Bier.Wal.Buffer.generation/1`. A
+  #   not-yet-registered Buffer would exit `:noproc`; the replay path now
+  #   degrades that to a `bier:reset` rather than a crash, but at boot it
+  #   would be a spurious one. (After a give-up the request never gets that
+  #   far: it is refused with `503 BIER004` before streaming.)
   # * Its `init/1` runs `Bier.Wal.validate!/2` before starting either child,
   #   so a misconfigured instance still fails boot with the remediation
   #   message rather than letting the consumer flap against a database that
@@ -708,7 +715,7 @@ defmodule Bier do
   #   starting before the HTTP server is harmless: it connects asynchronously
   #   (`sync_connect: false`) and has no subscribers to announce to yet.
   defp wal_children(%Bier.Config{events_publication: nil}), do: []
-  defp wal_children(conf), do: [{Bier.Wal.Supervisor, conf}]
+  defp wal_children(conf), do: [{Bier.Wal.Supervisor, conf}, {Bier.Wal.Watcher, conf}]
 
   # The JWT verification cache only runs when it can do work: a secret is
   # configured and jwt-cache-max-entries is positive (PostgREST's JwtNoCache

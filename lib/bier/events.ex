@@ -80,6 +80,7 @@ defmodule Bier.Events do
          :ok <- authorize(channels, config),
          role = resolve_role(conn),
          {:ok, columns} <- authorize_tables(conn, tables, config, role),
+         :ok <- feed_available(tables, config),
          :ok <- negotiate(conn) do
       stream(conn, config, channels, tables, columns, role)
     end
@@ -201,6 +202,19 @@ defmodule Bier.Events do
     error in [Postgrex.Error, DBConnection.ConnectionError] -> {:error, error}
   end
 
+  # A subscription with any `table=` in it — and so every `Last-Event-ID`
+  # resume, which only ever replays tables — is refused with `503 BIER004`
+  # once the WAL feed has been given up on (`Bier.Wal.Watcher`): it could
+  # only ever stream silence. Checked AFTER authorization, so the refusals
+  # that say something about a table keep their uniform BIER003 shape and
+  # ordering; this one says nothing about any table. Channel-only
+  # subscriptions are NOTIFY, not the WAL feed, and are unaffected.
+  defp feed_available([], _config), do: :ok
+
+  defp feed_available(_tables, config) do
+    if Bier.Wal.feed_stopped?(config.name), do: {:error, :events_feed_unavailable}, else: :ok
+  end
+
   # The browser EventSource API cannot set request headers, so this endpoint
   # (only) also accepts the JWT as an `access_token` query param. The header
   # wins when both are present; the fallback is materialized as a synthetic
@@ -272,16 +286,30 @@ defmodule Bier.Events do
         # mailbox and gets delivered again by `loop/6` right after — an
         # accepted, documented at-least-once duplicate window (the client
         # dedupes by `id:`), not a gap.
-        case resume(conn, config, sub) do
-          {:live, conn, delivered} ->
-            loop(conn, config, sub, delivered, start, metadata)
-
-          {:error, reason, delivered} ->
-            finish(conn, delivered, start, Map.put(metadata, :reason, reason))
+        #
+        # The feed flag is checked again AFTER registering: a give-up that
+        # landed between `feed_available/2` and the registration above
+        # announced itself to the subscribers registered at the time, which
+        # did not include this one. `Bier.Wal.Watcher` sets the flag before
+        # announcing, so a subscriber either was told or sees the flag here.
+        if tables != [] and Bier.Wal.feed_stopped?(config.name) do
+          close_with(conn, :feed_stopped, 0, start, metadata)
+        else
+          resume_then_loop(conn, config, sub, start, metadata)
         end
 
       {:error, reason} ->
         finish(conn, 0, start, Map.put(metadata, :reason, reason))
+    end
+  end
+
+  defp resume_then_loop(conn, config, sub, start, metadata) do
+    case resume(conn, config, sub) do
+      {:live, conn, delivered} ->
+        loop(conn, config, sub, delivered, start, metadata)
+
+      {:error, reason, delivered} ->
+        finish(conn, delivered, start, Map.put(metadata, :reason, reason))
     end
   end
 
@@ -494,6 +522,14 @@ defmodule Bier.Events do
 
       :bier_token_expired ->
         close_with(conn, :token_expired, delivered, start, metadata)
+
+      # The WAL feed was given up on (`Bier.Wal.Watcher`). Only table
+      # subscribers are told, and a subscription mixing `channel=` with
+      # `table=` is closed too: its table half can never deliver again, and
+      # a stream that silently became NOTIFY-only would be the one
+      # degradation nobody announced. The client may reconnect channel-only.
+      :bier_wal_feed_stopped ->
+        close_with(conn, :feed_stopped, delivered, start, metadata)
     after
       config.events_heartbeat_interval ->
         case chunk(conn, SSE.heartbeat()) do

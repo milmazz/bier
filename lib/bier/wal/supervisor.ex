@@ -5,19 +5,23 @@ defmodule Bier.Wal.Supervisor do
 
   The pair has its own supervisor so that its failures stay its own. Under
   the instance supervisor directly, every consumer crash was charged to the
-  budget that also covers the Postgrex pool and the HTTP server — three
-  crashes within five seconds (OTP's default intensity) took the whole
-  instance down, turning a WAL-feed problem into an API outage. Here they
-  spend this supervisor's budget instead, and when that runs out only the
-  feed stops (see `child_spec/1`).
+  budget that also covers the Postgrex pool and the HTTP server — a fourth
+  crash within five seconds (one more than OTP's default intensity of 3 in
+  5s) took the whole instance down, turning a WAL-feed problem into an API
+  outage. Here they spend this supervisor's budget instead, and when that
+  runs out only the feed stops (see `child_spec/1`).
 
   `:rest_for_one` because the Consumer depends on the Buffer and not the
   other way round. A Buffer crash takes its history and generation counter
   with it; restarting the Consumer alongside means the fresh slot bumps the
   fresh Buffer's generation and every live subscriber is told
-  `stream_restarted` — rather than the Consumer finding out on its next
-  `append` and announcing per-table resets for a history that no longer
-  exists at all. A Consumer crash restarts the Consumer alone; the Buffer
+  `stream_restarted`. Under the old `:one_for_one` the Consumer's next
+  `append` simply succeeded against the fresh, empty Buffer, so live
+  subscribers never learned that history had vanished (only an append that
+  landed in the instant the Buffer was down hit `retain/2`'s catch and
+  announced `history_evicted` for its tables — which can still happen here,
+  just before the restart's `stream_restarted`). A Consumer crash restarts
+  the Consumer alone; the Buffer
   survives it, and the restarted Consumer's generation bump invalidates the
   old history the ordinary way.
 
@@ -44,6 +48,10 @@ defmodule Bier.Wal.Supervisor do
   @max_restarts 5
   @max_seconds 30
 
+  @doc "This supervisor's restart budget, as `{max_restarts, max_seconds}`."
+  @spec budget() :: {pos_integer(), pos_integer()}
+  def budget, do: {@max_restarts, @max_seconds}
+
   def start_link(%Bier.Config{} = conf) do
     Supervisor.start_link(__MODULE__, conf, name: Registry.via(conf.name, __MODULE__))
   end
@@ -58,9 +66,12 @@ defmodule Bier.Wal.Supervisor do
   and a few give-ups inside five seconds would take down the API again,
   just more slowly. So giving up stops the feed for the rest of the
   instance's life and nothing else: REST, RPC, NOTIFY `channel=` events and
-  the admin listener keep serving. Every consumer crash is logged as it
-  happens; restarting the instance (or its host application) brings the
-  feed back once the cause is fixed.
+  the admin listener keep serving. The give-up itself is made explicit by
+  `Bier.Wal.Watcher` — logged at error level, `[:bier, :wal, :feed,
+  :stopped]` telemetry, live table subscribers closed with `bier:closed`
+  `feed_stopped`, new ones refused with `503 BIER004`. Restarting the
+  instance (or its host application) brings the feed back once the cause
+  is fixed.
   """
   def child_spec(%Bier.Config{} = conf) do
     %{

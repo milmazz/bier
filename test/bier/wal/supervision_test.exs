@@ -5,15 +5,20 @@ defmodule Bier.Wal.SupervisionTest do
 
   The feed is strictly additive, so its failures must stay its own: consumer
   crashes spend the WAL sub-supervisor's restart budget, never the instance
-  supervisor's — three of them within five seconds used to take the whole
-  instance down, HTTP server included. And the pair restarts as a pair: a
-  Buffer crash restarts the Consumer too, so the fresh Buffer's generation
-  is bumped and every subscriber is told the stream restarted, instead of the
-  Consumer discovering the loss on its next `append`.
+  supervisor's — a fourth within five seconds used to take the whole
+  instance down, HTTP server included. The pair restarts as a pair: a Buffer
+  crash restarts the Consumer too, so the fresh Buffer's generation is
+  bumped and every subscriber is told the stream restarted — under the old
+  layout the Consumer just kept appending to the fresh, empty Buffer and
+  nobody learned history had vanished. And a feed that keeps crashing is
+  given up on explicitly: announced, refused, and logged, with the API
+  still serving.
   """
 
   # Replication slots are DB-global state: run serially.
   use ExUnit.Case, async: false
+
+  import ExUnit.CaptureLog
 
   alias Bier.SSETestClient
   alias Bier.Wal.Buffer
@@ -56,6 +61,8 @@ defmodule Bier.Wal.SupervisionTest do
         # connection counts against the suite's shared budget.
         db_channel_enabled: false,
         events_publication: "wal_supervision_pub",
+        events_channels: ["chat"],
+        events_heartbeat_interval: 50,
         router: [port: port, scheme: :http]
       )
 
@@ -104,8 +111,8 @@ defmodule Bier.Wal.SupervisionTest do
 
     Process.exit(buffer, :kill)
 
-    # The Consumer is restarted with it, not left to find out on its next
-    # `append` that the history it was writing into is gone ...
+    # The Consumer is restarted with it, rather than carrying on appending
+    # to the fresh, empty Buffer as if nothing had been lost ...
     SSETestClient.wait_until(fn -> restarted?(name, Bier.Wal.Consumer, consumer) end)
     refute Process.alive?(consumer)
 
@@ -117,6 +124,107 @@ defmodule Bier.Wal.SupervisionTest do
 
     assert Process.alive?(instance)
     wait_feed_live(db, name)
+  end
+
+  test "a feed that keeps crashing is given up on, announced, and refused — the API stays up",
+       %{name: name, port: port, instance: instance} do
+    parent = self()
+    handler = "wal-feed-stopped-#{inspect(name)}"
+
+    :ok =
+      :telemetry.attach(
+        handler,
+        [:bier, :wal, :feed, :stopped],
+        fn event, measurements, metadata, _ -> send(parent, {event, measurements, metadata}) end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    # Live before the give-up: a table subscriber, a channel+table one, and
+    # a channel-only one.
+    table_sock = SSETestClient.connect_sse(port, "/events?table=orders")
+    SSETestClient.recv_until(table_sock, ": connected")
+    mixed_sock = SSETestClient.connect_sse(port, "/events?channel=chat&table=orders")
+    SSETestClient.recv_until(mixed_sock, ": connected")
+    channel_sock = SSETestClient.connect_sse(port, "/events?channel=chat")
+    SSETestClient.recv_until(channel_sock, ": connected")
+    SSETestClient.wait_until_listener_connected(name)
+
+    http_server = whereis!(name, Bier.HttpServerStarter)
+
+    # One crash past the WAL supervisor's budget (5 restarts in 30s).
+    log =
+      capture_log(fn ->
+        for n <- 1..6 do
+          consumer = whereis!(name, Bier.Wal.Consumer)
+          Process.exit(consumer, :kill)
+
+          if n < 6,
+            do: SSETestClient.wait_until(fn -> restarted?(name, Bier.Wal.Consumer, consumer) end)
+        end
+
+        SSETestClient.wait_until(fn ->
+          Registry.lookup(Bier.Registry, {name, Bier.Wal.Supervisor}) == []
+        end)
+
+        assert_receive {[:bier, :wal, :feed, :stopped], %{count: 1}, %{instance: ^name}}, 5_000
+      end)
+
+    # Logged at error level, naming the instance, the budget and the remedy.
+    assert log =~ "[error]"
+    assert log =~ inspect(name)
+    assert log =~ "5 restarts in 30s"
+    assert log =~ "restart"
+
+    # Every live subscription with a table in it is told, then closed: its
+    # table half can never deliver again.
+    assert_closed_then_closes(table_sock, "feed_stopped")
+    assert_closed_then_closes(mixed_sock, "feed_stopped")
+
+    # New table subscriptions and resumes are refused up front, uniformly,
+    # instead of streaming a 200 that can never deliver.
+    for path <- ["/events?table=orders", "/events?table=orders&last_event_id=0/1.0"] do
+      resp = Req.get!("http://localhost:#{port}#{path}", retry: false)
+      assert resp.status == 503, "#{path}: #{inspect(resp)}"
+      assert resp.body["code"] == "BIER004"
+    end
+
+    # NOTIFY channels are not the WAL feed: unaffected, old and new alike.
+    fresh_channel = SSETestClient.connect_sse(port, "/events?channel=chat")
+    SSETestClient.recv_until(fresh_channel, ": connected")
+    SSETestClient.notify(name, "chat", ~s({"msg":"still here"}))
+    assert SSETestClient.recv_until(channel_sock, "still here") =~ "event: chat\n"
+    assert SSETestClient.recv_until(fresh_channel, "still here") =~ "event: chat\n"
+
+    # And the instance never went anywhere.
+    assert Process.alive?(instance)
+    assert whereis!(name, Bier.HttpServerStarter) == http_server
+    assert Req.get!("http://localhost:#{port}/", retry: false).status == 200
+  end
+
+  # A terminal `bier:closed` frame carrying `reason`, then the close itself
+  # (Bandit's chunked terminator may share the frame's recv).
+  defp assert_closed_then_closes(sock, reason) do
+    raw = SSETestClient.recv_until(sock, ~r/event: bier:closed\ndata: \{[^\n]*\}\n/)
+    [_, data] = Regex.run(~r/event: bier:closed\ndata: ([^\n]*)\n/, raw)
+    assert JSON.decode!(data) == %{"reason" => reason}
+    refute raw =~ ~r/^id:/m
+    assert_socket_closes(sock)
+  end
+
+  defp assert_socket_closes(sock) do
+    case :gen_tcp.recv(sock, 0, 5_000) do
+      {:error, :closed} ->
+        :ok
+
+      {:ok, data} ->
+        refute data =~ "data: {", "stream kept delivering: #{inspect(data)}"
+        assert_socket_closes(sock)
+
+      {:error, reason} ->
+        flunk("expected the socket to close, got #{inspect(reason)}")
+    end
   end
 
   defp whereis!(name, role) do

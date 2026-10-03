@@ -586,6 +586,20 @@ defmodule Bier.Plugs.FallbackController do
     })
   end
 
+  # The WAL change feed was given up on (`Bier.Wal.Watcher`): a `table=`
+  # subscription or a resume could only ever stream silence, so it is
+  # refused before any byte of the stream is sent. 503, not 404: the table
+  # is fine, the server's feed is not — and it names no table, so it is the
+  # same for every request and cannot be used as an existence oracle.
+  def call(conn, {:error, :events_feed_unavailable}) do
+    error(conn, 503, %{
+      code: "BIER004",
+      message: "WAL feed unavailable",
+      details: "The change feed stopped after repeated failures and was not restarted",
+      hint: "Table subscriptions resume once the Bier instance is restarted"
+    })
+  end
+
   # ---- client disconnect (#82, Bier-specific) ------------------------------
   # The query was cancelled because the client went away mid-flight
   # (`Bier.Cancellation`). There is nobody to respond to, so this terminates
