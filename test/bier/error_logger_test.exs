@@ -60,6 +60,25 @@ defmodule Bier.ErrorLoggerTest do
            } = extract_envelope(log)
   end
 
+  test "a WAL boot validation that cannot reach the database logs PGRST002 too" do
+    # With `events_publication` set, `Bier.Wal.validate!/2` is the first boot
+    # step to touch the database (it runs in `Bier.Wal.Supervisor.init/1`,
+    # before `HttpServerStarter` loads the schema cache), so a database that
+    # is down at boot fails THERE. It must leave the same PGRST002 trace the
+    # schema-cache load used to leave, not an unlogged connection error.
+    name = Module.concat(__MODULE__, "WalDown#{System.unique_integer([:positive])}")
+    conn = Bier.Registry.via(name, Postgrex)
+    conf = struct!(Bier.Config, name: name, events_publication: "irrelevant")
+
+    log = capture_log(fn -> catch_exit(Bier.Wal.validate!(conn, conf)) end)
+
+    assert %{
+             "code" => "PGRST002",
+             "message" => "Could not query the database for the schema cache. Retrying.",
+             "hint" => nil
+           } = extract_envelope(log)
+  end
+
   # The envelope is the whole Logger message: one JSON object per log line.
   defp extract_envelope(log) do
     [json] = Regex.run(~r/\{.*\}/, log)

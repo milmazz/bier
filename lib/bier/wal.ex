@@ -15,7 +15,7 @@ defmodule Bier.Wal do
   @spec validate!(pool :: term(), Bier.Config.t()) :: :ok
   def validate!(_pool, %Bier.Config{events_publication: nil}), do: :ok
 
-  def validate!(pool, %Bier.Config{events_publication: publication}) do
+  def validate!(pool, %Bier.Config{events_publication: publication} = conf) do
     %{rows: [[wal_level]]} = Postgrex.query!(pool, "SHOW wal_level", [])
 
     wal_level == "logical" ||
@@ -46,6 +46,21 @@ defmodule Bier.Wal do
     warn_if_slots_tight(pool)
 
     :ok
+  rescue
+    # This runs before `HttpServerStarter` loads the schema cache (see
+    # `Bier.Wal.Supervisor.init/1`), so with the feed configured it is the
+    # first boot step to touch the database. A database that is unreachable
+    # at boot must leave the same PGRST002 trace the schema-cache load
+    # leaves when it is the first (`Bier.SchemaCache.load!/4`), not just an
+    # unlogged connection error. Only connection failures: the remediation
+    # `ArgumentError`s above are configuration, already self-explanatory.
+    error in DBConnection.ConnectionError ->
+      Bier.ErrorLogger.schema_cache_load_error(conf.name, error)
+      reraise error, __STACKTRACE__
+  catch
+    :exit, reason ->
+      Bier.ErrorLogger.schema_cache_load_error(conf.name, reason)
+      exit(reason)
   end
 
   # Deliberately a warning, not a `raise`. The three checks above are
