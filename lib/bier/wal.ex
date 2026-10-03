@@ -45,6 +45,7 @@ defmodule Bier.Wal do
               "run: ALTER ROLE <role> REPLICATION;"
 
     warn_if_slots_tight(pool)
+    warn_if_partition_truncates_unpublished(pool, publication)
 
     :ok
   rescue
@@ -87,6 +88,51 @@ defmodule Bier.Wal do
         "Bier's WAL change feed needs a replication slot but all #{limit} are in use " <>
           "(max_replication_slots). The consumer will retry on a backoff; to raise the " <>
           "ceiling run: ALTER SYSTEM SET max_replication_slots = <n>; and restart PostgreSQL"
+      )
+    end
+
+    :ok
+  end
+
+  # The one degradation the feed cannot announce. With
+  # `publish_via_partition_root = true`, PostgreSQL reports every change of
+  # a partition tree as its published ancestor — except a TRUNCATE that
+  # names only partitions (`TRUNCATE orders_2026`): pgoutput skips those
+  # outright, so they never reach the slot. Nothing arrives to detect, so
+  # no per-event `bier:reset` is possible, and subscribers to the
+  # partitioned table keep rows that no longer exist. It cannot be fixed
+  # from here either: a publication without the setting does not name the
+  # partitioned table at all. So it is named once, at feed start, and only
+  # for the configuration it applies to: a via-root publication that
+  # actually lists a partitioned table. A warning, not a refusal — the
+  # operator may well never truncate a single partition.
+  defp warn_if_partition_truncates_unpublished(pool, publication) do
+    %{rows: rows} =
+      Postgrex.query!(
+        pool,
+        """
+        SELECT format('%I.%I', pt.schemaname, pt.tablename)
+        FROM pg_publication p
+        JOIN pg_publication_tables pt ON pt.pubname = p.pubname
+        JOIN pg_class c
+          ON c.relname = pt.tablename
+         AND c.relnamespace = to_regnamespace(quote_ident(pt.schemaname))
+        WHERE p.pubname = $1 AND p.pubviaroot AND c.relkind = 'p'
+        ORDER BY 1
+        """,
+        [publication]
+      )
+
+    if rows != [] do
+      require Logger
+
+      Logger.warning(
+        "Bier's WAL change feed: publication '#{publication}' publishes the partitioned " <>
+          "table(s) #{rows |> List.flatten() |> Enum.join(", ")} via the partition root. " <>
+          "PostgreSQL does not publish a TRUNCATE of a single partition in that mode, so " <>
+          "subscribers to those tables are never told about one (no event, no bier:reset). " <>
+          "Truncate the partitioned table itself, or DELETE from the partition, when " <>
+          "subscribers must see it."
       )
     end
 

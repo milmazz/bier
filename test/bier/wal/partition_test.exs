@@ -31,6 +31,8 @@ defmodule Bier.Wal.PartitionTest do
   """
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Bier.SSETestClient
   alias Bier.TestPorts
   alias Bier.Wal.Authorize
@@ -504,6 +506,37 @@ defmodule Bier.Wal.PartitionTest do
       assert {:ok, _} = Authorize.check(db, nil, pub, [key("orders")])
       assert {:error, _} = Authorize.check(db, nil, pub, [key("orders_us")])
     end
+  end
+
+  describe "boot warning" do
+    # The single-partition TRUNCATE gap cannot be detected per event, so it
+    # is named once, when the feed starts, for exactly the configuration it
+    # applies to.
+    test "names the single-partition TRUNCATE gap for a via-root publication of a " <>
+           "partitioned table" do
+      assert boot_log(@pubs.on) =~ "TRUNCATE of a single partition"
+      refute boot_log(@pubs.off) =~ "TRUNCATE of a single partition"
+    end
+  end
+
+  defp boot_log(publication) do
+    name = :"wal_partition_boot_#{System.unique_integer([:positive])}"
+
+    capture_log(fn ->
+      opts =
+        Bier.ConformanceServer.base_opts()
+        |> Keyword.merge(
+          name: name,
+          pool_size: 1,
+          db_schemas: [@schema],
+          db_channel_enabled: false,
+          events_publication: publication,
+          router: [port: TestPorts.free_port(), scheme: :http]
+        )
+
+      start_supervised!({Bier, opts}, id: name)
+      stop_supervised!(name)
+    end)
   end
 
   # The RAW 404 body with the echoed identifier normalized out, after
