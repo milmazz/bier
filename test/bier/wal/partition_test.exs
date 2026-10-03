@@ -617,6 +617,81 @@ defmodule Bier.Wal.PartitionTest do
     end
   end
 
+  describe "boot warnings follow what the publication publishes" do
+    setup do
+      on_exit(fn ->
+        {:ok, cleanup} =
+          Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
+
+        for sql <- [
+              "DROP PUBLICATION IF EXISTS wal_part_no_truncate",
+              "DROP PUBLICATION IF EXISTS wal_part_no_changes",
+              "DROP PUBLICATION IF EXISTS wal_part_fdw",
+              "DROP SCHEMA IF EXISTS #{@schema} CASCADE",
+              "DROP SERVER IF EXISTS wal_part_nowhere CASCADE"
+            ],
+            do: Postgrex.query!(cleanup, sql, [])
+      end)
+    end
+
+    # The TRUNCATE gap only exists where TRUNCATE is published; wrong `old`
+    # only where UPDATE or DELETE are.
+    test "each warning is gated on the operations it concerns", %{db: db} do
+      sql!(
+        db,
+        "CREATE PUBLICATION wal_part_no_truncate FOR TABLE #{@schema}.orders " <>
+          "WITH (publish_via_partition_root = true, publish = 'insert, update, delete')"
+      )
+
+      sql!(
+        db,
+        "CREATE PUBLICATION wal_part_no_changes FOR TABLE #{@schema}.orders " <>
+          "WITH (publish_via_partition_root = true, publish = 'insert, truncate')"
+      )
+
+      log = boot_log("wal_part_no_truncate")
+      refute log =~ "TRUNCATE of a single partition"
+      assert log =~ "REPLICA IDENTITY differs"
+
+      log = boot_log("wal_part_no_changes")
+      assert log =~ "TRUNCATE of a single partition"
+      refute log =~ "REPLICA IDENTITY differs"
+    end
+
+    # A foreign table's REPLICA IDENTITY is fixed at NOTHING and its rows
+    # never stream (they live on another server): comparing it would only
+    # ever produce a warning nobody can act on.
+    test "foreign-table partitions are not compared", %{db: db} do
+      sql!(db, "CREATE EXTENSION IF NOT EXISTS postgres_fdw")
+      sql!(db, "CREATE SERVER wal_part_nowhere FOREIGN DATA WRAPPER postgres_fdw")
+
+      sql!(
+        db,
+        "CREATE TABLE #{@schema}.mixed (id int, region text) PARTITION BY LIST (region)"
+      )
+
+      sql!(
+        db,
+        "CREATE TABLE #{@schema}.mixed_local PARTITION OF #{@schema}.mixed " <>
+          "FOR VALUES IN ('local')"
+      )
+
+      sql!(
+        db,
+        "CREATE FOREIGN TABLE #{@schema}.mixed_remote PARTITION OF #{@schema}.mixed " <>
+          "FOR VALUES IN ('remote') SERVER wal_part_nowhere"
+      )
+
+      sql!(
+        db,
+        "CREATE PUBLICATION wal_part_fdw FOR TABLE #{@schema}.mixed " <>
+          "WITH (publish_via_partition_root = true)"
+      )
+
+      refute boot_log("wal_part_fdw") =~ "REPLICA IDENTITY differs"
+    end
+  end
+
   describe "boot warnings never block or fail boot" do
     # `pg_partition_tree()` and `pg_publication_tables` take AccessShareLock
     # on the relations they visit, so a long ALTER / VACUUM FULL / ATTACH on

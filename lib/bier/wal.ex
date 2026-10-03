@@ -110,35 +110,39 @@ defmodule Bier.Wal do
   # long ALTER or VACUUM FULL on the tree would then hold this boot-time
   # check, and so the instance's boot, behind it. Catalog scans and
   # `pg_partition_ancestors()` take no relation locks.
-  @published_roots """
-  pub AS (
-    SELECT p.oid, p.puballtables FROM pg_publication p
-    WHERE p.pubname = $1 AND p.pubviaroot
-  ),
-  members AS (
-    SELECT c.oid
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    CROSS JOIN pub
-    WHERE c.relkind = 'p'
-      AND ((pub.puballtables AND n.nspname <> 'information_schema'
-            AND left(n.nspname, 3) <> 'pg_')
-           OR EXISTS (SELECT 1 FROM pg_publication_rel pr
-                      WHERE pr.prpubid = pub.oid AND pr.prrelid = c.oid)
-           OR EXISTS (SELECT 1 FROM pg_publication_namespace pn
-                      WHERE pn.pnpubid = pub.oid AND pn.pnnspid = c.relnamespace))
-  ),
-  roots AS (
-    SELECT m.oid, format('%I.%I', n.nspname, c.relname) AS name
-    FROM members m
-    JOIN pg_class c ON c.oid = m.oid
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE NOT EXISTS (
-      SELECT 1 FROM pg_partition_ancestors(m.oid) a
-      JOIN members x ON x.oid = a.relid
-      WHERE a.relid <> m.oid)
-  )
-  """
+  #
+  # `gate` narrows the publication to the operations a check concerns.
+  defp published_roots(gate) do
+    """
+      pub AS (
+        SELECT p.oid, p.puballtables FROM pg_publication p
+        WHERE p.pubname = $1 AND p.pubviaroot AND (#{gate})
+      ),
+    members AS (
+      SELECT c.oid
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      CROSS JOIN pub
+      WHERE c.relkind = 'p'
+        AND ((pub.puballtables AND n.nspname <> 'information_schema'
+              AND left(n.nspname, 3) <> 'pg_')
+             OR EXISTS (SELECT 1 FROM pg_publication_rel pr
+                        WHERE pr.prpubid = pub.oid AND pr.prrelid = c.oid)
+             OR EXISTS (SELECT 1 FROM pg_publication_namespace pn
+                        WHERE pn.pnpubid = pub.oid AND pn.pnnspid = c.relnamespace))
+    ),
+    roots AS (
+      SELECT m.oid, format('%I.%I', n.nspname, c.relname) AS name
+      FROM members m
+      JOIN pg_class c ON c.oid = m.oid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE NOT EXISTS (
+        SELECT 1 FROM pg_partition_ancestors(m.oid) a
+        JOIN members x ON x.oid = a.relid
+        WHERE a.relid <> m.oid)
+    )
+    """
+  end
 
   # Each advisory check gets a short server-side budget, so a slow catalog
   # delays boot by seconds at most, never by the pool's 15s default.
@@ -195,14 +199,14 @@ defmodule Bier.Wal do
   # from here either: a publication without the setting does not name the
   # partitioned table at all. So it is named once, at feed start, and only
   # for the configuration it applies to: a via-root publication that
-  # actually lists a partitioned table. A warning, not a refusal — the
+  # publishes TRUNCATE and actually has a partitioned table to report. A warning, not a refusal — the
   # operator may well never truncate a single partition.
   defp warn_if_partition_truncates_unpublished(pool, publication) do
     rows =
       catalog_query(
         pool,
         """
-        WITH RECURSIVE #{@published_roots}
+        WITH RECURSIVE #{published_roots("p.pubtruncate")}
         SELECT name FROM roots ORDER BY name
         """,
         [publication]
@@ -233,8 +237,10 @@ defmodule Bier.Wal do
   # partition under a DEFAULT root loses the columns it did log. Nothing in
   # the stream says which happened, so the mismatch is named at boot.
   #
-  # Only leaves are compared: an intermediate partitioned table stores no
-  # rows and logs nothing. Any difference counts, including NOTHING, and a
+  # Only for a publication that publishes UPDATE or DELETE (the only
+  # operations that carry `old`), and only ordinary-table leaves are
+  # compared: an intermediate partitioned table stores no rows and logs
+  # nothing, and a foreign partition never streams. Any difference counts, including NOTHING, and a
   # USING INDEX matches only when the leaf's identity index is a partition
   # (at any depth) of the root's own identity index.
   defp warn_if_replica_identities_differ(pool, publication) do
@@ -242,7 +248,7 @@ defmodule Bier.Wal do
       catalog_query(
         pool,
         """
-        WITH RECURSIVE #{@published_roots},
+        WITH RECURSIVE #{published_roots("p.pubupdate OR p.pubdelete")},
         roots_ident AS (
           SELECT r.oid, r.name, c.relreplident AS ident,
                  (SELECT i.indexrelid FROM pg_index i
@@ -264,7 +270,10 @@ defmodule Bier.Wal do
                   WHERE i.indrelid = l.oid AND i.indisreplident) AS ident_index
           FROM tree t
           JOIN roots_ident r ON r.oid = t.root
-          JOIN pg_class l ON l.oid = t.relid AND l.relispartition AND l.relkind <> 'p'
+          -- Ordinary tables only: a partitioned level stores and logs
+          -- nothing, and a foreign partition's identity is fixed at
+          -- NOTHING while its rows never stream at all.
+          JOIN pg_class l ON l.oid = t.relid AND l.relispartition AND l.relkind = 'r'
           JOIN pg_namespace n ON n.oid = l.relnamespace
         )
         SELECT root, root_ident::text,
