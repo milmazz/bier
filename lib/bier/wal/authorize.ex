@@ -10,32 +10,33 @@ defmodule Bier.Wal.Authorize do
   endpoint cannot be used as an existence oracle (the #81 lesson): callers
   can't distinguish "doesn't exist" from "exists but you can't see it".
 
-  Ordinary tables (`relkind = 'r'`) and partitioned tables (`'p'`) are
-  subscribable; views and foreign tables fail the same uniform way. A
-  partitioned table is answered for as a whole, the way querying it is:
+  A table is subscribable exactly when pgoutput will NAME it: when it is
+  listed in `pg_publication_tables` for the publication. That one test is
+  right for both kinds of table this admits, ordinary (`relkind = 'r'`) and
+  partitioned (`'p'`); views, materialized views and foreign tables fail
+  the same uniform way.
 
-    * **Privileges, RLS and column grants are the root's own.** Querying
-      through the root applies the root's grants and policies, never a
-      partition's, so a grant on one leaf does not open the tree and RLS on
-      a leaf alone does not close it.
-    * **Membership is the root's own too.** It is published when the root
-      itself is in the publication — by name (`pg_publication_rel`),
-      through its schema (`TABLES IN SCHEMA`), or `FOR ALL TABLES` — which
-      is when Postgres publishes every one of its partitions. It is NOT read
-      off `pg_publication_tables`: with `publish_via_partition_root = false`
-      that view lists the leaves instead of the root, and a publication of
-      only some leaves would hand root subscribers part of a table.
-    * **Only the topmost root.** `Bier.Wal.Consumer` routes every partition
-      change to its topmost root (`pg_partition_root`), so an intermediate
-      partitioned table — itself a partition — would never receive a thing.
-      Refused rather than admitted and left silent.
+    * With `publish_via_partition_root = true`, PostgreSQL reports every
+      change of a partition tree as its topmost PUBLISHED ancestor, and the
+      view lists exactly that ancestor — the root, or an intermediate level
+      when only that level is published — and none of the partitions under
+      it, which pgoutput never names either. So the ancestor is admitted
+      and its partitions are refused rather than admitted and left silent.
+    * With `publish_via_partition_root = false` (the default), pgoutput
+      names only leaf partitions, and the view lists only leaves: every
+      partitioned table is refused, every published leaf is subscribable as
+      the ordinary table it is.
 
-  An ordinary table keeps the `pg_publication_tables` test, and for a leaf
-  partition that is exactly right: the view lists what pgoutput names. With
-  `publish_via_partition_root = true` it lists the root rather than the
-  leaves, and pgoutput never names a leaf either, so a leaf subscription —
-  which could only ever be silent — is refused there, while with the
-  setting off the leaf is listed and keeps streaming its own changes.
+  Verified against PostgreSQL 15, 16, 17 and 18, including the cases where
+  the two could plausibly disagree (`TABLES IN SCHEMA` with the root in an
+  unpublished schema, both root and intermediate published, a leaf
+  published alongside its root). Bier never second-guesses the naming from
+  the catalog: pgoutput resolves it as of each change, which the current
+  catalog cannot do across an ATTACH or DETACH.
+
+  A partitioned table's privileges, RLS flag and column grants are its OWN,
+  the way querying it is: a grant on a partition does not open the root,
+  and RLS on a partition alone does not close it.
 
   The role must also be one the authenticator may actually assume. Every
   other endpoint gets that check from Postgres for free, because
@@ -52,20 +53,7 @@ defmodule Bier.Wal.Authorize do
 
   @sql """
   SELECT t.schema, t.table,
-         COALESCE(CASE c.relkind
-           WHEN 'r' THEN EXISTS (
-             SELECT 1 FROM pg_publication_tables pt
-             WHERE pt.pubname = $1 AND pt.schemaname = t."schema"
-               AND pt.tablename = t."table")
-           WHEN 'p' THEN NOT c.relispartition AND EXISTS (
-             SELECT 1 FROM pg_publication p
-             WHERE p.pubname = $1
-               AND (p.puballtables
-                    OR EXISTS (SELECT 1 FROM pg_publication_rel pr
-                               WHERE pr.prpubid = p.oid AND pr.prrelid = c.oid)
-                    OR EXISTS (SELECT 1 FROM pg_publication_namespace pn
-                               WHERE pn.pnpubid = p.oid AND pn.pnnspid = c.relnamespace)))
-         END, false) AS published,
+         (pt.pubname IS NOT NULL) AS published,
          COALESCE(c.relrowsecurity, false) AS rls,
          COALESCE(cols.names, '{}') AS selectable
   FROM unnest($2::text[], $3::text[]) AS t("schema", "table")
@@ -73,6 +61,8 @@ defmodule Bier.Wal.Authorize do
          ON c.relname = t."table"
         AND c.relnamespace = to_regnamespace(quote_ident(t."schema"))
         AND c.relkind = ANY('{r,p}')
+  LEFT JOIN pg_publication_tables pt
+         ON pt.pubname = $1 AND pt.schemaname = t."schema" AND pt.tablename = t."table"
   LEFT JOIN LATERAL (
     SELECT array_agg(a.attname ORDER BY a.attnum) AS names
     FROM pg_attribute a

@@ -43,6 +43,24 @@ defmodule Bier.Wal.EventsHttpTest do
     Postgrex.query!(db, "CREATE TABLE #{@schema}.hidden (id int)", [])
     Postgrex.query!(db, "CREATE TABLE #{@schema}.locked (id int)", [])
     Postgrex.query!(db, "ALTER TABLE #{@schema}.locked ENABLE ROW LEVEL SECURITY", [])
+    # A partitioned parent published WITHOUT publish_via_partition_root:
+    # pgoutput reports its changes under the child partitions, so a
+    # subscription to the parent would deliver nothing and is refused like
+    # any unpublished table (`Bier.Wal.PartitionTest` covers the via-root
+    # publication, where the parent IS subscribable).
+    Postgrex.query!(
+      db,
+      "CREATE TABLE #{@schema}.parted (id int, at date) PARTITION BY RANGE (at)",
+      []
+    )
+
+    Postgrex.query!(
+      db,
+      "CREATE TABLE #{@schema}.parted_2026 PARTITION OF #{@schema}.parted " <>
+        "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
+      []
+    )
+
     Postgrex.query!(db, "DROP SCHEMA IF EXISTS #{@other_schema} CASCADE", [])
     Postgrex.query!(db, "CREATE SCHEMA #{@other_schema}", [])
     Postgrex.query!(db, "CREATE TABLE #{@other_schema}.orders (id serial PRIMARY KEY)", [])
@@ -51,7 +69,7 @@ defmodule Bier.Wal.EventsHttpTest do
     Postgrex.query!(
       db,
       "CREATE PUBLICATION #{@pub} FOR TABLE #{@schema}.orders, #{@schema}.items, " <>
-        "#{@schema}.tracked, #{@schema}.locked, #{@other_schema}.orders",
+        "#{@schema}.tracked, #{@schema}.locked, #{@schema}.parted, #{@other_schema}.orders",
       []
     )
 
@@ -417,6 +435,7 @@ defmodule Bier.Wal.EventsHttpTest do
       {"missing", "#{@schema}.missing"},
       {"hidden", "#{@schema}.hidden"},
       {"locked", "#{@schema}.locked"},
+      {"parted", "#{@schema}.parted"},
       {"#{@other_schema}.orders", "#{@other_schema}.orders"}
     ]
 
@@ -426,7 +445,7 @@ defmodule Bier.Wal.EventsHttpTest do
     disabled_port = start_publication_disabled_instance!()
     disabled_body = refusal_body(disabled_port, "orders", "#{@schema}.orders")
 
-    assert [b, b, b, b] = bodies, "the four refusals must be indistinguishable"
+    assert [b, b, b, b, b] = bodies, "the five refusals must be indistinguishable"
 
     assert disabled_body == b,
            "a disabled-publication refusal must be indistinguishable from the others too"

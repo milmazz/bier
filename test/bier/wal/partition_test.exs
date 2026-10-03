@@ -395,6 +395,41 @@ defmodule Bier.Wal.PartitionTest do
       for table <- ["orders_eu", "orders_eu_low", "orders_us"],
           do: assert(refusal_body(port, table) == missing, table)
     end
+
+    @tag pub: :off
+    test "without publish_via_partition_root the root is refused and leaves stream as " <>
+           "themselves",
+         %{db: db, port: port} do
+      assert refusal_body(port, "orders") == refusal_body(port, "missing")
+      assert refusal_body(port, "orders_eu") == refusal_body(port, "missing")
+
+      sock = SSETestClient.connect_sse(port, "/events?table=orders_eu_low")
+      SSETestClient.recv_until(sock, ": connected")
+      insert!(db, 3, "eu", "leaf")
+
+      frame = SSETestClient.recv_until(sock, "data: {")
+      assert frame =~ "event: orders_eu_low\n"
+      assert decode_frame(frame)["table"] == "orders_eu_low"
+    end
+
+    # Only the intermediate level is published: PostgreSQL names IT, so it
+    # is the subscribable table, and neither its root nor its leaves are.
+    @tag pub: :mid
+    test "an intermediate published on its own is subscribable as itself",
+         %{db: db, port: port} do
+      missing = refusal_body(port, "missing")
+
+      for table <- ["orders", "orders_eu_low"],
+          do: assert(refusal_body(port, table) == missing, table)
+
+      sock = SSETestClient.connect_sse(port, "/events?table=orders_eu")
+      SSETestClient.recv_until(sock, ": connected")
+      insert!(db, 1500, "eu", "high")
+
+      frame = SSETestClient.recv_until(sock, "data: {")
+      assert frame =~ "event: orders_eu\n"
+      assert decode_frame(frame)["row"]["note"] == "high"
+    end
   end
 
   describe "authorization of a partitioned root" do
