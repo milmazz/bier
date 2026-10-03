@@ -301,10 +301,12 @@ defmodule Bier.CLI.Config do
 
   # Keys settable from the in-database config source (`ALTER ROLE ... SET
   # pgrst.*`): upstream's `dbSettingsNames` whitelist, verbatim at
-  # https://github.com/PostgREST/postgrest/blob/v16.0/src/library/PostgREST/Config/Database.hs#L47-L71,
-  # intersected with the keys Bier implements. The three names not mirrored
-  # here are upstream-only: db_pre_config, db_hoisted_tx_settings and
-  # jwt_cache_max_lifetime (Bier's jwt-cache-max-entries is a different knob).
+  # https://github.com/PostgREST/postgrest/blob/v16.4/src/library/PostgREST/Config/Database.hs#L43-L68,
+  # intersected with the keys Bier implements. The two names not mirrored
+  # here are upstream-only: db_pre_config and db_hoisted_tx_settings.
+  # jwt_cache_max_entries joined in v16.4 (PostgREST#5269): through v16.3 the
+  # list named `jwt_cache_max_lifetime`, a key no parser reads, so the role
+  # setting was silently ignored (case 11707).
   # Everything else — notably server-* bind settings and db-uri — is
   # non-reloadable and ignored when set via the database (case 1725).
   @db_settable_keys ~w(
@@ -312,7 +314,7 @@ defmodule Bier.CLI.Config do
     db-anon-role db-extra-search-path db-max-rows db-plan-enabled
     db-pre-request db-prepared-statements db-root-spec db-schemas db-tx-end
     jwt-aud jwt-role-claim-key jwt-secret jwt-secret-is-base64
-    openapi-mode openapi-security-active openapi-server-proxy-uri
+    jwt-cache-max-entries openapi-mode openapi-security-active openapi-server-proxy-uri
     server-cors-allowed-origins server-trace-header server-timing-enabled
     url-use-legacy-target-names
   )

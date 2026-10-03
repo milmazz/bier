@@ -482,10 +482,14 @@ defmodule Bier.CLI.ConfigTest do
       refute "pgrst.db_config" in names
       refute "pgrst.log_level" in names
 
-      # Upstream lists 25 names; the three Bier does not implement
-      # (db_pre_config, db_hoisted_tx_settings, jwt_cache_max_lifetime) are the
-      # only ones missing here.
-      assert length(names) == 22
+      # v16.4 (PostgREST#5269) swapped the dead `jwt_cache_max_lifetime` entry
+      # for the real `jwt_cache_max_entries` (case 11707).
+      assert "pgrst.jwt_cache_max_entries" in names
+      refute "pgrst.jwt_cache_max_lifetime" in names
+
+      # Upstream lists 25 names; the two Bier does not implement
+      # (db_pre_config, db_hoisted_tx_settings) are the only ones missing here.
+      assert length(names) == 23
     end
 
     test "dump output is reparse-stable (case 1726)" do
