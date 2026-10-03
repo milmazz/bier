@@ -74,17 +74,22 @@ defmodule Bier.Wal.Buffer do
   timeout, which raises inside the replication process, kills the consumer,
   and turns a transient reconnect into a global `stream_restarted` reset
   for every subscriber. The server keeps only the O(tables) reset decision.
+
+  A Buffer that dies while a replay is in flight — crashed, restarted with
+  the consumer, or gone with a WAL supervisor that gave up — takes the
+  history this reader was owed with it, so every way that can surface here
+  degrades to `{:reset, "stream_restarted"}` instead of crashing the
+  subscriber's request after its 200 was already sent: an exit from either
+  `GenServer.call` (a dead or unregistered server, or a timeout), or an
+  `ArgumentError` from the ETS traversal, which runs in THIS process
+  against a table its owner's death has just deleted.
   """
   def replay_after(name, tables, cursor, generation) do
     server = Registry.via(name, __MODULE__)
     plan = {:replay_plan, tables, cursor, generation}
 
-    with {:ok, tid, rel_tid} <- GenServer.call(server, plan) do
-      replayed =
-        tables
-        |> Enum.flat_map(&collect_after(tid, rel_tid, &1, cursor))
-        |> Enum.sort_by(fn {c, _t, _e} -> c end)
-
+    with {:ok, tid, rel_tid} <- GenServer.call(server, plan),
+         {:ok, replayed} <- traverse(tid, rel_tid, tables, cursor) do
       # Re-run the decision after the traversal. Because it ran outside the
       # server, a concurrent generation bump or ring eviction could have
       # removed entries this reader had not reached yet — a silent gap,
@@ -98,6 +103,21 @@ defmodule Bier.Wal.Buffer do
         {:reset, _reason} = reset -> reset
       end
     end
+  catch
+    :exit, _reason -> {:reset, "stream_restarted"}
+  end
+
+  # Scoped to the traversal alone, so an `ArgumentError` from anything else
+  # is not mistaken for a vanished table.
+  defp traverse(tid, rel_tid, tables, cursor) do
+    replayed =
+      tables
+      |> Enum.flat_map(&collect_after(tid, rel_tid, &1, cursor))
+      |> Enum.sort_by(fn {c, _t, _e} -> c end)
+
+    {:ok, replayed}
+  rescue
+    ArgumentError -> {:reset, "stream_restarted"}
   end
 
   @impl true

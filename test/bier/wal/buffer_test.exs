@@ -216,4 +216,45 @@ defmodule Bier.Wal.BufferTest do
     assert orders_event.n == 4
     assert Enum.map(orders_event.relation.columns, & &1.name) == ["id", "note", "extra"]
   end
+
+  test "a Buffer that dies mid-replay degrades to an announced reset, never a crash" do
+    {name, gen} = start!(10_000)
+
+    entries = for n <- 1..2_000, do: {cursor(n), @orders, event(n)}
+    :ok = Buffer.append(name, entries)
+
+    buffer = GenServer.whereis(Bier.Registry.via(name, Buffer))
+    :erlang.trace(buffer, true, [:receive])
+
+    me = self()
+
+    {reader, ref} =
+      spawn_monitor(fn ->
+        send(me, {:replayed, Buffer.replay_after(name, [@orders], cursor(1), gen)})
+      end)
+
+    # Kill the Buffer the moment the reader's first `:replay_plan` call
+    # reaches it. Depending on how far that call got, the reader then hits
+    # a dead server (an exit from `GenServer.call`), a deleted ETS table
+    # mid-traversal (an `ArgumentError` — the traversal runs in the CALLER),
+    # or a fresh Buffer on its re-check (another generation). Every one of
+    # them means the history this reader was owed is gone with the process
+    # that held it: the same announced reset as a restart, not a crashed
+    # request (#150).
+    assert_receive {:trace, ^buffer, :receive, {:"$gen_call", _, {:replay_plan, _, _, _}}},
+                   5_000
+
+    Process.exit(buffer, :kill)
+
+    assert_receive {:replayed, result}, 5_000
+    assert result == {:reset, "stream_restarted"}
+    assert_receive {:DOWN, ^ref, :process, ^reader, :normal}
+  end
+
+  test "replay against a Buffer that is not running announces a restart" do
+    # The window between a Buffer dying and its replacement registering (or,
+    # after the WAL supervisor gives up, for good): the call exits `:noproc`.
+    name = :"buffer_test_absent_#{System.unique_integer([:positive])}"
+    assert Buffer.replay_after(name, [@orders], cursor(1), 1) == {:reset, "stream_restarted"}
+  end
 end

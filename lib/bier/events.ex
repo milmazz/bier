@@ -350,10 +350,7 @@ defmodule Bier.Events do
   defp replay(conn, _config, %{tables: []}, _cursor), do: {:live, conn, 0}
 
   defp replay(conn, config, sub, cursor) do
-    name = config.name
-    generation = Buffer.generation(name)
-
-    case Buffer.replay_after(name, sub.tables, cursor, generation) do
+    case replay_from_buffer(config.name, sub.tables, cursor) do
       # The Buffer says WHY it cannot resume, and that reason is passed
       # through verbatim: a client told `history_evicted` after a restart
       # would recover as if only its own subscription fell behind, when in
@@ -380,6 +377,17 @@ defmodule Bier.Events do
           end
         end)
     end
+  end
+
+  # `Buffer.replay_after/4` already degrades a Buffer that dies mid-replay
+  # to an announced restart; the generation read that precedes it gets the
+  # same treatment, so a Buffer between crash and restart (or gone for good
+  # with a WAL supervisor that gave up) costs the client a `bier:reset`,
+  # never a request that crashes after its 200 was sent.
+  defp replay_from_buffer(name, tables, cursor) do
+    Buffer.replay_after(name, tables, cursor, Buffer.generation(name))
+  catch
+    :exit, _reason -> {:reset, "stream_restarted"}
   end
 
   defp chunk_or_halt(conn, iodata) do
