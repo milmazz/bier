@@ -334,8 +334,15 @@ defmodule Bier.Embed do
   end
 
   # An empty-projection embed (`rel()`) establishes the relationship for null
-  # filtering but contributes no key to the output row.
-  defp build_node(%{kind: :embed, empty: true}, _relation, _al, _ef, state, _qe, _spread?) do
+  # filtering but contributes no key to the output row. It is still RESOLVED
+  # first, for the PGRST200/PGRST201 `resolve_relationship/3` throws: `addRels`
+  # (`Plan.hs` L602) runs `findRel` over every non-root node without reading its
+  # select list, and `rsEmptyEmbed` only decides, later, how an already-resolved
+  # embed renders. Short-circuiting before resolution answered an unresolvable
+  # `bogus()` with a 200, or under a spread with a phantom-column 42703
+  # (cases 11141-11144, #161).
+  defp build_node(%{kind: :embed, empty: true} = e, relation, _al, _ef, state, _qe, _spread?) do
+    _ = resolve_relationship(e, relation, state.relations)
     {[], state}
   end
 
