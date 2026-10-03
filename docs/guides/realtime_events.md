@@ -28,7 +28,7 @@ children = [
 | `events_heartbeat_interval` | `15_000` | ms of silence before a `: keepalive` comment is sent. |
 | `events_publication` | `nil` | Name of an operator-created `PUBLICATION` to stream as a WAL change feed. |
 | `events_buffer_size` | `1024` | Ring-buffer entries retained per table, for `Last-Event-ID` resume. |
-| `events_max_tx_events` | `10_000` | Per-transaction event cap before the transaction is dropped and a reset is announced. It counts delivered events, so a change to a partition counts twice — its leaf copy and its root copy — unless the publication publishes via the root (see [Partitioned tables](#partitioned-tables)). A fixed, non-configurable 64 MiB cap on a transaction's accumulated event payload applies alongside it (see [Limits](#limits)). |
+| `events_max_tx_events` | `10_000` | Per-transaction event cap before the transaction is dropped and a reset is announced. A fixed, non-configurable 64 MiB cap on a transaction's accumulated event payload applies alongside it (see [Limits](#limits)). |
 
 The endpoint is enabled as soon as *either* `events_channels` lists a
 channel or `events_publication` names a publication; with neither set the
@@ -111,7 +111,7 @@ subscriptions follow the same "auth before existence" ordering:
 | 400 | `BIER002` | Neither a `channel` nor a `table` query parameter was supplied. |
 | 404 | `BIER001` | A requested channel is not in `events_channels`. |
 | 503 | `BIER004` | The instance's WAL change feed was given up on after repeated failures (see [Enabling](#enabling)): any request with a `table=` subscription — and so every `Last-Event-ID` resume — is refused until the instance is restarted. `channel=`-only requests are unaffected. Checked after authorization and the `BIER003` checks. |
-| 404 | `BIER003` | A requested table doesn't exist, isn't an ordinary or partitioned table (a view or foreign table), is a partitioned table that is itself a partition, is a leaf partition the publication reports under its root (`publish_via_partition_root = true`), isn't in the configured publication, has RLS enabled, is in a schema outside `db_schemas`, leaves the role no `SELECT`-able column, or names a role the authenticator may not assume — one indistinguishable shape for every one of them (see [Change feed (WAL)](#change-feed-wal)); also returned for any `table=` request when `events_publication` isn't configured at all. |
+| 404 | `BIER003` | A requested table doesn't exist, isn't a table the publication streams under its own name (a view, materialized view, or foreign table; a partitioned table whose publication isn't `publish_via_partition_root = true`; a partition whose changes are published under its partitioned ancestor — see [Partitioned tables](#partitioned-tables)), isn't in the configured publication, has RLS enabled, is in a schema outside `db_schemas`, leaves the role no `SELECT`-able column, or names a role the authenticator may not assume — one indistinguishable shape for every one of them (see [Change feed (WAL)](#change-feed-wal)); also returned for any `table=` request when `events_publication` isn't configured at all. |
 | 400 | `42704` (raw `SQLSTATE`) | The JWT's role does not exist in `pg_roles` — surfaced like any other Postgres error (see the [API reference](api.md#errors)), never a 500 or a hang. |
 | 406 | `PGRST107` | `Accept` excludes `text/event-stream`. |
 | 405 | `PGRST117` | Any method other than `GET` or `OPTIONS`. |
@@ -257,8 +257,11 @@ first dot would be read as the schema separator.
 A table is subscribable only when it is in the publication, in an exposed
 schema, has no RLS enabled, and the connecting role has `SELECT` on at
 least one column — see [Errors](#errors) above for what an unmet condition
-returns. Partitioned tables can be subscribed too, under rules of their own
-(see [Partitioned tables](#partitioned-tables) below).
+returns. In short, a table is subscribable when PostgreSQL's
+`pg_publication_tables` lists it for the publication, because that is
+exactly the name the replication stream reports its changes under.
+Partitioned tables follow from that rule (see
+[Partitioned tables](#partitioned-tables) below).
 
 Every `table=` refusal is **byte-identical** — the same `404 BIER003` body
 for a given request, whatever the reason — but **not time-identical**. A name in a schema outside
@@ -273,58 +276,85 @@ either, but bier adds no data- or existence-dependent branch around it.
 
 ### Partitioned tables
 
-Subscribing to a partitioned table means "changes to the table as a
-whole", the same rows a `GET` on it returns, whichever way the
-publication is configured:
+A partitioned table can be subscribed through a publication created
+**`WITH (publish_via_partition_root = true)`**:
+
+```sql
+CREATE PUBLICATION bier_events FOR TABLE orders
+  WITH (publish_via_partition_root = true);
+```
 
 ```bash
 curl -N "http://localhost:4040/events?table=orders"   # orders PARTITION BY ...
 ```
 
-* **Every partition's changes arrive named after the root**: `event:
-  orders` and `"table":"orders"`, whichever partition the row landed in.
-  With `publish_via_partition_root = false` (PostgreSQL's default)
-  pgoutput reports changes under the leaf partition. Bier looks up each
-  leaf's root with `pg_partition_root()`, once per relation and not per
-  row, and delivers a copy of the change to the root's subscribers. With
-  the setting `true`, PostgreSQL already reports the root.
-* **Only the topmost root is subscribable.** An intermediate partitioned
-  table (one that is itself a partition of another) is refused with the
-  uniform `404 BIER003`, since changes are routed to the top of the tree.
-* **Authorization is the root's.** The root's `SELECT` and column grants,
-  and its RLS flag, decide the subscription and filter the frames, exactly
-  as they do for a query through the root. A grant on one partition does
-  not open the root, and RLS enabled on a partition alone does not close it.
-* **The root must itself be in the publication**: by name (`FOR TABLE
-  orders`), through its schema (`FOR TABLES IN SCHEMA`), or `FOR ALL
-  TABLES`. A publication listing only some of its partitions does not make
-  the root subscribable, because its subscribers would see part of the
-  table.
-* **Leaf partitions** stay subscribable as ordinary tables when
-  `publish_via_partition_root = false`, and keep receiving their own
-  changes under their own name. With the setting `true` PostgreSQL never
-  names a leaf whose ancestor is published, so such a subscription could
-  only ever be silent; it is refused with the uniform `404 BIER003` instead.
-* **Each copy is its own event.** The leaf's copy and the root's copy of a
-  change have distinct cursors (`id:`) in the same transaction. Each
-  subscription replays from its own table's history, so a root
-  subscription's `Last-Event-ID` resumes the root's copies only.
-* **`TRUNCATE`**: truncating the partitioned table reaches its subscribers
-  as one `TRUNCATE` of the root. With `publish_via_partition_root = false`,
-  truncating a *single partition* also reaches them as a `TRUNCATE` of the
-  root. The frame names one relation, so treat it as "re-bootstrap the
-  table with a `GET`" rather than "the table is now empty". With the
-  setting `true`, PostgreSQL does not publish a single partition's
-  `TRUNCATE` at all.
-* **ATTACH / DETACH PARTITION** take effect from the next change to the
-  affected partition. The root is looked up again when PostgreSQL re-sends
-  that partition's relation. A partition that is detached or dropped while
-  its own earlier changes are still being decoded (replication lag) no
-  longer belongs to the tree, so those in-flight changes reach only the
-  leaf's subscribers.
-* **The root lookup runs on the instance's connection pool.** If it keeps
-  failing, the consumer restarts, and every subscriber is told with a
-  `stream_restarted` reset rather than missing that partition's changes.
+With that setting PostgreSQL reports every change in the partition tree,
+at any depth, as the partitioned table: `event: orders` and
+`"table":"orders"`, whichever partition the row is stored in. Bier relays the name
+PostgreSQL gives each change and never looks up partition membership on
+its own. PostgreSQL resolves the name against the catalog **as of that
+change**, so `ATTACH PARTITION` and `DETACH PARTITION` take effect exactly
+at the DDL's position in the stream:
+
+* rows written to a table before it was attached never reach the
+  partitioned table's subscribers;
+* changes made to a partition before it was detached still do;
+* after a detach, the table's changes stop unless it is published on its
+  own.
+
+What the publication setting means for each kind of table:
+
+| | `publish_via_partition_root = true` | `false` (PostgreSQL's default) |
+|---|---|---|
+| The partitioned table | Subscribable: its changes are reported under its name. | Refused (`404 BIER003`). PostgreSQL reports its changes under the leaf partitions, so it would never receive anything. |
+| A leaf partition | Refused (`404 BIER003`) whenever an ancestor is published, because PostgreSQL never names it. | Subscribable as an ordinary table, receiving its own changes under its own name. |
+
+More precisely, the subscribable table is the **topmost published
+ancestor**. If only an intermediate level of a multi-level tree is in the
+publication, that intermediate table is subscribable, and its parent and
+its own partitions are not. A `FOR TABLES IN SCHEMA` publication publishes
+the tables in that schema: a partitioned table in an unpublished schema is
+not subscribable, even though some of its partitions are in the published
+one. Those partitions are then subscribable as themselves. In every case,
+the rule is the one above: subscribable means listed in
+`pg_publication_tables`.
+
+**Authorization is the partitioned table's own**, the same as for a query
+against it. Its `SELECT` and column grants decide whether the subscription
+is allowed and which columns the frames carry, and its RLS flag refuses the
+subscription. A grant on a partition does not make the partitioned table
+subscribable, and RLS enabled on a partition alone does not refuse it. A
+row filter or column list on the publication entry (PostgreSQL 15+)
+applies as it does to any published table: rows the filter excludes are
+never streamed, and columns outside the list never appear.
+
+What the frames look like:
+
+* **A cross-partition `UPDATE`** (one that moves a row into another
+  partition) arrives as a `DELETE` followed by an `INSERT`, both under the
+  partitioned table's name. That is how PostgreSQL logs it. There is no
+  `UPDATE` frame for such a change.
+* **`old` and `old_kind`** depend on two settings. The *partition's*
+  `REPLICA IDENTITY` decides what PostgreSQL logs. The *partitioned
+  table's* decides how that image is labelled (`"full"` or `"key"`). A
+  `"key"` image is reduced to the partitioned table's identity columns.
+  Give the partitioned table and every partition **the same** `REPLICA
+  IDENTITY`. A mismatch either hides logged columns (`FULL` partition,
+  `DEFAULT` parent) or reports a column that was never logged as `null`
+  under `"full"` (`DEFAULT` partition, `FULL` parent, when the key
+  changes). See [`REPLICA IDENTITY` and `old`](#replica-identity-and-old)
+  below.
+* **`TRUNCATE` of the partitioned table** arrives as one `TRUNCATE` frame
+  naming it.
+* **`TRUNCATE` of a single partition is never published.** PostgreSQL
+  skips a `TRUNCATE` that names only partitions when publishing via the
+  root. No event and no `bier:reset` reaches subscribers, who keep rows
+  that no longer exist. Bier cannot detect it, because nothing arrives,
+  and logs a warning when the feed starts with such a publication. If
+  subscribers must see it, truncate the partitioned table itself, or
+  `DELETE` from the partition, which streams row by row.
+* **Unlogged and foreign partitions never stream**: an unlogged table
+  writes no WAL, and a foreign table's rows live in another server.
 
 ### Frame format
 
@@ -458,7 +488,11 @@ across a reset.
 
 Delivery promise: **in-order, exactly-once while connected; at-least-once
 across reconnects within the buffer window (dedupe by `id`); explicit reset
-beyond it.** Every degradation is announced, never silent.
+beyond it.** Every degradation is announced, never silent, with one
+exception PostgreSQL imposes: a `TRUNCATE` of a single partition of a
+table published `WITH (publish_via_partition_root = true)` is never
+published at all, so nothing arrives to announce (see
+[Partitioned tables](#partitioned-tables)).
 
 ### Connection lifecycle
 
@@ -527,17 +561,10 @@ exactly as after a `bier:reset` (or resume with `?last_event_id=` after a
   `max_replication_slots` (default `10`) like any other slot.
 * **RLS tables refuse subscription** in v1 — per-event row-security
   evaluation is future work.
-* **A change to a partition is two events** when the publication does not
-  publish via the root: the leaf's copy and the root's copy (see
-  [Partitioned tables](#partitioned-tables) above). Both count toward
-  `events_max_tx_events` and take a ring-buffer entry, so a bulk load into
-  a partitioned table reaches the cap at half the rows an ordinary table
-  would. The 64 MiB payload cap counts the row once, because the copies
-  share it. Publishing `WITH (publish_via_partition_root = true)` delivers
-  one copy, but leaves the partitions unsubscribable.
-* **Only a partitioned table's topmost root is subscribable**, and its
-  leaf partitions only when the publication does not publish via the root
-  (see [Partitioned tables](#partitioned-tables) above).
+* **Partitioned tables need `publish_via_partition_root = true`.** Without
+  it, only their leaf partitions are subscribable. With it, the leaves are
+  not, and a `TRUNCATE` of a single partition is never published (see
+  [Partitioned tables](#partitioned-tables) above).
 * **A table whose name begins with `bier:` cannot be subscribed** — that
   prefix is reserved for the stream's own control frames (`event:
   bier:reset`, `event: bier:closed`), and `events_channels` is held to the

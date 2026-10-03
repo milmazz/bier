@@ -20,6 +20,15 @@ defmodule Bier.Wal.Consumer do
   member relation — each with its own cursor sequence and table key — and
   the per-transaction event cap counts every fanned-out event, not the
   single wire message.
+
+  Every event is keyed by exactly the relation pgoutput names, and this
+  process never queries the catalog to second-guess it. That is what makes
+  partitioned tables safe (#140): under `publish_via_partition_root = true`
+  PostgreSQL names a partition tree's published ancestor itself, resolved
+  as of each change, while a lookup against the CURRENT catalog would
+  misroute rows written before an ATTACH or DETACH that bier happened to
+  decode after it. It also keeps the feed independent of the instance's
+  query pool.
   """
 
   use Postgrex.ReplicationConnection
