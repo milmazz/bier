@@ -407,9 +407,8 @@ defmodule Bier.Embed do
   defp build_embed(e, rel, source, src_alias, ef, state, qe, spread?) do
     %{relation: target, kind: kind, join_cond: join} = rel
 
-    seq = state.embed_seq + 1
-    state = %{state | embed_seq: seq}
-    child_alias = "#{target.name}_e#{seq}"
+    depth = state.embed_depth + 1
+    child_alias = from_alias(target, rel, depth)
     out_name = e.alias || rel.embed_key
 
     # PostgREST's `relAggAlias` (`Plan.hs` L541):
@@ -421,7 +420,6 @@ defmodule Bier.Embed do
     # LATERAL under that alias does not project, and case 11139 pins that
     # message verbatim (`column factories_processes_1.process_costs does not
     # exist`).
-    depth = state.embed_depth + 1
     agg_alias = "#{source.name}_#{canonical_name(e)}_#{depth}"
 
     # Every parameter this subtree binds from here on is bound INTO the SQL it
@@ -596,6 +594,22 @@ defmodule Bier.Embed do
         {[{:col, sub, out_name, source_join_terms(join, src_alias), nil}], state}
     end
   end
+
+  # PostgREST's `fromAlias` for an embedded node (`Plan.hs` L583):
+  # `newAlias = Just (qiName (relForeignTable r) <> "_" <> show depth)` — the
+  # embedded table's name and the node's DEPTH, root 0. Like `relAggAlias` it is
+  # an internal identifier that leaks into user-facing errors: it qualifies every
+  # column the embed selects, so an unknown one comes back as `column
+  # factories_1.banana does not exist` (case 1531). A per-request counter made
+  # that name depend on unrelated sibling embeds (1532) and on nothing about
+  # nesting (1533), #162. Two sibling embeds of the same table at one depth
+  # share the alias, harmlessly: each lives in its own subquery.
+  #
+  # The many-to-many branch (`Plan.hs` L590) sets no alias at all — "m2m does
+  # internal implicit joins that don't need aliasing" — so the subquery reads
+  # the bare table and the message names it unaliased (case 1534).
+  defp from_alias(target, %{via: {_jrel, _}}, _depth), do: target.name
+  defp from_alias(target, _rel, depth), do: "#{target.name}_#{depth}"
 
   # Embed internals go through jsonb (to_jsonb / json_agg(to_jsonb(…))):
   # PostgREST renders embedded objects jsonb-style — `": "` spacing and jsonb
