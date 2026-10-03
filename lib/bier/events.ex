@@ -25,10 +25,16 @@ defmodule Bier.Events do
   arbitrary headers — the header wins when both are present) has it replayed
   before rejoining the live stream. A cursor the buffer can no longer honor
   gets an explicit `bier:reset` frame instead of a silent gap — reason
-  `history_evicted` when the ring evicted or dropped it, `stream_restarted`
-  when it is from before a bier (consumer) restart; a missing or
-  malformed id just starts at the live head. Clients also get a `retry:`
-  hint and periodic keepalive comments.
+  `history_evicted` when the ring evicted or dropped it or a DDL changed
+  the table's columns, `stream_restarted` when it is from before a bier
+  (consumer) restart; a missing or malformed id just starts at the live
+  head. Clients also get a `retry:` hint and periodic keepalive comments.
+
+  A stream the server ends on its own — the role's privileges revoked, the
+  token expired, the WAL feed given up on — ends with one terminal
+  `bier:closed` frame naming the reason, and while the
+  feed is given up on, table subscriptions and resumes are refused with
+  `503 BIER004` before streaming.
   """
 
   import Plug.Conn
@@ -168,9 +174,9 @@ defmodule Bier.Events do
   # every other refusal: a schema this instance does not expose, or a table
   # whose name would claim the `bier:` prefix the stream reserves for its own
   # control frames (`event: bier:reset`, `event: bier:closed`).
-  # `events_channels` is held to the
-  # same reservation in `Bier.Config`; this is the half of it that cannot be
-  # checked at boot, because the name comes from the database.
+  # `events_channels` is held to the same reservation in `Bier.Config`; this
+  # is the half of it that cannot be checked at boot, because the name comes
+  # from the database.
   defp refused_outright?({schema, table}, config),
     do: schema not in config.db_schemas or String.starts_with?(table, "bier:")
 

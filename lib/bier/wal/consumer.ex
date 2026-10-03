@@ -92,9 +92,9 @@ defmodule Bier.Wal.Consumer do
   # only runs after a SUCCESSFUL reconnect: through a database outage
   # postgrex keeps retrying `connect` on its backoff without calling it, so
   # clearing `tx` there alone would keep the partial transaction on the heap
-  # for the whole outage. Kept in both places: this one bounds the outage,
-  # `handle_connect/1` covers any path that reconnects without a disconnect
-  # callback first.
+  # for the whole outage. The reset in `handle_connect/1` stays as cheap
+  # insurance: it costs nothing and keeps a fresh session from ever starting
+  # with leftover state, whatever path led to it.
   @impl true
   def handle_disconnect(state), do: {:noreply, %{state | tx: nil}}
 

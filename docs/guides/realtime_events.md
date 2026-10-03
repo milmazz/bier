@@ -87,13 +87,16 @@ const es = new EventSource(`/events?channel=orders&access_token=${jwt}`);
 Note that query strings tend to end up in server logs; prefer the
 `Authorization` header for non-browser clients.
 
-The token is verified once, at connect time — the SSE connection is then
-held open indefinitely and is **not** re-checked against the token's `exp`.
-A long-lived stream can therefore outlive the JWT that opened it: a token
-that expires five minutes after connecting does not cause the stream to
-close five minutes later. Bounding stream lifetime by `exp` (closing or
-requiring reauthentication when the token expires) is possible future
-hardening; it is not currently implemented.
+The token is verified at connect time, and the stream is then bounded by
+its `exp` (plus the same 30s skew allowance the request path uses): when
+the token lapses the stream ends with a terminal
+`event: bier:closed` / `data: {"reason":"token_expired"}` frame (see
+[Connection lifecycle](#connection-lifecycle)). Do **not** let `EventSource`
+reconnect on its own after that: it would resend the same, now-expired
+token, get a `401`, and give up for good. Close it and open a **new**
+`EventSource` with a fresh token — passing the last `id:` it saw as
+`?last_event_id=` to resume a table subscription where it left off. A token
+without `exp` never expires the stream.
 
 ## Errors
 
@@ -107,6 +110,7 @@ subscriptions follow the same "auth before existence" ordering:
 | 401 | `PGRST3xx` | JWT missing/invalid, same as the rest of the API. Checked first. |
 | 400 | `BIER002` | Neither a `channel` nor a `table` query parameter was supplied. |
 | 404 | `BIER001` | A requested channel is not in `events_channels`. |
+| 503 | `BIER004` | The instance's WAL change feed was given up on after repeated failures (see [Enabling](#enabling)): any request with a `table=` subscription — and so every `Last-Event-ID` resume — is refused until the instance is restarted. `channel=`-only requests are unaffected. Checked after authorization and the `BIER003` checks. |
 | 404 | `BIER003` | A requested table doesn't exist, isn't an ordinary table (a view, foreign table, or partitioned parent), isn't in the configured publication, has RLS enabled, is in a schema outside `db_schemas`, leaves the role no `SELECT`-able column, or names a role the authenticator may not assume — one indistinguishable shape for every one of them (see [Change feed (WAL)](#change-feed-wal)); also returned for any `table=` request when `events_publication` isn't configured at all. |
 | 400 | `42704` (raw `SQLSTATE`) | The JWT's role does not exist in `pg_roles` — surfaced like any other Postgres error (see the [API reference](api.md#errors)), never a 500 or a hang. |
 | 406 | `PGRST107` | `Accept` excludes `text/event-stream`. |
@@ -145,14 +149,19 @@ pretend otherwise:
 * `[:bier, :events, :subscribe, :start | :stop]` — one span per SSE
   connection. `:stop` carries `:duration`, `:delivered`, and `:reason`:
   either a chunk-write error (a client disconnect, typically) or one of
-  three deliberate terminations — `:overloaded` (the slow-subscriber guard
-  below), `:revoked` (re-authorization failed after a schema reload), and
-  `:token_expired` (the subscription outlived its JWT's `exp`). The last
-  two are the ones worth alerting on.
+  four deliberate terminations — `:overloaded` (the slow-subscriber guard
+  below), `:revoked` (re-authorization found the role's privileges gone
+  after a schema reload), `:token_expired` (the subscription outlived its
+  JWT's `exp`), and `:feed_stopped` (the WAL change feed was given up on).
+  The last three are the ones worth alerting on.
 * `[:bier, :events, :notification]` — per NOTIFY, with the `:subscribers`
   count reached.
 * `[:bier, :events, :listener]` — `:status` of `:connected` /
   `:disconnected`; alert on this to spot gap windows.
+* `[:bier, :wal, :feed, :stopped]` — the WAL change feed was given up on
+  (see [Enabling](#enabling)); measurement `%{count: 1}`, metadata
+  `:instance` and `:reason`. At most once per instance lifetime. Alert on
+  it: the HTTP API keeps serving, so nothing else goes red.
 
 ## Change feed (WAL)
 
@@ -198,11 +207,34 @@ on a backoff — and when it does crash it restarts on that supervisor's
 budget, never the instance's: the HTTP API, RPC and `channel=` events keep
 serving throughout, and table subscribers get a `stream_restarted` reset
 (see [Resume and reset](#resume-and-reset)). A crash of the ring buffer
-restarts the consumer with it, with the same reset. Only a feed that keeps
-crashing — more than five restarts within thirty seconds — is given up on:
-it then stays stopped for the rest of the instance's life, still without
-touching the API, and comes back when the instance (or its host
-application) is restarted. Every crash is logged as it happens.
+restarts the consumer with it and ends in the same `stream_restarted`
+reset — possibly preceded by a `history_evicted` one for tables whose
+transaction committed in the instant the buffer was down.
+
+Only a feed that keeps crashing — a sixth restart within thirty seconds —
+is **given up on**. It then stays stopped for the rest of the instance's
+life, without touching the API, and comes back only when the instance (or
+its host application) is restarted. The give-up is never silent:
+
+* it is logged at `error` level, naming the instance, the restart budget
+  and the remedy, and emits `[:bier, :wal, :feed, :stopped]` (see
+  [Telemetry](#telemetry));
+* every live subscription with a `table=` in it — including one that mixes
+  `channel=` and `table=`, whose table half can never deliver again — ends
+  with `event: bier:closed` / `data: {"reason":"feed_stopped"}` (see
+  [Connection lifecycle](#connection-lifecycle)); `channel=`-only streams
+  carry on;
+* new `table=` subscriptions and `Last-Event-ID` resumes are refused with
+  `503 BIER004` (see [Errors](#errors)) instead of a stream that would
+  never deliver.
+
+The admin `/ready` endpoint does **not** reflect the feed: it reports
+whether the API can serve, and the API still can. Watch the telemetry event
+(or the error log) for the feed.
+
+Individual consumer crashes are not all logged: one that raises leaves a
+crash report, but a process killed outright (`:kill`) leaves nothing — the
+reset its subscribers receive is the trace.
 
 ### Subscribing to tables
 
@@ -341,14 +373,17 @@ header wins whenever both are present. A cursor that fails to parse
 (garbled, wrong shape) is not a protocol error: the stream just starts at
 the live head, same as supplying no cursor at all.
 
-A cursor that *does* parse but can no longer be honored — evicted from the
-ring buffer, or minted before the consumer last restarted — gets an explicit
-control frame instead of a silent gap, then the live head:
+A cursor that *does* parse but can no longer be honored gets an explicit
+control frame instead of a silent gap, then the live head — for a cursor
+minted before the consumer last restarted:
 
 ```
 event: bier:reset
-data: {"reason":"history_evicted"}
+data: {"reason":"stream_restarted"}
 ```
+
+and for one this stream did issue, but whose history the ring buffer has
+since lost, `{"reason":"history_evicted"}` (see the table below).
 
 `bier:` is a reserved `event:` prefix that can never collide with a channel
 or table name; it spells the stream's control frames, `bier:reset` and
@@ -358,7 +393,7 @@ defines exactly three reset reasons:
 | Reason | When |
 |---|---|
 | `stream_restarted` | The replication consumer (re)connected — a fresh temporary slot always begins at the current LSN. Every currently-open table subscriber gets this pushed live, mid-stream, and a connection that resumes with a cursor minted before that restart gets it too: everything before the restart is gone, for every subscriber. |
-| `history_evicted` | A connection resumes with a cursor from the current stream that the ring buffer can no longer replay: it aged out, an oversized transaction dropped that table's history, or a DDL changed the table's columns. History is still flowing — this subscription merely fell behind. |
+| `history_evicted` | A connection resumes with a cursor from the current stream that the ring buffer can no longer replay: it aged out, an oversized transaction dropped that table's history, or a DDL changed the table's columns. History is still flowing — this subscription merely fell behind. Also pushed live, mid-stream, for the tables of a transaction that was delivered but could not be recorded for resume because the ring buffer was momentarily unavailable. |
 | `transaction_too_large` | A single transaction exceeded `events_max_tx_events`, or accumulated more than 64 MiB of event payload; its events are dropped rather than delivered, and every table it touched gets this pushed live (see [Limits](#limits)). |
 
 A subscription naming more than one table resets **as a whole** the moment
@@ -375,35 +410,53 @@ beyond it.** Every degradation is announced, never silent.
 ### Connection lifecycle
 
 A response carrying any `table=` subscription also sends `Connection:
-close` — a NOTIFY-only `channel=` response does not. The WAL stream can end
-on its own at any moment (a consumer restart, or a schema-cache reload
-finding the subscriber's role lost `SELECT`), so the connection is declared
-non-keepalive up front rather than handed back to a pool as if it were
-reusable.
+close` — a NOTIFY-only `channel=` response does not. The server can end a
+WAL stream on its own at any moment — a schema-cache reload finding the
+subscriber's role lost its privileges, the token expiring, the feed being
+given up on, or the subscriber falling too far behind (see
+[Limits](#limits)) — so the connection is declared non-keepalive up front
+rather than handed back to a pool as if it were reusable. A consumer
+restart does **not** end the stream: it arrives as a `bier:reset` on a
+connection that stays open.
 
-A revoked subscription's stream **ends** with one terminal frame, then the
-connection closes:
+When the server ends a stream deliberately, it says why first, with one
+terminal frame, then closes the connection:
 
 ```
 event: bier:closed
 data: {"reason":"revoked"}
 ```
 
-It is deliberately not a `bier:reset`: a reset only ever means "history is
-gone, re-bootstrap and keep listening," never "you're no longer
-authorized," and the connection stays open across a reset but not across
-this. There is no `id:` — there is nothing to resume.
+| Reason | When | What the client should do |
+|---|---|---|
+| `revoked` | A schema reload found the role no longer authorized for a subscribed table (its last visible column, the table's publication membership, or the table itself is gone), or the role itself was dropped. A failed or interrupted re-check never revokes — the subscription stands until a reload can actually confirm the loss. | Stop. Reconnecting gets the refusal instead of a stream — `404 BIER003`, or `400 42704` for a dropped role (see [Errors](#errors)). Subscribe again once access is restored. |
+| `token_expired` | The JWT that opened the stream reached its `exp` (plus 30s skew). | Open a new `EventSource` with a fresh token, passing `?last_event_id=` to resume (see [Authentication](#authentication)). |
+| `feed_stopped` | The instance's WAL change feed was given up on (see [Enabling](#enabling)). Also closes a subscription mixing `channel=` and `table=`. | Stop. Table subscriptions get `503 BIER004` until the instance is restarted; a `channel=`-only subscription still works. |
 
-A client that receives `bier:closed` should **stop reconnecting** — call
-`EventSource.close()` from a `bier:closed` listener — rather than let the
-transport retry. Reconnecting re-authorizes from scratch and, while the
-privilege is still gone, gets the ordinary `404 BIER003` refusal (see
-[Errors](#errors) above) instead of a stream; `EventSource` treats any
-non-2xx response as fatal and stops retrying for good, so a later re-grant
-would never bring that subscription back on its own. Once access is
-restored (the user re-authenticates, or the app learns of the re-grant),
-open a fresh subscription and re-bootstrap with a plain `GET` exactly as
-after a `bier:reset`.
+It is deliberately not a `bier:reset`: a reset only ever means "history is
+gone, re-bootstrap and keep listening," and the connection stays open
+across a reset but not across this. There is no `id:` — there is nothing
+to resume from it.
+
+A client that receives `bier:closed` should **stop the transport from
+reconnecting on its own**. `bier:closed` is a named event, so it never
+reaches `onmessage` — listen for it explicitly:
+
+```javascript
+es.addEventListener("bier:closed", (e) => {
+  es.close();
+  const { reason } = JSON.parse(e.data);
+  // revoked / feed_stopped: stop; token_expired: reopen with a fresh token
+});
+```
+
+Otherwise `EventSource` reconnects into the refusal, and it treats any
+response other than `200` with `Content-Type: text/event-stream` as fatal
+and stops retrying for good — a later re-grant, fresh token or restored
+feed would never bring that subscription back on its own. Once the cause is
+resolved, open a fresh subscription and re-bootstrap with a plain `GET`
+exactly as after a `bier:reset` (or resume with `?last_event_id=` after a
+`token_expired`).
 
 ### Limits
 
@@ -462,8 +515,10 @@ after a `bier:reset`.
 * **A subscription ends when its JWT expires.** The token is verified at
   connect like any request; the stream is then bounded by that token's
   `exp` (plus the same 30s skew allowance the request path uses) rather
-  than living on indefinitely. `EventSource` reconnects on its own, so a
-  client that refreshes its token resumes by cursor.
+  than living on indefinitely, and ends with `bier:closed`
+  `token_expired`. An `EventSource` reconnect would resend the expired
+  token, so open a new one with a fresh token and `?last_event_id=` to
+  resume by cursor.
 * **`Connection: close` is only sent over HTTP/1.1.** The header is
   malformed in HTTP/2, so on an h2 connection it is omitted.
 * A bier restart always starts a fresh replication slot at the current LSN;

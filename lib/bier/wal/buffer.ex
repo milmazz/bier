@@ -30,13 +30,18 @@ defmodule Bier.Wal.Buffer do
   history this generation never had: a reset, never a quiet resume from
   post-restart events only.
 
-  A reset carries its **reason**, the same code the live stream uses, because
-  it is the client's only signal for how to recover: `"stream_restarted"`
+  A reset carries its **reason**, because it is the client's only signal for
+  how to recover: `"stream_restarted"`
   when the cursor belongs to an earlier generation or epoch (everything
   before the restart is gone, for every subscriber), `"history_evicted"`
   when this generation did have the history but a subscribed table has
   since lost it (ring eviction, `drop/2`, or a relation change) — this
-  subscription merely fell behind.
+  subscription merely fell behind. These are the resume-time codes; they do
+  not always match what the live stream said about the same loss. After an
+  oversized transaction, for instance, live subscribers were told
+  `transaction_too_large`, while a later resume across it reads
+  `history_evicted` — the history is gone either way, and the resume reason
+  says how it went.
   """
 
   use GenServer

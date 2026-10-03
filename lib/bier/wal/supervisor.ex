@@ -18,12 +18,12 @@ defmodule Bier.Wal.Supervisor do
   `stream_restarted`. Under the old `:one_for_one` the Consumer's next
   `append` simply succeeded against the fresh, empty Buffer, so live
   subscribers never learned that history had vanished (only an append that
-  landed in the instant the Buffer was down hit `retain/2`'s catch and
-  announced `history_evicted` for its tables — which can still happen here,
-  just before the restart's `stream_restarted`). A Consumer crash restarts
-  the Consumer alone; the Buffer
-  survives it, and the restarted Consumer's generation bump invalidates the
-  old history the ordinary way.
+  landed in the instant the Buffer was down hit the Consumer's buffering
+  catch and announced `history_evicted` for its tables — which can still
+  happen here, just before the restart's `stream_restarted`). A Consumer
+  crash restarts the Consumer alone; the Buffer survives it, and the
+  restarted Consumer's generation bump invalidates the old history the
+  ordinary way.
 
   `init/1` also runs `Bier.Wal.validate!/2` before either child starts, so a
   misconfigured feed (`wal_level`, a missing publication, a role without

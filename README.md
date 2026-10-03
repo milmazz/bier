@@ -306,6 +306,10 @@ When `events_publication` is set, the WAL change feed starts just *before*
 validates the feed's preconditions first, so a misconfigured feed still fails
 boot; once running, consumer crashes spend that supervisor's budget rather than
 the instance's, so a WAL-feed problem never takes the HTTP server down with it.
+`Bier.Wal.Watcher` follows it: if the WAL supervisor ever gives up, the watcher
+logs it, emits `[:bier, :wal, :feed, :stopped]`, closes live table subscriptions
+with `bier:closed` `feed_stopped`, and makes new ones answer `503 BIER004` —
+the feed stays down until the instance restarts, while the API keeps serving.
 
 ### Request flow
 

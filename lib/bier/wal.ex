@@ -1,7 +1,8 @@
 defmodule Bier.Wal do
   @moduledoc """
-  WAL change-feed entry points shared across the supervisor, the boot
-  validation in `Bier.Wal.Supervisor`, and the schema-reload hook.
+  WAL change-feed entry points: the boot validation `Bier.Wal.Supervisor`
+  runs, the feed-stopped flag `Bier.Wal.Watcher` sets and `Bier.Events`
+  reads, and the re-authorization the schema-reload hook triggers.
   """
 
   alias Bier.Wal.Authorize

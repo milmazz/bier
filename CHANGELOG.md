@@ -107,33 +107,55 @@ relation that really is related still yields no hint (cases 1527/1529/1530).
 - `Last-Event-ID` is validated more strictly: LSN halves must fit in 32
   bits, signs are rejected, and oversized input is refused before parsing.
   An unparseable cursor still just starts the stream at the live head.
-- A revoked table subscription now ends with a terminal `event: bier:closed`
-  frame (`{"reason":"revoked"}`, no `id:`) before the connection closes,
-  instead of closing silently. Without it a client could not tell revocation
-  from a network drop, and `EventSource` reconnected into a `404 BIER003` it
-  treats as fatal. Deliberately not `bier:reset`, which only ever means
-  "history is gone" (#150).
+- A stream the server ends on its own now says why first, with a terminal
+  `event: bier:closed` frame (no `id:`) whose `reason` is `revoked` (the
+  role's privileges were revoked), `token_expired` (the JWT reached its
+  `exp`) or `feed_stopped` (the WAL feed was given up on, below), instead of
+  closing silently. Without it a client could not tell any of these from a
+  network drop, and `EventSource` reconnected into a refusal — any response
+  other than `200 text/event-stream` is fatal to it — and stopped for good.
+  Deliberately not `bier:reset`, which only ever means "history is gone"
+  (#150).
 - The WAL change feed runs under its own `Bier.Wal.Supervisor`
   (`:rest_for_one` over the ring buffer and the consumer, with its own restart
   budget of 5 in 30s) instead of directly under the instance supervisor.
-  Consumer crashes no longer spend the instance's budget — three within five
-  seconds used to take the whole instance down, HTTP server included — and a
-  feed that keeps crashing is given up on alone, leaving the API serving. A
+  Consumer crashes no longer spend the instance's budget — a fourth within
+  five seconds used to take the whole instance down, HTTP server included. A
   ring-buffer crash now restarts the consumer with it, so subscribers get a
   `stream_restarted` reset. Boot-time feed validation moved from
   `Bier.HttpServerStarter` into the new supervisor, still failing boot with
-  the same remediation messages (#150).
+  the same remediation messages; with the database down at boot it is now the
+  first step to fail, and logs the same `PGRST002` the schema-cache load
+  does (#150).
+- A feed that keeps crashing (a sixth restart within 30s) is given up on
+  alone, with the API still serving — and announced rather than silent: it is
+  logged at error level and emits the new `[:bier, :wal, :feed, :stopped]`
+  telemetry event, every live subscription with a `table=` in it (including a
+  mixed `channel=`+`table=` one) ends with `bier:closed` `feed_stopped`, and
+  new `table=` subscriptions and `Last-Event-ID` resumes are refused with the
+  new `503 BIER004` until the instance is restarted. `channel=` streams are
+  unaffected, and the admin `/ready` endpoint does not reflect the feed
+  (#150).
+- A schema reload revokes a live table subscription only on a confirmed
+  privilege loss. A role that was dropped (`42704`) still revokes; any other
+  database error during the re-check (a statement timeout, a cancelled query,
+  a failover) now keeps the subscription for the next reload to re-check,
+  instead of closing every subscriber of that role (#150).
 
 ### Fixed
 
 - A client resuming with `Last-Event-ID` after a consumer restart was told
   `bier:reset` `history_evicted`; it now gets `stream_restarted`, the same
-  reason the live stream announces. `history_evicted` is reserved for a
-  cursor from the current stream that a table's ring buffer has since lost
-  (#150).
-- The WAL consumer discards a partially assembled transaction on reconnect
-  instead of holding it on its heap for the length of the backoff (#150).
-
+  reason the live stream announces. On resume, `history_evicted` is reserved
+  for a cursor from the current stream that a table's ring buffer has since
+  lost; it is also still pushed live for the tables of a transaction the ring
+  buffer was momentarily unable to record (#150).
+- A `Last-Event-ID` resume whose ring buffer died mid-replay crashed the
+  request after its `200` was sent; it now degrades to a `bier:reset`
+  `stream_restarted` (#150).
+- The WAL consumer discards a partially assembled transaction as soon as the
+  replication connection drops (and again on reconnect), instead of holding it
+  on its heap for the whole outage or backoff (#150).
 - A spread embed whose columns fed an aggregate leaked a raw PostgreSQL
   `42803` (`must appear in the GROUP BY clause`) to the client.
 - A `select` shape a mutation could not render — an aggregate inside a to-many
