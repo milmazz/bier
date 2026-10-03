@@ -330,6 +330,45 @@ defmodule Bier.Wal.PartitionTest do
     end
   end
 
+  describe "subscribing to a leaf partition directly" do
+    test "is admitted with publish_via_partition_root off, where pgoutput names leaves",
+         %{db: db} do
+      assert {:ok, _} = Bier.Wal.Authorize.check(db, nil, @pub_off, [key("orders_eu_low")])
+    end
+
+    # pgoutput reports every change of the tree as the root, so a leaf
+    # subscription could only ever be silent: refused, through the same
+    # uniform shape as an unknown table, rather than admitted and starved.
+    @tag pub: :on
+    test "gets the uniform 404 with publish_via_partition_root on", %{port: port} do
+      assert refusal_body(port, "orders_eu_low") == refusal_body(port, "missing")
+      assert refusal_body(port, "orders_us") == refusal_body(port, "missing")
+    end
+
+    # The refusal follows what pgoutput names, not the setting alone: a leaf
+    # published on its own, with no published ancestor, is reported as
+    # itself even with publish_via_partition_root on.
+    test "is admitted under publish_via_partition_root on when no ancestor is published",
+         %{db: db} do
+      pub = "wal_part_leaf_via_root"
+
+      on_exit(fn ->
+        {:ok, cleanup} =
+          Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
+
+        Postgrex.query!(cleanup, "DROP PUBLICATION IF EXISTS #{pub}", [])
+      end)
+
+      sql!(
+        db,
+        "CREATE PUBLICATION #{pub} FOR TABLE #{@schema}.orders_us " <>
+          "WITH (publish_via_partition_root = true)"
+      )
+
+      assert {:ok, _} = Bier.Wal.Authorize.check(db, nil, pub, [key("orders_us")])
+    end
+  end
+
   describe "authorization of a partitioned root" do
     alias Bier.Wal.Authorize
 
