@@ -123,15 +123,20 @@ defmodule Bier.Wal do
       send(pid, {:bier_wal_recheck, verdict(authorized, pid_tables)})
     end)
   rescue
-    # These two are NOT equivalent and deliberately get different outcomes.
-    # A `Postgrex.Error` (the role itself was dropped, say — then
-    # `has_column_privilege` raises `undefined_object`) is real evidence the
-    # subscription is no longer valid. A `DBConnection.ConnectionError` is
-    # pool contention or an infrastructure hiccup and says nothing about the
-    # role's privileges, so those subscribers keep the columns they have and
-    # the next reload gets another chance to actually verify.
-    _error in Postgrex.Error ->
-      notify_all(entries, :revoked)
+    # Only a CONFIRMED privilege loss revokes. The role itself having been
+    # dropped is one: `has_column_privilege`/`pg_has_role` then raise
+    # `42704 undefined_object`, which is real evidence every subscription of
+    # that role is no longer valid. Anything else — a statement timeout, a
+    # cancelled query, a failover, pool contention
+    # (`DBConnection.ConnectionError`) — says nothing about the role's
+    # privileges, and revoking on it would cut every subscriber of that role
+    # loose over a transient fault. Those subscribers keep the columns they
+    # have and the next reload gets another chance to actually verify.
+    error in Postgrex.Error ->
+      case error do
+        %Postgrex.Error{postgres: %{code: :undefined_object}} -> notify_all(entries, :revoked)
+        _other -> notify_all(entries, :keep)
+      end
 
     _error in DBConnection.ConnectionError ->
       notify_all(entries, :keep)
