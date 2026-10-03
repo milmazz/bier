@@ -300,6 +300,13 @@ After `HttpServerStarter`, the supervisor also starts `Bier.SchemaCacheListener`
 (unless `db_channel_enabled: false`), which LISTENs on `db_channel` and swaps
 the `Bier.SchemaCache` snapshot on `NOTIFY … 'reload schema'`.
 
+When `events_publication` is set, the WAL change feed starts just *before*
+`HttpServerStarter`, as its own `Bier.Wal.Supervisor` (`:rest_for_one` over
+`Bier.Wal.Buffer` and `Bier.Wal.Consumer`, with its own restart budget). It
+validates the feed's preconditions first, so a misconfigured feed still fails
+boot; once running, consumer crashes spend that supervisor's budget rather than
+the instance's, so a WAL-feed problem never takes the HTTP server down with it.
+
 ### Request flow
 
 ```mermaid

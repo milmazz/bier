@@ -107,8 +107,32 @@ relation that really is related still yields no hint (cases 1527/1529/1530).
 - `Last-Event-ID` is validated more strictly: LSN halves must fit in 32
   bits, signs are rejected, and oversized input is refused before parsing.
   An unparseable cursor still just starts the stream at the live head.
+- A revoked table subscription now ends with a terminal `event: bier:closed`
+  frame (`{"reason":"revoked"}`, no `id:`) before the connection closes,
+  instead of closing silently. Without it a client could not tell revocation
+  from a network drop, and `EventSource` reconnected into a `404 BIER003` it
+  treats as fatal. Deliberately not `bier:reset`, which only ever means
+  "history is gone" (#150).
+- The WAL change feed runs under its own `Bier.Wal.Supervisor`
+  (`:rest_for_one` over the ring buffer and the consumer, with its own restart
+  budget of 5 in 30s) instead of directly under the instance supervisor.
+  Consumer crashes no longer spend the instance's budget — three within five
+  seconds used to take the whole instance down, HTTP server included — and a
+  feed that keeps crashing is given up on alone, leaving the API serving. A
+  ring-buffer crash now restarts the consumer with it, so subscribers get a
+  `stream_restarted` reset. Boot-time feed validation moved from
+  `Bier.HttpServerStarter` into the new supervisor, still failing boot with
+  the same remediation messages (#150).
 
 ### Fixed
+
+- A client resuming with `Last-Event-ID` after a consumer restart was told
+  `bier:reset` `history_evicted`; it now gets `stream_restarted`, the same
+  reason the live stream announces. `history_evicted` is reserved for a
+  cursor from the current stream that a table's ring buffer has since lost
+  (#150).
+- The WAL consumer discards a partially assembled transaction on reconnect
+  instead of holding it on its heap for the length of the backoff (#150).
 
 - A spread embed whose columns fed an aggregate leaked a raw PostgreSQL
   `42803` (`must appear in the GROUP BY clause`) to the client.

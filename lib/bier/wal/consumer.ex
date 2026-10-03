@@ -56,10 +56,11 @@ defmodule Bier.Wal.Consumer do
           # `init/1` with no timeout. CREATE_REPLICATION_SLOT ... LOGICAL
           # must reach a consistent decoding point, so it blocks until every
           # in-flight transaction finishes — minutes, on a busy database.
-          # That would block this child's `start_link`, hence the instance
-          # supervisor, hence `Bier.start_link/1` and the host application's
-          # whole boot. The WAL feed is strictly additive; it must never be
-          # able to hold the API's boot hostage. Connect asynchronously and
+          # That would block this child's `start_link`, hence
+          # `Bier.Wal.Supervisor`, hence the instance supervisor, hence
+          # `Bier.start_link/1` and the host application's whole boot. The
+          # WAL feed is strictly additive; it must never be able to hold the
+          # API's boot hostage. Connect asynchronously and
           # let the existing auto_reconnect path handle failures.
           sync_connect: false,
           name: Bier.Registry.via(conf.name, __MODULE__)
@@ -313,13 +314,14 @@ defmodule Bier.Wal.Consumer do
     :ok
   end
 
-  # Buffering is best-effort; LIVE delivery is not. If the Buffer is
-  # momentarily gone (its own supervisor restarting it), letting the
-  # `GenServer.call` exit propagate would kill this process too — and a
-  # consumer restart costs the whole instance's shared restart budget and
-  # resets every subscriber. Announce the lost history for the affected
-  # tables instead and keep streaming: resume degrades to a reset, which is
-  # the contract, rather than a silent gap or an outage.
+  # Buffering is best-effort; LIVE delivery is not. If the Buffer call
+  # fails — a timeout, or the Buffer dying mid-call in the instant before
+  # `Bier.Wal.Supervisor`'s `:rest_for_one` restarts this process along with
+  # it — letting the `GenServer.call` exit propagate would crash this
+  # process on its own account, spending the WAL supervisor's restart budget
+  # and resetting every subscriber. Announce the lost history for the
+  # affected tables instead and keep streaming: resume degrades to a reset,
+  # which is the contract, rather than a silent gap or a crash.
   defp retain(state, entries) do
     Buffer.append(state.conf.name, entries)
   catch

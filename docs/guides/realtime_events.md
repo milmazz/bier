@@ -190,6 +190,20 @@ connecting role has the `REPLICATION` attribute (or is a superuser). The
 raised error names the exact statement to run for whichever precondition is
 missing.
 
+The feed runs under its own supervisor inside the instance
+(`Bier.Wal.Supervisor`: the ring buffer, then the replication consumer), so
+its failures stay its own. The consumer is built not to crash on anything
+transient — a dropped connection reconnects, a failed slot creation retries
+on a backoff — and when it does crash it restarts on that supervisor's
+budget, never the instance's: the HTTP API, RPC and `channel=` events keep
+serving throughout, and table subscribers get a `stream_restarted` reset
+(see [Resume and reset](#resume-and-reset)). A crash of the ring buffer
+restarts the consumer with it, with the same reset. Only a feed that keeps
+crashing — more than five restarts within thirty seconds — is given up on:
+it then stays stopped for the rest of the instance's life, still without
+touching the API, and comes back when the instance (or its host
+application) is restarted. Every crash is logged as it happens.
+
 ### Subscribing to tables
 
 `table=` sits beside `channel=` on the very same query string and

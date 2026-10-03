@@ -647,10 +647,10 @@ defmodule Bier do
           {DynamicSupervisor,
            strategy: :one_for_one, name: Registry.via(conf.name, DynamicSupervisor)}
         ] ++
-        wal_buffer_children(conf) ++
+        wal_children(conf) ++
         [{Bier.HttpServerStarter, conf}] ++
         listener_children(conf) ++
-        events_children(conf) ++ wal_consumer_children(conf) ++ admin_children(conf)
+        events_children(conf) ++ admin_children(conf)
 
     Supervisor.init(children, strategy: :one_for_one)
   end
@@ -688,23 +688,27 @@ defmodule Bier do
 
   defp events_children(%Bier.Config{} = conf), do: [{Bier.Events.Listener, conf}]
 
-  # The WAL change feed runs only when an operator publication is configured.
-  # The Buffer must precede the Consumer: the consumer bumps the Buffer
-  # generation from `handle_result/2`'s success arm — once the slot actually
-  # exists, not on every connect attempt — so the Buffer has to be alive by
-  # then. The Buffer also starts BEFORE HttpServerStarter: `HttpServerStarter`'s
-  # `handle_continue` starts Bandit, which can accept a `GET /events?table=…`
-  # carrying `Last-Event-ID` immediately — and that path calls
-  # `Bier.Wal.Buffer.generation/1`, which would exit `:noproc` on a
-  # not-yet-registered via-tuple and surface as a raw 500.
-  defp wal_buffer_children(%Bier.Config{events_publication: nil}), do: []
-  defp wal_buffer_children(conf), do: [{Bier.Wal.Buffer, conf}]
-
-  # The Consumer stays AFTER HttpServerStarter, whose `init/1` runs
-  # `Bier.Wal.validate!/2`: a misconfigured instance fails boot there rather
-  # than letting the consumer flap against a database that cannot stream.
-  defp wal_consumer_children(%Bier.Config{events_publication: nil}), do: []
-  defp wal_consumer_children(conf), do: [{Bier.Wal.Consumer, conf}]
+  # The WAL change feed runs only when an operator publication is configured,
+  # as one `Bier.Wal.Supervisor` holding the Buffer and then the Consumer
+  # (`:rest_for_one`, its own restart budget, `restart: :temporary` — see
+  # that module for why a feed failure must never spend this supervisor's
+  # budget). Its position here preserves two orderings:
+  #
+  # * It starts BEFORE HttpServerStarter, so the Buffer is registered before
+  #   Bandit serves: `HttpServerStarter`'s `handle_continue` starts Bandit,
+  #   which can accept a `GET /events?table=…` carrying `Last-Event-ID`
+  #   immediately — and that path calls `Bier.Wal.Buffer.generation/1`,
+  #   which would exit `:noproc` on a not-yet-registered via-tuple and
+  #   surface as a raw 500.
+  # * Its `init/1` runs `Bier.Wal.validate!/2` before starting either child,
+  #   so a misconfigured instance still fails boot with the remediation
+  #   message rather than letting the consumer flap against a database that
+  #   cannot stream. (That check used to live in `HttpServerStarter.init/1`,
+  #   which is why the Consumer used to start after it.) The Consumer
+  #   starting before the HTTP server is harmless: it connects asynchronously
+  #   (`sync_connect: false`) and has no subscribers to announce to yet.
+  defp wal_children(%Bier.Config{events_publication: nil}), do: []
+  defp wal_children(conf), do: [{Bier.Wal.Supervisor, conf}]
 
   # The JWT verification cache only runs when it can do work: a secret is
   # configured and jwt-cache-max-entries is positive (PostgREST's JwtNoCache
