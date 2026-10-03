@@ -617,24 +617,91 @@ defmodule Bier.Wal.PartitionTest do
     end
   end
 
-  defp boot_log(publication) do
+  describe "boot warnings never block or fail boot" do
+    # `pg_partition_tree()` and `pg_publication_tables` take AccessShareLock
+    # on the relations they visit, so a long ALTER / VACUUM FULL / ATTACH on
+    # any partition would hold validate! — and so the instance's boot —
+    # behind it. The checks read the catalogs only, and still warn.
+    test "the checks run while the tree is ACCESS EXCLUSIVE locked", %{db: db} do
+      sql!(db, "ALTER TABLE #{@schema}.orders REPLICA IDENTITY FULL")
+      parent = self()
+
+      {:ok, locker} =
+        Postgrex.start_link(Keyword.put(Bier.ConformanceServer.base_opts(), :pool_size, 1))
+
+      holder =
+        spawn_link(fn ->
+          Postgrex.transaction(locker, fn conn ->
+            for table <- ["orders", "orders_eu_low"],
+                do:
+                  Postgrex.query!(
+                    conn,
+                    "LOCK TABLE #{@schema}.#{table} IN ACCESS EXCLUSIVE MODE",
+                    []
+                  )
+
+            send(parent, :locked)
+            receive do: (:release -> :ok)
+          end)
+        end)
+
+      assert_receive :locked, 5_000
+
+      # Only the boot is timed: the lock holder's transaction also keeps
+      # the new instance's replication slot waiting for a consistent point,
+      # which is asynchronous and not boot.
+      {micros, log} =
+        try do
+          boot_log(@pubs.on, timed: true)
+        after
+          send(holder, :release)
+        end
+
+      assert log =~ "TRUNCATE of a single partition"
+      assert log =~ "#{@schema}.orders_eu_low (DEFAULT)"
+      assert micros < 5_000_000, "boot took #{div(micros, 1000)}ms behind the lock"
+    end
+
+    test "a failing check is logged as skipped and boot goes on" do
+      for failure <- [
+            fn -> raise "boom" end,
+            fn -> raise %Postgrex.Error{message: "catalog trouble"} end,
+            fn -> exit(:timeout) end
+          ] do
+        log =
+          capture_log(fn ->
+            assert :ok == Bier.Wal.best_effort("the test check", failure)
+          end)
+
+        assert log =~ "skipped the test check"
+      end
+    end
+  end
+
+  # Boots and stops an instance on `publication`, returning what it logged.
+  # With `timed: true`, returns `{boot_micros, log}`, timing the start alone.
+  defp boot_log(publication, opts \\ []) do
     name = :"wal_partition_boot_#{System.unique_integer([:positive])}"
 
-    capture_log(fn ->
-      opts =
-        Bier.ConformanceServer.base_opts()
-        |> Keyword.merge(
-          name: name,
-          pool_size: 1,
-          db_schemas: [@schema],
-          db_channel_enabled: false,
-          events_publication: publication,
-          router: [port: TestPorts.free_port(), scheme: :http]
-        )
+    bier_opts =
+      Bier.ConformanceServer.base_opts()
+      |> Keyword.merge(
+        name: name,
+        pool_size: 1,
+        db_schemas: [@schema],
+        db_channel_enabled: false,
+        events_publication: publication,
+        router: [port: TestPorts.free_port(), scheme: :http]
+      )
 
-      start_supervised!({Bier, opts}, id: name)
-      stop_supervised!(name)
-    end)
+    log =
+      capture_log(fn ->
+        {micros, _pid} = :timer.tc(fn -> start_supervised!({Bier, bier_opts}, id: name) end)
+        Process.put(:boot_micros, micros)
+        stop_supervised!(name)
+      end)
+
+    if opts[:timed], do: {Process.get(:boot_micros), log}, else: log
   end
 
   # The RAW 404 body with the echoed identifier normalized out, after

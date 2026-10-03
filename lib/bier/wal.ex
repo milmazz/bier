@@ -45,8 +45,14 @@ defmodule Bier.Wal do
               "run: ALTER ROLE <role> REPLICATION;"
 
     warn_if_slots_tight(pool)
-    warn_if_partition_truncates_unpublished(pool, publication)
-    warn_if_replica_identities_differ(pool, publication)
+
+    best_effort("the single-partition TRUNCATE check", fn ->
+      warn_if_partition_truncates_unpublished(pool, publication)
+    end)
+
+    best_effort("the partition REPLICA IDENTITY check", fn ->
+      warn_if_replica_identities_differ(pool, publication)
+    end)
 
     :ok
   rescue
@@ -95,6 +101,90 @@ defmodule Bier.Wal do
     :ok
   end
 
+  # The partitioned tables a via-root publication reports changes as: every
+  # partitioned table it publishes (by name, through its schema, or FOR ALL
+  # TABLES) with no published ancestor — the "topmost published ancestor"
+  # rule `pg_publication_tables` applies. Spelled out over the catalogs
+  # instead of read from that view because the view takes AccessShareLock on
+  # each table it lists, as `pg_partition_tree()` does on each partition: a
+  # long ALTER or VACUUM FULL on the tree would then hold this boot-time
+  # check, and so the instance's boot, behind it. Catalog scans and
+  # `pg_partition_ancestors()` take no relation locks.
+  @published_roots """
+  pub AS (
+    SELECT p.oid, p.puballtables FROM pg_publication p
+    WHERE p.pubname = $1 AND p.pubviaroot
+  ),
+  members AS (
+    SELECT c.oid
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    CROSS JOIN pub
+    WHERE c.relkind = 'p'
+      AND ((pub.puballtables AND n.nspname <> 'information_schema'
+            AND left(n.nspname, 3) <> 'pg_')
+           OR EXISTS (SELECT 1 FROM pg_publication_rel pr
+                      WHERE pr.prpubid = pub.oid AND pr.prrelid = c.oid)
+           OR EXISTS (SELECT 1 FROM pg_publication_namespace pn
+                      WHERE pn.pnpubid = pub.oid AND pn.pnnspid = c.relnamespace))
+  ),
+  roots AS (
+    SELECT m.oid, format('%I.%I', n.nspname, c.relname) AS name
+    FROM members m
+    JOIN pg_class c ON c.oid = m.oid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE NOT EXISTS (
+      SELECT 1 FROM pg_partition_ancestors(m.oid) a
+      JOIN members x ON x.oid = a.relid
+      WHERE a.relid <> m.oid)
+  )
+  """
+
+  # Each advisory check gets a short server-side budget, so a slow catalog
+  # delays boot by seconds at most, never by the pool's 15s default.
+  @check_timeout_ms 2_000
+
+  defp catalog_query(pool, sql, params) do
+    {:ok, rows} =
+      Postgrex.transaction(
+        pool,
+        fn conn ->
+          Postgrex.query!(conn, "SET LOCAL statement_timeout = #{@check_timeout_ms}", [])
+          Postgrex.query!(conn, sql, params).rows
+        end,
+        timeout: @check_timeout_ms * 2
+      )
+
+    rows
+  end
+
+  @doc false
+  # Runs one ADVISORY boot check. Only the three configuration checks in
+  # `validate!/2` may fail boot; a check that exists to warn must not be
+  # able to block or fail it, whatever goes wrong — a database error, a
+  # timeout, a pool exit or a plain bug. The failure is logged and the
+  # check skipped. Public only so its contract can be tested directly.
+  @spec best_effort(String.t(), (-> term())) :: :ok
+  def best_effort(check, fun) do
+    fun.()
+    :ok
+  rescue
+    error -> skipped(check, Exception.message(error))
+  catch
+    kind, reason -> skipped(check, "#{kind}: #{inspect(reason)}")
+  end
+
+  defp skipped(check, why) do
+    require Logger
+
+    Logger.warning(
+      "Bier's WAL change feed skipped #{check} at boot (#{why}); the feed starts anyway, " <>
+        "but the condition it looks for was not checked."
+    )
+
+    :ok
+  end
+
   # The one degradation the feed cannot announce. With
   # `publish_via_partition_root = true`, PostgreSQL reports every change of
   # a partition tree as its published ancestor — except a TRUNCATE that
@@ -108,18 +198,12 @@ defmodule Bier.Wal do
   # actually lists a partitioned table. A warning, not a refusal — the
   # operator may well never truncate a single partition.
   defp warn_if_partition_truncates_unpublished(pool, publication) do
-    %{rows: rows} =
-      Postgrex.query!(
+    rows =
+      catalog_query(
         pool,
         """
-        SELECT format('%I.%I', pt.schemaname, pt.tablename)
-        FROM pg_publication p
-        JOIN pg_publication_tables pt ON pt.pubname = p.pubname
-        JOIN pg_class c
-          ON c.relname = pt.tablename
-         AND c.relnamespace = to_regnamespace(quote_ident(pt.schemaname))
-        WHERE p.pubname = $1 AND p.pubviaroot AND c.relkind = 'p'
-        ORDER BY 1
+        WITH RECURSIVE #{@published_roots}
+        SELECT name FROM roots ORDER BY name
         """,
         [publication]
       )
@@ -154,34 +238,34 @@ defmodule Bier.Wal do
   # USING INDEX matches only when the leaf's identity index is a partition
   # (at any depth) of the root's own identity index.
   defp warn_if_replica_identities_differ(pool, publication) do
-    %{rows: rows} =
-      Postgrex.query!(
+    rows =
+      catalog_query(
         pool,
         """
-        WITH roots AS (
-          SELECT r.oid, format('%I.%I', pt.schemaname, pt.tablename) AS name,
-                 r.relreplident AS ident,
+        WITH RECURSIVE #{@published_roots},
+        roots_ident AS (
+          SELECT r.oid, r.name, c.relreplident AS ident,
                  (SELECT i.indexrelid FROM pg_index i
                   WHERE i.indrelid = r.oid AND i.indisreplident) AS ident_index
-          FROM pg_publication p
-          JOIN pg_publication_tables pt ON pt.pubname = p.pubname
-          JOIN pg_class r
-            ON r.relname = pt.tablename
-           AND r.relnamespace = to_regnamespace(quote_ident(pt.schemaname))
-          WHERE p.pubname = $1 AND p.pubviaroot AND r.relkind = 'p'
+          FROM roots r JOIN pg_class c ON c.oid = r.oid
+        ),
+        -- The tree walked through pg_inherits directly: pg_partition_tree()
+        -- would take AccessShareLock on every partition it visits.
+        tree(root, relid) AS (
+          SELECT oid, oid FROM roots_ident
+          UNION ALL
+          SELECT t.root, i.inhrelid FROM tree t JOIN pg_inherits i ON i.inhparent = t.relid
         ),
         leaves AS (
-          SELECT roots.name AS root, roots.ident AS root_ident,
-                 roots.ident_index AS root_index,
+          SELECT r.name AS root, r.ident AS root_ident, r.ident_index AS root_index,
                  format('%I.%I', n.nspname, l.relname) AS name,
                  l.relreplident AS ident,
                  (SELECT i.indexrelid FROM pg_index i
                   WHERE i.indrelid = l.oid AND i.indisreplident) AS ident_index
-          FROM roots
-          CROSS JOIN LATERAL pg_partition_tree(roots.oid) t
-          JOIN pg_class l ON l.oid = t.relid
+          FROM tree t
+          JOIN roots_ident r ON r.oid = t.root
+          JOIN pg_class l ON l.oid = t.relid AND l.relispartition AND l.relkind <> 'p'
           JOIN pg_namespace n ON n.oid = l.relnamespace
-          WHERE t.isleaf
         )
         SELECT root, root_ident::text,
                (SELECT format('%I.%I', n.nspname, c.relname) FROM pg_class c
